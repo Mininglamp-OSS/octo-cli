@@ -14,7 +14,6 @@ Also installed automatically with `octo-daemon`.
 
 ```bash
 export OCTO_BOT_TOKEN="your-bot-token"
-export OCTO_SPACE_ID="your-space-id"
 export OCTO_API_URL="https://todo.example.com"
 
 # List todos
@@ -32,7 +31,6 @@ octo todo goal create --title "Q3 Release"
 
 ## Authentication
 
-Bot Token via environment variable `OCTO_BOT_TOKEN`. Each bot authenticates with its own identity. Space context via `OCTO_SPACE_ID`.
 
 ## Output
 

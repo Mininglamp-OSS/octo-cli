@@ -14,7 +14,6 @@ Each Octo built-in service module maps to a CLI subcommand: `octo todo`, `octo <
 - Thin REST client — all logic lives in backend services (todo-service, etc.)
 - Default output: JSON (consumed by bots); `--format table` for human debugging
 - Authentication: Bot Token via `OCTO_BOT_TOKEN` env var (robot_id:app_key format)
-- Space context: `OCTO_SPACE_ID` env var
 - Server URL: `OCTO_API_URL` env var
 
 ## Identity Model
@@ -49,7 +48,6 @@ octo version
 
 All commands call todo-service REST API at `$OCTO_API_URL/api/v1/...`
 
-Authentication: `Authorization: Bearer $OCTO_BOT_TOKEN` header + `X-Space-ID: $OCTO_SPACE_ID` header.
 
 ## Code Style
 
