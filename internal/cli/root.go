@@ -36,8 +36,9 @@ func NewRootCmd() *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return err
 			}
-			apiClient = client.New(cfg)
-			return nil
+			var clientErr error
+			apiClient, clientErr = client.New(cfg)
+			return clientErr
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,

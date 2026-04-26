@@ -17,6 +17,7 @@ func newTodoCmd() *cobra.Command {
 	cmd.AddCommand(newTodoListCmd())
 	cmd.AddCommand(newTodoGetCmd())
 	cmd.AddCommand(newTodoCreateCmd())
+	cmd.AddCommand(newTodoUpdateCmd())
 	cmd.AddCommand(newTodoDoneCmd())
 	cmd.AddCommand(newTodoMoveCmd())
 	cmd.AddCommand(newTodoAssignCmd())
@@ -31,7 +32,7 @@ func newTodoCmd() *cobra.Command {
 // --- todo list ---
 
 func newTodoListCmd() *cobra.Command {
-	var goalID, status, assignee string
+	var goalID, status, assignee, cursor string
 	var limit int
 
 	cmd := &cobra.Command{
@@ -39,9 +40,10 @@ func newTodoListCmd() *cobra.Command {
 		Short: "List todos",
 		Example: `  octo todo list
   octo todo list --status in_progress
-  octo todo list --goal <goal-id> --limit 20`,
+  octo todo list --goal <goal-id> --limit 20
+  octo todo list --cursor <next_cursor>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := apiClient.TodoList(goalID, status, assignee, limit)
+			data, err := apiClient.TodoList(goalID, status, assignee, cursor, limit)
 			if err != nil {
 				return err
 			}
@@ -53,6 +55,7 @@ func newTodoListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&goalID, "goal", "", "filter by goal ID")
 	cmd.Flags().StringVar(&status, "status", "", "filter by status (draft|planned|in_progress|done|cancelled)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee user ID")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "pagination cursor (from previous response)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max number of results")
 
 	return cmd
@@ -116,6 +119,47 @@ func newTodoCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&deadline, "deadline", "", "deadline (RFC3339 format)")
 	cmd.Flags().StringSliceVar(&assignees, "assignee", nil, "assignee user IDs (repeatable)")
 	_ = cmd.MarkFlagRequired("title")
+
+	return cmd
+}
+
+// --- todo update ---
+
+func newTodoUpdateCmd() *cobra.Command {
+	var title, desc, deadline string
+
+	cmd := &cobra.Command{
+		Use:   "update <todo-id>",
+		Short: "Update a todo (title, description, deadline)",
+		Example: `  octo todo update <id> --title "New title"
+  octo todo update <id> --desc "Updated description" --deadline 2026-06-01T00:00:00Z`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := map[string]any{}
+			if title != "" {
+				req["title"] = title
+			}
+			if desc != "" {
+				req["description"] = desc
+			}
+			if deadline != "" {
+				req["deadline"] = deadline
+			}
+			if len(req) == 0 {
+				return fmt.Errorf("at least one of --title, --desc, or --deadline is required")
+			}
+			data, err := apiClient.TodoUpdate(args[0], req)
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&title, "title", "", "new title")
+	cmd.Flags().StringVar(&desc, "desc", "", "new description")
+	cmd.Flags().StringVar(&deadline, "deadline", "", "new deadline (RFC3339)")
 
 	return cmd
 }
@@ -217,7 +261,7 @@ func newTodoDeleteCmd() *cobra.Command {
 			if err := apiClient.TodoDelete(args[0]); err != nil {
 				return err
 			}
-			fmt.Println(`{"status":"deleted"}`)
+			output.Print(cfg.Format, []byte(`{"status":"deleted"}`))
 			return nil
 		},
 	}
@@ -306,7 +350,7 @@ func newGoalArchiveCmd() *cobra.Command {
 			if err := apiClient.GoalArchive(args[0]); err != nil {
 				return err
 			}
-			fmt.Println(`{"status":"archived"}`)
+			output.Print(cfg.Format, []byte(`{"status":"archived"}`))
 			return nil
 		},
 	}

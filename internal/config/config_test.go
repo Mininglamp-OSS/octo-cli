@@ -1,0 +1,34 @@
+package config
+
+import (
+	"testing"
+)
+
+func TestValidate_MissingToken(t *testing.T) {
+	c := &Config{APIURL: "http://localhost", BotToken: ""}
+	if err := c.Validate(); err == nil {
+		t.Error("expected error for missing OCTO_BOT_TOKEN")
+	}
+}
+
+func TestValidate_OK(t *testing.T) {
+	c := &Config{APIURL: "http://localhost", BotToken: "some-jwt-token"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_Defaults(t *testing.T) {
+	// Clear env to test defaults
+	t.Setenv("OCTO_BOT_TOKEN", "")
+	t.Setenv("OCTO_API_URL", "")
+	t.Setenv("OCTO_FORMAT", "")
+
+	cfg := Load()
+	if cfg.APIURL != "http://127.0.0.1:8080" {
+		t.Errorf("APIURL = %q, want default", cfg.APIURL)
+	}
+	if cfg.Format != "json" {
+		t.Errorf("Format = %q, want json", cfg.Format)
+	}
+}

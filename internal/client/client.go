@@ -23,8 +23,11 @@ type Client struct {
 }
 
 // New creates a Client from config. It extracts space_id from the JWT token.
-func New(cfg *config.Config) *Client {
+func New(cfg *config.Config) (*Client, error) {
 	spaceID := extractSpaceIDFromJWT(cfg.BotToken)
+	if spaceID == "" {
+		return nil, fmt.Errorf("JWT does not contain space_id claim — ensure the token was issued with a space context")
+	}
 	return &Client{
 		baseURL:  cfg.APIURL,
 		botToken: cfg.BotToken,
@@ -32,7 +35,7 @@ func New(cfg *config.Config) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-	}
+	}, nil
 }
 
 // extractSpaceIDFromJWT extracts the space_id claim from a JWT without verification.
@@ -103,7 +106,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 }
 
 // TodoList lists todos with optional filters.
-func (c *Client) TodoList(goalID, status, assignee string, limit int) (json.RawMessage, error) {
+func (c *Client) TodoList(goalID, status, assignee, cursor string, limit int) (json.RawMessage, error) {
 	params := url.Values{}
 	if goalID != "" {
 		params.Set("goal_id", goalID)
@@ -113,6 +116,9 @@ func (c *Client) TodoList(goalID, status, assignee string, limit int) (json.RawM
 	}
 	if assignee != "" {
 		params.Set("assignee", assignee)
+	}
+	if cursor != "" {
+		params.Set("cursor", cursor)
 	}
 	if limit > 0 {
 		params.Set("limit", fmt.Sprintf("%d", limit))
