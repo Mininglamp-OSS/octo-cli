@@ -1,9 +1,9 @@
-# Binaries
-octo
-*.exe
+# Binary (root only)
+/octo
 
 # Go
 go.work.sum
+*.test
 
 # IDE
 .idea/
