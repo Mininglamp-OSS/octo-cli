@@ -8,7 +8,8 @@ import (
 // Config holds CLI configuration loaded from environment variables.
 type Config struct {
 	APIURL   string // OCTO_API_URL — base URL of todo-service
-	BotToken string // OCTO_BOT_TOKEN — bot authentication token (JWT with space_id claim)
+	BotToken string // OCTO_BOT_TOKEN — bot token in "robot_id/app_key" format
+	SpaceID  string // OCTO_SPACE_ID — bot's space (set by agent runtime)
 	Format   string // output format: "json" (default) or "table"
 }
 
@@ -17,6 +18,7 @@ func Load() *Config {
 	return &Config{
 		APIURL:   envOrDefault("OCTO_API_URL", "http://127.0.0.1:8080"),
 		BotToken: os.Getenv("OCTO_BOT_TOKEN"),
+		SpaceID:  os.Getenv("OCTO_SPACE_ID"),
 		Format:   envOrDefault("OCTO_FORMAT", "json"),
 	}
 }
@@ -24,7 +26,10 @@ func Load() *Config {
 // Validate checks required fields.
 func (c *Config) Validate() error {
 	if c.BotToken == "" {
-		return fmt.Errorf("OCTO_BOT_TOKEN is required")
+		return fmt.Errorf("OCTO_BOT_TOKEN is required (format: robot_id/app_key)")
+	}
+	if c.SpaceID == "" {
+		return fmt.Errorf("OCTO_SPACE_ID is required")
 	}
 	return nil
 }

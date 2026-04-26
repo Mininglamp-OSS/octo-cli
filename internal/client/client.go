@@ -2,13 +2,11 @@ package client
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/dmwork-org/octo-cli/internal/config"
@@ -17,51 +15,21 @@ import (
 // Client is a REST client for the todo-service API.
 type Client struct {
 	baseURL    string
-	botToken   string
-	spaceID    string // extracted from JWT space_id claim
+	botToken   string // robot_id/app_key format
+	spaceID    string
 	httpClient *http.Client
 }
 
-// New creates a Client from config. It extracts space_id from the JWT token.
-func New(cfg *config.Config) (*Client, error) {
-	spaceID := extractSpaceIDFromJWT(cfg.BotToken)
-	if spaceID == "" {
-		return nil, fmt.Errorf("JWT does not contain space_id claim — ensure the token was issued with a space context")
-	}
+// New creates a Client from config.
+func New(cfg *config.Config) *Client {
 	return &Client{
 		baseURL:  cfg.APIURL,
 		botToken: cfg.BotToken,
-		spaceID:  spaceID,
+		spaceID:  cfg.SpaceID,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-	}, nil
-}
-
-// extractSpaceIDFromJWT extracts the space_id claim from a JWT without verification.
-// Verification is done server-side; CLI just needs the claim for the X-Space-ID header.
-func extractSpaceIDFromJWT(token string) string {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) < 2 {
-		return ""
 	}
-	// Decode payload (add padding if needed)
-	payload := parts[1]
-	if m := len(payload) % 4; m != 0 {
-		payload += strings.Repeat("=", 4-m)
-	}
-	data, err := base64.URLEncoding.DecodeString(payload)
-	if err != nil {
-		return ""
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(data, &claims); err != nil {
-		return ""
-	}
-	if spaceID, ok := claims["space_id"].(string); ok {
-		return spaceID
-	}
-	return ""
 }
 
 func (c *Client) do(method, path string, body any) ([]byte, error) {
@@ -81,7 +49,8 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+c.botToken)
+	// Bot auth: "Bot <robot_id>/<app_key>"
+	req.Header.Set("Authorization", "Bot "+c.botToken)
 	req.Header.Set("X-Space-ID", c.spaceID)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
