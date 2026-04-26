@@ -1,0 +1,16 @@
+# Binaries
+octo
+*.exe
+
+# Go
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Claude Code
+.omc/
