@@ -217,12 +217,6 @@ func (c *Client) TodoDeleteComment(todoID, commentID string) error {
 	return err
 }
 
-// TodoUpdateAssigneeStatus updates the caller's completion status on a todo.
-func (c *Client) TodoUpdateAssigneeStatus(todoID, status string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodPut, "/api/v1/todos/"+esc(todoID)+"/assignee-status", map[string]string{"status": status})
-	return json.RawMessage(data), err
-}
-
 // TodoListAttachments lists attachments on a todo.
 func (c *Client) TodoListAttachments(todoID string) (json.RawMessage, error) {
 	data, err := c.do(http.MethodGet, "/api/v1/todos/"+esc(todoID)+"/attachments", nil)

@@ -25,7 +25,6 @@ func newTodoCmd() *cobra.Command {
 	cmd.AddCommand(newTodoCommentCmd())
 	cmd.AddCommand(newTodoCommentListCmd())
 	cmd.AddCommand(newTodoCommentDeleteCmd())
-	cmd.AddCommand(newTodoAssigneeStatusCmd())
 	cmd.AddCommand(newTodoAttachmentCmd())
 	cmd.AddCommand(newTodoDeleteCmd())
 	cmd.AddCommand(newTodoGoalCmd())
@@ -402,28 +401,6 @@ func newTodoCommentDeleteCmd() *cobra.Command {
 				return err
 			}
 			output.Print(cfg.Format, []byte(`{"status":"deleted"}`))
-			return nil
-		},
-	}
-}
-
-// --- todo assignee-status ---
-
-func newTodoAssigneeStatusCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "assignee-status <todo-id> <pending|done>",
-		Short: "Update your completion status on a todo",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			status := args[1]
-			if status != "pending" && status != "done" {
-				return fmt.Errorf("status must be 'pending' or 'done'")
-			}
-			data, err := apiClient.TodoUpdateAssigneeStatus(args[0], status)
-			if err != nil {
-				return err
-			}
-			output.Print(cfg.Format, data)
 			return nil
 		},
 	}
