@@ -20,6 +20,9 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// esc escapes a path segment for safe URL concatenation.
+func esc(s string) string { return url.PathEscape(s) }
+
 // New creates a Client from config.
 func New(cfg *config.Config) *Client {
 	return &Client{
@@ -51,7 +54,9 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 
 	// Bot auth: "Bot <robot_id>/<app_key>"
 	req.Header.Set("Authorization", "Bot "+c.botToken)
-	req.Header.Set("X-Space-ID", c.spaceID)
+	if c.spaceID != "" {
+		req.Header.Set("X-Space-ID", c.spaceID)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -102,7 +107,7 @@ func (c *Client) TodoList(goalID, status, assignee, cursor string, limit int) (j
 
 // TodoGet retrieves a single todo.
 func (c *Client) TodoGet(id string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodGet, "/api/v1/todos/"+id, nil)
+	data, err := c.do(http.MethodGet, "/api/v1/todos/"+esc(id), nil)
 	return json.RawMessage(data), err
 }
 
@@ -114,37 +119,37 @@ func (c *Client) TodoCreate(req map[string]any) (json.RawMessage, error) {
 
 // TodoTransition changes todo status.
 func (c *Client) TodoTransition(id, status string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodPut, "/api/v1/todos/"+id+"/status", map[string]string{"status": status})
+	data, err := c.do(http.MethodPut, "/api/v1/todos/"+esc(id)+"/status", map[string]string{"status": status})
 	return json.RawMessage(data), err
 }
 
 // TodoUpdate updates a todo.
 func (c *Client) TodoUpdate(id string, req map[string]any) (json.RawMessage, error) {
-	data, err := c.do(http.MethodPut, "/api/v1/todos/"+id, req)
+	data, err := c.do(http.MethodPut, "/api/v1/todos/"+esc(id), req)
 	return json.RawMessage(data), err
 }
 
 // TodoDelete deletes a todo.
 func (c *Client) TodoDelete(id string) error {
-	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+id, nil)
+	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+esc(id), nil)
 	return err
 }
 
 // TodoAddAssignee adds an assignee to a todo.
 func (c *Client) TodoAddAssignee(todoID, userID string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodPost, "/api/v1/todos/"+todoID+"/assignees", map[string]string{"user_id": userID})
+	data, err := c.do(http.MethodPost, "/api/v1/todos/"+esc(todoID)+"/assignees", map[string]string{"user_id": userID})
 	return json.RawMessage(data), err
 }
 
 // TodoRemoveAssignee removes an assignee from a todo.
 func (c *Client) TodoRemoveAssignee(todoID, userID string) error {
-	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+todoID+"/assignees/"+userID, nil)
+	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+esc(todoID)+"/assignees/"+esc(userID), nil)
 	return err
 }
 
 // TodoComment adds a comment to a todo.
 func (c *Client) TodoComment(todoID, content string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodPost, "/api/v1/todos/"+todoID+"/comments", map[string]string{"content": content})
+	data, err := c.do(http.MethodPost, "/api/v1/todos/"+esc(todoID)+"/comments", map[string]string{"content": content})
 	return json.RawMessage(data), err
 }
 
@@ -156,7 +161,7 @@ func (c *Client) GoalList() (json.RawMessage, error) {
 
 // GoalGet retrieves a single goal.
 func (c *Client) GoalGet(id string) (json.RawMessage, error) {
-	data, err := c.do(http.MethodGet, "/api/v1/goals/"+id, nil)
+	data, err := c.do(http.MethodGet, "/api/v1/goals/"+esc(id), nil)
 	return json.RawMessage(data), err
 }
 
@@ -168,6 +173,6 @@ func (c *Client) GoalCreate(req map[string]any) (json.RawMessage, error) {
 
 // GoalArchive archives a goal.
 func (c *Client) GoalArchive(id string) error {
-	_, err := c.do(http.MethodDelete, "/api/v1/goals/"+id, nil)
+	_, err := c.do(http.MethodDelete, "/api/v1/goals/"+esc(id), nil)
 	return err
 }
