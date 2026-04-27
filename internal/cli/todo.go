@@ -23,6 +23,10 @@ func newTodoCmd() *cobra.Command {
 	cmd.AddCommand(newTodoAssignCmd())
 	cmd.AddCommand(newTodoUnassignCmd())
 	cmd.AddCommand(newTodoCommentCmd())
+	cmd.AddCommand(newTodoCommentListCmd())
+	cmd.AddCommand(newTodoCommentDeleteCmd())
+	cmd.AddCommand(newTodoAssigneeStatusCmd())
+	cmd.AddCommand(newTodoAttachmentCmd())
 	cmd.AddCommand(newTodoDeleteCmd())
 	cmd.AddCommand(newTodoGoalCmd())
 
@@ -82,14 +86,16 @@ func newTodoGetCmd() *cobra.Command {
 // --- todo create ---
 
 func newTodoCreateCmd() *cobra.Command {
-	var title, desc, goalID, deadline string
+	var title, desc, goalID, deadline, sourceChannelID string
+	var sourceChannelType int
 	var assignees []string
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new todo",
 		Example: `  octo todo create --title "Deploy v2.0"
-  octo todo create --title "Fix bug" --goal <goal-id> --assignee user-1 --assignee user-2`,
+  octo todo create --title "Fix bug" --goal <goal-id> --assignee user-1 --assignee user-2
+  octo todo create --title "From chat" --source-channel <channel-id> --source-type 2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := map[string]any{"title": title}
 			if desc != "" {
@@ -103,6 +109,12 @@ func newTodoCreateCmd() *cobra.Command {
 			}
 			if len(assignees) > 0 {
 				req["assignee_ids"] = assignees
+			}
+			if sourceChannelID != "" {
+				req["source_channel_id"] = sourceChannelID
+			}
+			if sourceChannelType > 0 {
+				req["source_channel_type"] = sourceChannelType
 			}
 			data, err := apiClient.TodoCreate(req)
 			if err != nil {
@@ -118,6 +130,8 @@ func newTodoCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&goalID, "goal", "", "parent goal ID")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "deadline (RFC3339 format)")
 	cmd.Flags().StringSliceVar(&assignees, "assignee", nil, "assignee user IDs (repeatable)")
+	cmd.Flags().StringVar(&sourceChannelID, "source-channel", "", "source channel ID (for chat context)")
+	cmd.Flags().IntVar(&sourceChannelType, "source-type", 0, "source channel type (2=group, 5=thread)")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
@@ -277,6 +291,9 @@ func newTodoGoalCmd() *cobra.Command {
 	cmd.AddCommand(newGoalListCmd())
 	cmd.AddCommand(newGoalGetCmd())
 	cmd.AddCommand(newGoalCreateCmd())
+	cmd.AddCommand(newGoalUpdateCmd())
+	cmd.AddCommand(newGoalAssignCmd())
+	cmd.AddCommand(newGoalUnassignCmd())
 	cmd.AddCommand(newGoalArchiveCmd())
 
 	return cmd
@@ -350,6 +367,209 @@ func newGoalArchiveCmd() *cobra.Command {
 				return err
 			}
 			output.Print(cfg.Format, []byte(`{"status":"archived"}`))
+			return nil
+		},
+	}
+}
+
+// --- todo comment list ---
+
+func newTodoCommentListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "comments <todo-id>",
+		Short: "List comments on a todo",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := apiClient.TodoListComments(args[0])
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+}
+
+// --- todo comment delete ---
+
+func newTodoCommentDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "comment-delete <todo-id> <comment-id>",
+		Short: "Delete a comment from a todo",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apiClient.TodoDeleteComment(args[0], args[1]); err != nil {
+				return err
+			}
+			output.Print(cfg.Format, []byte(`{"status":"deleted"}`))
+			return nil
+		},
+	}
+}
+
+// --- todo assignee-status ---
+
+func newTodoAssigneeStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "assignee-status <todo-id> <pending|done>",
+		Short: "Update your completion status on a todo",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			status := args[1]
+			if status != "pending" && status != "done" {
+				return fmt.Errorf("status must be 'pending' or 'done'")
+			}
+			data, err := apiClient.TodoUpdateAssigneeStatus(args[0], status)
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+}
+
+// --- todo attachment (subcommand group) ---
+
+func newTodoAttachmentCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "attachment",
+		Short: "Manage todo attachments",
+	}
+	cmd.AddCommand(newAttachmentListCmd())
+	cmd.AddCommand(newAttachmentAddCmd())
+	cmd.AddCommand(newAttachmentDeleteCmd())
+	return cmd
+}
+
+func newAttachmentListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list <todo-id>",
+		Short: "List attachments on a todo",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := apiClient.TodoListAttachments(args[0])
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+}
+
+func newAttachmentAddCmd() *cobra.Command {
+	var fileURL, fileName, mimeType string
+
+	cmd := &cobra.Command{
+		Use:   "add <todo-id>",
+		Short: "Add an attachment to a todo",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := map[string]any{"file_url": fileURL}
+			if fileName != "" {
+				req["file_name"] = fileName
+			}
+			if mimeType != "" {
+				req["mime_type"] = mimeType
+			}
+			data, err := apiClient.TodoAddAttachment(args[0], req)
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&fileURL, "url", "", "attachment URL (required, must be https)")
+	cmd.Flags().StringVar(&fileName, "name", "", "file name")
+	cmd.Flags().StringVar(&mimeType, "type", "", "MIME type")
+	_ = cmd.MarkFlagRequired("url")
+
+	return cmd
+}
+
+func newAttachmentDeleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <todo-id> <attachment-id>",
+		Short: "Delete an attachment from a todo",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apiClient.TodoDeleteAttachment(args[0], args[1]); err != nil {
+				return err
+			}
+			output.Print(cfg.Format, []byte(`{"status":"deleted"}`))
+			return nil
+		},
+	}
+}
+
+// --- goal update ---
+
+func newGoalUpdateCmd() *cobra.Command {
+	var title, desc string
+
+	cmd := &cobra.Command{
+		Use:   "update <goal-id>",
+		Short: "Update a goal",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			req := map[string]any{}
+			if title != "" {
+				req["title"] = title
+			}
+			if desc != "" {
+				req["description"] = desc
+			}
+			if len(req) == 0 {
+				return fmt.Errorf("at least one of --title or --desc is required")
+			}
+			data, err := apiClient.GoalUpdate(args[0], req)
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&title, "title", "", "new title")
+	cmd.Flags().StringVar(&desc, "desc", "", "new description")
+
+	return cmd
+}
+
+// --- goal assign ---
+
+func newGoalAssignCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "assign <goal-id> <user-id>",
+		Short: "Add an assignee to a goal",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			data, err := apiClient.GoalAddAssignee(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			output.Print(cfg.Format, data)
+			return nil
+		},
+	}
+}
+
+// --- goal unassign ---
+
+func newGoalUnassignCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unassign <goal-id> <user-id>",
+		Short: "Remove an assignee from a goal",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apiClient.GoalRemoveAssignee(args[0], args[1]); err != nil {
+				return err
+			}
+			output.Print(cfg.Format, []byte(`{"status":"removed"}`))
 			return nil
 		},
 	}

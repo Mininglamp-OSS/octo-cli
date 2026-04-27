@@ -73,6 +73,16 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
+		// Try to parse error envelope {"error":{"code":"...","message":"..."}}
+		var envelope struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal(respBody, &envelope) == nil && envelope.Error.Message != "" {
+			return nil, fmt.Errorf("%s: %s", envelope.Error.Code, envelope.Error.Message)
+		}
 		return nil, fmt.Errorf("server returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -174,5 +184,59 @@ func (c *Client) GoalCreate(req map[string]any) (json.RawMessage, error) {
 // GoalArchive archives a goal.
 func (c *Client) GoalArchive(id string) error {
 	_, err := c.do(http.MethodDelete, "/api/v1/goals/"+esc(id), nil)
+	return err
+}
+
+// GoalUpdate updates a goal.
+func (c *Client) GoalUpdate(id string, req map[string]any) (json.RawMessage, error) {
+	data, err := c.do(http.MethodPut, "/api/v1/goals/"+esc(id), req)
+	return json.RawMessage(data), err
+}
+
+// GoalAddAssignee adds an assignee to a goal.
+func (c *Client) GoalAddAssignee(goalID, userID string) (json.RawMessage, error) {
+	data, err := c.do(http.MethodPost, "/api/v1/goals/"+esc(goalID)+"/assignees", map[string]string{"user_id": userID})
+	return json.RawMessage(data), err
+}
+
+// GoalRemoveAssignee removes an assignee from a goal.
+func (c *Client) GoalRemoveAssignee(goalID, userID string) error {
+	_, err := c.do(http.MethodDelete, "/api/v1/goals/"+esc(goalID)+"/assignees/"+esc(userID), nil)
+	return err
+}
+
+// TodoListComments lists comments on a todo.
+func (c *Client) TodoListComments(todoID string) (json.RawMessage, error) {
+	data, err := c.do(http.MethodGet, "/api/v1/todos/"+esc(todoID)+"/comments", nil)
+	return json.RawMessage(data), err
+}
+
+// TodoDeleteComment deletes a comment.
+func (c *Client) TodoDeleteComment(todoID, commentID string) error {
+	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+esc(todoID)+"/comments/"+esc(commentID), nil)
+	return err
+}
+
+// TodoUpdateAssigneeStatus updates the caller's completion status on a todo.
+func (c *Client) TodoUpdateAssigneeStatus(todoID, status string) (json.RawMessage, error) {
+	data, err := c.do(http.MethodPut, "/api/v1/todos/"+esc(todoID)+"/assignee-status", map[string]string{"status": status})
+	return json.RawMessage(data), err
+}
+
+// TodoListAttachments lists attachments on a todo.
+func (c *Client) TodoListAttachments(todoID string) (json.RawMessage, error) {
+	data, err := c.do(http.MethodGet, "/api/v1/todos/"+esc(todoID)+"/attachments", nil)
+	return json.RawMessage(data), err
+}
+
+// TodoAddAttachment adds an attachment to a todo.
+func (c *Client) TodoAddAttachment(todoID string, req map[string]any) (json.RawMessage, error) {
+	data, err := c.do(http.MethodPost, "/api/v1/todos/"+esc(todoID)+"/attachments", req)
+	return json.RawMessage(data), err
+}
+
+// TodoDeleteAttachment deletes an attachment.
+func (c *Client) TodoDeleteAttachment(todoID, attachmentID string) error {
+	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+esc(todoID)+"/attachments/"+esc(attachmentID), nil)
 	return err
 }

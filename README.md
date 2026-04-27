@@ -34,6 +34,11 @@ octo todo goal create --title "Q3 Release"
 ```
 
 ## Authentication
+
+Set `OCTO_BOT_TOKEN` to your bot's `robot_id/app_key` credentials. The CLI sends `Authorization: Bot <token>` on every request.
+
+`OCTO_SPACE_ID` is optional — if set, it's sent as `X-Space-ID` header for space-scoped operations. Bot auth can auto-resolve the space from the server.
+
 ## Output
 
 Default: JSON (for bot consumption). Use `--format table` for human-readable output.
