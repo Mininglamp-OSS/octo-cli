@@ -154,7 +154,7 @@ func (c *Client) GoalList() (json.RawMessage, error) {
 	return json.RawMessage(data), err
 }
 
-// GoalGet retrieves a single goal (kanban view).
+// GoalGet retrieves a single goal.
 func (c *Client) GoalGet(id string) (json.RawMessage, error) {
 	data, err := c.do(http.MethodGet, "/api/v1/goals/"+id, nil)
 	return json.RawMessage(data), err

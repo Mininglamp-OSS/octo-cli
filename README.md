@@ -23,8 +23,11 @@ octo todo list
 # Create a todo
 octo todo create --title "Deploy v2.0" --assignee user-123
 
-# Mark done
-octo todo done <todo-id>
+# Mark closed
+octo todo close <todo-id>
+
+# Reopen
+octo todo reopen <todo-id>
 
 # Create a goal
 octo todo goal create --title "Q3 Release"

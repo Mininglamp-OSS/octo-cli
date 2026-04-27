@@ -29,8 +29,8 @@ Each Octo built-in service module maps to a CLI subcommand: `octo todo`, `octo <
 octo todo list [--goal <id>] [--status <s>] [--assignee <uid>] [--limit <n>]
 octo todo create --title <t> [--goal <id>] [--assignee <uid>...] [--deadline <date>] [--desc <d>]
 octo todo get <id>
-octo todo done <id>
-octo todo move <id> <status>
+octo todo close <id>
+octo todo reopen <id>
 octo todo assign <id> <uid>
 octo todo unassign <id> <uid>
 octo todo comment <id> <text>

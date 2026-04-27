@@ -30,7 +30,7 @@ func TestCollectHeaders(t *testing.T) {
 	item := map[string]any{
 		"id":     "123",
 		"title":  "test",
-		"status": "draft",
+		"status": "open",
 		"extra":  "ignored",
 	}
 	headers := collectHeaders(item)

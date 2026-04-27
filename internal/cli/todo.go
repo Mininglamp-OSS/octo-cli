@@ -18,8 +18,8 @@ func newTodoCmd() *cobra.Command {
 	cmd.AddCommand(newTodoGetCmd())
 	cmd.AddCommand(newTodoCreateCmd())
 	cmd.AddCommand(newTodoUpdateCmd())
-	cmd.AddCommand(newTodoDoneCmd())
-	cmd.AddCommand(newTodoMoveCmd())
+	cmd.AddCommand(newTodoCloseCmd())
+	cmd.AddCommand(newTodoReopenCmd())
 	cmd.AddCommand(newTodoAssignCmd())
 	cmd.AddCommand(newTodoUnassignCmd())
 	cmd.AddCommand(newTodoCommentCmd())
@@ -39,7 +39,7 @@ func newTodoListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List todos",
 		Example: `  octo todo list
-  octo todo list --status in_progress
+  octo todo list --status open
   octo todo list --goal <goal-id> --limit 20
   octo todo list --cursor <next_cursor>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -53,7 +53,7 @@ func newTodoListCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&goalID, "goal", "", "filter by goal ID")
-	cmd.Flags().StringVar(&status, "status", "", "filter by status (draft|planned|in_progress|done|cancelled)")
+	cmd.Flags().StringVar(&status, "status", "", "filter by status (open|closed)")
 	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee user ID")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "pagination cursor (from previous response)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max number of results")
@@ -164,15 +164,15 @@ func newTodoUpdateCmd() *cobra.Command {
 	return cmd
 }
 
-// --- todo done ---
+// --- todo close ---
 
-func newTodoDoneCmd() *cobra.Command {
+func newTodoCloseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "done <todo-id>",
-		Short: "Mark a todo as done",
+		Use:   "close <todo-id>",
+		Short: "Close a todo",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := apiClient.TodoTransition(args[0], "done")
+			data, err := apiClient.TodoTransition(args[0], "closed")
 			if err != nil {
 				return err
 			}
@@ -182,16 +182,15 @@ func newTodoDoneCmd() *cobra.Command {
 	}
 }
 
-// --- todo move ---
+// --- todo reopen ---
 
-func newTodoMoveCmd() *cobra.Command {
+func newTodoReopenCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "move <todo-id> <status>",
-		Short: "Transition todo to a new status",
-		Long:  "Valid statuses: draft, planned, in_progress, done, cancelled",
-		Args:  cobra.ExactArgs(2),
+		Use:   "reopen <todo-id>",
+		Short: "Reopen a closed todo",
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := apiClient.TodoTransition(args[0], args[1])
+			data, err := apiClient.TodoTransition(args[0], "open")
 			if err != nil {
 				return err
 			}
@@ -301,7 +300,7 @@ func newGoalListCmd() *cobra.Command {
 func newGoalGetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <goal-id>",
-		Short: "Get goal detail (kanban view)",
+		Short: "Get goal detail",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := apiClient.GoalGet(args[0])
