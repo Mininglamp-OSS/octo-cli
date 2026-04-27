@@ -26,19 +26,28 @@ Each Octo built-in service module maps to a CLI subcommand: `octo todo`, `octo <
 ## Command Structure
 
 ```
-octo todo list [--goal <id>] [--status <s>] [--assignee <uid>] [--limit <n>]
-octo todo create --title <t> [--goal <id>] [--assignee <uid>...] [--deadline <date>] [--desc <d>]
+octo todo list [--goal <id>] [--status <s>] [--assignee <uid>] [--limit <n>] [--cursor <c>]
+octo todo create --title <t> [--goal <id>] [--assignee <uid>...] [--deadline <date>] [--desc <d>] [--source-channel <id>] [--source-type <n>]
 octo todo get <id>
+octo todo update <id> [--title <t>] [--desc <d>] [--deadline <date>]
 octo todo close <id>
 octo todo reopen <id>
+octo todo delete <id>
 octo todo assign <id> <uid>
 octo todo unassign <id> <uid>
 octo todo comment <id> <text>
-octo todo delete <id>
+octo todo comments <id>
+octo todo comment-delete <id> <comment-id>
+octo todo attachment list <id>
+octo todo attachment add <id> --url <url> [--name <n>] [--type <mime>]
+octo todo attachment delete <id> <attachment-id>
 
 octo todo goal list
 octo todo goal create --title <t> [--desc <d>]
 octo todo goal get <id>
+octo todo goal update <id> [--title <t>] [--desc <d>]
+octo todo goal assign <id> <uid>
+octo todo goal unassign <id> <uid>
 octo todo goal archive <id>
 
 octo version
