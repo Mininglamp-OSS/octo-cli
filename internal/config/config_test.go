@@ -11,10 +11,10 @@ func TestValidate_MissingToken(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingSpaceID(t *testing.T) {
+func TestValidate_SpaceIDOptional(t *testing.T) {
 	c := &Config{APIURL: "http://localhost", BotToken: "bot1/key1", SpaceID: ""}
-	if err := c.Validate(); err == nil {
-		t.Error("expected error for missing OCTO_SPACE_ID")
+	if err := c.Validate(); err != nil {
+		t.Errorf("empty OCTO_SPACE_ID should be allowed, got %v", err)
 	}
 }
 

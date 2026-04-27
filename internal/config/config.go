@@ -9,7 +9,7 @@ import (
 type Config struct {
 	APIURL   string // OCTO_API_URL — base URL of todo-service
 	BotToken string // OCTO_BOT_TOKEN — bot token in "robot_id/app_key" format
-	SpaceID  string // OCTO_SPACE_ID — bot's space (set by agent runtime)
+	SpaceID  string // OCTO_SPACE_ID — optional, auto-resolved from bot auth if not set
 	Format   string // output format: "json" (default) or "table"
 }
 
@@ -29,7 +29,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("OCTO_BOT_TOKEN is required (format: robot_id/app_key)")
 	}
 	if c.SpaceID == "" {
-		return fmt.Errorf("OCTO_SPACE_ID is required")
+		// SpaceID is optional; bot auth can auto-resolve from verify-bot response.
 	}
 	return nil
 }

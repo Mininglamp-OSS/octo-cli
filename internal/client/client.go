@@ -84,7 +84,7 @@ func (c *Client) TodoList(goalID, status, assignee, cursor string, limit int) (j
 		params.Set("status", status)
 	}
 	if assignee != "" {
-		params.Set("assignee", assignee)
+		params.Set("assignee_id", assignee)
 	}
 	if cursor != "" {
 		params.Set("cursor", cursor)
