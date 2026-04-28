@@ -53,7 +53,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 	}
 
 	// Bot auth: "Bot <robot_id>/<app_key>"
-	req.Header.Set("Authorization", "Bot "+c.botToken)
+	req.Header.Set("Authorization", "Bearer "+c.botToken)
 	if c.spaceID != "" {
 		req.Header.Set("X-Space-ID", c.spaceID)
 	}
@@ -163,9 +163,13 @@ func (c *Client) TodoComment(todoID, content string) (json.RawMessage, error) {
 	return json.RawMessage(data), err
 }
 
-// GoalList lists goals.
-func (c *Client) GoalList() (json.RawMessage, error) {
-	data, err := c.do(http.MethodGet, "/api/v1/goals", nil)
+// GoalList lists goals with optional status filter.
+func (c *Client) GoalList(status string) (json.RawMessage, error) {
+	path := "/api/v1/goals"
+	if status != "" {
+		path += "?status=" + url.QueryEscape(status)
+	}
+	data, err := c.do(http.MethodGet, path, nil)
 	return json.RawMessage(data), err
 }
 
@@ -232,5 +236,11 @@ func (c *Client) TodoAddAttachment(todoID string, req map[string]any) (json.RawM
 // TodoDeleteAttachment deletes an attachment.
 func (c *Client) TodoDeleteAttachment(todoID, attachmentID string) error {
 	_, err := c.do(http.MethodDelete, "/api/v1/todos/"+esc(todoID)+"/attachments/"+esc(attachmentID), nil)
+	return err
+}
+
+// GoalSetStatus transitions a goal's status.
+func (c *Client) GoalSetStatus(id, status string) error {
+	_, err := c.do(http.MethodPut, "/api/v1/goals/"+esc(id)+"/status", map[string]string{"status": status})
 	return err
 }

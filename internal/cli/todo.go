@@ -294,16 +294,20 @@ func newTodoGoalCmd() *cobra.Command {
 	cmd.AddCommand(newGoalAssignCmd())
 	cmd.AddCommand(newGoalUnassignCmd())
 	cmd.AddCommand(newGoalArchiveCmd())
+	cmd.AddCommand(newGoalCompleteCmd())
+	cmd.AddCommand(newGoalReactivateCmd())
 
 	return cmd
 }
 
 func newGoalListCmd() *cobra.Command {
-	return &cobra.Command{
+	var status string
+
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List goals",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := apiClient.GoalList()
+			data, err := apiClient.GoalList(status)
 			if err != nil {
 				return err
 			}
@@ -311,6 +315,9 @@ func newGoalListCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&status, "status", "", "filter by status (active, completed, archived)")
+	return cmd
 }
 
 func newGoalGetCmd() *cobra.Command {
@@ -330,7 +337,7 @@ func newGoalGetCmd() *cobra.Command {
 }
 
 func newGoalCreateCmd() *cobra.Command {
-	var title, desc string
+	var title, desc, deadline string
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -339,6 +346,9 @@ func newGoalCreateCmd() *cobra.Command {
 			req := map[string]any{"title": title}
 			if desc != "" {
 				req["description"] = desc
+			}
+			if deadline != "" {
+				req["deadline"] = deadline
 			}
 			data, err := apiClient.GoalCreate(req)
 			if err != nil {
@@ -351,6 +361,7 @@ func newGoalCreateCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&title, "title", "", "goal title (required)")
 	cmd.Flags().StringVar(&desc, "desc", "", "description")
+	cmd.Flags().StringVar(&deadline, "deadline", "", "deadline (RFC3339 format)")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
@@ -366,6 +377,36 @@ func newGoalArchiveCmd() *cobra.Command {
 				return err
 			}
 			output.Print(cfg.Format, []byte(`{"status":"archived"}`))
+			return nil
+		},
+	}
+}
+
+func newGoalCompleteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "complete <goal-id>",
+		Short: "Mark a goal as completed",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apiClient.GoalSetStatus(args[0], "completed"); err != nil {
+				return err
+			}
+			output.Print(cfg.Format, []byte(`{"status":"completed"}`))
+			return nil
+		},
+	}
+}
+
+func newGoalReactivateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reactivate <goal-id>",
+		Short: "Reactivate a completed or archived goal",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := apiClient.GoalSetStatus(args[0], "active"); err != nil {
+				return err
+			}
+			output.Print(cfg.Format, []byte(`{"status":"active"}`))
 			return nil
 		},
 	}
