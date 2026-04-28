@@ -15,8 +15,7 @@ import (
 // Client is a REST client for the todo-service API.
 type Client struct {
 	baseURL    string
-	botToken   string // robot_id/app_key format
-	spaceID    string
+	botToken   string
 	httpClient *http.Client
 }
 
@@ -28,7 +27,6 @@ func New(cfg *config.Config) *Client {
 	return &Client{
 		baseURL:  cfg.APIURL,
 		botToken: cfg.BotToken,
-		spaceID:  cfg.SpaceID,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -54,9 +52,6 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 
 	// Bot auth: "Bot <robot_id>/<app_key>"
 	req.Header.Set("Authorization", "Bearer "+c.botToken)
-	if c.spaceID != "" {
-		req.Header.Set("X-Space-ID", c.spaceID)
-	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
