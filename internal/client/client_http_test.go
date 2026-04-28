@@ -10,11 +10,10 @@ import (
 
 // --- helpers ---
 
-func newTestClient(srv *httptest.Server, spaceID string) *Client {
+func newTestClient(srv *httptest.Server) *Client {
 	return &Client{
 		baseURL:    srv.URL,
 		botToken:   "robot1/key123",
-		spaceID:    spaceID,
 		httpClient: srv.Client(),
 	}
 }
@@ -30,7 +29,7 @@ func TestDo_SetsAuthHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "")
+	c := newTestClient(srv)
 	c.botToken = "mybot/mykey"
 	c.do(http.MethodGet, "/test", nil)
 
@@ -39,41 +38,7 @@ func TestDo_SetsAuthHeader(t *testing.T) {
 	}
 }
 
-func TestDo_SetsSpaceIDWhenNonEmpty(t *testing.T) {
-	var gotSpaceID string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSpaceID = r.Header.Get("X-Space-ID")
-		w.WriteHeader(200)
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
 
-	c := newTestClient(srv, "space-42")
-	c.do(http.MethodGet, "/test", nil)
-
-	if gotSpaceID != "space-42" {
-		t.Errorf("X-Space-ID = %q, want %q", gotSpaceID, "space-42")
-	}
-}
-
-func TestDo_SkipsSpaceIDWhenEmpty(t *testing.T) {
-	var gotSpaceID string
-	var hasHeader bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotSpaceID = r.Header.Get("X-Space-ID")
-		_, hasHeader = r.Header["X-Space-Id"]
-		w.WriteHeader(200)
-		w.Write([]byte(`{}`))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(srv, "")
-	c.do(http.MethodGet, "/test", nil)
-
-	if hasHeader || gotSpaceID != "" {
-		t.Errorf("X-Space-ID should not be sent when empty, got %q (present=%v)", gotSpaceID, hasHeader)
-	}
-}
 
 func TestDo_SetsContentTypeForPOST(t *testing.T) {
 	var gotCT string
@@ -84,7 +49,7 @@ func TestDo_SetsContentTypeForPOST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "")
+	c := newTestClient(srv)
 	c.do(http.MethodPost, "/test", map[string]string{"key": "val"})
 
 	if gotCT != "application/json" {
@@ -101,7 +66,7 @@ func TestDo_NoContentTypeForGET(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "")
+	c := newTestClient(srv)
 	c.do(http.MethodGet, "/test", nil)
 
 	if gotCT != "" {
@@ -116,7 +81,7 @@ func TestDo_ErrorParsesEnvelope(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "")
+	c := newTestClient(srv)
 	_, err := c.do(http.MethodGet, "/test", nil)
 
 	if err == nil {
@@ -134,7 +99,7 @@ func TestDo_ErrorFallsBackToRawBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "")
+	c := newTestClient(srv)
 	_, err := c.do(http.MethodGet, "/test", nil)
 
 	if err == nil {
@@ -159,7 +124,7 @@ func TestTodoGet_EscapesID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoGet("id/with/slashes")
 
 	if !strings.Contains(gotPath, "id%2Fwith%2Fslashes") {
@@ -178,7 +143,7 @@ func TestTodoRemoveAssignee_EscapesBothSegments(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoRemoveAssignee("t/1", "u/2")
 
 	if !strings.Contains(gotPath, "t%2F1") || !strings.Contains(gotPath, "u%2F2") {
@@ -199,7 +164,7 @@ func TestTodoList_GETWithParams(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoList("g1", "open", "u1", "", 10)
 
 	if gotMethod != "GET" {
@@ -225,7 +190,7 @@ func TestTodoCreate_POST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoCreate(map[string]any{"title": "Test"})
 
 	if gotMethod != "POST" {
@@ -251,7 +216,7 @@ func TestTodoTransition_PUT(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoTransition("t1", "closed")
 
 	if gotMethod != "PUT" {
@@ -274,7 +239,7 @@ func TestTodoDelete_DELETE(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoDelete("t1")
 
 	if gotMethod != "DELETE" {
@@ -295,7 +260,7 @@ func TestGoalList_GET(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.GoalList("")
 
 	if gotMethod != "GET" {
@@ -316,7 +281,7 @@ func TestTodoListComments_GET(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoListComments("t1")
 
 	if gotMethod != "GET" {
@@ -337,7 +302,7 @@ func TestTodoAddAttachment_POST(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := newTestClient(srv, "sp")
+	c := newTestClient(srv)
 	c.TodoAddAttachment("t1", map[string]any{"file_url": "https://example.com/f.pdf"})
 
 	if gotMethod != "POST" {
