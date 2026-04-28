@@ -34,8 +34,8 @@ func TestDo_SetsAuthHeader(t *testing.T) {
 	c.botToken = "mybot/mykey"
 	c.do(http.MethodGet, "/test", nil)
 
-	if gotAuth != "Bot mybot/mykey" {
-		t.Errorf("Authorization = %q, want %q", gotAuth, "Bot mybot/mykey")
+	if gotAuth != "Bearer mybot/mykey" {
+		t.Errorf("Authorization = %q, want %q", gotAuth, "Bearer mybot/mykey")
 	}
 }
 
@@ -296,7 +296,7 @@ func TestGoalList_GET(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv, "sp")
-	c.GoalList()
+	c.GoalList("")
 
 	if gotMethod != "GET" {
 		t.Errorf("method = %q, want GET", gotMethod)
