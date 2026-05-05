@@ -4,8 +4,28 @@ Command-line interface for the Octo ecosystem. Designed for AI Agent Bots to int
 
 ## Install
 
+### Go install
+
 ```bash
 go install github.com/dmwork-org/octo-cli/cmd/octo@latest
+```
+
+### Homebrew (coming soon)
+
+```bash
+brew install dmwork-org/tap/octo
+```
+
+### Download from GitHub Releases
+
+Download the latest binary for your platform from
+[GitHub Releases](https://github.com/dmwork-org/octo-cli/releases).
+
+```bash
+# Example: Linux amd64
+curl -LO https://github.com/dmwork-org/octo-cli/releases/latest/download/octo_Linux_amd64.tar.gz
+tar xzf octo_Linux_amd64.tar.gz
+sudo mv octo /usr/local/bin/
 ```
 
 Also installed automatically with `octo-daemon`.
