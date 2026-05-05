@@ -165,7 +165,7 @@ func TestTodoList_GETWithParams(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	c.TodoList("g1", "open", "u1", "", 10)
+	c.TodoList("g1", "open", "u1", "", "", "", "", 0, 10)
 
 	if gotMethod != "GET" {
 		t.Errorf("method = %q, want GET", gotMethod)

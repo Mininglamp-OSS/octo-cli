@@ -35,8 +35,8 @@ func newTodoCmd() *cobra.Command {
 // --- todo list ---
 
 func newTodoListCmd() *cobra.Command {
-	var goalID, status, assignee, cursor string
-	var limit int
+	var goalID, status, assignee, cursor, creator, search, sourceChannel string
+	var sourceType, limit int
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -44,9 +44,10 @@ func newTodoListCmd() *cobra.Command {
 		Example: `  octo todo list
   octo todo list --status open
   octo todo list --goal <goal-id> --limit 20
+  octo todo list -q "deploy" --creator <uid>
   octo todo list --cursor <next_cursor>`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, err := apiClient.TodoList(goalID, status, assignee, cursor, limit)
+			data, err := apiClient.TodoList(goalID, status, assignee, cursor, creator, search, sourceChannel, sourceType, limit)
 			if err != nil {
 				return err
 			}
@@ -60,6 +61,10 @@ func newTodoListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignee, "assignee", "", "filter by assignee user ID")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "pagination cursor (from previous response)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max number of results")
+	cmd.Flags().StringVar(&creator, "creator", "", "filter by creator user ID")
+	cmd.Flags().StringVarP(&search, "search", "q", "", "full-text search query")
+	cmd.Flags().StringVar(&sourceChannel, "source-channel", "", "filter by source channel ID")
+	cmd.Flags().IntVar(&sourceType, "source-type", 0, "filter by source channel type")
 
 	return cmd
 }
@@ -85,7 +90,7 @@ func newTodoGetCmd() *cobra.Command {
 // --- todo create ---
 
 func newTodoCreateCmd() *cobra.Command {
-	var title, desc, goalID, deadline, sourceChannelID string
+	var title, desc, goalID, deadline, sourceChannelID, remindAt, sourceName string
 	var sourceChannelType int
 	var assignees []string
 
@@ -115,6 +120,12 @@ func newTodoCreateCmd() *cobra.Command {
 			if sourceChannelType > 0 {
 				req["source_channel_type"] = sourceChannelType
 			}
+			if remindAt != "" {
+				req["remind_at"] = remindAt
+			}
+			if sourceName != "" {
+				req["source_name"] = sourceName
+			}
 			data, err := apiClient.TodoCreate(req)
 			if err != nil {
 				return err
@@ -131,6 +142,8 @@ func newTodoCreateCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&assignees, "assignee", nil, "assignee user IDs (repeatable)")
 	cmd.Flags().StringVar(&sourceChannelID, "source-channel", "", "source channel ID (for chat context)")
 	cmd.Flags().IntVar(&sourceChannelType, "source-type", 0, "source channel type (2=group, 5=thread)")
+	cmd.Flags().StringVar(&remindAt, "remind-at", "", "reminder time (RFC3339 format)")
+	cmd.Flags().StringVar(&sourceName, "source-name", "", "source name")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
@@ -139,13 +152,14 @@ func newTodoCreateCmd() *cobra.Command {
 // --- todo update ---
 
 func newTodoUpdateCmd() *cobra.Command {
-	var title, desc, deadline string
+	var title, desc, deadline, remindAt, goalID string
 
 	cmd := &cobra.Command{
 		Use:   "update <todo-id>",
-		Short: "Update a todo (title, description, deadline)",
+		Short: "Update a todo",
 		Example: `  octo todo update <id> --title "New title"
-  octo todo update <id> --desc "Updated description" --deadline 2026-06-01T00:00:00Z`,
+  octo todo update <id> --desc "Updated description" --deadline 2026-06-01T00:00:00Z
+  octo todo update <id> --goal <goal-id> --remind-at 2026-06-01T09:00:00Z`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := map[string]any{}
@@ -158,8 +172,14 @@ func newTodoUpdateCmd() *cobra.Command {
 			if deadline != "" {
 				req["deadline"] = deadline
 			}
+			if remindAt != "" {
+				req["remind_at"] = remindAt
+			}
+			if goalID != "" {
+				req["goal_id"] = goalID
+			}
 			if len(req) == 0 {
-				return fmt.Errorf("at least one of --title, --desc, or --deadline is required")
+				return fmt.Errorf("at least one flag is required")
 			}
 			data, err := apiClient.TodoUpdate(args[0], req)
 			if err != nil {
@@ -173,6 +193,8 @@ func newTodoUpdateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&title, "title", "", "new title")
 	cmd.Flags().StringVar(&desc, "desc", "", "new description")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "new deadline (RFC3339)")
+	cmd.Flags().StringVar(&remindAt, "remind-at", "", "reminder time (RFC3339)")
+	cmd.Flags().StringVar(&goalID, "goal", "", "reassign to a different goal ID")
 
 	return cmd
 }
@@ -294,8 +316,6 @@ func newTodoGoalCmd() *cobra.Command {
 	cmd.AddCommand(newGoalAssignCmd())
 	cmd.AddCommand(newGoalUnassignCmd())
 	cmd.AddCommand(newGoalArchiveCmd())
-	cmd.AddCommand(newGoalCompleteCmd())
-	cmd.AddCommand(newGoalReactivateCmd())
 
 	return cmd
 }
@@ -338,6 +358,7 @@ func newGoalGetCmd() *cobra.Command {
 
 func newGoalCreateCmd() *cobra.Command {
 	var title, desc, deadline string
+	var assignees []string
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -349,6 +370,9 @@ func newGoalCreateCmd() *cobra.Command {
 			}
 			if deadline != "" {
 				req["deadline"] = deadline
+			}
+			if len(assignees) > 0 {
+				req["assignee_ids"] = assignees
 			}
 			data, err := apiClient.GoalCreate(req)
 			if err != nil {
@@ -362,6 +386,7 @@ func newGoalCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&title, "title", "", "goal title (required)")
 	cmd.Flags().StringVar(&desc, "desc", "", "description")
 	cmd.Flags().StringVar(&deadline, "deadline", "", "deadline (RFC3339 format)")
+	cmd.Flags().StringSliceVar(&assignees, "assignee", nil, "assignee user IDs (repeatable)")
 	_ = cmd.MarkFlagRequired("title")
 
 	return cmd
@@ -382,35 +407,6 @@ func newGoalArchiveCmd() *cobra.Command {
 	}
 }
 
-func newGoalCompleteCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "complete <goal-id>",
-		Short: "Mark a goal as completed",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := apiClient.GoalSetStatus(args[0], "completed"); err != nil {
-				return err
-			}
-			output.Print(cfg.Format, []byte(`{"status":"completed"}`))
-			return nil
-		},
-	}
-}
-
-func newGoalReactivateCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "reactivate <goal-id>",
-		Short: "Reactivate a completed or archived goal",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := apiClient.GoalSetStatus(args[0], "active"); err != nil {
-				return err
-			}
-			output.Print(cfg.Format, []byte(`{"status":"active"}`))
-			return nil
-		},
-	}
-}
 
 // --- todo comment list ---
 
@@ -526,7 +522,7 @@ func newAttachmentDeleteCmd() *cobra.Command {
 // --- goal update ---
 
 func newGoalUpdateCmd() *cobra.Command {
-	var title, desc string
+	var title, desc, deadline string
 
 	cmd := &cobra.Command{
 		Use:   "update <goal-id>",
@@ -540,8 +536,11 @@ func newGoalUpdateCmd() *cobra.Command {
 			if desc != "" {
 				req["description"] = desc
 			}
+			if deadline != "" {
+				req["deadline"] = deadline
+			}
 			if len(req) == 0 {
-				return fmt.Errorf("at least one of --title or --desc is required")
+				return fmt.Errorf("at least one of --title, --desc, or --deadline is required")
 			}
 			data, err := apiClient.GoalUpdate(args[0], req)
 			if err != nil {
@@ -554,6 +553,7 @@ func newGoalUpdateCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&title, "title", "", "new title")
 	cmd.Flags().StringVar(&desc, "desc", "", "new description")
+	cmd.Flags().StringVar(&deadline, "deadline", "", "new deadline (RFC3339)")
 
 	return cmd
 }

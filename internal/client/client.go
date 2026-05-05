@@ -85,7 +85,7 @@ func (c *Client) do(method, path string, body any) ([]byte, error) {
 }
 
 // TodoList lists todos with optional filters.
-func (c *Client) TodoList(goalID, status, assignee, cursor string, limit int) (json.RawMessage, error) {
+func (c *Client) TodoList(goalID, status, assignee, cursor, creator, search, sourceChannel string, sourceType, limit int) (json.RawMessage, error) {
 	params := url.Values{}
 	if goalID != "" {
 		params.Set("goal_id", goalID)
@@ -98,6 +98,18 @@ func (c *Client) TodoList(goalID, status, assignee, cursor string, limit int) (j
 	}
 	if cursor != "" {
 		params.Set("cursor", cursor)
+	}
+	if creator != "" {
+		params.Set("creator_id", creator)
+	}
+	if search != "" {
+		params.Set("q", search)
+	}
+	if sourceChannel != "" {
+		params.Set("source_channel_id", sourceChannel)
+	}
+	if sourceType > 0 {
+		params.Set("source_channel_type", fmt.Sprintf("%d", sourceType))
 	}
 	if limit > 0 {
 		params.Set("limit", fmt.Sprintf("%d", limit))
@@ -234,8 +246,3 @@ func (c *Client) TodoDeleteAttachment(todoID, attachmentID string) error {
 	return err
 }
 
-// GoalSetStatus transitions a goal's status.
-func (c *Client) GoalSetStatus(id, status string) error {
-	_, err := c.do(http.MethodPut, "/api/v1/goals/"+esc(id)+"/status", map[string]string{"status": status})
-	return err
-}
