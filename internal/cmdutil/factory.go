@@ -26,7 +26,6 @@ type GlobalOptions struct {
 	Timeout  string // raw string; parsed where used
 	NoRetry  bool
 	Space    string
-	Yes      bool
 	PageAll  bool
 	PageMax  int
 }

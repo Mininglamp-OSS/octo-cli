@@ -9,7 +9,7 @@ import (
 // top-level command should be an *ExitError so the envelope renderer can emit a
 // structured JSON error. Agent consumers parse Type/Code to decide next action.
 type ExitError struct {
-	Type    string          // CLI taxonomy: auth_error | validation | api_error | network | rate_limited | permission | confirmation_required | internal
+	Type    string          // CLI taxonomy: auth_error | validation | api_error | network | rate_limited | permission | internal
 	Code    string          // machine code (string from backend or a numeric-as-string sentinel)
 	Message string          // human-readable message (English)
 	Hint    string          // suggested next action
@@ -26,6 +26,19 @@ func (e *ExitError) Error() string {
 		return fmt.Sprintf("%s: %s", e.Code, e.Message)
 	}
 	return e.Message
+}
+
+// ExitCode returns the process exit code for this error type.
+// auth_error → 3, validation/config → 2, all others → 1.
+func (e *ExitError) ExitCode() int {
+	switch e.Type {
+	case "auth_error":
+		return 3
+	case "validation", "config":
+		return 2
+	default:
+		return 1
+	}
 }
 
 // AsExitError unwraps an error to *ExitError, returning nil if none present.
@@ -67,10 +80,6 @@ func ErrNetwork(msg, hint string) *ExitError {
 	return &ExitError{Type: "network", Code: "NETWORK_ERROR", Message: msg, Hint: hint}
 }
 
-// ErrConfirmationRequired is produced by high-risk commands when --yes is missing.
-func ErrConfirmationRequired(msg string) *ExitError {
-	return &ExitError{Type: "confirmation_required", Code: "CONFIRMATION_REQUIRED", Message: msg, Hint: "add --yes to confirm"}
-}
 
 // --- backend error mapping ---
 

@@ -7,6 +7,7 @@ import (
 	"syscall"
 
 	"github.com/dmwork-org/octo-cli/cmd"
+	"github.com/dmwork-org/octo-cli/internal/output"
 )
 
 func main() {
@@ -16,7 +17,10 @@ func main() {
 	root := cmd.NewRootCmd(nil)
 	if err := root.ExecuteContext(ctx); err != nil {
 		// Error envelope has already been emitted by the command's RunE via
-		// Factory.EmitError. Just set the exit code.
+		// Factory.EmitError. Map error type to exit code.
+		if ee := output.AsExitError(err); ee != nil {
+			os.Exit(ee.ExitCode())
+		}
 		os.Exit(1)
 	}
 }

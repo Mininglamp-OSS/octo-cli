@@ -348,15 +348,6 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	ctx := cobraCmd.Context()
 	d := rt.detail
 
-	// Risk gate. Checked before any network work so the caller gets a fast
-	// structured failure and no partial side effect.
-	if d.Risk == "high-risk-write" && (f.Globals == nil || !f.Globals.Yes) {
-		ee := output.ErrConfirmationRequired(
-			fmt.Sprintf("%s is a high-risk write and requires --yes", d.ID),
-		)
-		_ = f.EmitError(ee)
-		return ee
-	}
 
 	// Path substitution. cobra.ExactArgs already ensured count.
 	urlPath := d.Path

@@ -44,7 +44,6 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.StringVar(&f.Globals.Timeout, "timeout", "", "per-request timeout (e.g. 30s, 2m)")
 	pf.BoolVar(&f.Globals.NoRetry, "no-retry", false, "disable retry on transient failures")
 	pf.StringVar(&f.Globals.Space, "space", "", "space id (for platform-scoped bots)")
-	pf.BoolVar(&f.Globals.Yes, "yes", false, "skip confirmation prompts for high-risk operations")
 
 	root.AddCommand(newSchemaCmd(f))
 	root.AddCommand(newVersionCmd(f))

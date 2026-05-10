@@ -162,35 +162,23 @@ func TestMatterCreate_DataThenFlagOverride(t *testing.T) {
 
 // --- high-risk-write gate on matter.delete ---
 
-func TestMatterDelete_RequiresYes(t *testing.T) {
+// --- matter.delete executes directly (no confirmation gate) ---
+
+func TestMatterDelete_ExecutesDirectly(t *testing.T) {
 	called := false
-	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		w.WriteHeader(200)
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(204)
 	})
 	root.SetArgs([]string{"matter", "delete", "m1"})
-	if err := root.Execute(); err == nil {
-		t.Fatal("expected error without --yes")
-	}
-	if called {
-		t.Error("server should not have been called when --yes missing")
-	}
-	if !bytes.Contains(tf.ErrOut.Bytes(), []byte("confirmation_required")) {
-		t.Errorf("expected confirmation_required error, got %s", tf.ErrOut.String())
-	}
-
-	// With Globals.Yes the request goes through. We flip the flag on the
-	// shared factory rather than passing --yes on the CLI, since the test
-	// root doesn't mount root-level persistent flags.
-	tf.Out.Reset()
-	tf.ErrOut.Reset()
-	tf.Factory.Globals.Yes = true
-	root.SetArgs([]string{"matter", "delete", "m1"})
 	if err := root.Execute(); err != nil {
-		t.Fatalf("execute with --yes: %v", err)
+		t.Fatalf("execute: %v", err)
 	}
 	if !called {
-		t.Error("expected server call when --yes is set")
+		t.Error("expected server call")
 	}
 }
 
