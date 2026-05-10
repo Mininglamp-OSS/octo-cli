@@ -66,7 +66,7 @@ Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`,
 - Errors wrap with `fmt.Errorf("context: %w", err)`; CLI errors use the `*output.ExitError` taxonomy so envelopes stay structured.
 - The `internal/output` package is a leaf — it must not import other `internal/*` packages.
 - No package-level globals; resolve everything through the Factory.
-- External deps limited to cobra, yaml, jq-go, and the standard library.
+- External deps limited to cobra, gojq, and the standard library.
 - All text in English.
 
 ## Build & Test

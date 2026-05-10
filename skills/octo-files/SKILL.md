@@ -25,15 +25,20 @@ Unlike every other command, `file upload` sends a multipart `multipart/form-data
 
 The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `matter timeline add` or `message send`.
 
-### `download` — binary payload
+### `download` — returns a presigned URL
 
-`file download <path>` issues a GET that redirects to the storage tier and streams the bytes. The CLI flags this operation as `BinaryResponse` so the body is emitted verbatim — **do not wrap it in the usual envelope**. Always redirect stdout to a file:
+`file download <path>` issues a GET. The backend responds with a 302 redirect to the storage tier. The CLI does **not** stream raw bytes — instead it returns a JSON envelope containing the presigned URL:
 
 ```bash
-octo file download /chat/2026/05/abc123.png > out.png
+octo file download /chat/2026/05/abc123.png
+# → {"ok":true,"data":{"url":"https://s3.../abc123.png?...","status":302,"content_type":"image/png"}}
 ```
 
-`--jq` and `--format` are ignored on binary responses.
+To actually fetch the file, use the URL from the response:
+
+```bash
+octo file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out.png
+```
 
 ### Direct-to-S3 uploads
 
@@ -97,7 +102,7 @@ octo matter timeline add <matter_id> --data "$(jq -n \
 |--------------------------------------------------|--------------------------------------------------------------------|
 | `upload` → `PAYLOAD_TOO_LARGE`                   | Use `file presigned` / `file credentials` and upload direct to S3. |
 | `upload` → `validation` "--file is required"     | Path is empty or unreadable; check permissions and absolute path.  |
-| `download` prints unreadable bytes to terminal   | You forgot to redirect stdout to a file.                           |
+| `download` returns JSON instead of bytes          | Expected; extract `.data.url` and fetch with curl/wget.            |
 | `bot typing` returns 200 but no UI update        | Channel type must be `1` and the DM must exist.                    |
 | `bot register` rejected with `UNAUTHORIZED`      | Token prefix/env mismatch — confirm with `octo config show`.       |
 
