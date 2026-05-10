@@ -15,7 +15,7 @@ const (
 	EnvMattersURL  = "OCTO_MATTERS_URL"
 	EnvDmworkIMURL = "OCTO_DMWORKIM_URL"
 	EnvBotToken    = "OCTO_BOT_TOKEN"
-	EnvSpaceID    = "OCTO_SPACE_ID"
+	EnvSpaceID     = "OCTO_SPACE_ID"
 	EnvFormat      = "OCTO_FORMAT"
 )
 

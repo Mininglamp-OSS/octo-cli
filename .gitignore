@@ -1,5 +1,7 @@
 # Binary (root only)
 /octo
+/bin/
+coverage.out
 
 # Go
 go.work.sum

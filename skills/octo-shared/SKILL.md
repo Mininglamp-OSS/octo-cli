@@ -1,6 +1,10 @@
 ---
 name: octo-shared
+version: 0.4.0
 description: Shared knowledge for using the octo CLI — authentication, multi-service config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
+metadata:
+  requires:
+    bins: ["octo"]
 ---
 
 # octo-shared — CLI fundamentals for AI Agents

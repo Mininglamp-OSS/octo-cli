@@ -73,7 +73,7 @@ type stubProvider struct {
 	err  error
 }
 
-func (s *stubProvider) Name() string                    { return s.name }
+func (s *stubProvider) Name() string                     { return s.name }
 func (s *stubProvider) Resolve() (*BotCredential, error) { return s.cred, s.err }
 
 func TestChain_FirstProviderWins(t *testing.T) {

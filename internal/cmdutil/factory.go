@@ -21,15 +21,15 @@ import (
 // RunE functions need to consult. Populated by the root command before
 // dispatch. Zero values are meaningful defaults (e.g. Format="" → json).
 type GlobalOptions struct {
-	Format   string
-	JQ       string
-	DryRun   bool
-	Verbose  bool
-	Timeout  string // raw string; parsed where used
-	NoRetry  bool
-	Space    string
-	PageAll  bool
-	PageMax  int
+	Format  string
+	JQ      string
+	DryRun  bool
+	Verbose bool
+	Timeout string // raw string; parsed where used
+	NoRetry bool
+	Space   string
+	PageAll bool
+	PageMax int
 }
 
 // Factory is the DI container. All accessors are lazy + cached so a command

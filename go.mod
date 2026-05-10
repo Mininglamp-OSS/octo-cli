@@ -1,6 +1,6 @@
 module github.com/dmwork-org/octo-cli
 
-go 1.25.0
+go 1.24.0
 
 require (
 	github.com/itchyny/gojq v0.12.19

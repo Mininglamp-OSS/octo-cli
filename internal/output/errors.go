@@ -84,7 +84,6 @@ func ErrNetwork(msg, hint string) *ExitError {
 	return &ExitError{Type: "network", Code: "NETWORK_ERROR", Message: msg, Hint: hint}
 }
 
-
 // --- backend error mapping ---
 
 // backendErrorMapping maps matters error codes to CLI taxonomy + hint. See

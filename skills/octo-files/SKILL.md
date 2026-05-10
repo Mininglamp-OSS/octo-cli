@@ -1,6 +1,11 @@
 ---
 name: octo-files
+version: 0.4.0
 description: File operations (upload/download, presigned S3 credentials) plus bot housekeeping (register, set-commands, user-info, space-members, typing, heartbeat). Load after octo-shared.
+metadata:
+  requires:
+    bins: ["octo"]
+    skills: ["octo-shared"]
 ---
 
 # octo-files — file I/O and bot housekeeping
