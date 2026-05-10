@@ -134,6 +134,8 @@ type OperationDetail struct {
 	Pagination     *PaginationInfo `json:"pagination,omitempty"`
 	BaseURLEnv     string          `json:"base_url_env,omitempty"`
 	SpaceHeader    bool            `json:"space_header,omitempty"`
+	Multipart      bool            `json:"multipart,omitempty"`
+	BinaryResponse bool            `json:"binary_response,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -237,6 +239,9 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		BaseURLEnv:  stringOf(doc["x-octo-base-url"]),
 		SpaceHeader: boolOf(doc["x-octo-space-header"]),
 	}
+
+	d.Multipart = boolOf(op["x-octo-multipart"])
+	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 
 	if params, ok := op["parameters"].([]any); ok {
 		for _, p := range params {

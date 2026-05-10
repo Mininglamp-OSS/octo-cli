@@ -32,7 +32,7 @@ Octo CLI is the command-line interface for the Octo ecosystem. Its **primary con
 | JSON envelope output | Agent parses structured errors to decide next action |
 | Single command syntax | No dual syntax coexistence; avoids Agent confusion |
 | Minimal dependencies | stdlib for HTTP/JSON/test; only add deps with clear ROI |
-| No interactive I/O | No prompts, no confirmations — flags only; missing --yes → structured error |
+| No interactive I/O | No prompts, no confirmations — flags only |
 
 ---
 
@@ -213,11 +213,10 @@ Service commands resolve base URL: `spec.x-octo-base-url` → config override �
 
 ### 4.2 Non-Interactive Principle
 
-CLI never reads stdin interactively. High-risk operations without `--yes`:
-```jsonc
-{"ok": false, "error": {"type": "confirmation_required", "code": 2,
-  "message": "delete requires --yes", "hint": "add --yes to confirm"}}
-```
+CLI never reads stdin interactively. There are no prompts and no confirmation
+gates — every decision is expressed via flags. Destructive operations
+(`high-risk-write`) execute immediately; callers are expected to validate
+before invoking.
 
 ### 4.3 Error Mapping (Backend → CLI)
 
@@ -430,7 +429,6 @@ Discovered from backend code, relevant to CLI alias design and Skill documentati
 | `--no-retry` | Disable retry |
 | `--page-all` | Auto-paginate |
 | `--page-limit <n>` | Max pages (default: 10) |
-| `--yes` | Skip confirmation for high-risk-write |
 | `--space <id>` | Space context (when bot is platform-scoped) |
 | `--profile <name>` | Credential profile (Phase 4a) |
 

@@ -429,7 +429,7 @@
       },
       "ExtractReq": {
         "type": "object",
-        "required": ["channel_id", "channel_type", "msgs"],
+        "required": ["channel_id", "channel_type", "creator_uid", "msgs"],
         "properties": {
           "channel_id": { "type": "string" },
           "channel_type": { "type": "integer", "enum": [1, 2, 5] },

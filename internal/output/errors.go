@@ -2,6 +2,7 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -42,11 +43,14 @@ func (e *ExitError) ExitCode() int {
 }
 
 // AsExitError unwraps an error to *ExitError, returning nil if none present.
+// Uses errors.As so wrappers (e.g. retry sentinels) can still surface the
+// structured exit info through their Unwrap chain.
 func AsExitError(err error) *ExitError {
 	if err == nil {
 		return nil
 	}
-	if ee, ok := err.(*ExitError); ok {
+	var ee *ExitError
+	if errors.As(err, &ee) {
 		return ee
 	}
 	return nil

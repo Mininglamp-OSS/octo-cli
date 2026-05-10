@@ -15,6 +15,7 @@
         "summary": "Upload a file via multipart form",
         "description": "multipart/form-data: file=<binary>. Max 100MB.",
         "x-octo-risk": "write",
+        "x-octo-multipart": true,
         "parameters": [
           { "name": "type", "in": "query", "schema": { "type": "string", "default": "chat" }, "description": "storage bucket subdir" },
           { "name": "path", "in": "query", "schema": { "type": "string" }, "description": "override generated path" }
@@ -57,6 +58,7 @@
         "operationId": "file.download",
         "summary": "Download a file (302 redirect to presigned URL)",
         "x-octo-risk": "read",
+        "x-octo-binary-response": true,
         "parameters": [
           { "name": "path", "in": "path", "required": true, "schema": { "type": "string" }, "description": "storage key path (URL-encoded)" },
           { "name": "filename", "in": "query", "schema": { "type": "string" }, "description": "override download filename" }

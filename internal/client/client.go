@@ -43,13 +43,21 @@ type Options struct {
 // Request is a generic API request. Service selects per-service URL; Path is
 // the URL suffix (e.g. "/api/v1/todos/t1"). Body is JSON-encoded if non-nil.
 // Query is merged into the URL; headers take precedence over client defaults.
+//
+// For non-JSON payloads (e.g. multipart uploads) set RawBody + ContentType.
+// When RawBody is non-nil, Body is ignored and no JSON marshaling is performed.
 type Request struct {
-	Service string
-	Method  string
-	Path    string
-	Query   url.Values
-	Body    any
-	Headers map[string]string
+	Service     string
+	Method      string
+	Path        string
+	Query       url.Values
+	Body        any
+	Headers     map[string]string
+	RawBody     []byte
+	ContentType string
+	// BinaryResponse asks the client to treat 3xx/non-JSON responses as
+	// structured metadata envelopes rather than parsing JSON. See file.download.
+	BinaryResponse bool
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
@@ -76,9 +84,16 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 		}
 	}
 	return &Client{
-		cfg:        cfg,
-		cred:       cred,
-		httpClient: &http.Client{Timeout: timeout},
+		cfg:  cfg,
+		cred: cred,
+		httpClient: &http.Client{
+			Timeout: timeout,
+			// Don't auto-follow — file.download returns 302 to a presigned URL
+			// and we want to surface that URL in the envelope, not fetch it.
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		options:    opts,
 		retryClock: time.Sleep,
 	}
@@ -105,22 +120,27 @@ func (c *Client) Do(ctx context.Context, req Request) ([]byte, error) {
 	}
 
 	var bodyBytes []byte
-	if req.Body != nil {
+	contentType := ""
+	if len(req.RawBody) > 0 {
+		bodyBytes = req.RawBody
+		contentType = req.ContentType
+	} else if req.Body != nil {
 		bodyBytes, err = json.Marshal(req.Body)
 		if err != nil {
 			return nil, output.ErrWithHint("internal", "MARSHAL_FAILED", fmt.Sprintf("marshal request body: %v", err), "")
 		}
+		contentType = "application/json"
 	}
 
 	if c.options.DryRun {
 		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes)
+	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse)
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -144,7 +164,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body)
+		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binary)
 		if err == nil {
 			return body, nil
 		}
@@ -158,7 +178,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte) ([]byte, error) {
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -175,8 +195,8 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	if c.cred != nil && c.cred.SpaceID != "" {
 		httpReq.Header.Set("X-Space-Id", c.cred.SpaceID)
 	}
-	if body != nil {
-		httpReq.Header.Set("Content-Type", "application/json")
+	if body != nil && contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
 	}
 	for k, v := range headers {
 		httpReq.Header.Set(k, v)
@@ -205,7 +225,39 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 
 	c.verbosef("← %d (%d bytes)", resp.StatusCode, len(respBody))
 
+	// Redirects (3xx) are not followed automatically — surface the Location
+	// header as a JSON envelope when the caller opted into binary/redirect
+	// handling (file.download). Any other endpoint returning 3xx is treated
+	// as an unexpected error.
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		if binary {
+			loc := resp.Header.Get("Location")
+			env := map[string]any{
+				"url":    loc,
+				"status": resp.StatusCode,
+			}
+			if ct := resp.Header.Get("Content-Type"); ct != "" {
+				env["content_type"] = ct
+			}
+			return json.Marshal(env)
+		}
+		return nil, output.ErrAPI(
+			fmt.Sprintf("HTTP_%d", resp.StatusCode),
+			fmt.Sprintf("unexpected redirect to %q", resp.Header.Get("Location")),
+			"",
+		)
+	}
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Binary/redirect opt-in: don't try to parse as JSON, just describe.
+		if binary {
+			env := map[string]any{
+				"status":       resp.StatusCode,
+				"content_type": resp.Header.Get("Content-Type"),
+				"size":         len(respBody),
+			}
+			return json.Marshal(env)
+		}
 		return respBody, nil
 	}
 
@@ -317,6 +369,15 @@ func redactToken(t string) string {
 type retryableErr struct {
 	*output.ExitError
 	retryAfter time.Duration
+}
+
+// Unwrap lets errors.As reach the embedded *ExitError so callers (e.g.
+// output.AsExitError) can still get structured info after retries exhaust.
+func (r *retryableErr) Unwrap() error {
+	if r == nil {
+		return nil
+	}
+	return r.ExitError
 }
 
 func isRetryable(err error) bool {

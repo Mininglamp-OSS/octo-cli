@@ -12,10 +12,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -112,6 +116,7 @@ type operationRuntime struct {
 	bodyData    *string                     // --data (nil when command has no body)
 	pageAll     *bool                       // --page-all (nil when no pagination)
 	pageLimit   *int                        // --page-limit
+	filePath    *string                     // --file (multipart operations only)
 	hasRequired bool                        // whether any required flag has been marked
 }
 
@@ -249,11 +254,23 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 	if body == nil {
 		return
 	}
-	// Every command with a body gets --data, even when we also promote simple
-	// fields. Individual flags override the JSON blob (architecture §5.2).
-	data := new(string)
-	cmd.Flags().StringVar(data, "data", "", "JSON request body (string, @file, or @- for stdin). Individual flags override.")
-	rt.bodyData = data
+
+	// Multipart operations: register --file for the binary upload and skip
+	// --data (JSON body doesn't apply). Non-binary body fields still register
+	// as flags below so they can go through as form text fields.
+	if d.Multipart {
+		filePath := new(string)
+		cmd.Flags().StringVar(filePath, "file", "", "path to the file to upload (required)")
+		_ = cmd.MarkFlagRequired("file")
+		rt.filePath = filePath
+	} else {
+		// Every non-multipart command with a body gets --data, even when we
+		// also promote simple fields. Individual flags override the JSON blob
+		// (architecture §5.2).
+		data := new(string)
+		cmd.Flags().StringVar(data, "data", "", "JSON request body (string, @file, or @- for stdin). Individual flags override.")
+		rt.bodyData = data
+	}
 
 	if body.Properties == nil {
 		return
@@ -270,13 +287,17 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 	sort.Strings(names)
 	for _, name := range names {
 		prop := body.Properties[name]
+		// Skip binary fields — those are handled by --file in multipart mode.
+		if prop.Format == "binary" {
+			continue
+		}
 		kind, ok := promotableKind(prop)
 		if !ok {
 			continue
 		}
 		flagName := strings.ReplaceAll(name, "_", "-")
-		// Avoid collisions with --data or a query param of the same name.
-		if flagName == "data" || rt.queryFlags[flagName] != nil {
+		// Avoid collisions with --data, --file or a query param of the same name.
+		if flagName == "data" || flagName == "file" || rt.queryFlags[flagName] != nil {
 			continue
 		}
 		desc := prop.Description
@@ -378,18 +399,29 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	// Body: start from --data (if any), then merge explicit flags on top.
-	body, err := resolveBody(f, cobraCmd, rt)
-	if err != nil {
-		_ = f.EmitError(err)
-		return err
-	}
-
+	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
-		Service: serviceForBaseURL(d.BaseURLEnv),
-		Method:  d.Method,
-		Path:    urlPath,
-		Query:   q,
-		Body:    body,
+		Service:        serviceForBaseURL(d.BaseURLEnv),
+		Method:         d.Method,
+		Path:           urlPath,
+		Query:          q,
+		BinaryResponse: d.BinaryResponse,
+	}
+	if d.Multipart {
+		raw, ct, err := buildMultipartBody(cobraCmd, rt)
+		if err != nil {
+			_ = f.EmitError(err)
+			return err
+		}
+		req.RawBody = raw
+		req.ContentType = ct
+	} else {
+		body, err := resolveBody(f, cobraCmd, rt)
+		if err != nil {
+			_ = f.EmitError(err)
+			return err
+		}
+		req.Body = body
 	}
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
@@ -398,6 +430,64 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, req)
+}
+
+// buildMultipartBody assembles a multipart/form-data payload for operations
+// tagged x-octo-multipart. The binary upload is read from --file and attached
+// under the "file" form field (backend uses FormFile("file")). Any promoted
+// body flags the user set are included as form text fields.
+func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime) ([]byte, string, error) {
+	if rt.filePath == nil || *rt.filePath == "" {
+		return nil, "", output.ErrValidation("--file is required for multipart upload", "pass --file <path>")
+	}
+	path := *rt.filePath
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", output.ErrValidation(fmt.Sprintf("--file: %v", err), "check path and permissions")
+	}
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+
+	part, err := w.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
+	}
+	if _, err := part.Write(data); err != nil {
+		return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
+	}
+
+	// Any promoted body fields the user set become form text fields.
+	for flagName, bf := range rt.bodyFlags {
+		if !cobraCmd.Flags().Changed(flagName) {
+			continue
+		}
+		var value string
+		switch bf.kind {
+		case kindInt:
+			value = strconv.Itoa(*bf.intVal)
+		case kindBool:
+			value = strconv.FormatBool(*bf.boolVal)
+		case kindStringSlice:
+			// Flatten slice: one form field per value.
+			for _, v := range *bf.strSlc {
+				if err := w.WriteField(bf.apiName, v); err != nil {
+					return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
+				}
+			}
+			continue
+		default:
+			value = *bf.strVal
+		}
+		if err := w.WriteField(bf.apiName, value); err != nil {
+			return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
+	}
+	return buf.Bytes(), w.FormDataContentType(), nil
 }
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data
