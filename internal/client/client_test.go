@@ -21,7 +21,6 @@ func newTestClient(srv *httptest.Server) *Client {
 	cred := &credential.BotCredential{Token: "app_test", SpaceID: "space-1"}
 	c := New(cfg, cred, Options{})
 	c.httpClient = srv.Client()
-	c.retryClock = func(time.Duration) {}
 	return c
 }
 
@@ -307,7 +306,6 @@ func newBinaryClient(srv *httptest.Server) *Client {
 		return http.ErrUseLastResponse
 	}
 	c.httpClient = sc
-	c.retryClock = func(time.Duration) {}
 	return c
 }
 

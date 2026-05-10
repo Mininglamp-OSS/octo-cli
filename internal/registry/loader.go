@@ -81,7 +81,10 @@ func (r *Registry) GetSpec(service string) map[string]any {
 	return r.specs[service]
 }
 
-// OperationInfo is the summary view returned by ListOperations.
+// OperationInfo is the summary view of an operation — what ListOperations
+// and ListAllOperations return. It carries the identifiers and metadata
+// needed to route to and describe the operation without loading its full
+// parameter / schema detail. Use GetOperation for the expanded view.
 type OperationInfo struct {
 	ID      string `json:"id"`
 	Service string `json:"service"`
@@ -91,7 +94,10 @@ type OperationInfo struct {
 	Risk    string `json:"risk,omitempty"`
 }
 
-// ParamInfo describes a single parameter (path, query, header).
+// ParamInfo describes a single parameter on an operation (one entry in the
+// OpenAPI `parameters` array). Covers path, query, and header parameters;
+// the `In` field records which. Type/Default/Enum come from the nested
+// schema when present.
 type ParamInfo struct {
 	Name        string `json:"name"`
 	In          string `json:"in"`
@@ -103,7 +109,10 @@ type ParamInfo struct {
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
-// the schema command to describe a request/response body to an Agent.
+// the schema command to describe a request/response body to an Agent. One
+// level of `$ref` into `components.schemas` is resolved eagerly; deeper refs
+// are surfaced as an unresolved `$ref` pointer so the output still contains
+// a useful reference.
 type SchemaInfo struct {
 	Type        string                `json:"type,omitempty"`
 	Required    []string              `json:"required,omitempty"`
@@ -117,7 +126,10 @@ type SchemaInfo struct {
 	Ref         string                `json:"$ref,omitempty"`
 }
 
-// PaginationInfo captures the x-octo-pagination extension.
+// PaginationInfo captures the `x-octo-pagination` extension. It tells the
+// service engine which query parameters carry the cursor / limit and which
+// response fields carry the next cursor / has-more flag, so `--page-all`
+// can walk pages without operation-specific code.
 type PaginationInfo struct {
 	CursorParam  string `json:"cursor_param,omitempty"`
 	LimitParam   string `json:"limit_param,omitempty"`
@@ -125,7 +137,12 @@ type PaginationInfo struct {
 	HasMoreField string `json:"has_more_field,omitempty"`
 }
 
-// OperationDetail is the expanded view returned by GetOperation.
+// OperationDetail is the expanded view of a single operation returned by
+// GetOperation. It embeds OperationInfo for identity/summary and adds every
+// piece of metadata the service engine needs to build a complete cobra
+// command: parameters, request/response schemas, pagination, base-URL
+// routing, space-header behaviour, and payload shape flags (multipart /
+// binary response).
 type OperationDetail struct {
 	OperationInfo
 	Parameters     []ParamInfo     `json:"parameters,omitempty"`

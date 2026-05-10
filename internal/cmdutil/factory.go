@@ -4,9 +4,11 @@
 package cmdutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/dmwork-org/octo-cli/internal/client"
 	"github.com/dmwork-org/octo-cli/internal/config"
@@ -165,7 +167,7 @@ func (f *Factory) EmitSuccessWithMeta(raw []byte, meta output.EnvelopeMeta) erro
 func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	// Build the success envelope into an in-memory buffer first so --jq can
 	// operate on the canonical envelope shape (not the backend shape).
-	var envBuf writableBuffer
+	var envBuf bytes.Buffer
 	if err := output.WriteSuccess(&envBuf, raw, meta); err != nil {
 		return err
 	}
@@ -191,26 +193,50 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	return output.Format(f.IOStreams.Out, f.Format(), envelope)
 }
 
-// EmitError renders an error envelope to stderr. Always returns nil so that
-// cobra doesn't print its own error on top of ours; the caller is responsible
-// for setting the process exit code separately.
+// EmitError renders an error envelope to stderr. Non-ExitError values are
+// classified via WrapCLIError before rendering so the envelope always carries
+// a proper taxonomy. Always returns nil so cobra doesn't print its own error
+// on top of ours; the caller sets the process exit code separately.
 func (f *Factory) EmitError(err error) error {
-	return output.WriteError(f.IOStreams.ErrOut, err)
+	return output.WriteError(f.IOStreams.ErrOut, WrapCLIError(err))
 }
 
 // --- helpers ---
 
-// writableBuffer is a small buffer that implements io.Writer so we can reuse
-// output.WriteSuccess without importing bytes here for the single allocation.
-type writableBuffer struct {
-	data []byte
+// WrapCLIError classifies a plain error into an *output.ExitError using narrow
+// heuristics for the common agent-facing failures (missing token, unknown
+// flag, missing arg). Already-wrapped *ExitError values pass through
+// unchanged. Everything else falls through to a generic config error so exit
+// codes and envelopes stay predictable.
+//
+// Shared by the root command (for cobra-framework errors) and the Factory
+// (for EmitError callers) so both paths produce identical taxonomy.
+func WrapCLIError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if ee := output.AsExitError(err); ee != nil {
+		return ee
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "octo_bot_token"),
+		strings.Contains(lower, "bot token"),
+		strings.Contains(lower, "token is required"):
+		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an app_* or bf_* token")
+	case strings.Contains(lower, "unknown flag"),
+		strings.Contains(lower, "unknown command"),
+		strings.Contains(lower, "unknown shorthand"),
+		strings.Contains(lower, "required flag"),
+		strings.Contains(lower, "invalid argument"),
+		strings.Contains(lower, "accepts "),
+		strings.Contains(lower, "requires at "),
+		strings.Contains(lower, "arg(s)"):
+		return output.ErrValidation(msg, "run `octo <command> --help` to see valid flags and args")
+	}
+	return output.ErrWithHint("config", "CLI_ERROR", msg, "")
 }
-
-func (b *writableBuffer) Write(p []byte) (int, error) {
-	b.data = append(b.data, p...)
-	return len(p), nil
-}
-func (b *writableBuffer) Bytes() []byte { return b.data }
 
 func normalizeRaw(raw []byte) []byte {
 	if len(raw) == 0 {

@@ -61,14 +61,16 @@ type Request struct {
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
+//
+// Tests should control retry timing by setting Options.NoRetry=true (to
+// bypass the retry loop entirely) or by keeping the test context bounded so
+// the select in doWithRetry exits via ctx.Done(). There is no test-only
+// clock hook on Client; the retry scheduling is intentionally minimal.
 type Client struct {
 	cfg        *config.Config
 	cred       *credential.BotCredential
 	httpClient *http.Client
 	options    Options
-
-	// retryClock lets tests inject a fake sleep. Production uses time.Sleep.
-	retryClock func(time.Duration)
 }
 
 // New constructs a Client. Timeout is parsed here; invalid values fall back to
@@ -94,8 +96,7 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 				return http.ErrUseLastResponse
 			},
 		},
-		options:    opts,
-		retryClock: time.Sleep,
+		options: opts,
 	}
 }
 
