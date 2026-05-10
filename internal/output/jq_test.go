@@ -87,3 +87,54 @@ func TestApplyJQ_ParseError(t *testing.T) {
 		t.Error("expected parse error")
 	}
 }
+
+func TestApplyJQ_NoMatches(t *testing.T) {
+	// Select filter that yields nothing.
+	got, err := ApplyJQ(map[string]any{"a": []any{1, 2, 3}}, ".a[] | select(. > 10)")
+	if err != nil {
+		t.Fatalf("ApplyJQ: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected no results, got %v", got)
+	}
+}
+
+func TestApplyJQ_MultipleResults(t *testing.T) {
+	got, err := ApplyJQ(map[string]any{"a": []any{1, 2, 3}}, ".a[]")
+	if err != nil {
+		t.Fatalf("ApplyJQ: %v", err)
+	}
+	if len(got) != 3 {
+		t.Errorf("len = %d, want 3", len(got))
+	}
+}
+
+func TestApplyJQ_RuntimeError(t *testing.T) {
+	// jq .foo on a number is a runtime error (not a parse error).
+	_, err := ApplyJQ(float64(42), ".foo")
+	if err == nil {
+		t.Error("expected runtime error for field access on scalar")
+	}
+}
+
+func TestNormalizeForJQ_PrimitiveFastPath(t *testing.T) {
+	// Primitives round-trip as-is (no JSON marshal round-trip).
+	out, err := normalizeForJQ("hello")
+	if err != nil {
+		t.Fatalf("normalizeForJQ: %v", err)
+	}
+	if out != "hello" {
+		t.Errorf("got %v", out)
+	}
+}
+
+func TestNormalizeForJQ_MapFastPath(t *testing.T) {
+	in := map[string]any{"a": 1}
+	out, err := normalizeForJQ(in)
+	if err != nil {
+		t.Fatalf("normalizeForJQ: %v", err)
+	}
+	if m, ok := out.(map[string]any); !ok || m["a"] != 1 {
+		t.Errorf("got %v", out)
+	}
+}

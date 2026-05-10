@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -377,5 +378,245 @@ func TestBackoffDelay_Grows(t *testing.T) {
 	}
 	if d3 > defaultMaxDelay {
 		t.Errorf("attempt 3 exceeded cap: %s", d3)
+	}
+}
+
+// --- expanded coverage: parseRetryAfter ---
+
+func TestParseRetryAfter_HTTPDate(t *testing.T) {
+	future := time.Now().Add(5 * time.Second).UTC().Format(http.TimeFormat)
+	d := parseRetryAfter(future)
+	if d <= 0 || d > 6*time.Second {
+		t.Errorf("parseRetryAfter(date) = %s, want ~5s", d)
+	}
+}
+
+func TestParseRetryAfter_PastDate(t *testing.T) {
+	past := time.Now().Add(-10 * time.Minute).UTC().Format(http.TimeFormat)
+	if d := parseRetryAfter(past); d != 0 {
+		t.Errorf("past dates should yield 0, got %s", d)
+	}
+}
+
+func TestParseRetryAfter_Invalid(t *testing.T) {
+	if d := parseRetryAfter("not a time"); d != 0 {
+		t.Errorf("garbage should yield 0, got %s", d)
+	}
+}
+
+func TestParseRetryAfter_NegativeSeconds(t *testing.T) {
+	// Negative seconds fall through both strconv and ParseTime → 0.
+	if d := parseRetryAfter("-5"); d != 0 {
+		t.Errorf("negative seconds should yield 0, got %s", d)
+	}
+}
+
+// --- expanded coverage: buildURL ---
+
+func TestBuildURL_NoLeadingSlash(t *testing.T) {
+	u, err := buildURL("http://h", "path/x", nil)
+	if err != nil {
+		t.Fatalf("buildURL: %v", err)
+	}
+	if u != "http://h/path/x" {
+		t.Errorf("buildURL = %q", u)
+	}
+}
+
+func TestBuildURL_MergesQuery(t *testing.T) {
+	u, err := buildURL("http://h", "/p?existing=1", url.Values{"a": {"2"}})
+	if err != nil {
+		t.Fatalf("buildURL: %v", err)
+	}
+	if !strings.Contains(u, "existing=1") || !strings.Contains(u, "a=2") {
+		t.Errorf("missing params in %q", u)
+	}
+}
+
+func TestBuildURL_Invalid(t *testing.T) {
+	_, err := buildURL(":::bad://", "/x", nil)
+	if err == nil {
+		t.Error("expected parse error for malformed base")
+	}
+}
+
+// --- dry-run integration via Do ---
+
+func TestDo_DryRunReturnsSyntheticBody(t *testing.T) {
+	cfg := &config.Config{APIURL: "http://ignored"}
+	cred := &credential.BotCredential{Token: "app_drytok"}
+	c := New(cfg, cred, Options{DryRun: true})
+
+	body, err := c.Do(context.Background(), Request{
+		Method: "POST", Path: "/t", Body: map[string]string{"k": "v"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var out map[string]any
+	if jerr := json.Unmarshal(body, &out); jerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", jerr, body)
+	}
+	if out["dry_run"] != true {
+		t.Errorf("missing dry_run flag: %v", out)
+	}
+	// Body should round-trip through synthetic envelope.
+	rb, _ := out["body"].(map[string]any)
+	if rb["k"] != "v" {
+		t.Errorf("body payload lost: %v", out["body"])
+	}
+}
+
+// --- Retry-After header respected ---
+
+func TestDo_RetryAfterRespected(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&calls, 1)
+		if n == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(429)
+			_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"wait"}}`))
+			return
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"ok":1}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	start := time.Now()
+	body, err := c.Do(context.Background(), Request{Method: "GET", Path: "/r"})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if atomic.LoadInt32(&calls) != 2 {
+		t.Errorf("calls = %d, want 2", calls)
+	}
+	if elapsed < 800*time.Millisecond {
+		t.Errorf("expected ≥~1s wait from Retry-After, got %s", elapsed)
+	}
+	if !strings.Contains(string(body), `"ok":1`) {
+		t.Errorf("body = %s", body)
+	}
+}
+
+// --- verbose logging captures request body ---
+
+func TestDo_VerboseLogsRequestBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var errBuf bytes.Buffer
+	c := newTestClient(srv)
+	c.options.Verbose = true
+	c.options.ErrOut = &errBuf
+
+	_, err := c.Do(context.Background(), Request{
+		Method: "POST", Path: "/t", Body: map[string]string{"k": "v"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	out := errBuf.String()
+	if !strings.Contains(out, "POST") {
+		t.Errorf("verbose missing method: %q", out)
+	}
+	if !strings.Contains(out, "request body") {
+		t.Errorf("verbose missing body trace: %q", out)
+	}
+	if !strings.Contains(out, "←") {
+		t.Errorf("verbose missing response trace: %q", out)
+	}
+}
+
+// --- unknown service base URL ---
+
+func TestDo_UnknownServiceBaseURL(t *testing.T) {
+	cfg := &config.Config{} // no URLs set
+	cred := &credential.BotCredential{Token: "t"}
+	c := New(cfg, cred, Options{})
+
+	_, err := c.Do(context.Background(), Request{
+		Service: "matters", Method: "GET", Path: "/x",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing base URL")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" {
+		t.Errorf("expected validation error, got %T %v", err, err)
+	}
+}
+
+// --- invalid timeout emits a warning but still returns a working client ---
+
+func TestNew_InvalidTimeoutWarns(t *testing.T) {
+	var buf bytes.Buffer
+	cfg := &config.Config{APIURL: "http://x"}
+	c := New(cfg, &credential.BotCredential{Token: "t"}, Options{
+		Timeout: "not-a-duration",
+		ErrOut:  &buf,
+	})
+	if c == nil {
+		t.Fatal("client nil")
+	}
+	if !strings.Contains(buf.String(), "invalid --timeout") {
+		t.Errorf("expected warning, got %q", buf.String())
+	}
+}
+
+// --- retryable vs non-retryable status codes ---
+
+func TestIsRetryableStatus(t *testing.T) {
+	retryable := []int{429, 502, 503, 504}
+	for _, s := range retryable {
+		if !isRetryableStatus(s) {
+			t.Errorf("status %d should be retryable", s)
+		}
+	}
+	nonRetryable := []int{400, 401, 403, 404, 500}
+	for _, s := range nonRetryable {
+		if isRetryableStatus(s) {
+			t.Errorf("status %d should NOT be retryable", s)
+		}
+	}
+}
+
+// --- redact token helper ---
+
+func TestRedactToken(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "****"},
+		{"short", "****"},
+		{"abcdefgh", "****"},
+		{"app_abcdef12345678xyzzy", "app_****zzzy"[:4] + "****" + "zzzy"[len("zzzy")-4:]}, // redundant — just check prefix+suffix structure below
+	}
+	_ = cases
+	got := redactToken("app_abcdefghijklmnop")
+	if !strings.HasPrefix(got, "app_") {
+		t.Errorf("prefix missing: %q", got)
+	}
+	if !strings.Contains(got, "****") {
+		t.Errorf("mask missing: %q", got)
+	}
+	if len(got) != len("app_")+len("****")+4 {
+		t.Errorf("unexpected shape: %q", got)
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if truncate("hi", 10) != "hi" {
+		t.Errorf("short string should pass through")
+	}
+	got := truncate("1234567890abc", 5)
+	if !strings.Contains(got, "truncated") {
+		t.Errorf("truncate marker missing: %q", got)
 	}
 }

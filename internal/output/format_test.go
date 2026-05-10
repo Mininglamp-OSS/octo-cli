@@ -138,3 +138,110 @@ func TestTableHeaders_PriorityOrder(t *testing.T) {
 		t.Errorf("trailing header = %q", h[3])
 	}
 }
+
+// --- edge cases ---
+
+func TestFormat_JSONEmptyArray(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Format(&buf, "json", []any{}); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if strings.TrimSpace(buf.String()) != "[]" {
+		t.Errorf("empty array → %q, want []", buf.String())
+	}
+}
+
+func TestFormat_JSONNil(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Format(&buf, "json", nil); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if strings.TrimSpace(buf.String()) != "null" {
+		t.Errorf("nil → %q, want null", buf.String())
+	}
+}
+
+func TestFormat_NDJSONMultiRow(t *testing.T) {
+	env := map[string]any{
+		"ok": true,
+		"data": []map[string]any{
+			{"id": "a"}, {"id": "b"}, {"id": "c"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Format(&buf, "ndjson", env); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines, got %d: %q", len(lines), buf.String())
+	}
+	for i, ln := range lines {
+		var row map[string]any
+		if err := json.Unmarshal([]byte(ln), &row); err != nil {
+			t.Errorf("line %d invalid JSON: %v", i, err)
+		}
+	}
+}
+
+func TestFormat_CSVWithNestedObject(t *testing.T) {
+	// Nested values serialize as JSON strings inside CSV cells.
+	env := map[string]any{
+		"ok": true,
+		"data": []map[string]any{
+			{"id": "t1", "meta": map[string]any{"k": "v"}},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Format(&buf, "csv", env); err != nil {
+		t.Fatalf("Format csv: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "t1") {
+		t.Errorf("id missing: %q", out)
+	}
+	// meta cell must round-trip the nested object.
+	if !strings.Contains(out, `"k":"v"`) && !strings.Contains(out, `""k"":""v""`) {
+		t.Errorf("nested object not represented: %q", out)
+	}
+}
+
+func TestFormat_TableFallbackOnScalar(t *testing.T) {
+	// A raw scalar (not a map/array) can't be coerced to rows; Format should
+	// fall back to JSON rendering instead of erroring.
+	var buf bytes.Buffer
+	if err := Format(&buf, "table", "just-a-string"); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	if !strings.Contains(buf.String(), "just-a-string") {
+		t.Errorf("scalar should fall through to JSON: %q", buf.String())
+	}
+}
+
+func TestRenderCell_Types(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{nil, ""},
+		{"hi", "hi"},
+		{float64(42), "42"},
+		{float64(3.14), "3.14"},
+		{true, "true"},
+		{false, "false"},
+		{[]any{1, 2}, `[1,2]`},
+	}
+	for _, c := range cases {
+		if got := renderCell(c.in); got != c.want {
+			t.Errorf("renderCell(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestExtractRows_UncoercibleValueFallsThrough(t *testing.T) {
+	// Non-map, non-array JSON (scalar) → extractRows returns (nil,false).
+	_, ok := extractRows(42)
+	if ok {
+		t.Error("scalar should not coerce to rows")
+	}
+}

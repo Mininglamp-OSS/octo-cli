@@ -185,3 +185,50 @@ func TestSplitPagination_Detection(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteError_NilError(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteError(&buf, nil); err != nil {
+		t.Fatalf("WriteError(nil): %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
+	}
+	if env["ok"] != false {
+		t.Errorf("ok = %v", env["ok"])
+	}
+	errObj, _ := env["error"].(map[string]any)
+	if errObj["type"] != "internal" {
+		t.Errorf("nil error should produce internal type, got %v", errObj["type"])
+	}
+}
+
+func TestWriteSuccess_NilMeta(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, json.RawMessage(`{"id":"x"}`), EnvelopeMeta{}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	s := buf.String()
+	if strings.Contains(s, "_rate_limit") || strings.Contains(s, "_notice") {
+		t.Errorf("empty meta should not emit meta fields: %s", s)
+	}
+}
+
+func TestIsJSONHelpers_Whitespace(t *testing.T) {
+	if !isJSONArray(json.RawMessage("  \n\t[1,2]")) {
+		t.Error("whitespace-prefixed array not detected")
+	}
+	if !isJSONObject(json.RawMessage("  \n{\"a\":1}")) {
+		t.Error("whitespace-prefixed object not detected")
+	}
+	if isJSONArray(json.RawMessage(`{"a":1}`)) {
+		t.Error("object mistaken for array")
+	}
+	if isJSONObject(json.RawMessage(`[1]`)) {
+		t.Error("array mistaken for object")
+	}
+	if isJSONArray(json.RawMessage(`   `)) {
+		t.Error("whitespace-only should not classify")
+	}
+}
