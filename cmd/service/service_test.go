@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/dmwork-org/octo-cli/internal/cmdutil"
 	"github.com/dmwork-org/octo-cli/internal/config"
 	"github.com/dmwork-org/octo-cli/internal/credential"
+	"github.com/dmwork-org/octo-cli/internal/output"
 	"github.com/dmwork-org/octo-cli/internal/registry"
 )
 
@@ -338,4 +342,184 @@ func contains(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// --- multipart upload (file.upload) ---
+
+// TestFileUpload_FlagRegistration confirms a multipart operation gets a --file
+// flag and that it is marked required by cobra.
+func TestFileUpload_FlagRegistration(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	upload := findCmd(findCmd(root, "file"), "upload")
+	if upload == nil {
+		t.Fatal("file upload command not registered")
+	}
+	f := upload.Flags().Lookup("file")
+	if f == nil {
+		t.Fatal("multipart operation missing --file flag")
+	}
+	required := upload.Flags().Lookup("file").Annotations[cobra.BashCompOneRequiredFlag]
+	if len(required) == 0 || required[0] != "true" {
+		t.Errorf("--file should be required; annotations=%v", required)
+	}
+}
+
+// TestFileUpload_MissingFileReturnsError confirms running the upload command
+// without --file fails before touching the network.
+func TestFileUpload_MissingFileReturnsError(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	root.SetArgs([]string{"file", "upload"})
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for missing --file")
+	}
+	if called {
+		t.Error("server should not be called when --file is missing")
+	}
+}
+
+// TestFileUpload_ContentTypeIsMultipart confirms the client sends multipart
+// form-data and that the uploaded bytes land in the "file" form field.
+func TestFileUpload_ContentTypeIsMultipart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hello.txt")
+	payload := []byte("hello multipart")
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("write tmp file: %v", err)
+	}
+
+	var gotCT string
+	var gotFileName string
+	var gotFileBody []byte
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotCT = r.Header.Get("Content-Type")
+		mediaType, params, err := mime.ParseMediaType(gotCT)
+		if err != nil {
+			t.Fatalf("parse media type: %v", err)
+		}
+		if mediaType != "multipart/form-data" {
+			t.Errorf("media type = %q", mediaType)
+		}
+		if params["boundary"] == "" {
+			t.Error("missing boundary parameter")
+		}
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart: %v", err)
+		}
+		fhs := r.MultipartForm.File["file"]
+		if len(fhs) != 1 {
+			t.Fatalf("expected 1 file part, got %d", len(fhs))
+		}
+		gotFileName = fhs[0].Filename
+		f, err := fhs[0].Open()
+		if err != nil {
+			t.Fatalf("open part: %v", err)
+		}
+		defer f.Close()
+		gotFileBody, _ = io.ReadAll(f)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"url":"cos://x","name":"hello.txt","size":15}`))
+	})
+	root.SetArgs([]string{"file", "upload", "--file", path})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.HasPrefix(gotCT, "multipart/form-data") {
+		t.Errorf("Content-Type = %q", gotCT)
+	}
+	if gotFileName != "hello.txt" {
+		t.Errorf("filename = %q", gotFileName)
+	}
+	if !bytes.Equal(gotFileBody, payload) {
+		t.Errorf("body = %q want %q", gotFileBody, payload)
+	}
+}
+
+// TestBuildMultipartBody_FormTextFields directly exercises buildMultipartBody
+// to confirm non-binary body flags are emitted as form text fields alongside
+// the binary part. The current registry has no multipart op with additional
+// body properties, so this synthesises the runtime.
+func TestBuildMultipartBody_FormTextFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.bin")
+	if err := os.WriteFile(path, []byte("binary"), 0o644); err != nil {
+		t.Fatalf("write tmp file: %v", err)
+	}
+
+	filePath := path
+	label := "report"
+	count := 7
+	flag := true
+	tags := []string{"a", "b"}
+	rt := &operationRuntime{
+		filePath: &filePath,
+		bodyFlags: map[string]*bodyFlag{
+			"label": {apiName: "label", kind: kindString, strVal: &label},
+			"count": {apiName: "count", kind: kindInt, intVal: &count},
+			"flag":  {apiName: "flag", kind: kindBool, boolVal: &flag},
+			"tags":  {apiName: "tags", kind: kindStringSlice, strSlc: &tags},
+		},
+	}
+
+	cmd := &cobra.Command{Use: "synth"}
+	cmd.Flags().StringVar(&filePath, "file", filePath, "")
+	cmd.Flags().StringVar(&label, "label", label, "")
+	cmd.Flags().IntVar(&count, "count", count, "")
+	cmd.Flags().BoolVar(&flag, "flag", flag, "")
+	cmd.Flags().StringSliceVar(&tags, "tags", tags, "")
+	if err := cmd.ParseFlags([]string{"--label", "report", "--count", "7", "--flag", "--tags", "a,b"}); err != nil {
+		t.Fatalf("parse flags: %v", err)
+	}
+
+	raw, ct, err := buildMultipartBody(cmd, rt)
+	if err != nil {
+		t.Fatalf("buildMultipartBody: %v", err)
+	}
+	if !strings.HasPrefix(ct, "multipart/form-data") {
+		t.Fatalf("content type = %q", ct)
+	}
+
+	_, params, _ := mime.ParseMediaType(ct)
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", ct)
+	_ = params
+	if err := req.ParseMultipartForm(1 << 20); err != nil {
+		t.Fatalf("parse multipart: %v", err)
+	}
+
+	if got := req.MultipartForm.Value["label"]; len(got) != 1 || got[0] != "report" {
+		t.Errorf("label form field = %v", got)
+	}
+	if got := req.MultipartForm.Value["count"]; len(got) != 1 || got[0] != "7" {
+		t.Errorf("count form field = %v", got)
+	}
+	if got := req.MultipartForm.Value["flag"]; len(got) != 1 || got[0] != "true" {
+		t.Errorf("flag form field = %v", got)
+	}
+	if got := req.MultipartForm.Value["tags"]; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("tags form field = %v", got)
+	}
+	if len(req.MultipartForm.File["file"]) != 1 {
+		t.Error("binary file part missing")
+	}
+}
+
+// TestBuildMultipartBody_MissingFile confirms the validation error surfaces
+// when --file is empty.
+func TestBuildMultipartBody_MissingFile(t *testing.T) {
+	empty := ""
+	rt := &operationRuntime{filePath: &empty}
+	cmd := &cobra.Command{Use: "synth"}
+	_, _, err := buildMultipartBody(cmd, rt)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" {
+		t.Errorf("expected validation ExitError, got %T: %v", err, err)
+	}
 }

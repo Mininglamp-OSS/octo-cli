@@ -293,6 +293,81 @@ func TestParseRetryAfter_Empty(t *testing.T) {
 	}
 }
 
+// --- binary response path (file.download) ---
+
+// newBinaryClient returns a Client that does NOT follow redirects, so 302s
+// surface to Do for the binary envelope path.
+func newBinaryClient(srv *httptest.Server) *Client {
+	cfg := &config.Config{APIURL: srv.URL}
+	cred := &credential.BotCredential{Token: "app_test"}
+	c := New(cfg, cred, Options{})
+	// srv.Client() follows redirects by default; keep our no-follow policy.
+	sc := srv.Client()
+	sc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	c.httpClient = sc
+	c.retryClock = func(time.Duration) {}
+	return c
+}
+
+func TestDo_BinaryResponse_RedirectReturnsLocationEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://cdn.example.com/object?sig=abc")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), Request{
+		Method: "GET", Path: "/dl", BinaryResponse: true,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["url"] != "https://cdn.example.com/object?sig=abc" {
+		t.Errorf("url = %v", env["url"])
+	}
+	if n, _ := env["status"].(float64); int(n) != http.StatusFound {
+		t.Errorf("status = %v", env["status"])
+	}
+}
+
+func TestDo_BinaryResponse_InlineBodyReturnsMetadata(t *testing.T) {
+	payload := bytes.Repeat([]byte{0xff}, 128)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), Request{
+		Method: "GET", Path: "/dl", BinaryResponse: true,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["content_type"] != "image/png" {
+		t.Errorf("content_type = %v", env["content_type"])
+	}
+	if n, _ := env["status"].(float64); int(n) != 200 {
+		t.Errorf("status = %v", env["status"])
+	}
+	if n, _ := env["size"].(float64); int(n) != len(payload) {
+		t.Errorf("size = %v, want %d", env["size"], len(payload))
+	}
+}
+
 func TestBackoffDelay_Grows(t *testing.T) {
 	d1 := backoffDelay(1)
 	d3 := backoffDelay(3)
