@@ -24,15 +24,21 @@ func newConfigCmd(f *cmdutil.Factory) *cobra.Command {
 // newConfigShowCmd prints the currently resolved configuration as a success
 // envelope. The bot token is masked (first 8 chars + "***") so an agent can
 // verify *which* bot is in use without leaking the secret.
+//
+// Resolution goes through the Factory so the values reflect the same path the
+// rest of the CLI takes (ConfigFunc may be stubbed by tests). When the Factory
+// can't produce a config — e.g. a future hook that returns an error for an
+// unconfigured env — fall back to config.Load() so `config show` still emits
+// a diagnostic envelope instead of failing the command.
 func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Print the resolved configuration (token masked)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := config.Load()
-			if f.Globals != nil && f.Globals.Format != "" {
-				cfg.Format = f.Globals.Format
+			cfg, err := f.Config()
+			if err != nil || cfg == nil {
+				cfg = config.Load()
 			}
 			space := cfg.SpaceID
 			if f.Globals != nil && f.Globals.Space != "" {

@@ -65,7 +65,7 @@ Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`,
 - `gofmt`, `go vet`, standard-library `testing` with table-driven tests.
 - Errors wrap with `fmt.Errorf("context: %w", err)`; CLI errors use the `*output.ExitError` taxonomy so envelopes stay structured.
 - The `internal/output` package is a leaf — it must not import other `internal/*` packages.
-- No package-level globals; resolve everything through the Factory.
+- No mutable package-level globals; state flows through the Factory. The only package-level `var` declarations allowed are (a) ldflags-injected build metadata (`cmd/build.go`), (b) `//go:embed` file systems (`internal/registry`), and (c) immutable lookup tables (e.g. `backendErrorMapping` in `internal/output/errors.go`, `httpMethods` in `internal/registry/loader.go`). These are const-equivalent — never mutated at runtime — and exist only because Go doesn't permit `const` for their types.
 - External deps limited to cobra, gojq, and the standard library.
 - All text in English.
 

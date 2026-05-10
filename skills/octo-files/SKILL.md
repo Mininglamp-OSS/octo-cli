@@ -46,12 +46,12 @@ For files too large for multipart, ask the backend for a presigned target and up
 
 ```bash
 cred=$(octo file presigned --filename big.zip)
-url=$(jq -r '.data.url'    <<<"$cred")
-hdr=$(jq -r '.data.headers' <<<"$cred")
-curl -X PUT -T big.zip -H "$hdr" "$url"
+url=$(jq  -r '.data.uploadUrl'   <<<"$cred")
+ctype=$(jq -r '.data.contentType' <<<"$cred")
+curl -X PUT -T big.zip -H "Content-Type: $ctype" "$url"
 ```
 
-`file credentials` returns STS-style tokens; `file presigned` returns a one-shot signed URL. Pick the shape the backend gives you.
+`file presigned` returns `{uploadUrl, downloadUrl, method, contentType, key, expiresIn, expiredTime}` — a one-shot signed URL. `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, cdnBaseUrl, ...}`) for SDK-driven uploads. Pick the shape the backend gives you.
 
 ## 2. Bot housekeeping
 

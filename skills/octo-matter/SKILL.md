@@ -14,15 +14,15 @@ Both App Bot and User Bot can call every operation in this domain.
 
 ```bash
 octo matter create --title "Fix login bug"                     # required: --title (≤500 chars)
-octo matter list   --status open --assignee me --limit 50      # cursor pagination
+octo matter list   --status open --assignee-id me --limit 50   # cursor pagination
 octo matter get    <id>
 octo matter update <id> --title "..." --description "..."
 octo matter delete <id>                                        # soft delete
 ```
 
-`create` also accepts `--description` (≤10 000), `--assignee` (repeatable — supports `me` alias), `--deadline` (RFC3339), `--remind-at` (RFC3339), `--source-channel`, `--source-type` (1=user, 2=group, 5=thread), `--source-name`.
+`create` also accepts `--description` (≤10 000), `--assignee-ids` (repeatable — supports `me` alias), `--deadline` (RFC3339), `--remind-at` (RFC3339), `--source-channel-id`, `--source-channel-type` (1=user, 2=group, 5=thread), `--source-name`.
 
-`list` filters: `--status`, `--assignee` (repeatable, `me` supported), `--creator`, `-q <query>`, `--source-channel`, `--source-type`, `--channel`, `--limit` (default 20, max 100), `--cursor`.
+`list` filters: `--status`, `--assignee-id` (`me` supported), `--creator-id`, `--q <query>`, `--source-channel-id`, `--source-channel-type`, `--channel-id`, `--limit` (default 20, max 100), `--cursor`.
 
 ## 2. Status transitions
 
@@ -97,7 +97,7 @@ octo matter extract --data '{
 Anywhere an assignee UID is accepted, `me` resolves server-side to the caller's UID.
 
 ```bash
-octo matter list --assignee me --status open
+octo matter list --assignee-id me --status open
 ```
 
 ### Cursor pagination
@@ -112,7 +112,7 @@ octo matter timeline list <id> --page-all --page-limit 5
 ### Pipe chains
 
 ```bash
-octo matter list --status open --assignee me --jq '.data[].id' \
+octo matter list --status open --assignee-id me --jq '.data[].id' \
   | xargs -I{} octo matter close {}
 ```
 

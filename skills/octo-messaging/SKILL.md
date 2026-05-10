@@ -19,9 +19,9 @@ Before attempting a write, confirm the token type with `octo config show` — Ap
 ## 1. `message` — 4 commands
 
 ```bash
-# Send a message. payload is a JSON map and cannot be auto-promoted.
+# Send a message. payload is a JSON object and cannot be auto-promoted — use --data.
 octo message send --channel-id <cid> --channel-type 1 \
-  --payload '{"type":"text","content":"hello"}' \
+  --data '{"payload":{"type":"text","content":"hello"}}' \
   [--stream-no <n>]
 
 # Edit by (message-id, channel-id, channel-type); content-edit is the new body.
@@ -49,7 +49,7 @@ octo message read-receipt --channel-id <cid> --channel-type 1 \
 
 ### `payload` shape
 
-Message payloads are free-form maps — text, markdown, quote, attachment, etc. — so they **never** auto-promote to flags. Use `--payload <json>` (scalar) or `--data '{"payload":{...}}'` (full body).
+Message payloads are free-form maps — text, markdown, quote, attachment, etc. — so they **never** auto-promote to a flag. Wrap the payload under the top-level `payload` key and pass the whole body via `--data '{"channel_id":"…","channel_type":1,"payload":{…}}'` (or `--data @file.json`, `--data @-`).
 
 ## 2. `group` — 9 commands (5 read + 4 write)
 
@@ -66,10 +66,10 @@ Write operations (**User Bot only**):
 
 ```bash
 octo group md-update     <group_no> --content "# Updated description"
-octo group create        --data '{"name":"eng","members":["u1","u2"],"creator":"u0"}'
+octo group create        --members u1 --members u2 --name "eng" --creator u0
 octo group update        <group_no> --data '{"name":"new name"}'
-octo group member-add    <group_no> --data '{"uids":["u3","u4"]}'
-octo group member-remove <group_no> --data '{"uids":["u3"]}'
+octo group member-add    <group_no> --members u3 --members u4
+octo group member-remove <group_no> --members u3
 ```
 
 App Bot attempting any of the four write operations gets `FORBIDDEN` with message `"app bot does not support group operations"`.

@@ -41,7 +41,7 @@ func NewTestFactory() *TestFactory {
 	f.ConfigFunc = func() (*config.Config, error) { return cfg, nil }
 	f.CredentialFunc = func() (*credential.BotCredential, error) { return cred, nil }
 	f.ClientFunc = func() (*client.Client, error) {
-		return nil, errTestClientNotSet
+		return nil, stringError("test factory: client not set (call SetClient first)")
 	}
 
 	return &TestFactory{Factory: f, In: in, Out: out, ErrOut: errOut}
@@ -62,10 +62,8 @@ func (t *TestFactory) SetCredential(c *credential.BotCredential) {
 	t.Factory.CredentialFunc = func() (*credential.BotCredential, error) { return c, nil }
 }
 
-// errTestClientNotSet is returned when a test command calls Client() without
-// setting one first. Kept as a sentinel so tests can assert on it if needed.
-var errTestClientNotSet = stringError("test factory: client not set (call SetClient first)")
-
+// stringError is an immutable, allocation-free error type for sentinel
+// messages that don't need a package-level var.
 type stringError string
 
 func (e stringError) Error() string { return string(e) }
