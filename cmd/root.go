@@ -48,17 +48,22 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newSchemaCmd(f))
 	root.AddCommand(newVersionCmd(f))
 	root.AddCommand(newAPICmd(f))
+	root.AddCommand(newConfigCmd(f))
 	service.RegisterServiceCommands(root, f)
 
 	return root
 }
 
 // skipValidation is true for commands that must run without a configured
-// credential (e.g. `octo version`, `octo help`, `octo schema`).
+// credential (e.g. `octo version`, `octo help`, `octo schema`, `octo config`,
+// and cobra's generated `completion`). Walks the parent chain so leaves like
+// `config show` match through their parent.
 func skipValidation(cmd *cobra.Command) bool {
-	switch cmd.Name() {
-	case "version", "help", "schema", "":
-		return true
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "version", "help", "schema", "config", "completion", "":
+			return true
+		}
 	}
 	return false
 }

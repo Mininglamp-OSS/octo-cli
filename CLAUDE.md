@@ -2,69 +2,72 @@
 
 ## What is octo-cli
 
-octo-cli is a command-line interface for the Octo ecosystem, designed primarily for **AI Agent Bots** to interact with Octo services via `exec` calls from agent runtimes (OpenClaw, Claude Code, etc.).
-
-Each Octo built-in service module maps to a CLI subcommand: `octo todo`, `octo <future-module>`, etc.
-
-**Current scope: `octo todo` only.**
+`octo` is the command-line interface for the Octo ecosystem, built for **AI Agent Bots** to call via `exec` from agent runtimes (OpenClaw, Claude Code, etc.). Output is a JSON envelope; there is no interactive I/O.
 
 ## Architecture
 
-- Go single binary, cobra CLI framework
-- Thin REST client — all logic lives in backend services (todo-service, etc.)
-- Default output: JSON (consumed by bots); `--format table` for human debugging
-- Authentication: Bot Token via `OCTO_BOT_TOKEN` env var (robot_id:app_key format)
-- Server URL: `OCTO_API_URL` env var
+- Go single binary, cobra CLI framework.
+- **Metadata-driven**: the entire service command tree is auto-registered at startup from OpenAPI 3.x specs embedded into the binary via `internal/registry`. To add or change an endpoint, update a spec — not code.
+- **Thin client**: all business logic lives in backend services (matters, dmworkim). CLI is transport + validation + formatting.
+- **Multi-backend**: different domains live at different base URLs, resolved per-operation from the spec's `x-octo-base-url`.
+- **Factory DI**: `internal/cmdutil.Factory` is the DI container; no package-level globals. Tests inject stubs through `ConfigFunc` / `CredentialFunc` / `ClientFunc` / `RegistryFunc`.
+- **JSON envelope I/O**: `{ok, identity, data, _pagination, _rate_limit}` on stdout for success; `{ok:false, error:{type,code,message,hint,detail}}` on stderr for failure. Exit codes: auth=3, validation/config=2, rest=1.
 
 ## Identity Model
 
-- **Bot** authenticates with its own token (not user credentials)
-- Each Bot has an **owner** (the human who created it)
-- Operations are attributed to the Bot identity
-- Daemon (octo-daemon) is device-level, separate auth — daemon installs octo-cli but auth is independent
+- The CLI is **bot-only** — no user login. `OCTO_BOT_TOKEN` carries an `app_*` (App Bot) or `bf_*` (User Bot) token.
+- Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
+- `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure
+## Command Structure (7 domains, 51 operations)
+
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, and the cobra-generated `completion`.
 
 ```
-octo todo list [--goal <id>] [--status <s>] [--assignee <uid>] [--creator <uid>] [-q <query>] [--source-channel <id>] [--source-type <n>] [--limit <n>] [--cursor <c>]
-octo todo create --title <t> [--goal <id>] [--assignee <uid>...] [--deadline <date>] [--remind-at <date>] [--desc <d>] [--source-channel <id>] [--source-type <n>] [--source-name <name>]
-octo todo get <id>
-octo todo update <id> [--title <t>] [--desc <d>] [--deadline <date>] [--remind-at <date>] [--goal <id>]
-octo todo close <id>
-octo todo reopen <id>
-octo todo delete <id>
-octo todo assign <id> <uid>
-octo todo unassign <id> <uid>
-octo todo comment <id> <text>
-octo todo comments <id>
-octo todo comment-delete <id> <comment-id>
-octo todo attachment list <id>
-octo todo attachment add <id> --url <url> [--name <n>] [--type <mime>]
-octo todo attachment delete <id> <attachment-id>
+octo matter    create | list | get | update | delete
+               transition | close | reopen | archive | extract
+               assignee add|remove
+               channel  link|unlink
+               timeline add|list|delete
+octo message   send | edit | sync | read-receipt
+octo group     list | get | members | md-get | md-update
+               create | update | member-add | member-remove       (User Bot only)
+octo thread    create | list | get | delete | members
+               join | leave | md-get | md-update                  (User Bot only)
+octo file      upload | download | credentials | presigned
+octo bot       register | set-commands | user-info | space-members | typing | heartbeat
+octo event     list | ack
 
-octo todo goal list [--status <active|completed|archived>]
-octo todo goal create --title <t> [--desc <d>] [--deadline <date>] [--assignee <uid>...]
-octo todo goal get <id>
-octo todo goal update <id> [--title <t>] [--desc <d>] [--deadline <date>]
-octo todo goal assign <id> <uid>
-octo todo goal unassign <id> <uid>
-octo todo goal archive <id>
-
+octo schema [--list [domain] | <operation-id>]
+octo api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
+octo config show
+octo completion bash|zsh|fish|powershell
 octo version
 ```
 
-## API Mapping
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter`, `octo-messaging`, `octo-files`) — keep those in sync when command shapes change.
 
-All commands call todo-service REST API at `$OCTO_API_URL/api/v1/...`
+## Environment
 
+| Var                 | Purpose                                                  |
+|---------------------|----------------------------------------------------------|
+| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Required.                 |
+| `OCTO_API_URL`      | Fallback base URL.                                       |
+| `OCTO_MATTERS_URL`  | Matters service.                                         |
+| `OCTO_DMWORKIM_URL` | dmworkim (message/group/thread/file/bot/event).          |
+| `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
+| `OCTO_FORMAT`       | Default output format (`json` | `table` | `csv` | `ndjson`). |
+
+Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`, `--no-retry`, `--space`. Paginated ops additionally support `--page-all` / `--page-limit`.
 
 ## Code Style
 
-- Go: `gofmt`, `go vet`
-- Tests: standard `testing`, table-driven
-- Errors: `fmt.Errorf("context: %w", err)`
-- No external deps beyond cobra and standard library
-- All text in English
+- `gofmt`, `go vet`, standard-library `testing` with table-driven tests.
+- Errors wrap with `fmt.Errorf("context: %w", err)`; CLI errors use the `*output.ExitError` taxonomy so envelopes stay structured.
+- The `internal/output` package is a leaf — it must not import other `internal/*` packages.
+- No package-level globals; resolve everything through the Factory.
+- External deps limited to cobra, yaml, jq-go, and the standard library.
+- All text in English.
 
 ## Build & Test
 
@@ -72,4 +75,11 @@ All commands call todo-service REST API at `$OCTO_API_URL/api/v1/...`
 go build -o octo ./cmd/octo
 go test ./... -count=1
 go vet ./...
+
+# Shell completion (cobra built-in)
+octo completion bash   > /etc/bash_completion.d/octo
+octo completion zsh    > "${fpath[1]}/_octo"
+octo completion fish   > ~/.config/fish/completions/octo.fish
 ```
+
+Version metadata is injected via `-ldflags` at release time (see `cmd/build.go`).
