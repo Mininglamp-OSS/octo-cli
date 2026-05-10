@@ -1,8 +1,52 @@
 # octo-cli
 
-Command-line interface for the Octo ecosystem. Designed for AI Agent Bots to interact with Octo services via `exec` from agent runtimes.
+[![CI](https://github.com/dmwork-org/octo-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/dmwork-org/octo-cli/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dmwork-org/octo-cli.svg)](https://pkg.go.dev/github.com/dmwork-org/octo-cli)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-## Install
+`octo` is the command-line interface for the **Octo ecosystem** — a thin,
+single-binary REST client designed for **AI Agent Bots** to call via `exec`
+from agent runtimes (OpenClaw, Claude Code, and similar). Every invocation
+emits a structured JSON envelope on stdout; errors go to stderr with a
+deterministic taxonomy. There is no interactive I/O.
+
+## Architecture
+
+octo-cli is **metadata-driven**. The entire command tree — 48 operations
+across 7 domains — is auto-registered at startup from OpenAPI 3.x specs
+embedded into the binary. Adding or changing an endpoint means editing a
+spec, not the code.
+
+```
+OpenAPI specs  ──►  Registry  ──►  Service Engine  ──►  Factory  ──►  Client  ──►  Output
+(embedded)         (parsed)       (cobra commands)    (DI)          (HTTP)       (envelope)
+```
+
+Key properties:
+
+- **Thin client.** All business logic lives in backend services (matters,
+  dmworkim). The CLI is transport, validation, and formatting.
+- **Multi-backend routing.** Each operation declares its base URL via
+  `x-octo-base-url`; the client selects the correct service per call.
+- **Factory DI.** `internal/cmdutil.Factory` is the dependency container.
+  No mutable package-level globals; tests inject stubs through `ConfigFunc`
+  / `CredentialFunc` / `ClientFunc` / `RegistryFunc`.
+- **Agent-first output.** A stable JSON envelope with identity, data,
+  pagination, and rate-limit metadata; a small fixed error taxonomy.
+
+## Domains
+
+| Domain    | Ops | Purpose                                                        |
+|-----------|-----|----------------------------------------------------------------|
+| `matter`  | 14  | Todos/tasks — CRUD, transitions, assignees, channels, timeline |
+| `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
+| `thread`  | 9   | Threads — create, list, get, members, join/leave, metadata     |
+| `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
+| `message` | 4   | Messaging — send, edit, sync, read-receipt                     |
+| `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
+| `event`   | 2   | Event polling — list, ack                                      |
+
+## Installation
 
 ### Go install
 
@@ -16,69 +60,177 @@ go install github.com/dmwork-org/octo-cli/cmd/octo@latest
 brew install dmwork-org/tap/octo
 ```
 
-### Download from GitHub Releases
+### GitHub Releases
 
 Download the latest binary for your platform from
-[GitHub Releases](https://github.com/dmwork-org/octo-cli/releases).
+[GitHub Releases](https://github.com/dmwork-org/octo-cli/releases):
 
 ```bash
-# Example: Linux amd64
 curl -LO https://github.com/dmwork-org/octo-cli/releases/latest/download/octo_Linux_amd64.tar.gz
 tar xzf octo_Linux_amd64.tar.gz
 sudo mv octo /usr/local/bin/
 ```
 
-Also installed automatically with `octo-daemon`.
+### install.sh
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dmwork-org/octo-cli/main/install.sh | sh
+```
 
 ## Quick Start
 
 ```bash
-export OCTO_BOT_TOKEN="your-bot-token"
-export OCTO_API_URL="https://todo.example.com"
+# Authenticate as a bot.
+export OCTO_BOT_TOKEN="bf_your_user_bot_token"
+export OCTO_MATTERS_URL="https://matters.example.com"
+export OCTO_DMWORKIM_URL="https://dmworkim.example.com"
 
-# Todos
-octo todo list
-octo todo list --status open --assignee me
-octo todo list -q "deploy" --creator user-456
-octo todo create --title "Deploy v2.0" --assignee user-123 --remind-at 2026-06-01T09:00:00Z
-octo todo get <todo-id>
-octo todo update <todo-id> --title "New title" --goal <goal-id>
-octo todo close <todo-id>
-octo todo reopen <todo-id>
-octo todo delete <todo-id>
+# Matters (todos/tasks)
+octo matter list --status open --assignee me
+octo matter create --title "Deploy v2.0" --assignee user-123
+octo matter get matter-abc
+octo matter update matter-abc --title "Deploy v2.1"
+octo matter close matter-abc
+octo matter assignee add matter-abc user-456
 
-# Assignees
-octo todo assign <todo-id> <user-id>
-octo todo unassign <todo-id> <user-id>
+# Messaging
+octo message send --data '{"chat_id":"chat-1","text":"hi"}'
+octo message edit --data '{"msg_id":"m-1","text":"updated"}'
 
-# Comments
-octo todo comment <todo-id> "Fix the build"
-octo todo comments <todo-id>
-octo todo comment-delete <todo-id> <comment-id>
+# Groups and threads
+octo group list
+octo group members group-abc
+octo thread list --chat-id chat-1
+octo thread create --chat-id chat-1 --name "design review"
 
-# Attachments
-octo todo attachment list <todo-id>
-octo todo attachment add <todo-id> --url https://example.com/file.pdf --name report.pdf
-octo todo attachment delete <todo-id> <attachment-id>
+# Files
+octo file upload --file ./report.pdf
+octo file download abc123 --jq '.data.url'
 
-# Goals
-octo todo goal list --status active
-octo todo goal create --title "Q3 Release" --deadline 2026-09-30T00:00:00Z --assignee user-1
-octo todo goal get <goal-id>
-octo todo goal update <goal-id> --title "Q4 Release" --deadline 2026-12-31T00:00:00Z
-octo todo goal assign <goal-id> <user-id>
-octo todo goal unassign <goal-id> <user-id>
-octo todo goal archive <goal-id>
+# Discover the API — fully offline, specs are embedded.
+octo schema --list              # all operations across all domains
+octo schema --list matter       # operations in one domain
+octo schema matter.create       # request/response schema for one op
+octo config show                # resolved config (token masked)
+
+# Generic passthrough for ops that aren't auto-registered.
+octo api GET  /v1/matters --params '{"status":"open"}'
+octo api POST /v1/matters --data @body.json
 ```
 
 ## Authentication
 
-Set `OCTO_BOT_TOKEN` to your BotFather bot token. The CLI sends `Authorization: Bearer <token>` on every request. Space context is resolved server-side from the token.
+`octo` is bot-only — there is no user login. `OCTO_BOT_TOKEN` carries either
+an **App Bot** (`app_*`) or **User Bot** (`bf_*`) token:
+
+| Prefix  | Type     | DM | Group read | Group write | Thread | Voice |
+|---------|----------|----|------------|-------------|--------|-------|
+| `app_*` | App Bot  | yes | yes       | **no**      | **no** | **no**|
+| `bf_*`  | User Bot | yes | yes       | yes         | yes    | yes   |
+
+The CLI does not enforce capability locally; the backend rejects
+unsupported operations with `FORBIDDEN`.
+
+### Multi-service URLs
+
+Different Octo services live at different base URLs. Each operation's spec
+declares its `x-octo-base-url`; the CLI picks that URL, with `OCTO_API_URL`
+as a fallback.
+
+| Var                 | Purpose                                                  |
+|---------------------|----------------------------------------------------------|
+| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Required.                 |
+| `OCTO_API_URL`      | Fallback base URL.                                       |
+| `OCTO_MATTERS_URL`  | Matters service.                                         |
+| `OCTO_DMWORKIM_URL` | dmworkim (message, group, thread, file, bot, event).     |
+| `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
+| `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 
 ## Output
 
-Default: JSON (for bot consumption). Use `--format table` for human-readable output.
+Every successful invocation prints a JSON envelope on stdout:
+
+```json
+{
+  "ok": true,
+  "identity": "bot",
+  "data": { ... },
+  "_pagination": { "has_more": true, "next_cursor": "..." },
+  "_rate_limit": { "remaining": 99, "reset": 1730000000 }
+}
+```
+
+Every failure prints an error envelope on **stderr** and exits non-zero:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "type": "validation",
+    "code": "VALIDATION_ERROR",
+    "message": "title is required",
+    "hint": "check params with `octo schema <op>`",
+    "detail": { ... }
+  }
+}
+```
+
+Exit codes: `3` auth, `2` validation/config, `1` everything else.
+
+### Universal flags
+
+| Flag            | Purpose                                                         |
+|-----------------|-----------------------------------------------------------------|
+| `--format`      | `json` (default) \| `table` \| `csv` \| `ndjson`                |
+| `--jq`, `-q`    | Apply a jq expression to the envelope before formatting         |
+| `--dry-run`     | Print the resolved request instead of sending it                |
+| `--verbose`     | Log request/response trace to stderr                            |
+| `--timeout`     | Per-request deadline, e.g. `30s`, `2m`                          |
+| `--no-retry`    | Disable retry on transient failures                             |
+| `--space`       | Override `OCTO_SPACE_ID` for one call                           |
+| `--page-all`    | Walk pages until `has_more=false`, emit one merged array        |
+| `--page-limit`  | Hard cap on pages fetched with `--page-all` (default 10)        |
+
+### Examples
+
+```bash
+# Dry-run to inspect the resolved request — no side effects.
+octo matter create --title "Hello" --dry-run
+
+# Extract a single field with jq.
+octo matter list --jq '.data[0].id'
+
+# Auto-paginate.
+octo matter list --status open --page-all --page-limit 20
+
+# Tabular output for human eyes.
+octo matter list --format table
+```
+
+## Agent Skills
+
+Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
+
+- [`octo-shared`](./skills/octo-shared/SKILL.md) — fundamentals (auth,
+  output, flags, error taxonomy). Load first.
+- [`octo-matter`](./skills/octo-matter/SKILL.md) — matter (todo/task) domain.
+- [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
+  threads, event polling.
+- [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
+
+## Shell Completion
+
+```bash
+octo completion bash   > /etc/bash_completion.d/octo
+octo completion zsh    > "${fpath[1]}/_octo"
+octo completion fish   > ~/.config/fish/completions/octo.fish
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). TL;DR: add or change an endpoint
+by editing a spec in `internal/registry/specs/`, not Go code.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](./LICENSE)

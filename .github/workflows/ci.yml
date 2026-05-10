@@ -6,21 +6,55 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: build & test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ["1.24.x"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.25.0"
+          go-version: ${{ matrix.go-version }}
+          check-latest: true
 
-      - name: Vet
+      - name: gofmt
+        run: |
+          out=$(gofmt -l . | grep -v '^vendor/' || true)
+          if [ -n "$out" ]; then
+            echo "gofmt needed on:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
         run: go vet ./...
 
-      - name: Test
-        run: go test ./... -count=1
+      - name: go mod tidy check
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "go.mod / go.sum drift — run 'go mod tidy' and commit"
+            exit 1
+          fi
 
-      - name: Build
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.61
+
+      - name: test (race, coverage)
+        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -n 20
+
+      - name: build
         run: go build -o octo ./cmd/octo
