@@ -1,12 +1,14 @@
 // Package cmd is the command tree. It wires cobra commands with the Factory DI
-// container and holds root-level persistent flags. Command RunE functions
-// receive the factory and build client.Request values directly — the client
-// is a thin REST layer, not a typed API SDK.
+// container and holds root-level persistent flags. Service-domain commands are
+// auto-registered from the embedded OpenAPI registry via cmd/service — the
+// only hand-written leaves are `schema`, `version`, and `api` (generic
+// passthrough).
 package cmd
 
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/dmwork-org/octo-cli/cmd/service"
 	"github.com/dmwork-org/octo-cli/internal/cmdutil"
 )
 
@@ -19,7 +21,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "octo",
 		Short: "Octo CLI — command-line interface for the Octo ecosystem",
-		Long:  "octo is a CLI for AI Agent Bots to interact with Octo services.\nCurrent module: octo todo",
+		Long:  "octo is a CLI for AI Agent Bots to interact with Octo services.\nService commands are generated from the embedded OpenAPI registry.",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if skipValidation(cmd) {
 				return nil
@@ -44,9 +46,10 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.StringVar(&f.Globals.Space, "space", "", "space id (for platform-scoped bots)")
 	pf.BoolVar(&f.Globals.Yes, "yes", false, "skip confirmation prompts for high-risk operations")
 
-	root.AddCommand(newTodoCmd(f))
 	root.AddCommand(newSchemaCmd(f))
 	root.AddCommand(newVersionCmd(f))
+	root.AddCommand(newAPICmd(f))
+	service.RegisterServiceCommands(root, f)
 
 	return root
 }
