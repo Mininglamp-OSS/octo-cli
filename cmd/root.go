@@ -45,16 +45,17 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.BoolVar(&f.Globals.Yes, "yes", false, "skip confirmation prompts for high-risk operations")
 
 	root.AddCommand(newTodoCmd(f))
+	root.AddCommand(newSchemaCmd(f))
 	root.AddCommand(newVersionCmd(f))
 
 	return root
 }
 
 // skipValidation is true for commands that must run without a configured
-// credential (e.g. `octo version`, `octo help`).
+// credential (e.g. `octo version`, `octo help`, `octo schema`).
 func skipValidation(cmd *cobra.Command) bool {
 	switch cmd.Name() {
-	case "version", "help", "":
+	case "version", "help", "schema", "":
 		return true
 	}
 	return false

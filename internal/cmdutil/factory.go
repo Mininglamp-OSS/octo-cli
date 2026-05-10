@@ -12,6 +12,7 @@ import (
 	"github.com/dmwork-org/octo-cli/internal/config"
 	"github.com/dmwork-org/octo-cli/internal/credential"
 	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/dmwork-org/octo-cli/internal/registry"
 )
 
 // GlobalOptions holds the values of root-level persistent flags that command
@@ -40,11 +41,13 @@ type Factory struct {
 	ConfigFunc     func() (*config.Config, error)
 	CredentialFunc func() (*credential.BotCredential, error)
 	ClientFunc     func() (*client.Client, error)
+	RegistryFunc   func() *registry.Registry
 
 	// Cached resolutions.
 	config *config.Config
 	cred   *credential.BotCredential
 	cli    *client.Client
+	reg    *registry.Registry
 }
 
 // NewDefaultFactory wires the production providers: config from env, cred from
@@ -107,6 +110,15 @@ func NewDefaultFactory() *Factory {
 		return cli, nil
 	}
 
+	f.RegistryFunc = func() *registry.Registry {
+		if f.reg != nil {
+			return f.reg
+		}
+		// Specs are embedded; parse failure is a build-time bug.
+		f.reg = registry.MustNew()
+		return f.reg
+	}
+
 	return f
 }
 
@@ -118,6 +130,15 @@ func (f *Factory) Credential() (*credential.BotCredential, error) { return f.Cre
 
 // Client returns the resolved HTTP client (cached).
 func (f *Factory) Client() (*client.Client, error) { return f.ClientFunc() }
+
+// Registry returns the spec registry (cached). Tests may inject a stub by
+// replacing RegistryFunc.
+func (f *Factory) Registry() *registry.Registry {
+	if f.RegistryFunc == nil {
+		return nil
+	}
+	return f.RegistryFunc()
+}
 
 // Format returns the effective output format (CLI flag > env/config default).
 func (f *Factory) Format() string {

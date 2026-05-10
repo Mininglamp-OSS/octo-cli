@@ -1,0 +1,84 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Bot Event API",
+    "version": "1.0.0",
+    "description": "Bot event queue endpoints under dmworkim /v1/bot. Events are held in a Redis sorted set until ACK'd."
+  },
+  "x-octo-service": "event",
+  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/events": {
+      "post": {
+        "operationId": "event.list",
+        "summary": "Poll pending events (server-side cursor by event_id)",
+        "description": "Uses POST despite being a read — event_id cursor is carried in the request body.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "event_id": { "type": "integer", "description": "exclusive lower bound; 0 for initial poll" },
+                  "limit": { "type": "integer", "default": 20, "maximum": 100 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Event batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "integer" },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event_id": { "type": "integer" },
+                          "event_type": { "type": "string" },
+                          "event_data": { "type": "object" },
+                          "message": {
+                            "type": "object",
+                            "properties": {
+                              "message_id": { "type": "integer" },
+                              "message_seq": { "type": "integer" },
+                              "from_uid": { "type": "string" },
+                              "channel_id": { "type": "string" },
+                              "channel_type": { "type": "integer" },
+                              "timestamp": { "type": "integer" },
+                              "payload": { "type": "object" }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/events/{event_id}/ack": {
+      "post": {
+        "operationId": "event.ack",
+        "summary": "Acknowledge (remove) an event from the queue",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "event_id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Acknowledged" } }
+      }
+    }
+  }
+}
