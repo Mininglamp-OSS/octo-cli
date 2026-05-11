@@ -18,30 +18,30 @@ type BotCredential struct {
 	Source  string
 }
 
-// Provider resolves a credential from a single source. Implementations should
+// Source resolves a credential from a single source. Implementations should
 // return a nil credential and no error when the source is simply absent; the
 // chain treats that as "move on to the next provider". An error means the
 // source is present but malformed / unreadable and the chain should stop.
-type Provider interface {
+type Source interface {
 	Name() string
 	Resolve() (*BotCredential, error)
 }
 
-// CredentialProvider is a chain of providers tried in order. The first
-// provider that yields a non-nil credential wins.
-type CredentialProvider struct {
-	providers []Provider
+// Provider is a chain of credential sources tried in order. The first source
+// that yields a non-nil credential wins.
+type Provider struct {
+	providers []Source
 }
 
-// NewChain builds a chain. Providers are consulted in the given order.
-func NewChain(providers ...Provider) *CredentialProvider {
-	return &CredentialProvider{providers: providers}
+// NewChain builds a chain. Sources are consulted in the given order.
+func NewChain(providers ...Source) *Provider {
+	return &Provider{providers: providers}
 }
 
 // Resolve walks the chain. It returns the first credential found, or an error
 // listing every source it tried when none match. Errors from individual
-// providers short-circuit the chain.
-func (c *CredentialProvider) Resolve() (*BotCredential, error) {
+// sources short-circuit the chain.
+func (c *Provider) Resolve() (*BotCredential, error) {
 	if c == nil || len(c.providers) == 0 {
 		return nil, errors.New("no credential providers configured")
 	}

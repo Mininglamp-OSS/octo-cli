@@ -36,7 +36,7 @@ Examples:
 			reg := f.Registry()
 			if reg == nil {
 				ee := output.ErrWithHint("internal", "REGISTRY_UNAVAILABLE", "registry not initialized", "report as a bug")
-				_ = f.EmitError(ee)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 				return ee
 			}
 
@@ -46,7 +46,7 @@ Examples:
 
 			if len(args) == 0 {
 				ee := output.ErrValidation("operation-id is required (or pass --list)", "try `octo schema --list` to see available operations")
-				_ = f.EmitError(ee)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 				return ee
 			}
 
@@ -71,7 +71,7 @@ func runSchemaList(f *cmdutil.Factory, args []string) error {
 				fmt.Sprintf("unknown service %q", svc),
 				fmt.Sprintf("known services: %v", reg.ListServices()),
 			)
-			_ = f.EmitError(ee)
+			_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 			return ee
 		}
 		payload["service"] = svc
@@ -94,7 +94,7 @@ func runSchemaGet(f *cmdutil.Factory, operationID string) error {
 			fmt.Sprintf("unknown operation %q", operationID),
 			"try `octo schema --list` to see available operations",
 		)
-		_ = f.EmitError(ee)
+		_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 		return ee
 	}
 	buf, err := json.Marshal(op)

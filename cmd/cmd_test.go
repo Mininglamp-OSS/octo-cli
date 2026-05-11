@@ -30,7 +30,7 @@ func newTestFactoryWithReg() *cmdutil.TestFactory {
 
 // execRoot runs the root command with args, returning (stdout, stderr, error).
 // args exclude the program name.
-func execRoot(t *testing.T, f *cmdutil.TestFactory, args ...string) (string, string, error) {
+func execRoot(t *testing.T, f *cmdutil.TestFactory, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
 	root := NewRootCmd(f.Factory)
 	root.SetArgs(args)
@@ -38,7 +38,7 @@ func execRoot(t *testing.T, f *cmdutil.TestFactory, args ...string) (string, str
 	// the RunE emits envelopes to Factory.ErrOut so we don't care about cobra's.
 	root.SetOut(&bytes.Buffer{})
 	root.SetErr(&bytes.Buffer{})
-	err := root.ExecuteContext(context.Background())
+	err = root.ExecuteContext(context.Background())
 	return f.Out.String(), f.ErrOut.String(), err
 }
 

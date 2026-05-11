@@ -44,37 +44,37 @@ flags are not auto-generated and --page-all is not available.`,
 			path := args[1]
 			if !strings.HasPrefix(path, "/") {
 				ee := output.ErrValidation("path must start with '/'", "e.g. /api/v1/matters")
-				_ = f.EmitError(ee)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 				return ee
 			}
 
 			q, err := parseParamsJSON(paramsSpec)
 			if err != nil {
-				_ = f.EmitError(err)
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 				return err
 			}
 
 			rawData, err := cmdutil.ParseInput(f, dataSpec)
 			if err != nil {
 				ee := output.ErrValidation(fmt.Sprintf("--data: %v", err), "pass inline JSON, @file, or @-")
-				_ = f.EmitError(ee)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 				return ee
 			}
 			var body any
 			if len(rawData) > 0 {
 				if err := json.Unmarshal(rawData, &body); err != nil {
 					ee := output.ErrValidation(fmt.Sprintf("--data is not valid JSON: %v", err), "pass a JSON value or use @file/@-")
-					_ = f.EmitError(ee)
+					_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 					return ee
 				}
 			}
 
 			cli, err := f.Client()
 			if err != nil {
-				_ = f.EmitError(err)
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 				return err
 			}
-			respBody, err := cli.Do(cobraCmd.Context(), client.Request{
+			respBody, err := cli.Do(cobraCmd.Context(), &client.Request{
 				Service: service,
 				Method:  method,
 				Path:    path,
@@ -82,7 +82,7 @@ flags are not auto-generated and --page-all is not available.`,
 				Body:    body,
 			})
 			if err != nil {
-				_ = f.EmitError(err)
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 				return err
 			}
 			return f.EmitSuccess(respBody)
@@ -134,7 +134,7 @@ func parseParamsJSON(spec string) (url.Values, error) {
 				q.Add(k, fmt.Sprintf("%v", item))
 			}
 		default:
-			buf, _ := json.Marshal(val)
+			buf, _ := json.Marshal(val) //nolint:errcheck // val is pre-validated JSON-safe type
 			q.Set(k, string(buf))
 		}
 	}

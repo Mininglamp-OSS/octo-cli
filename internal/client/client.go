@@ -103,7 +103,7 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 // Do performs req against the service URL, applying auth, retry, and dry-run.
 // Returns the raw response body on 2xx; an *output.ExitError on non-2xx or
 // transport failure.
-func (c *Client) Do(ctx context.Context, req Request) ([]byte, error) {
+func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	if req.Service == "" {
 		req.Service = "default"
 	}
@@ -179,7 +179,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) {
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)

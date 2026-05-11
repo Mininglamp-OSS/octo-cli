@@ -20,7 +20,7 @@ func NewEnvProvider() *EnvProvider {
 	return &EnvProvider{TokenVar: "OCTO_BOT_TOKEN", SpaceVar: "OCTO_SPACE_ID"}
 }
 
-// Name implements Provider.
+// Name implements Source.
 func (e *EnvProvider) Name() string {
 	v := e.TokenVar
 	if v == "" {

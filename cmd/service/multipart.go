@@ -20,7 +20,7 @@ import (
 // rather than file size. The file is attached under the "file" form field
 // (backend uses FormFile("file")). Any promoted body flags the user set are
 // included as form text fields.
-func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime) ([]byte, string, error) {
+func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime) (body []byte, contentType string, err error) {
 	if rt.filePath == nil || *rt.filePath == "" {
 		return nil, "", output.ErrValidation("--file is required for multipart upload", "pass --file <path>")
 	}

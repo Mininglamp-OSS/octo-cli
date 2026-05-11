@@ -37,7 +37,7 @@ func newMatterStatusAlias(f *cmdutil.Factory, name, short, target string) *cobra
 				Path:    "/api/v1/matters/" + url.PathEscape(args[0]) + "/status",
 				Body:    map[string]string{"status": target},
 			}
-			return emitOnce(cmd.Context(), f, req)
+			return emitOnce(cmd.Context(), f, &req)
 		},
 	}
 }

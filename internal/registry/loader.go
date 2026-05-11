@@ -358,11 +358,11 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 // resolveSchema performs a shallow walk of a schema node, following one level
 // of $ref into components.schemas. Deeper refs are left as `$ref` strings so
 // the schema command can still surface a useful pointer to the consumer.
-func resolveSchema(doc map[string]any, s map[string]any) SchemaInfo {
+func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
 
-func resolveSchemaWithDepth(doc map[string]any, s map[string]any, depth int) SchemaInfo {
+func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nolint:gocyclo // recursive schema resolver, branching is inherent to OpenAPI
 	if s == nil {
 		return SchemaInfo{}
 	}
