@@ -17,8 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
-	"github.com/dmwork-org/octo-cli/internal/registry"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // RegisterServiceCommands attaches one cobra subtree per service in the

@@ -12,7 +12,7 @@ need to know to get a change merged.
 ## Quick Start
 
 ```bash
-git clone https://github.com/dmwork-org/octo-cli.git
+git clone https://github.com/Mininglamp-OSS/octo-cli.git
 cd octo-cli
 
 make build            # builds ./bin/octo

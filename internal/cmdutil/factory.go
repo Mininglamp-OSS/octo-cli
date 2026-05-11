@@ -10,11 +10,11 @@ import (
 	"io"
 	"strings"
 
-	"github.com/dmwork-org/octo-cli/internal/client"
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
-	"github.com/dmwork-org/octo-cli/internal/output"
-	"github.com/dmwork-org/octo-cli/internal/registry"
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // GlobalOptions holds the values of root-level persistent flags that command

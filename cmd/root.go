@@ -8,8 +8,8 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/cmd/service"
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
 // NewRootCmd builds the top-level command tree.

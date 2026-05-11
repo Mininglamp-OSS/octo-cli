@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // newSchemaCmd returns `octo schema`. Two modes:

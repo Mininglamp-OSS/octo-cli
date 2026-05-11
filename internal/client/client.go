@@ -18,9 +18,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // Retry defaults per architecture-design.md §6.2.

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func TestNewDefaultFactory_InitializesFields(t *testing.T) {

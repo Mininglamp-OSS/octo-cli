@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
 // newVersionCmd prints octo-cli version metadata.

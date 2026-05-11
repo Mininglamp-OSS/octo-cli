@@ -1,4 +1,4 @@
-module github.com/dmwork-org/octo-cli
+module github.com/Mininglamp-OSS/octo-cli
 
 go 1.24.0
 

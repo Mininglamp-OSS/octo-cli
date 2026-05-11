@@ -12,11 +12,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/client"
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
-	"github.com/dmwork-org/octo-cli/internal/registry"
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // newTestFactoryWithReg returns a TestFactory with the real embedded registry

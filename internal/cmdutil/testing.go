@@ -3,9 +3,9 @@ package cmdutil
 import (
 	"bytes"
 
-	"github.com/dmwork-org/octo-cli/internal/client"
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 )
 
 // TestFactory is a pre-wired Factory for unit tests. Callers can poke at

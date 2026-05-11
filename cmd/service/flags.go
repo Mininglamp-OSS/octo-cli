@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/registry"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // operationRuntime holds everything the RunE closure needs to build the

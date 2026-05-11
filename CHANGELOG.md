@@ -62,5 +62,5 @@ Factory-based DI throughout.
   subcommand trees. All equivalent functionality is now under `octo matter`
   and auto-registered from the spec.
 
-[Unreleased]: https://github.com/dmwork-org/octo-cli/compare/v0.4.0...HEAD
-[0.4.0]: https://github.com/dmwork-org/octo-cli/releases/tag/v0.4.0
+[Unreleased]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Mininglamp-OSS/octo-cli/releases/tag/v0.4.0

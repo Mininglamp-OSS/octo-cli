@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmwork-org/octo-cli/internal/config"
-	"github.com/dmwork-org/octo-cli/internal/credential"
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func newTestClient(srv *httptest.Server) *Client {

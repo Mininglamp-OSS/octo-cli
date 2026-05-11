@@ -1,7 +1,7 @@
 # octo-cli
 
-[![CI](https://github.com/dmwork-org/octo-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/dmwork-org/octo-cli/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/dmwork-org/octo-cli.svg)](https://pkg.go.dev/github.com/dmwork-org/octo-cli)
+[![CI](https://github.com/Mininglamp-OSS/octo-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/Mininglamp-OSS/octo-cli/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Mininglamp-OSS/octo-cli.svg)](https://pkg.go.dev/github.com/Mininglamp-OSS/octo-cli)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
 `octo` is the command-line interface for the **Octo ecosystem** — a thin,
@@ -51,22 +51,22 @@ Key properties:
 ### Go install
 
 ```bash
-go install github.com/dmwork-org/octo-cli/cmd/octo@latest
+go install github.com/Mininglamp-OSS/octo-cli/cmd/octo@latest
 ```
 
 ### Homebrew (coming soon)
 
 ```bash
-brew install dmwork-org/tap/octo
+brew install Mininglamp-OSS/tap/octo
 ```
 
 ### GitHub Releases
 
 Download the latest binary for your platform from
-[GitHub Releases](https://github.com/dmwork-org/octo-cli/releases):
+[GitHub Releases](https://github.com/Mininglamp-OSS/octo-cli/releases):
 
 ```bash
-curl -LO https://github.com/dmwork-org/octo-cli/releases/latest/download/octo_Linux_amd64.tar.gz
+curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/latest/download/octo_Linux_amd64.tar.gz
 tar xzf octo_Linux_amd64.tar.gz
 sudo mv octo /usr/local/bin/
 ```
@@ -74,7 +74,7 @@ sudo mv octo /usr/local/bin/
 ### install.sh
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dmwork-org/octo-cli/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/install.sh | sh
 ```
 
 ## Quick Start

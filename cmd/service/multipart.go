@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // buildMultipartBody assembles a multipart/form-data payload for operations

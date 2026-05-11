@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/dmwork-org/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // TestDo_RetryExhaustionPreservesExitError verifies that after exhausting

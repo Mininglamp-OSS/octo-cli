@@ -1,10 +1,10 @@
 #!/bin/sh
 # octo-cli installer — downloads the latest release from GitHub
-# Usage: curl -fsSL https://raw.githubusercontent.com/dmwork-org/octo-cli/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/install.sh | sh
 
 set -e
 
-REPO="dmwork-org/octo-cli"
+REPO="Mininglamp-OSS/octo-cli"
 BINARY="octo"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

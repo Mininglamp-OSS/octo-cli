@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dmwork-org/octo-cli/internal/client"
-	"github.com/dmwork-org/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
 // attachMatterStatusAliases registers `octo matter close/reopen/archive <id>`

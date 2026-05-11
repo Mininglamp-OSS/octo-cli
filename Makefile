@@ -2,7 +2,7 @@
 
 # Build metadata is injected at link time. Release builds override VERSION.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -X github.com/dmwork-org/octo-cli/cmd.Version=$(VERSION)
+LDFLAGS := -X github.com/Mininglamp-OSS/octo-cli/cmd.Version=$(VERSION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/octo ./cmd/octo
