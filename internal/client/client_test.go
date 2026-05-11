@@ -257,7 +257,7 @@ func TestDo_ServiceURLRouting(t *testing.T) {
 	var hitService string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitService = r.URL.Path
-		w.Write([]byte(`{}`)) //nolint:errcheck // test
+		w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
 
