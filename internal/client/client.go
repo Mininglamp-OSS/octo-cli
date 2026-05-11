@@ -412,8 +412,18 @@ func isRetryableStatus(status int) bool {
 // Retry-After is NOT capped by maxDelay (per design §6.2); that handling lives
 // in doWithRetry.
 func backoffDelay(attempt int) time.Duration {
-	exp := defaultBaseDelay << (attempt - 1) // 500ms, 1s, 2s, 4s, ...
-	if exp > defaultMaxDelay {
+	// Guard against overflow: if the shift would exceed maxDelay, clamp early.
+	// With defaultBaseDelay=500ms the shift overflows time.Duration around
+	// attempt=34, but maxRetries=3 makes this a defensive check.
+	shift := attempt - 1
+	if shift < 0 {
+		shift = 0
+	}
+	exp := defaultBaseDelay
+	if shift < 63 {
+		exp = defaultBaseDelay << shift // 500ms, 1s, 2s, 4s, ...
+	}
+	if exp <= 0 || exp > defaultMaxDelay {
 		exp = defaultMaxDelay
 	}
 	jitter := jitterFraction() * float64(exp)

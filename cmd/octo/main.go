@@ -15,20 +15,21 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	root := cmd.NewRootCmd(nil)
+	f := cmdutil.NewDefaultFactory()
+	root := cmd.NewRootCmd(f)
 	if err := root.ExecuteContext(ctx); err != nil {
-		// RunE paths have already emitted an envelope via Factory.EmitError.
-		// Cobra-framework errors (unknown flag, missing arg) and PersistentPreRunE
-		// failures (missing token, bad --format) reach here as plain errors — wrap
-		// and emit them so agents always get a structured envelope on stderr.
-		wrapped := cmdutil.WrapCLIError(err)
-		ee := output.AsExitError(wrapped)
+		// RunE paths emit an envelope via Factory.EmitError and set
+		// f.ErrorEmitted. Only emit here for errors that bypassed the
+		// Factory (cobra-framework errors, PersistentPreRunE failures).
+		if !f.ErrorEmitted {
+			wrapped := cmdutil.WrapCLIError(err)
+			_ = output.WriteError(os.Stderr, wrapped)
+		}
+
+		// Determine exit code from the structured error.
+		ee := output.AsExitError(cmdutil.WrapCLIError(err))
 		if ee == nil {
 			ee = output.ErrWithHint("internal", "INTERNAL", err.Error(), "")
-		}
-		if output.AsExitError(err) == nil {
-			// Only emit here for plain errors; RunE already emitted for *ExitError.
-			_ = output.WriteError(os.Stderr, ee)
 		}
 		os.Exit(ee.ExitCode())
 	}

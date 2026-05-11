@@ -15,7 +15,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+      - -s -w -X github.com/dmwork-org/octo-cli/cmd.Version={{.Version}} -X github.com/dmwork-org/octo-cli/cmd.Commit={{.Commit}} -X github.com/dmwork-org/octo-cli/cmd.BuildDate={{.Date}}
 
 archives:
   - format: tar.gz

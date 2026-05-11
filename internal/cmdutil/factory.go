@@ -44,6 +44,11 @@ type Factory struct {
 	ClientFunc     func() (*client.Client, error)
 	RegistryFunc   func() *registry.Registry
 
+	// ErrorEmitted is set to true after EmitError writes an envelope to
+	// stderr. The top-level main func checks this to avoid double-emitting
+	// when RunE returns the same error that was already rendered.
+	ErrorEmitted bool
+
 	// Cached resolutions.
 	config *config.Config
 	cred   *credential.BotCredential
@@ -195,9 +200,11 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 
 // EmitError renders an error envelope to stderr. Non-ExitError values are
 // classified via WrapCLIError before rendering so the envelope always carries
-// a proper taxonomy. Always returns nil so cobra doesn't print its own error
+// a proper taxonomy. Sets ErrorEmitted so the top-level main func can avoid
+// double-emitting. Always returns nil so cobra doesn't print its own error
 // on top of ours; the caller sets the process exit code separately.
 func (f *Factory) EmitError(err error) error {
+	f.ErrorEmitted = true
 	return output.WriteError(f.IOStreams.ErrOut, WrapCLIError(err))
 }
 
