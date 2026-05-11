@@ -89,12 +89,12 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 		}
 		rt.queryFlags[flagName] = qf
 		if p.Required {
-			_ = cmd.MarkFlagRequired(flagName)
+			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
 		}
 	}
 }
 
-func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
+func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) { //nolint:gocyclo // flag registration has many branches by nature; well-structured
 	body := d.RequestBody
 	if body == nil {
 		return
@@ -106,7 +106,7 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 	if d.Multipart {
 		filePath := new(string)
 		cmd.Flags().StringVar(filePath, "file", "", "path to the file to upload (required)")
-		_ = cmd.MarkFlagRequired("file")
+		_ = cmd.MarkFlagRequired("file") //nolint:errcheck // static flag name, can't fail
 		rt.filePath = filePath
 	} else {
 		// Every non-multipart command with a body gets --data, even when we
@@ -136,7 +136,7 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		if prop.Format == "binary" {
 			continue
 		}
-		kind, ok := promotableKind(prop)
+		kind, ok := promotableKind(&prop)
 		if !ok {
 			continue
 		}
@@ -174,7 +174,7 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 // promotableKind returns the primitive flag kind a body property maps to,
 // or (0,false) if the property is complex (object, array-of-object, etc.)
 // and must go through --data. Enums inherit their base type.
-func promotableKind(p registry.SchemaInfo) (valueKind, bool) {
+func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 	switch p.Type {
 	case "string":
 		return kindString, true

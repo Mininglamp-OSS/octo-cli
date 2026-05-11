@@ -22,7 +22,7 @@ func NewStdIOStreams() *IOStreams {
 
 // NewTestIOStreams returns in-memory streams plus the concrete buffers so the
 // test can assert on captured output.
-func NewTestIOStreams() (*IOStreams, *bytes.Buffer, *bytes.Buffer, *bytes.Buffer) {
+func NewTestIOStreams() (streams *IOStreams, inBuf, outBuf, errBuf *bytes.Buffer) {
 	in := &bytes.Buffer{}
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}

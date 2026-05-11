@@ -12,6 +12,10 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -23,7 +27,7 @@ func main() {
 		// Factory (cobra-framework errors, PersistentPreRunE failures).
 		if !f.ErrorEmitted {
 			wrapped := cmdutil.WrapCLIError(err)
-			_ = output.WriteError(os.Stderr, wrapped)
+			_ = output.WriteError(os.Stderr, wrapped) //nolint:errcheck // best-effort write before exit
 		}
 
 		// Determine exit code from the structured error.
@@ -31,6 +35,7 @@ func main() {
 		if ee == nil {
 			ee = output.ErrWithHint("internal", "INTERNAL", err.Error(), "")
 		}
-		os.Exit(ee.ExitCode())
+		return ee.ExitCode()
 	}
+	return 0
 }

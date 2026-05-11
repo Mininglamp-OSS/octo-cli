@@ -81,7 +81,7 @@ func WriteError(w io.Writer, err error) error {
 // splitPagination detects the backend's paginated shape and splits it into a
 // data value (RawMessage of the array) and a pagination value. Returns ok=false
 // if raw is not an object with those two keys.
-func splitPagination(raw json.RawMessage) (data json.RawMessage, pagination json.RawMessage, ok bool) {
+func splitPagination(raw json.RawMessage) (data, pagination json.RawMessage, ok bool) {
 	if len(raw) == 0 {
 		return nil, nil, false
 	}

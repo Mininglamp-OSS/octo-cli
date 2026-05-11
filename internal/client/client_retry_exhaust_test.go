@@ -28,7 +28,7 @@ func TestDo_RetryExhaustionPreservesExitError(t *testing.T) {
 	c := newTestClient(srv)
 	// Keep the retry loop short — NoRetry=false still uses the full 4 attempts.
 	// We can't control retryClock (removed), so just rely on the bounded attempts.
-	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "/flaky"})
+	_, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/flaky"})
 	if err == nil {
 		t.Fatalf("expected error after exhausting retries")
 	}

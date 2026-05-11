@@ -45,7 +45,7 @@ func rootWithService(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *c
 	tf.SetClient(cli)
 	// Wire the registry explicitly to the one from the binary so the test
 	// exercises the real specs.
-	tf.RegistryFunc = func() *registry.Registry { return registry.MustNew() }
+	tf.RegistryFunc = registry.MustNew
 
 	root := &cobra.Command{Use: "octo", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
@@ -236,7 +236,7 @@ func TestDryRun_NoRequest(t *testing.T) {
 	tf.SetCredential(cred)
 	cli := client.New(cfg, cred, client.Options{DryRun: true, ErrOut: io.Discard})
 	tf.SetClient(cli)
-	tf.RegistryFunc = func() *registry.Registry { return registry.MustNew() }
+	tf.RegistryFunc = registry.MustNew
 
 	// A server we don't expect to hit — if we do, `called` flips.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))

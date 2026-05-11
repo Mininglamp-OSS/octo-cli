@@ -12,13 +12,11 @@ linters:
     - unused
     # additional correctness / style gates
     - bodyclose
-    - exportloopref
+    - copyloopvar
     - gocritic
     - gocyclo
     - nolintlint
     - revive
-  disable:
-    - scopelint
 
 linters-settings:
   errcheck:

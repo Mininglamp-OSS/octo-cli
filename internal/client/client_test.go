@@ -36,7 +36,7 @@ func TestDo_SetsAuthAndSpaceHeaders(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	if _, err := c.Do(context.Background(), Request{Method: "GET", Path: "/test"}); err != nil {
+	if _, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/test"}); err != nil {
 		t.Fatalf("Do: %v", err)
 	}
 	if gotAuth != "Bearer app_test" {
@@ -57,7 +57,7 @@ func TestDo_SetsContentTypeForBody(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), Request{
+	_, err := c.Do(context.Background(), &Request{
 		Method: "POST", Path: "/t", Body: map[string]string{"k": "v"},
 	})
 	if err != nil {
@@ -78,7 +78,7 @@ func TestDo_NoContentTypeForGET(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, _ = c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if gotCT != "" {
 		t.Errorf("Content-Type should be empty, got %q", gotCT)
 	}
@@ -94,7 +94,7 @@ func TestDo_BuildsQueryString(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), Request{
+	_, err := c.Do(context.Background(), &Request{
 		Method: "GET", Path: "/t",
 		Query: map[string][]string{"a": {"1"}, "b": {"two"}},
 	})
@@ -114,7 +114,7 @@ func TestDo_BackendErrorParsed(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -145,7 +145,7 @@ func TestDo_RetryOn503ThenSucceed(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	body, err := c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	body, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDo_NoRetryFlag(t *testing.T) {
 	c := newTestClient(srv)
 	c.options.NoRetry = true
 
-	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -188,7 +188,7 @@ func TestDo_NoRetryOn400(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -208,7 +208,7 @@ func TestDo_DryRunDoesNotCallServer(t *testing.T) {
 	c := newTestClient(srv)
 	c.options.DryRun = true
 
-	body, err := c.Do(context.Background(), Request{
+	body, err := c.Do(context.Background(), &Request{
 		Method: "POST", Path: "/x", Body: map[string]string{"title": "hi"},
 	})
 	if err != nil {
@@ -246,7 +246,7 @@ func TestDo_VerboseWritesToErrOut(t *testing.T) {
 	c.options.Verbose = true
 	c.options.ErrOut = &errBuf
 
-	_, _ = c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if !strings.Contains(errBuf.String(), "GET") {
 		t.Errorf("verbose trace missing: %q", errBuf.String())
 	}
@@ -270,12 +270,12 @@ func TestDo_ServiceURLRouting(t *testing.T) {
 	c := New(cfg, cred, Options{})
 	c.httpClient = mattersSrv.Client()
 
-	_, _ = c.Do(context.Background(), Request{Service: "matters", Method: "GET", Path: "/t"})
+	_, _ = c.Do(context.Background(), &Request{Service: "matters", Method: "GET", Path: "/t"})
 	if hit != "matters" {
 		t.Errorf("expected matters URL, got %q", hit)
 	}
 
-	_, _ = c.Do(context.Background(), Request{Method: "GET", Path: "/t"})
+	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if hit != "default" {
 		t.Errorf("expected default URL, got %q", hit)
 	}
@@ -318,7 +318,7 @@ func TestDo_BinaryResponse_RedirectReturnsLocationEnvelope(t *testing.T) {
 	defer srv.Close()
 
 	c := newBinaryClient(srv)
-	body, err := c.Do(context.Background(), Request{
+	body, err := c.Do(context.Background(), &Request{
 		Method: "GET", Path: "/dl", BinaryResponse: true,
 	})
 	if err != nil {
@@ -346,7 +346,7 @@ func TestDo_BinaryResponse_InlineBodyReturnsMetadata(t *testing.T) {
 	defer srv.Close()
 
 	c := newBinaryClient(srv)
-	body, err := c.Do(context.Background(), Request{
+	body, err := c.Do(context.Background(), &Request{
 		Method: "GET", Path: "/dl", BinaryResponse: true,
 	})
 	if err != nil {
@@ -457,7 +457,7 @@ func TestDo_DryRunReturnsSyntheticBody(t *testing.T) {
 	cred := &credential.BotCredential{Token: "app_drytok"}
 	c := New(cfg, cred, Options{DryRun: true})
 
-	body, err := c.Do(context.Background(), Request{
+	body, err := c.Do(context.Background(), &Request{
 		Method: "POST", Path: "/t", Body: map[string]string{"k": "v"},
 	})
 	if err != nil {
@@ -496,7 +496,7 @@ func TestDo_RetryAfterRespected(t *testing.T) {
 
 	c := newTestClient(srv)
 	start := time.Now()
-	body, err := c.Do(context.Background(), Request{Method: "GET", Path: "/r"})
+	body, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/r"})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("Do: %v", err)
@@ -526,7 +526,7 @@ func TestDo_VerboseLogsRequestBody(t *testing.T) {
 	c.options.Verbose = true
 	c.options.ErrOut = &errBuf
 
-	_, err := c.Do(context.Background(), Request{
+	_, err := c.Do(context.Background(), &Request{
 		Method: "POST", Path: "/t", Body: map[string]string{"k": "v"},
 	})
 	if err != nil {
@@ -551,7 +551,7 @@ func TestDo_UnknownServiceBaseURL(t *testing.T) {
 	cred := &credential.BotCredential{Token: "t"}
 	c := New(cfg, cred, Options{})
 
-	_, err := c.Do(context.Background(), Request{
+	_, err := c.Do(context.Background(), &Request{
 		Service: "matters", Method: "GET", Path: "/x",
 	})
 	if err == nil {

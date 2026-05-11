@@ -183,7 +183,7 @@ func renderCell(v any) string {
 		}
 		return "false"
 	case []any, map[string]any:
-		b, _ := json.Marshal(val)
+		b, _ := json.Marshal(val) //nolint:errcheck // val is pre-validated JSON-safe type
 		return string(b)
 	default:
 		return fmt.Sprintf("%v", val)

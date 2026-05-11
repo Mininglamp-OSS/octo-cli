@@ -62,7 +62,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if d.Multipart {
 		raw, ct, err := buildMultipartBody(cobraCmd, rt)
 		if err != nil {
-			_ = f.EmitError(err)
+			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
 		req.RawBody = raw
@@ -70,7 +70,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	} else {
 		body, err := resolveBody(f, cobraCmd, rt)
 		if err != nil {
-			_ = f.EmitError(err)
+			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
 		req.Body = body
@@ -78,10 +78,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
 	if rt.pageAll != nil && *rt.pageAll && !(f.Globals != nil && f.Globals.DryRun) {
-		return runPaginated(ctx, f, rt, req)
+		return runPaginated(ctx, f, rt, &req)
 	}
 
-	return emitOnce(ctx, f, req)
+	return emitOnce(ctx, f, &req)
 }
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data
@@ -129,15 +129,15 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 
 // emitOnce runs one request and emits the envelope. Returns the same error
 // value so cobra sets a non-zero exit code.
-func emitOnce(ctx context.Context, f *cmdutil.Factory, req client.Request) error {
+func emitOnce(ctx context.Context, f *cmdutil.Factory, req *client.Request) error {
 	cli, err := f.Client()
 	if err != nil {
-		_ = f.EmitError(err)
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
 	body, err := cli.Do(ctx, req)
 	if err != nil {
-		_ = f.EmitError(err)
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
 	return f.EmitSuccess(body)
@@ -149,10 +149,10 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, req client.Request) error
 // the context is cancelled. The merged result is a flat array of all data
 // items — the caller gets a single envelope with no _pagination block
 // (architecture §4.4).
-func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, firstReq client.Request) error {
+func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, firstReq *client.Request) error {
 	cli, err := f.Client()
 	if err != nil {
-		_ = f.EmitError(err)
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
 	pag := rt.detail.Pagination
@@ -166,16 +166,16 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 	}
 
 	merged := make([]json.RawMessage, 0, 64)
-	req := firstReq
+	req := *firstReq
 	for page := 0; page < limit; page++ {
-		body, err := cli.Do(ctx, req)
+		body, err := cli.Do(ctx, &req)
 		if err != nil {
-			_ = f.EmitError(err)
+			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
 		data, nextCursor, hasMore, perr := parsePage(body)
 		if perr != nil {
-			_ = f.EmitError(perr)
+			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
 		}
 		merged = append(merged, data...)
@@ -207,7 +207,7 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 
 // parsePage extracts {data:[], pagination:{has_more, next_cursor}} from a
 // backend response. Tolerant: missing fields → empty data, no more pages.
-func parsePage(body []byte) ([]json.RawMessage, string, bool, *output.ExitError) {
+func parsePage(body []byte) (items []json.RawMessage, cursor string, hasMore bool, exitErr *output.ExitError) {
 	if len(body) == 0 {
 		return nil, "", false, nil
 	}
