@@ -1,0 +1,284 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Bot Group API",
+    "version": "1.0.0",
+    "description": "Group read/write endpoints under dmworkim /v1/bot. App Bot is rejected for write ops (create/update/member-add/member-remove)."
+  },
+  "x-octo-service": "group",
+  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/groups": {
+      "get": {
+        "operationId": "group.list",
+        "summary": "List groups the bot is a member of",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "space_id", "in": "query", "schema": { "type": "string" }, "description": "optional filter by space" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "group_no": { "type": "string" },
+                      "name": { "type": "string" },
+                      "space_id": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}": {
+      "get": {
+        "operationId": "group.get",
+        "summary": "Get group info",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Group info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "group_no": { "type": "string" },
+                    "name": { "type": "string" },
+                    "notice": { "type": "string" },
+                    "creator": { "type": "string" },
+                    "status": { "type": "integer" },
+                    "created_at": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/members": {
+      "get": {
+        "operationId": "group.members",
+        "summary": "List group members",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "uid": { "type": "string" },
+                      "name": { "type": "string" },
+                      "role": { "type": "integer" },
+                      "robot": { "type": "integer" },
+                      "created_at": { "type": "string" },
+                      "owner_uid": { "type": "string" },
+                      "owner_name": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/md": {
+      "get": {
+        "operationId": "group.md-get",
+        "summary": "Read GROUP.md content",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "GROUP.md",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "content": { "type": "string" },
+                    "version": { "type": "integer" },
+                    "updated_at": { "type": "string" },
+                    "updated_by": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "group.md-update",
+        "summary": "Update GROUP.md content (bot must be bot_admin)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": { "content": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "version": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/createGroup": {
+      "post": {
+        "operationId": "group.create",
+        "summary": "Create a new group (User Bot only; App Bot rejected)",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["members"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "members": { "type": "array", "maxItems": 200, "items": { "type": "string" } },
+                  "creator": { "type": "string" },
+                  "space_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "group_no": { "type": "string" },
+                    "name": { "type": "string" },
+                    "skipped_members": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/info": {
+      "put": {
+        "operationId": "group.update",
+        "summary": "Update group name/notice (bot must be bot_admin; App Bot rejected)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "notice": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated" } }
+      }
+    },
+    "/v1/bot/groups/{group_no}/members/add": {
+      "post": {
+        "operationId": "group.member-add",
+        "summary": "Add members to group (App Bot rejected)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["members"],
+                "properties": {
+                  "members": { "type": "array", "maxItems": 200, "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Added" } }
+      }
+    },
+    "/v1/bot/groups/{group_no}/members/remove": {
+      "post": {
+        "operationId": "group.member-remove",
+        "summary": "Remove members from group (bot must be bot_admin; App Bot rejected)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["members"],
+                "properties": {
+                  "members": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Removed" } }
+      }
+    }
+  }
+}

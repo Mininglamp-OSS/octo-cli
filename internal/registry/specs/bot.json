@@ -1,0 +1,178 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Bot Identity API",
+    "version": "1.0.0",
+    "description": "Bot registration, metadata and presence endpoints under dmworkim /v1/bot."
+  },
+  "x-octo-service": "bot",
+  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/register": {
+      "post": {
+        "operationId": "bot.register",
+        "summary": "Register (authenticate) the bot and obtain IM token + URLs",
+        "description": "Routes by token prefix: app_* → App Bot, bf_* → User Bot.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "agent_platform": { "type": "string" },
+                  "agent_version": { "type": "string" },
+                  "plugin_version": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bot identity + connection info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "robot_id": { "type": "string" },
+                    "name": { "type": "string" },
+                    "im_token": { "type": "string" },
+                    "ws_url": { "type": "string" },
+                    "api_url": { "type": "string" },
+                    "owner_uid": { "type": "string" },
+                    "owner_channel_id": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/setCommands": {
+      "post": {
+        "operationId": "bot.set-commands",
+        "summary": "Publish the bot's command list",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["commands"],
+                "properties": {
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "command": { "type": "string" },
+                        "description": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Saved" } }
+      }
+    },
+    "/v1/bot/user/info": {
+      "get": {
+        "operationId": "bot.user-info",
+        "summary": "Look up a user by UID",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "uid", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "User info",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uid": { "type": "string" },
+                    "name": { "type": "string" },
+                    "avatar": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/space/members": {
+      "get": {
+        "operationId": "bot.space-members",
+        "summary": "List members of the bot's space",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "optional LIKE filter on name" },
+          { "name": "space_id", "in": "query", "schema": { "type": "string" }, "description": "override space (defaults to bot's space)" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "uid": { "type": "string" },
+                      "name": { "type": "string" },
+                      "robot": { "type": "integer" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/typing": {
+      "post": {
+        "operationId": "bot.typing",
+        "summary": "Send a typing indicator (throttled server-side)",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "channel_type"],
+                "properties": {
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Typing sent (or throttled)" } }
+      }
+    },
+    "/v1/bot/heartbeat": {
+      "post": {
+        "operationId": "bot.heartbeat",
+        "summary": "Report liveness (60s TTL in Redis)",
+        "x-octo-risk": "write",
+        "responses": { "200": { "description": "Heartbeat recorded" } }
+      }
+    }
+  }
+}

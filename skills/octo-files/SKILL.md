@@ -1,0 +1,121 @@
+---
+name: octo-files
+version: 0.4.0
+description: File operations (upload/download, presigned S3 credentials) plus bot housekeeping (register, set-commands, user-info, space-members, typing, heartbeat). Load after octo-shared.
+metadata:
+  requires:
+    bins: ["octo"]
+    skills: ["octo-shared"]
+---
+
+# octo-files — file I/O and bot housekeeping
+
+Two small domains are covered here because they share a base URL (`$OCTO_DMWORKIM_URL/v1/bot/*`) and are usually needed together:
+
+- `file` — 4 ops, no bot-kind restrictions
+- `bot` — 6 ops, no bot-kind restrictions
+
+## 1. File operations
+
+```bash
+octo file upload      --file ./report.pdf [--type chat] [--path subdir/]
+octo file download    <path> --format json > saved.bin      # see note below
+octo file credentials --filename report.pdf
+octo file presigned   --filename report.pdf
+```
+
+### `upload` — multipart form
+
+Unlike every other command, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path; `--type` (default `chat`) and `--path` become form text fields. Promoted body flags declared in the spec go in as text fields alongside the binary.
+
+The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `matter timeline add` or `message send`.
+
+### `download` — returns a presigned URL
+
+`file download <path>` issues a GET. The backend responds with a 302 redirect to the storage tier. The CLI does **not** stream raw bytes — instead it returns a JSON envelope containing the presigned URL:
+
+```bash
+octo file download /chat/2026/05/abc123.png
+# → {"ok":true,"data":{"url":"https://s3.../abc123.png?...","status":302,"content_type":"image/png"}}
+```
+
+To actually fetch the file, use the URL from the response:
+
+```bash
+octo file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out.png
+```
+
+### Direct-to-S3 uploads
+
+For files too large for multipart, ask the backend for a presigned target and upload directly:
+
+```bash
+cred=$(octo file presigned --filename big.zip)
+url=$(jq  -r '.data.uploadUrl'   <<<"$cred")
+ctype=$(jq -r '.data.contentType' <<<"$cred")
+curl -X PUT -T big.zip -H "Content-Type: $ctype" "$url"
+```
+
+`file presigned` returns `{uploadUrl, downloadUrl, method, contentType, key, expiresIn, expiredTime}` — a one-shot signed URL. `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, cdnBaseUrl, ...}`) for SDK-driven uploads. Pick the shape the backend gives you.
+
+## 2. Bot housekeeping
+
+```bash
+octo bot register       --data '{...registration payload...}'
+octo bot set-commands   --data '[{"name":"fix","desc":"create a matter"}, ...]'
+octo bot user-info      [--uid <uid>]      # no uid → info about *this* bot
+octo bot space-members                      # paginated (100 cap typical)
+octo bot typing         --channel-id <cid> --channel-type 1
+octo bot heartbeat
+```
+
+### `bot register` — special auth
+
+`register` is the **only** operation not behind the `authBot` middleware. The backend routes it by token prefix: `app_*` → `registerAppBot`, `bf_*` → `registerUserBot`. You still supply `OCTO_BOT_TOKEN`; the CLI treats the call like any other.
+
+Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-commands` to advertise slash-command metadata.
+
+### `user-info` gives you the owner_uid
+
+```bash
+owner=$(octo bot user-info --jq '.data.owner_uid')
+```
+
+This is the value `matter extract` requires as `creator_uid` (see `octo-matter` skill §6).
+
+### `typing` and `heartbeat`
+
+Both are fire-and-forget. `typing` signals an "…is typing" UI state in DM channels. `heartbeat` refreshes bot liveness — call it on a long-running poll loop so the platform knows the bot is alive.
+
+## 3. Common pattern: timeline attachment end-to-end
+
+```bash
+# 1. Upload the binary.
+up=$(octo file upload --file ./log.txt --type chat)
+url=$(jq -r '.data.url'  <<<"$up")
+name=$(jq -r '.data.name' <<<"$up")
+
+# 2. Attach it to a matter timeline entry.
+octo matter timeline add <matter_id> --data "$(jq -n \
+  --arg u "$url" --arg n "$name" \
+  '{content:"see log", attachments:[{url:$u, name:$n, type:"text/plain"}]}')"
+```
+
+## 4. Error recovery
+
+| Symptom                                          | Fix                                                                |
+|--------------------------------------------------|--------------------------------------------------------------------|
+| `upload` → `PAYLOAD_TOO_LARGE`                   | Use `file presigned` / `file credentials` and upload direct to S3. |
+| `upload` → `validation` "--file is required"     | Path is empty or unreadable; check permissions and absolute path.  |
+| `download` returns JSON instead of bytes          | Expected; extract `.data.url` and fetch with curl/wget.            |
+| `bot typing` returns 200 but no UI update        | Channel type must be `1` and the DM must exist.                    |
+| `bot register` rejected with `UNAUTHORIZED`      | Token prefix/env mismatch — confirm with `octo config show`.       |
+
+## 5. Schema lookup
+
+```bash
+octo schema file.upload
+octo schema file.download
+octo schema bot.register
+octo schema bot.user-info
+```

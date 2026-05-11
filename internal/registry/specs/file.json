@@ -1,0 +1,139 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Bot File API",
+    "version": "1.0.0",
+    "description": "File upload/download endpoints under dmworkim /v1/bot."
+  },
+  "x-octo-service": "file",
+  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/file/upload": {
+      "post": {
+        "operationId": "file.upload",
+        "summary": "Upload a file via multipart form",
+        "description": "multipart/form-data: file=<binary>. Max 100MB.",
+        "x-octo-risk": "write",
+        "x-octo-multipart": true,
+        "parameters": [
+          { "name": "type", "in": "query", "schema": { "type": "string", "default": "chat" }, "description": "storage bucket subdir" },
+          { "name": "path", "in": "query", "schema": { "type": "string" }, "description": "override generated path" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": { "type": "string" },
+                    "name": { "type": "string" },
+                    "size": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/file/download/{path}": {
+      "get": {
+        "operationId": "file.download",
+        "summary": "Download a file (302 redirect to presigned URL)",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          { "name": "path", "in": "path", "required": true, "schema": { "type": "string" }, "description": "storage key path (URL-encoded)" },
+          { "name": "filename", "in": "query", "schema": { "type": "string" }, "description": "override download filename" }
+        ],
+        "responses": { "302": { "description": "Redirect to presigned URL" } }
+      }
+    },
+    "/v1/bot/upload/credentials": {
+      "get": {
+        "operationId": "file.credentials",
+        "summary": "Obtain STS temp credentials for direct-to-COS upload",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "filename", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "STS credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "bucket": { "type": "string" },
+                    "region": { "type": "string" },
+                    "key": { "type": "string" },
+                    "credentials": {
+                      "type": "object",
+                      "properties": {
+                        "tmpSecretId": { "type": "string" },
+                        "tmpSecretKey": { "type": "string" },
+                        "sessionToken": { "type": "string" }
+                      }
+                    },
+                    "startTime": { "type": "integer" },
+                    "expiredTime": { "type": "integer" },
+                    "cdnBaseUrl": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/upload/presigned": {
+      "get": {
+        "operationId": "file.presigned",
+        "summary": "Get a presigned PUT URL for direct upload",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "filename", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presigned URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "method": { "type": "string" },
+                    "uploadUrl": { "type": "string" },
+                    "downloadUrl": { "type": "string" },
+                    "contentType": { "type": "string" },
+                    "key": { "type": "string" },
+                    "expiresIn": { "type": "integer" },
+                    "expiredTime": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

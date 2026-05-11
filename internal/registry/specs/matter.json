@@ -1,0 +1,466 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Matters Service",
+    "version": "1.0.0",
+    "description": "Matter (task) management. Backend: github.com/dmwork-org/matters."
+  },
+  "x-octo-service": "matter",
+  "x-octo-base-url": "OCTO_MATTERS_URL",
+  "x-octo-space-header": true,
+  "x-octo-status-values": ["open", "done", "archived"],
+  "paths": {
+    "/api/v1/matters": {
+      "post": {
+        "operationId": "matter.create",
+        "summary": "Create a matter",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateMatterReq" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Matter created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MatterDetail" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "matter.list",
+        "summary": "List matters (cursor-paginated)",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "limitParam": "limit",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["open", "done", "archived"] }, "description": "filter by matter status" },
+          { "name": "assignee_id", "in": "query", "schema": { "type": "string" }, "description": "assignee UID (accepts 'me' to resolve to caller)" },
+          { "name": "creator_id", "in": "query", "schema": { "type": "string" }, "description": "creator UID (accepts 'me')" },
+          { "name": "q", "in": "query", "schema": { "type": "string" }, "description": "full-text search" },
+          { "name": "source_channel_id", "in": "query", "schema": { "type": "string" }, "description": "filter by origin channel id" },
+          { "name": "source_channel_type", "in": "query", "schema": { "type": "integer", "enum": [1, 2, 5] }, "description": "filter by origin channel type" },
+          { "name": "channel_id", "in": "query", "schema": { "type": "string" }, "description": "filter by linked channel id" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "opaque pagination cursor" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated matter list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Matter" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/matters/extract": {
+      "post": {
+        "operationId": "matter.extract",
+        "summary": "Extract matter(s) from chat messages via LLM",
+        "description": "Bot path requires creator_uid == bot's owner_uid. Rate-limited.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ExtractReq" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Extraction result" }
+        }
+      }
+    },
+    "/api/v1/matters/{id}": {
+      "get": {
+        "operationId": "matter.get",
+        "summary": "Get matter detail",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "source_channel_id", "in": "query", "schema": { "type": "string" }, "description": "optional channel membership hint" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matter detail",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MatterDetail" } } }
+          }
+        }
+      },
+      "put": {
+        "operationId": "matter.update",
+        "summary": "Update matter fields",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateMatterReq" } }
+          }
+        },
+        "responses": {
+          "200": { "description": "Updated matter", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Matter" } } } }
+        }
+      },
+      "delete": {
+        "operationId": "matter.delete",
+        "summary": "Soft-delete a matter",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/api/v1/matters/{id}/status": {
+      "put": {
+        "operationId": "matter.transition",
+        "summary": "Transition matter status (open|done|archived)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["open", "done", "archived"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Matter detail after transition", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MatterDetail" } } } }
+        }
+      }
+    },
+    "/api/v1/matters/{id}/assignees": {
+      "post": {
+        "operationId": "matter.assignee.add",
+        "summary": "Add an assignee to a matter",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["user_id"],
+                "properties": { "user_id": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Added" } }
+      }
+    },
+    "/api/v1/matters/{id}/assignees/{uid}": {
+      "delete": {
+        "operationId": "matter.assignee.remove",
+        "summary": "Remove an assignee",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Removed" } }
+      }
+    },
+    "/api/v1/matters/{id}/channels": {
+      "post": {
+        "operationId": "matter.channel.link",
+        "summary": "Link a channel to a matter",
+        "description": "Bot path is forbidden — only user tokens may link channels post-creation.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "channel_type"],
+                "properties": {
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5] },
+                  "channel_name": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Linked", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MatterChannel" } } } } }
+      }
+    },
+    "/api/v1/matters/{id}/channels/{channel_id}": {
+      "delete": {
+        "operationId": "matter.channel.unlink",
+        "summary": "Unlink a channel from a matter",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "channel_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Unlinked" } }
+      }
+    },
+    "/api/v1/matters/{id}/timeline": {
+      "post": {
+        "operationId": "matter.timeline.add",
+        "summary": "Add a timeline entry (may include attachments or LLM extraction)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/TimelineCreateReq" } }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created entry (or LLM result)",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TimelineEntry" } } }
+          }
+        }
+      },
+      "get": {
+        "operationId": "matter.timeline.list",
+        "summary": "List timeline entries (cursor-paginated)",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "limitParam": "limit",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "source_channel_id", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated timeline",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/TimelineEntry" } },
+                    "pagination": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/matters/{id}/timeline/{entry_id}": {
+      "delete": {
+        "operationId": "matter.timeline.delete",
+        "summary": "Delete a timeline entry",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "entry_id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Matter": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "seq_no": { "type": "integer" },
+          "space_id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "creator_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "done", "archived"] },
+          "deadline": { "type": "string", "format": "date-time" },
+          "remind_at": { "type": "string", "format": "date-time" },
+          "source_channel_id": { "type": "string" },
+          "source_channel_type": { "type": "integer" },
+          "source_name": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MatterDetail": {
+        "type": "object",
+        "properties": {
+          "matter": { "$ref": "#/components/schemas/Matter" },
+          "assignees": { "type": "array", "items": { "$ref": "#/components/schemas/MatterAssignee" } },
+          "channels": { "type": "array", "items": { "$ref": "#/components/schemas/MatterChannel" } }
+        }
+      },
+      "MatterAssignee": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "matter_id": { "type": "string" },
+          "user_id": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "MatterChannel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "matter_id": { "type": "string" },
+          "channel_id": { "type": "string" },
+          "channel_type": { "type": "integer" },
+          "channel_name": { "type": "string" },
+          "linked_by": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TimelineEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "matter_id": { "type": "string" },
+          "user_id": { "type": "string" },
+          "content": { "type": "string" },
+          "channel_id": { "type": "string" },
+          "channel_type": { "type": "integer" },
+          "source_channel_id": { "type": "string" },
+          "source_msgs": { "type": "array", "items": { "type": "string" } },
+          "related_uids": { "type": "array", "items": { "type": "string" } },
+          "created_at": { "type": "string", "format": "date-time" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/TimelineAttachment" } }
+        }
+      },
+      "TimelineAttachment": {
+        "type": "object",
+        "properties": {
+          "file_url": { "type": "string" },
+          "file_name": { "type": "string" },
+          "file_size": { "type": "integer" },
+          "mime_type": { "type": "string" }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "has_more": { "type": "boolean" },
+          "next_cursor": { "type": "string" }
+        }
+      },
+      "CreateMatterReq": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 500 },
+          "description": { "type": "string", "maxLength": 10000 },
+          "assignee_ids": { "type": "array", "items": { "type": "string" } },
+          "deadline": { "type": "string", "format": "date-time", "description": "RFC3339 timestamp" },
+          "remind_at": { "type": "string", "format": "date-time", "description": "RFC3339 timestamp" },
+          "source_channel_id": { "type": "string" },
+          "source_channel_type": { "type": "integer", "enum": [1, 2, 5] },
+          "source_name": { "type": "string" }
+        }
+      },
+      "UpdateMatterReq": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "maxLength": 500 },
+          "description": { "type": "string", "maxLength": 10000 },
+          "deadline": { "type": "string", "format": "date-time" },
+          "remind_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "TimelineCreateReq": {
+        "type": "object",
+        "properties": {
+          "content": { "type": "string", "maxLength": 10000 },
+          "attachments": {
+            "type": "array",
+            "maxItems": 10,
+            "items": { "$ref": "#/components/schemas/TimelineAttachment" }
+          },
+          "channel_type": { "type": "integer", "enum": [1, 2, 5] },
+          "channel_id": { "type": "string" },
+          "channel_name": { "type": "string" },
+          "participant_uid": { "type": "string" },
+          "matter_id": { "type": "string" },
+          "msgs": { "type": "array", "maxItems": 200, "items": { "type": "object" } }
+        }
+      },
+      "ExtractReq": {
+        "type": "object",
+        "required": ["channel_id", "channel_type", "creator_uid", "msgs"],
+        "properties": {
+          "channel_id": { "type": "string" },
+          "channel_type": { "type": "integer", "enum": [1, 2, 5] },
+          "channel_name": { "type": "string" },
+          "creator_uid": { "type": "string", "description": "For bot calls must equal bot owner UID" },
+          "participant_uid": { "type": "string" },
+          "msgs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "message_id": { "type": "string" },
+                "from_uid": { "type": "string" },
+                "from_uname": { "type": "string" },
+                "timestamp": { "type": "integer" },
+                "content": { "type": "string" },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "file_name": { "type": "string" },
+                      "file_url": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

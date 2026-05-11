@@ -1,0 +1,138 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Bot Message API",
+    "version": "1.0.0",
+    "description": "Bot messaging endpoints under dmworkim /v1/bot."
+  },
+  "x-octo-service": "message",
+  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/sendMessage": {
+      "post": {
+        "operationId": "message.send",
+        "summary": "Send a message to a channel",
+        "description": "App Bot: DM-only (channel_type=1) and requires friend relationship. User Bot: DM + group + thread (requires membership).",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "channel_type", "payload"],
+                "properties": {
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "stream_no": { "type": "string", "description": "optional stream session identifier" },
+                  "payload": { "type": "object", "description": "message payload (content, type, mention, etc.)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Send result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message_id": { "type": "string" },
+                    "message_seq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/message/edit": {
+      "post": {
+        "operationId": "message.edit",
+        "summary": "Edit a previously-sent bot message",
+        "description": "Only the original sender bot may edit. App Bot: DM only.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message_id", "channel_id", "channel_type", "content_edit"],
+                "properties": {
+                  "message_id": { "type": "string" },
+                  "message_seq": { "type": "integer" },
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer" },
+                  "content_edit": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Edit accepted" } }
+      }
+    },
+    "/v1/bot/messages/sync": {
+      "post": {
+        "operationId": "message.sync",
+        "summary": "Sync channel messages (pull)",
+        "description": "App Bot: DM only. User Bot: DM + group + thread (membership required).",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "channel_type"],
+                "properties": {
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer" },
+                  "start_message_seq": { "type": "integer" },
+                  "end_message_seq": { "type": "integer" },
+                  "limit": { "type": "integer", "default": 50, "maximum": 200 },
+                  "pull_mode": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/readReceipt": {
+      "post": {
+        "operationId": "message.read-receipt",
+        "summary": "Mark messages as read",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "message_ids"],
+                "properties": {
+                  "channel_id": { "type": "string" },
+                  "channel_type": { "type": "integer", "default": 1 },
+                  "message_ids": { "type": "array", "maxItems": 100, "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Read receipts recorded" } }
+      }
+    }
+  }
+}
