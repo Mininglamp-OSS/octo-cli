@@ -381,6 +381,16 @@ func TestBackoffDelay_Grows(t *testing.T) {
 	}
 }
 
+func TestBackoffDelay_OverflowSafe(t *testing.T) {
+	// Extreme attempt values must not overflow or panic.
+	for _, attempt := range []int{0, -1, 50, 100, 1000} {
+		d := backoffDelay(attempt)
+		if d < 0 || d > defaultMaxDelay {
+			t.Errorf("attempt %d: delay %s out of [0, %s]", attempt, d, defaultMaxDelay)
+		}
+	}
+}
+
 // --- expanded coverage: parseRetryAfter ---
 
 func TestParseRetryAfter_HTTPDate(t *testing.T) {

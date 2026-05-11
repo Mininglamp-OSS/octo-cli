@@ -283,6 +283,9 @@ func TestFactory_EmitError_ExitError(t *testing.T) {
 	if err := f.Factory.EmitError(ee); err != nil {
 		t.Fatalf("EmitError: %v", err)
 	}
+	if !f.Factory.ErrorEmitted {
+		t.Error("ErrorEmitted should be true after EmitError")
+	}
 	var env map[string]any
 	if err := json.Unmarshal(f.ErrOut.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -293,6 +296,13 @@ func TestFactory_EmitError_ExitError(t *testing.T) {
 	errObj, _ := env["error"].(map[string]any)
 	if errObj["type"] != "validation" {
 		t.Errorf("type = %v", errObj["type"])
+	}
+}
+
+func TestFactory_ErrorEmitted_InitiallyFalse(t *testing.T) {
+	f := NewTestFactory()
+	if f.Factory.ErrorEmitted {
+		t.Error("ErrorEmitted should be false on new Factory")
 	}
 }
 
