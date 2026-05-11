@@ -229,7 +229,7 @@ func TestDo_DryRunDoesNotCallServer(t *testing.T) {
 	}
 	// token must be redacted
 	hdrs, _ := out["headers"].(map[string]any)
-	if auth, _ := hdrs["Authorization"].(string); !strings.Contains(auth, "****") {
+	if auth, _ := hdrs["Authorization"].(string); !strings.Contains(auth, "***") {
 		t.Errorf("token not redacted: %v", auth)
 	}
 }
@@ -603,21 +603,17 @@ func TestRedactToken(t *testing.T) {
 	cases := []struct {
 		in, want string
 	}{
-		{"", "****"},
-		{"short", "****"},
-		{"abcdefgh", "****"},
-		{"app_abcdef12345678xyzzy", "app_****zzzy"[:4] + "****" + "zzzy"[len("zzzy")-4:]}, // redundant — just check prefix+suffix structure below
+		{"", "***"},
+		{"short", "***"},
+		{"abcdefgh", "***"},
+		{"app_abcdefgh12345678", "app_***"},
+		{"bf_something", "bf_***"},
+		{"unknown_format", "***"},
 	}
-	_ = cases
-	got := redactToken("app_abcdefghijklmnop")
-	if !strings.HasPrefix(got, "app_") {
-		t.Errorf("prefix missing: %q", got)
-	}
-	if !strings.Contains(got, "****") {
-		t.Errorf("mask missing: %q", got)
-	}
-	if len(got) != len("app_")+len("****")+4 {
-		t.Errorf("unexpected shape: %q", got)
+	for _, c := range cases {
+		if got := redactToken(c.in); got != c.want {
+			t.Errorf("redactToken(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
 
