@@ -35,14 +35,13 @@ Before acting, inspect `octo config show` to confirm the token in use.
 Different Octo services run at different URLs. Set whichever you need:
 
 ```bash
-export OCTO_API_URL=http://127.0.0.1:8080          # fallback for unknown services
-export OCTO_MATTERS_URL=https://matters.example    # matter domain
-export OCTO_DMWORKIM_URL=https://dmworkim.example  # message, group, thread, file, bot, event
+export OCTO_API_BASE_URL=https://api.example.com   # unified API base URL for all services
+
 export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bots
 export OCTO_FORMAT=json                            # default output format
 ```
 
-Routing rule: each operation's spec declares its base-URL env var (`x-octo-base-url`); the CLI picks that URL, falling back to `OCTO_API_URL`. You do not pick a service manually except in `octo api --service <key>`.
+Routing: all services go through `OCTO_API_BASE_URL`. The `--service` flag on `octo api` is for documentation only — all traffic routes to the same gateway.
 
 ## 3. Output: the JSON envelope
 

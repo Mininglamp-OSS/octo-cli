@@ -91,7 +91,7 @@ flags are not auto-generated and --page-all is not available.`,
 
 	cmd.Flags().StringVar(&paramsSpec, "params", "", "query parameters as JSON object (e.g. '{\"status\":\"open\"}')")
 	cmd.Flags().StringVar(&dataSpec, "data", "", "request body: inline JSON, @filepath, or @- for stdin")
-	cmd.Flags().StringVar(&service, "service", "", "service key override (matters | dmworkim). Default: OCTO_API_URL")
+	cmd.Flags().StringVar(&service, "service", "", "service key override (matters | dmworkim). Default: OCTO_API_BASE_URL")
 	return cmd
 }
 

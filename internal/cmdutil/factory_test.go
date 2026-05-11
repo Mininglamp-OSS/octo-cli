@@ -29,7 +29,7 @@ func TestNewDefaultFactory_InitializesFields(t *testing.T) {
 
 func TestFactory_ConfigCaches(t *testing.T) {
 	t.Setenv("OCTO_BOT_TOKEN", "app_xxx")
-	t.Setenv("OCTO_API_URL", "http://x")
+	t.Setenv("OCTO_API_BASE_URL", "http://x")
 
 	f := NewDefaultFactory()
 	c1, err := f.Config()
@@ -119,7 +119,7 @@ func TestFactory_CredentialCaches(t *testing.T) {
 
 func TestFactory_ClientCaches(t *testing.T) {
 	t.Setenv("OCTO_BOT_TOKEN", "app_yyy")
-	t.Setenv("OCTO_API_URL", "http://x")
+	t.Setenv("OCTO_API_BASE_URL", "http://x")
 	f := NewDefaultFactory()
 
 	c1, err := f.Client()

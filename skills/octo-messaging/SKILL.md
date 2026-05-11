@@ -10,7 +10,7 @@ metadata:
 
 # octo-messaging — messages, groups, threads, events
 
-Three related domains live here. They all call `$OCTO_DMWORKIM_URL/v1/bot/*`.
+Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*`.
 
 | Domain    | App Bot           | User Bot |
 |-----------|-------------------|----------|

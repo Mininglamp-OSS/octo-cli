@@ -6,7 +6,7 @@
     "description": "Bot event queue endpoints under dmworkim /v1/bot. Events are held in a Redis sorted set until ACK'd."
   },
   "x-octo-service": "event",
-  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
     "/v1/bot/events": {

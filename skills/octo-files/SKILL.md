@@ -10,7 +10,7 @@ metadata:
 
 # octo-files — file I/O and bot housekeeping
 
-Two small domains are covered here because they share a base URL (`$OCTO_DMWORKIM_URL/v1/bot/*`) and are usually needed together:
+Two small domains are covered here because they share a base URL (`$OCTO_API_BASE_URL/v1/bot/*`) and are usually needed together:
 
 - `file` — 4 ops, no bot-kind restrictions
 - `bot` — 6 ops, no bot-kind restrictions
