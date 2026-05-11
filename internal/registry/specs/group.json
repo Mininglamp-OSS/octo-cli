@@ -6,7 +6,7 @@
     "description": "Group read/write endpoints under dmworkim /v1/bot. App Bot is rejected for write ops (create/update/member-add/member-remove)."
   },
   "x-octo-service": "group",
-  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
     "/v1/bot/groups": {

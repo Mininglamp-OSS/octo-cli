@@ -12,7 +12,7 @@ metadata:
 
 A **matter** is the Octo equivalent of a task or todo. The domain has 17 operations across five groups: core CRUD, status transitions, assignees, channels, and timeline. Plus one LLM helper: `matter extract`.
 
-Backend: matters service at `$OCTO_MATTERS_URL/api/v1/matters`.
+Backend: matters service at `$OCTO_API_BASE_URL/api/v1/matters`.
 Both App Bot and User Bot can call every operation in this domain.
 
 ## 1. Core CRUD

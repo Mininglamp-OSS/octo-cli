@@ -45,9 +45,7 @@ func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 				space = f.Globals.Space
 			}
 			payload := map[string]any{
-				"api_url":          cfg.APIURL,
-				"matters_url":      urlOrNull(cfg.MattersURL),
-				"dmworkim_url":     urlOrNull(cfg.DmworkIMURL),
+				"api_base_url":     cfg.APIBaseURL,
 				"space_id":         nullableString(space),
 				"format":           cfg.Format,
 				"bot_token":        maskToken(cfg.BotToken),
@@ -95,13 +93,6 @@ func botKind(tok string) any {
 		return "user_bot"
 	}
 	return "unknown"
-}
-
-func urlOrNull(u string) any {
-	if u == "" {
-		return nil
-	}
-	return u
 }
 
 func nullableString(s string) any {

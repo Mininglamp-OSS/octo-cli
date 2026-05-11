@@ -32,11 +32,9 @@ func rootWithService(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *c
 
 	tf := cmdutil.NewTestFactory()
 	cfg := &config.Config{
-		APIURL:      srv.URL,
-		MattersURL:  srv.URL,
-		DmworkIMURL: srv.URL,
-		BotToken:    "app_test",
-		Format:      "json",
+		APIBaseURL: srv.URL,
+		BotToken:   "app_test",
+		Format:     "json",
 	}
 	tf.SetConfig(cfg)
 	cred := &credential.BotCredential{Token: "app_test", Source: "test"}
@@ -230,7 +228,7 @@ func TestMatterStatusAliases(t *testing.T) {
 func TestDryRun_NoRequest(t *testing.T) {
 	called := false
 	tf := cmdutil.NewTestFactory()
-	cfg := &config.Config{APIURL: "http://dry.local", MattersURL: "http://dry.local", BotToken: "app_test", Format: "json"}
+	cfg := &config.Config{APIBaseURL: "http://dry.local", BotToken: "app_test", Format: "json"}
 	tf.SetConfig(cfg)
 	cred := &credential.BotCredential{Token: "app_test", Source: "test"}
 	tf.SetCredential(cred)

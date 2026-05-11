@@ -6,7 +6,7 @@
     "description": "Bot registration, metadata and presence endpoints under dmworkim /v1/bot."
   },
   "x-octo-service": "bot",
-  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
     "/v1/bot/register": {

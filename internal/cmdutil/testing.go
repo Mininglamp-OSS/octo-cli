@@ -25,9 +25,9 @@ type TestFactory struct {
 func NewTestFactory() *TestFactory {
 	streams, in, out, errOut := NewTestIOStreams()
 	cfg := &config.Config{
-		APIURL:   "http://test.local",
-		BotToken: "app_test",
-		Format:   "json",
+		APIBaseURL: "http://test.local",
+		BotToken:   "app_test",
+		Format:     "json",
 	}
 	cred := &credential.BotCredential{
 		Token:  "app_test",

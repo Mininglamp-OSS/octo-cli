@@ -139,11 +139,9 @@ func TestCmd_SchemaUnknownOperation(t *testing.T) {
 func TestCmd_ConfigShow(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{
-		APIURL:      "http://api.local",
-		MattersURL:  "http://matters.local",
-		DmworkIMURL: "",
-		BotToken:    "app_abcdefgh12345",
-		Format:      "json",
+		APIBaseURL: "http://gateway.local",
+		BotToken:   "app_abcdefgh12345",
+		Format:     "json",
 	})
 
 	out, _, err := execRoot(t, f, "config", "show")
@@ -155,8 +153,8 @@ func TestCmd_ConfigShow(t *testing.T) {
 		t.Fatalf("unmarshal: %v\n%s", jerr, out)
 	}
 	data, _ := env["data"].(map[string]any)
-	if data["api_url"] != "http://api.local" {
-		t.Errorf("api_url = %v", data["api_url"])
+	if data["api_base_url"] != "http://gateway.local" {
+		t.Errorf("api_base_url = %v", data["api_base_url"])
 	}
 	// Masked token: "app_abcd***".
 	tok, _ := data["bot_token"].(string)
@@ -186,7 +184,7 @@ func TestCmd_API_GET(t *testing.T) {
 	defer srv.Close()
 
 	f := newTestFactoryWithReg()
-	cfg := &config.Config{APIURL: srv.URL, BotToken: "app_test", Format: "json"}
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
 	f.SetConfig(cfg)
 	cred := &credential.BotCredential{Token: "app_test"}
 	f.SetCredential(cred)
@@ -223,7 +221,7 @@ func TestCmd_API_POSTBody(t *testing.T) {
 	defer srv.Close()
 
 	f := newTestFactoryWithReg()
-	cfg := &config.Config{APIURL: srv.URL, BotToken: "app_test", Format: "json"}
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
 	f.SetConfig(cfg)
 	f.SetCredential(&credential.BotCredential{Token: "app_test"})
 	f.SetClient(client.New(cfg, &credential.BotCredential{Token: "app_test"}, client.Options{}))
@@ -278,7 +276,7 @@ func TestCmd_DryRunNoServerCall(t *testing.T) {
 	defer srv.Close()
 
 	f := newTestFactoryWithReg()
-	cfg := &config.Config{APIURL: srv.URL, BotToken: "app_test", Format: "json"}
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
 	f.SetConfig(cfg)
 	cred := &credential.BotCredential{Token: "app_test"}
 	f.SetCredential(cred)
@@ -315,7 +313,7 @@ func TestCmd_UnknownCommand(t *testing.T) {
 // yielding a validation error (NOT on skip-list commands like `version`).
 func TestCmd_MissingTokenOnServiceCommand(t *testing.T) {
 	f := newTestFactoryWithReg()
-	f.SetConfig(&config.Config{APIURL: "http://x", Format: "json"}) // no BotToken
+	f.SetConfig(&config.Config{APIBaseURL: "http://x", Format: "json"}) // no BotToken
 
 	_, _, err := execRoot(t, f, "matter", "list")
 	if err == nil {
@@ -381,15 +379,6 @@ func TestNullableString(t *testing.T) {
 	}
 	if got := nullableString("x"); got != "x" {
 		t.Errorf("non-empty → %v", got)
-	}
-}
-
-func TestUrlOrNull(t *testing.T) {
-	if got := urlOrNull(""); got != nil {
-		t.Errorf("empty → %v", got)
-	}
-	if got := urlOrNull("http://x"); got != "http://x" {
-		t.Errorf("value → %v", got)
 	}
 }
 

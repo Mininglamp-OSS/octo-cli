@@ -6,7 +6,7 @@
     "description": "Matter (task) management. Backend: github.com/dmwork-org/matters."
   },
   "x-octo-service": "matter",
-  "x-octo-base-url": "OCTO_MATTERS_URL",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": true,
   "x-octo-status-values": ["open", "done", "archived"],
   "paths": {

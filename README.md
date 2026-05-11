@@ -82,8 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/dmwork-org/octo-cli/main/install.sh
 ```bash
 # Authenticate as a bot.
 export OCTO_BOT_TOKEN="bf_your_user_bot_token"
-export OCTO_MATTERS_URL="https://matters.example.com"
-export OCTO_DMWORKIM_URL="https://dmworkim.example.com"
+export OCTO_API_BASE_URL="https://api.example.com"
 
 # Matters (todos/tasks)
 octo matter list --status open --assignee me
@@ -131,18 +130,14 @@ an **App Bot** (`app_*`) or **User Bot** (`bf_*`) token:
 The CLI does not enforce capability locally; the backend rejects
 unsupported operations with `FORBIDDEN`.
 
-### Multi-service URLs
+### API Base URL
 
-Different Octo services live at different base URLs. Each operation's spec
-declares its `x-octo-base-url`; the CLI picks that URL, with `OCTO_API_URL`
-as a fallback.
+All backend services are accessed through a single API base URL.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
 | `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Required.                 |
-| `OCTO_API_URL`      | Fallback base URL.                                       |
-| `OCTO_MATTERS_URL`  | Matters service.                                         |
-| `OCTO_DMWORKIM_URL` | dmworkim (message, group, thread, file, bot, event).     |
+| `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 

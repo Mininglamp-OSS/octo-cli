@@ -6,7 +6,7 @@
     "description": "Thread endpoints under dmworkim /v1/bot. All thread operations are rejected for App Bot."
   },
   "x-octo-service": "thread",
-  "x-octo-base-url": "OCTO_DMWORKIM_URL",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
     "/v1/bot/groups/{group_no}/threads": {

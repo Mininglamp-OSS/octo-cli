@@ -111,7 +111,7 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	if base == "" {
 		return nil, output.ErrValidation(
 			fmt.Sprintf("no base URL configured for service %q", req.Service),
-			fmt.Sprintf("set %s or OCTO_API_URL", serviceEnvHint(req.Service)),
+			fmt.Sprintf("set %s", config.EnvAPIBaseURL),
 		)
 	}
 
@@ -336,16 +336,6 @@ func buildURL(base, path string, query url.Values) (string, error) {
 		u.RawQuery = q.Encode()
 	}
 	return u.String(), nil
-}
-
-func serviceEnvHint(service string) string {
-	switch service {
-	case "matters":
-		return config.EnvMattersURL
-	case "dmworkim":
-		return config.EnvDmworkIMURL
-	}
-	return config.EnvAPIURL
 }
 
 func truncate(s string, n int) string {

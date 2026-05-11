@@ -71,8 +71,8 @@ func TestGetOperationMatterCreate(t *testing.T) {
 	if op.Risk != "write" {
 		t.Errorf("risk: got %q, want write", op.Risk)
 	}
-	if op.BaseURLEnv != "OCTO_MATTERS_URL" {
-		t.Errorf("base url env: got %q, want OCTO_MATTERS_URL", op.BaseURLEnv)
+	if op.BaseURLEnv != "OCTO_API_BASE_URL" {
+		t.Errorf("base url env: got %q, want OCTO_API_BASE_URL", op.BaseURLEnv)
 	}
 	if !op.SpaceHeader {
 		t.Error("space header: want true for matter domain")
@@ -127,8 +127,8 @@ func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
 	if !ok {
 		t.Fatal("message.send not found")
 	}
-	if op.BaseURLEnv != "OCTO_DMWORKIM_URL" {
-		t.Errorf("base url env: got %q, want OCTO_DMWORKIM_URL", op.BaseURLEnv)
+	if op.BaseURLEnv != "OCTO_API_BASE_URL" {
+		t.Errorf("base url env: got %q, want OCTO_API_BASE_URL", op.BaseURLEnv)
 	}
 	if op.SpaceHeader {
 		t.Error("space header: want false for dmworkim domain")

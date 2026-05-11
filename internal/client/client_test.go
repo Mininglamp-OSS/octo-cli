@@ -18,7 +18,7 @@ import (
 )
 
 func newTestClient(srv *httptest.Server) *Client {
-	cfg := &config.Config{APIURL: srv.URL}
+	cfg := &config.Config{APIBaseURL: srv.URL}
 	cred := &credential.BotCredential{Token: "app_test", SpaceID: "space-1"}
 	c := New(cfg, cred, Options{})
 	c.httpClient = srv.Client()
@@ -253,31 +253,32 @@ func TestDo_VerboseWritesToErrOut(t *testing.T) {
 }
 
 func TestDo_ServiceURLRouting(t *testing.T) {
-	var hit string
-	mattersSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = "matters"
-		w.Write([]byte(`{}`))
+	// With the unified API base URL model, all services route to APIBaseURL.
+	var hitService string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitService = r.URL.Path
+		w.Write([]byte(`{}`)) //nolint:errcheck // test
 	}))
-	defer mattersSrv.Close()
-	defaultSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hit = "default"
-		w.Write([]byte(`{}`))
-	}))
-	defer defaultSrv.Close()
+	defer srv.Close()
 
-	cfg := &config.Config{APIURL: defaultSrv.URL, MattersURL: mattersSrv.URL}
+	cfg := &config.Config{APIBaseURL: srv.URL}
 	cred := &credential.BotCredential{Token: "app_test"}
 	c := New(cfg, cred, Options{})
-	c.httpClient = mattersSrv.Client()
+	c.httpClient = srv.Client()
 
-	_, _ = c.Do(context.Background(), &Request{Service: "matters", Method: "GET", Path: "/t"})
-	if hit != "matters" {
-		t.Errorf("expected matters URL, got %q", hit)
+	_, _ = c.Do(context.Background(), &Request{Service: "matters", Method: "GET", Path: "/api/v1/matters"})
+	if hitService != "/api/v1/matters" {
+		t.Errorf("matters service should route to gateway, got path %q", hitService)
 	}
 
-	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
-	if hit != "default" {
-		t.Errorf("expected default URL, got %q", hit)
+	_, _ = c.Do(context.Background(), &Request{Service: "dmworkim", Method: "GET", Path: "/v1/bot/info"})
+	if hitService != "/v1/bot/info" {
+		t.Errorf("dmworkim service should route to gateway, got path %q", hitService)
+	}
+
+	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/fallback"})
+	if hitService != "/fallback" {
+		t.Errorf("default service should route to gateway, got path %q", hitService)
 	}
 }
 
@@ -298,7 +299,7 @@ func TestParseRetryAfter_Empty(t *testing.T) {
 // newBinaryClient returns a Client that does NOT follow redirects, so 302s
 // surface to Do for the binary envelope path.
 func newBinaryClient(srv *httptest.Server) *Client {
-	cfg := &config.Config{APIURL: srv.URL}
+	cfg := &config.Config{APIBaseURL: srv.URL}
 	cred := &credential.BotCredential{Token: "app_test"}
 	c := New(cfg, cred, Options{})
 	// srv.Client() follows redirects by default; keep our no-follow policy.
@@ -453,7 +454,7 @@ func TestBuildURL_Invalid(t *testing.T) {
 // --- dry-run integration via Do ---
 
 func TestDo_DryRunReturnsSyntheticBody(t *testing.T) {
-	cfg := &config.Config{APIURL: "http://ignored"}
+	cfg := &config.Config{APIBaseURL: "http://ignored"}
 	cred := &credential.BotCredential{Token: "app_drytok"}
 	c := New(cfg, cred, Options{DryRun: true})
 
@@ -567,7 +568,7 @@ func TestDo_UnknownServiceBaseURL(t *testing.T) {
 
 func TestNew_InvalidTimeoutWarns(t *testing.T) {
 	var buf bytes.Buffer
-	cfg := &config.Config{APIURL: "http://x"}
+	cfg := &config.Config{APIBaseURL: "http://x"}
 	c := New(cfg, &credential.BotCredential{Token: "t"}, Options{
 		Timeout: "not-a-duration",
 		ErrOut:  &buf,
