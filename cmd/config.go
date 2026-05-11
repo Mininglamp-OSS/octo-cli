@@ -22,7 +22,7 @@ func newConfigCmd(f *cmdutil.Factory) *cobra.Command {
 }
 
 // newConfigShowCmd prints the currently resolved configuration as a success
-// envelope. The bot token is masked (first 8 chars + "***") so an agent can
+// envelope. The bot token is masked (prefix only + "***") so an agent can
 // verify *which* bot is in use without leaking the secret.
 //
 // Resolution goes through the Factory so the values reflect the same path the
@@ -63,17 +63,19 @@ func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 }
 
-// maskToken returns the token's first 8 chars followed by "***" (or a shorter
-// prefix if the token is that short). Empty tokens return null so envelope
-// consumers can detect the unconfigured case cleanly.
+// maskToken returns only the known token type prefix followed by "***", so
+// the bot kind is visible without leaking any token entropy. Empty tokens
+// return null so envelope consumers can detect the unconfigured case cleanly.
 func maskToken(tok string) any {
-	if tok == "" {
+	switch {
+	case tok == "":
 		return nil
+	case len(tok) >= 4 && tok[:4] == "app_":
+		return "app_***"
+	case len(tok) >= 3 && tok[:3] == "bf_":
+		return "bf_***"
 	}
-	if len(tok) <= 8 {
-		return tok + "***"
-	}
-	return tok[:8] + "***"
+	return "***"
 }
 
 func tokenSource(tok string) any {

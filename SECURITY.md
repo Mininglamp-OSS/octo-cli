@@ -27,3 +27,16 @@ This policy covers:
 - SQL injection or data exposure
 - Denial of service via resource exhaustion
 - Sensitive data in logs or error responses
+
+## Token Handling
+
+`octo config show` displays the active configuration including bot token metadata.
+The token value is masked — only the known type prefix (`app_` or `bf_`) is shown,
+followed by `***`. No token entropy is exposed in CLI output.
+
+| Token format | Displayed as |
+|---|---|
+| `app_...` | `app_***` |
+| `bf_...` | `bf_***` |
+| Other | `***` |
+| Empty | `null` |

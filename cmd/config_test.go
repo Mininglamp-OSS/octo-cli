@@ -9,9 +9,11 @@ func TestMaskToken(t *testing.T) {
 		in   string
 		want any
 	}{
-		{"app_abcdefgh12345678", "app_abcd***"},
-		{"short", "short***"},
+		{"app_abcdefgh12345678", "app_***"},
+		{"bf_something", "bf_***"},
+		{"short", "***"},
 		{"", nil},
+		{"unknown_format_token", "***"},
 	}
 	for _, c := range cases {
 		if got := maskToken(c.in); got != c.want {
