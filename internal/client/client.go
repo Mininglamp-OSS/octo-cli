@@ -356,10 +356,15 @@ func truncate(s string, n int) string {
 }
 
 func redactToken(t string) string {
-	if len(t) <= 8 {
-		return "****"
+	switch {
+	case t == "":
+		return "***"
+	case len(t) >= 4 && t[:4] == "app_":
+		return "app_***"
+	case len(t) >= 3 && t[:3] == "bf_":
+		return "bf_***"
 	}
-	return t[:4] + "****" + t[len(t)-4:]
+	return "***"
 }
 
 // --- retry logic ---
