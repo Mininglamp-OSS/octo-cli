@@ -49,17 +49,17 @@ func NewTestFactory() *TestFactory {
 
 // SetClient injects a client (usually backed by httptest.Server) for tests.
 func (t *TestFactory) SetClient(c *client.Client) {
-	t.Factory.ClientFunc = func() (*client.Client, error) { return c, nil }
+	t.ClientFunc = func() (*client.Client, error) { return c, nil }
 }
 
 // SetConfig replaces the config hook.
 func (t *TestFactory) SetConfig(cfg *config.Config) {
-	t.Factory.ConfigFunc = func() (*config.Config, error) { return cfg, nil }
+	t.ConfigFunc = func() (*config.Config, error) { return cfg, nil }
 }
 
 // SetCredential replaces the credential hook.
 func (t *TestFactory) SetCredential(c *credential.BotCredential) {
-	t.Factory.CredentialFunc = func() (*credential.BotCredential, error) { return c, nil }
+	t.CredentialFunc = func() (*credential.BotCredential, error) { return c, nil }
 }
 
 // stringError is an immutable, allocation-free error type for sentinel

@@ -30,7 +30,7 @@ func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime) (body []b
 	if err != nil {
 		return nil, "", output.ErrValidation(fmt.Sprintf("--file: %v", err), "check path and permissions")
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck // best-effort close; read-only file
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)

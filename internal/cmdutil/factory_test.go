@@ -154,7 +154,7 @@ func TestFactory_RegistryNilFunc(t *testing.T) {
 func TestFactory_Format_FlagWins(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.Format = "csv"
-	if got := f.Factory.Format(); got != "csv" {
+	if got := f.Format(); got != "csv" {
 		t.Errorf("Format = %q, want csv", got)
 	}
 }
@@ -162,7 +162,7 @@ func TestFactory_Format_FlagWins(t *testing.T) {
 func TestFactory_Format_ConfigFallback(t *testing.T) {
 	f := NewTestFactory()
 	f.SetConfig(&config.Config{Format: "ndjson"})
-	if got := f.Factory.Format(); got != "ndjson" {
+	if got := f.Format(); got != "ndjson" {
 		t.Errorf("Format = %q, want ndjson from config", got)
 	}
 }
@@ -181,7 +181,7 @@ func TestFactory_Format_DefaultsToJSON(t *testing.T) {
 func TestFactory_EmitSuccess_EmitsEnvelope(t *testing.T) {
 	f := NewTestFactory()
 	raw := []byte(`{"id":"t1"}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	var env map[string]any
@@ -200,7 +200,7 @@ func TestFactory_EmitSuccess_EmitsEnvelope(t *testing.T) {
 func TestFactory_EmitSuccess_FlattensPagination(t *testing.T) {
 	f := NewTestFactory()
 	raw := []byte(`{"data":[{"id":"a"}],"pagination":{"has_more":false}}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	var env map[string]any
@@ -218,7 +218,7 @@ func TestFactory_EmitSuccess_JQFilter(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.JQ = ".data.id"
 	raw := []byte(`{"id":"t1"}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	got := strings.TrimSpace(f.Out.String())
@@ -232,7 +232,7 @@ func TestFactory_EmitSuccess_TableFormat(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.Format = "table"
 	raw := []byte(`{"data":[{"id":"t1","title":"x"}],"pagination":{}}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	out := f.Out.String()
@@ -245,7 +245,7 @@ func TestFactory_EmitSuccess_NDJSONFormat(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.Format = "ndjson"
 	raw := []byte(`{"data":[{"id":"a"},{"id":"b"},{"id":"c"}],"pagination":{}}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(f.Out.String()), "\n")
@@ -258,7 +258,7 @@ func TestFactory_EmitSuccess_CSVFormat(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.Format = "csv"
 	raw := []byte(`{"data":[{"id":"t1","title":"x"}],"pagination":{}}`)
-	if err := f.Factory.EmitSuccess(raw); err != nil {
+	if err := f.EmitSuccess(raw); err != nil {
 		t.Fatalf("EmitSuccess: %v", err)
 	}
 	if !strings.Contains(f.Out.String(), "id") || !strings.Contains(f.Out.String(), "t1") {
@@ -269,7 +269,7 @@ func TestFactory_EmitSuccess_CSVFormat(t *testing.T) {
 func TestFactory_EmitSuccessWithMeta(t *testing.T) {
 	f := NewTestFactory()
 	meta := output.EnvelopeMeta{RateLimit: json.RawMessage(`{"remaining":5}`)}
-	if err := f.Factory.EmitSuccessWithMeta([]byte(`{"id":"x"}`), meta); err != nil {
+	if err := f.EmitSuccessWithMeta([]byte(`{"id":"x"}`), meta); err != nil {
 		t.Fatalf("EmitSuccessWithMeta: %v", err)
 	}
 	if !strings.Contains(f.Out.String(), "_rate_limit") {
@@ -280,10 +280,10 @@ func TestFactory_EmitSuccessWithMeta(t *testing.T) {
 func TestFactory_EmitError_ExitError(t *testing.T) {
 	f := NewTestFactory()
 	ee := output.ErrValidation("bad input", "try again")
-	if err := f.Factory.EmitError(ee); err != nil {
+	if err := f.EmitError(ee); err != nil {
 		t.Fatalf("EmitError: %v", err)
 	}
-	if !f.Factory.ErrorEmitted {
+	if !f.ErrorEmitted {
 		t.Error("ErrorEmitted should be true after EmitError")
 	}
 	var env map[string]any
@@ -301,14 +301,14 @@ func TestFactory_EmitError_ExitError(t *testing.T) {
 
 func TestFactory_ErrorEmitted_InitiallyFalse(t *testing.T) {
 	f := NewTestFactory()
-	if f.Factory.ErrorEmitted {
+	if f.ErrorEmitted {
 		t.Error("ErrorEmitted should be false on new Factory")
 	}
 }
 
 func TestFactory_EmitError_PlainErrorWrapped(t *testing.T) {
 	f := NewTestFactory()
-	if err := f.Factory.EmitError(errors.New("OCTO_BOT_TOKEN missing")); err != nil {
+	if err := f.EmitError(errors.New("OCTO_BOT_TOKEN missing")); err != nil {
 		t.Fatalf("EmitError: %v", err)
 	}
 	var env map[string]any
