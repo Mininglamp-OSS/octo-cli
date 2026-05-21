@@ -5,9 +5,8 @@ run:
 
 linters:
   enable:
-    # default correctness set
+    # default correctness set (gosimple merged into staticcheck in v2)
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
