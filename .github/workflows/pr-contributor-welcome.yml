@@ -17,3 +17,4 @@ jobs:
     uses: Mininglamp-OSS/.github/.github/workflows/reusable-pr-contributor-welcome.yml@main
     permissions:
       issues: write
+      pull-requests: write
