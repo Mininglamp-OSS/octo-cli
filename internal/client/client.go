@@ -82,7 +82,7 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 		if d, err := time.ParseDuration(opts.Timeout); err == nil {
 			timeout = d
 		} else if opts.ErrOut != nil {
-			_, _ = fmt.Fprintf(opts.ErrOut, "warning: invalid --timeout %q; using %s\n", opts.Timeout, defaultTimeout)
+			fmt.Fprintf(opts.ErrOut, "warning: invalid --timeout %q; using %s\n", opts.Timeout, defaultTimeout) //nolint:errcheck // stderr warning
 		}
 	}
 	return &Client{
@@ -217,7 +217,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 			ExitError: output.ErrNetwork(err.Error(), "transport error; will retry"),
 		}
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -315,7 +315,7 @@ func (c *Client) verbosef(format string, args ...any) {
 	if !c.options.Verbose || c.options.ErrOut == nil {
 		return
 	}
-	_, _ = fmt.Fprintf(c.options.ErrOut, "[octo] "+format+"\n", args...)
+	fmt.Fprintf(c.options.ErrOut, "[octo] "+format+"\n", args...) //nolint:errcheck // stderr verbose log
 }
 
 func buildURL(base, path string, query url.Values) (string, error) {
