@@ -81,14 +81,14 @@ func writeTable(w io.Writer, v any) error {
 	}
 	headers := tableHeaders(rows)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, strings.Join(headers, "\t"))
-	fmt.Fprintln(tw, strings.Join(repeat("---", len(headers)), "\t"))
+	_, _ = fmt.Fprintln(tw, strings.Join(headers, "\t"))
+	_, _ = fmt.Fprintln(tw, strings.Join(repeat("---", len(headers)), "\t"))
 	for _, row := range rows {
 		cols := make([]string, len(headers))
 		for i, h := range headers {
 			cols[i] = renderCell(row[h])
 		}
-		fmt.Fprintln(tw, strings.Join(cols, "\t"))
+		_, _ = fmt.Fprintln(tw, strings.Join(cols, "\t"))
 	}
 	return tw.Flush()
 }

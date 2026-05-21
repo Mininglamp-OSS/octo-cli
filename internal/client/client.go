@@ -82,7 +82,7 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 		if d, err := time.ParseDuration(opts.Timeout); err == nil {
 			timeout = d
 		} else if opts.ErrOut != nil {
-			fmt.Fprintf(opts.ErrOut, "warning: invalid --timeout %q; using %s\n", opts.Timeout, defaultTimeout)
+			_, _ = fmt.Fprintf(opts.ErrOut, "warning: invalid --timeout %q; using %s\n", opts.Timeout, defaultTimeout)
 		}
 	}
 	return &Client{
@@ -141,7 +141,7 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -165,7 +165,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binary)
+		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp)
 		if err == nil {
 			return body, nil
 		}
@@ -179,7 +179,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binary bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -217,7 +217,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 			ExitError: output.ErrNetwork(err.Error(), "transport error; will retry"),
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -231,7 +231,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	// handling (file.download). Any other endpoint returning 3xx is treated
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		if binary {
+		if binaryResp {
 			loc := resp.Header.Get("Location")
 			env := map[string]any{
 				"url":    loc,
@@ -251,7 +251,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Binary/redirect opt-in: don't try to parse as JSON, just describe.
-		if binary {
+		if binaryResp {
 			env := map[string]any{
 				"status":       resp.StatusCode,
 				"content_type": resp.Header.Get("Content-Type"),
@@ -315,7 +315,7 @@ func (c *Client) verbosef(format string, args ...any) {
 	if !c.options.Verbose || c.options.ErrOut == nil {
 		return
 	}
-	fmt.Fprintf(c.options.ErrOut, "[octo] "+format+"\n", args...)
+	_, _ = fmt.Fprintf(c.options.ErrOut, "[octo] "+format+"\n", args...)
 }
 
 func buildURL(base, path string, query url.Values) (string, error) {

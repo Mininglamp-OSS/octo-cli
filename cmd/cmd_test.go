@@ -24,7 +24,7 @@ import (
 func newTestFactoryWithReg() *cmdutil.TestFactory {
 	f := cmdutil.NewTestFactory()
 	reg := registry.MustNew()
-	f.Factory.RegistryFunc = func() *registry.Registry { return reg }
+	f.RegistryFunc = func() *registry.Registry { return reg }
 	return f
 }
 

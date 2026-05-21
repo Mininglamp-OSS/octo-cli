@@ -77,7 +77,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
-	if rt.pageAll != nil && *rt.pageAll && !(f.Globals != nil && f.Globals.DryRun) {
+	if rt.pageAll != nil && *rt.pageAll && (f.Globals == nil || !f.Globals.DryRun) {
 		return runPaginated(ctx, f, rt, &req)
 	}
 
