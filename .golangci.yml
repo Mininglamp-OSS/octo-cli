@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
 
@@ -17,35 +19,33 @@ linters:
     - gocyclo
     - nolintlint
     - revive
-
-linters-settings:
-  errcheck:
-    check-blank: true
-  gocyclo:
-    min-complexity: 15
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
-      - style
-    disabled-checks:
-      - commentFormatting   # noisy; we don't enforce period-terminated comments
-      - ifElseChain         # switch-vs-if is style; let reviewer decide
-  revive:
-    rules:
-      - name: var-naming
-      - name: exported
-        arguments: [ "checkPrivateReceivers" ]
-      - name: indent-error-flow
-      - name: unreachable-code
-      - name: superfluous-else
-  nolintlint:
-    require-specific: true
-    require-explanation: true
-    allow-unused: false
+  settings:
+    errcheck:
+      check-blank: true
+    gocyclo:
+      min-complexity: 15
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - commentFormatting
+        - ifElseChain
+    revive:
+      rules:
+        - name: var-naming
+        - name: exported
+          arguments: ["checkPrivateReceivers"]
+        - name: indent-error-flow
+        - name: unreachable-code
+        - name: superfluous-else
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+      allow-unused: false
 
 issues:
   exclude-rules:
-    # Tests are allowed to be longer / more complex.
     - path: _test\.go
-      linters: [ gocyclo, errcheck, revive ]
+      linters: [gocyclo, errcheck, revive]
