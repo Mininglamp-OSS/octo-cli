@@ -44,8 +44,10 @@ linters:
       require-specific: true
       require-explanation: true
       allow-unused: false
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters: [gocyclo, errcheck, revive]
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gocyclo
+          - errcheck
+          - revive
