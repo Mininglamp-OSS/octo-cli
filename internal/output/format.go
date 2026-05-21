@@ -81,7 +81,7 @@ func writeTable(w io.Writer, v any) error {
 	}
 	headers := tableHeaders(rows)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, strings.Join(headers, "\t"))           //nolint:errcheck // tabwriter buffered write
+	fmt.Fprintln(tw, strings.Join(headers, "\t"))                     //nolint:errcheck // tabwriter buffered write
 	fmt.Fprintln(tw, strings.Join(repeat("---", len(headers)), "\t")) //nolint:errcheck // tabwriter buffered write
 	for _, row := range rows {
 		cols := make([]string, len(headers))
