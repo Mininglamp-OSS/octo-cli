@@ -59,7 +59,7 @@ func (t *TestFactory) SetConfig(cfg *config.Config) {
 
 // SetCredential replaces the credential hook.
 func (t *TestFactory) SetCredential(c *credential.BotCredential) {
-	t.Factory.CredentialFunc = func() (*credential.BotCredential, error) { return c, nil }
+	t.CredentialFunc = func() (*credential.BotCredential, error) { return c, nil }
 }
 
 // stringError is an immutable, allocation-free error type for sentinel

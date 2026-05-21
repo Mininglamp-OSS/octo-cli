@@ -154,7 +154,7 @@ func TestFactory_RegistryNilFunc(t *testing.T) {
 func TestFactory_Format_FlagWins(t *testing.T) {
 	f := NewTestFactory()
 	f.Globals.Format = "csv"
-	if got := f.Factory.Format(); got != "csv" {
+	if got := f.Format(); got != "csv" {
 		t.Errorf("Format = %q, want csv", got)
 	}
 }
@@ -162,7 +162,7 @@ func TestFactory_Format_FlagWins(t *testing.T) {
 func TestFactory_Format_ConfigFallback(t *testing.T) {
 	f := NewTestFactory()
 	f.SetConfig(&config.Config{Format: "ndjson"})
-	if got := f.Factory.Format(); got != "ndjson" {
+	if got := f.Format(); got != "ndjson" {
 		t.Errorf("Format = %q, want ndjson from config", got)
 	}
 }
