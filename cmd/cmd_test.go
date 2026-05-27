@@ -364,12 +364,12 @@ func TestParseParamsJSON_EmptyAndInvalid(t *testing.T) {
 	}
 }
 
-func TestTokenSource_EmptyReturnsNil(t *testing.T) {
-	if got := tokenSource(""); got != nil {
-		t.Errorf("empty token → %v, want nil", got)
+func TestDefaultTokenSource(t *testing.T) {
+	if got := defaultTokenSource(""); got != "" {
+		t.Errorf("empty token → %q, want \"\"", got)
 	}
-	if got := tokenSource("app_x"); got == nil {
-		t.Error("non-empty token should have source")
+	if got := defaultTokenSource("app_x"); got == "" {
+		t.Error("non-empty token should have a source tag")
 	}
 }
 

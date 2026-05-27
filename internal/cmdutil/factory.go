@@ -6,10 +6,13 @@ package cmdutil
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/authstore"
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
@@ -30,6 +33,12 @@ type GlobalOptions struct {
 	Space   string
 	PageAll bool
 	PageMax int
+
+	// Profile selects a stored credential by friendly name; BotID selects (and
+	// asserts) it by robot id. BotID falls back to OCTO_BOT_ID when the flag is
+	// empty. Both feed the credential chain's FileProvider.
+	Profile string
+	BotID   string
 }
 
 // Factory is the DI container. All accessors are lazy + cached so a command
@@ -54,6 +63,7 @@ type Factory struct {
 	cred   *credential.BotCredential
 	cli    *client.Client
 	reg    *registry.Registry
+	store  *authstore.Store
 }
 
 // NewDefaultFactory wires the production providers: config from env, cred from
@@ -69,9 +79,9 @@ func NewDefaultFactory() *Factory {
 		if f.config != nil {
 			return f.config, nil
 		}
-		cfg := config.Load()
-		if f.Globals.Format != "" {
-			cfg.Format = f.Globals.Format
+		cfg, err := f.buildConfig()
+		if err != nil {
+			return nil, err
 		}
 		f.config = cfg
 		return cfg, nil
@@ -81,13 +91,9 @@ func NewDefaultFactory() *Factory {
 		if f.cred != nil {
 			return f.cred, nil
 		}
-		chain := credential.NewChain(credential.NewEnvProvider())
-		cred, err := chain.Resolve()
+		cred, err := f.buildCredential()
 		if err != nil {
 			return nil, err
-		}
-		if f.Globals.Space != "" {
-			cred.SpaceID = f.Globals.Space
 		}
 		f.cred = cred
 		return cred, nil
@@ -126,6 +132,94 @@ func NewDefaultFactory() *Factory {
 	}
 
 	return f
+}
+
+// buildConfig loads the env config and reflects the resolved credential into it
+// so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
+// profile-based use and config show reports the active token. Only the "no
+// credential found" case is swallowed (so cfg.Validate reports the familiar
+// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
+// surface rather than masquerading as a missing token.
+func (f *Factory) buildConfig() (*config.Config, error) {
+	cfg := config.Load()
+	if f.Globals.Format != "" {
+		cfg.Format = f.Globals.Format
+	}
+	cred, err := f.CredentialFunc()
+	if err != nil {
+		if errors.Is(err, credential.ErrNoCredential) {
+			return cfg, nil
+		}
+		return nil, err
+	}
+	if cred != nil {
+		if cred.Token != "" {
+			cfg.BotToken = cred.Token
+		}
+		if cred.SpaceID != "" {
+			cfg.SpaceID = cred.SpaceID
+		}
+		f.overlayProfileBaseURL(cfg, cred.Profile)
+	}
+	return cfg, nil
+}
+
+// buildCredential resolves the credential through the file→env chain, applying
+// the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
+func (f *Factory) buildCredential() (*credential.BotCredential, error) {
+	store, err := f.AuthStore()
+	if err != nil {
+		return nil, err
+	}
+	botID := f.Globals.BotID
+	if botID == "" {
+		botID = os.Getenv(config.EnvBotID)
+	}
+	chain := credential.NewChain(
+		credential.NewFileProvider(store, f.Globals.Profile, botID),
+		credential.NewEnvProvider(),
+	)
+	cred, err := chain.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if f.Globals.Space != "" {
+		cred.SpaceID = f.Globals.Space
+	}
+	return cred, nil
+}
+
+// AuthStore lazily constructs and caches the credential store.
+func (f *Factory) AuthStore() (*authstore.Store, error) {
+	if f.store != nil {
+		return f.store, nil
+	}
+	s, err := authstore.New()
+	if err != nil {
+		return nil, err
+	}
+	f.store = s
+	return s, nil
+}
+
+// overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
+// but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
+func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
+	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
+		return
+	}
+	store, err := f.AuthStore()
+	if err != nil {
+		return
+	}
+	profiles, err := store.LoadProfiles()
+	if err != nil {
+		return
+	}
+	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
+		cfg.APIBaseURL = m.APIBaseURL
+	}
 }
 
 // Config returns the resolved config (cached).
@@ -169,7 +263,34 @@ func (f *Factory) EmitSuccessWithMeta(raw []byte, meta output.EnvelopeMeta) erro
 	return f.emit(normalizeRaw(raw), meta)
 }
 
+// identityValue builds the envelope's identity field from the credential
+// resolved during the command. It only inspects the already-cached credential
+// (never forces resolution), so commands that don't authenticate keep the plain
+// "bot" tag. Returns nil to mean "use the default".
+func (f *Factory) identityValue() any {
+	if f.cred == nil {
+		return nil
+	}
+	id := map[string]any{"type": "bot"}
+	if f.cred.Profile != "" {
+		id["profile"] = f.cred.Profile
+	}
+	if f.cred.RobotID != "" {
+		id["robot_id"] = f.cred.RobotID
+	}
+	if kind := credential.TokenKind(f.cred.Token); kind != "" {
+		id["bot_kind"] = kind
+	}
+	if f.cred.Source != "" {
+		id["source"] = f.cred.Source
+	}
+	return id
+}
+
 func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
+	if meta.Identity == nil {
+		meta.Identity = f.identityValue()
+	}
 	// Build the success envelope into an in-memory buffer first so --jq can
 	// operate on the canonical envelope shape (not the backend shape).
 	var envBuf bytes.Buffer

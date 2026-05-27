@@ -44,12 +44,15 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.StringVar(&f.Globals.Timeout, "timeout", "", "per-request timeout (e.g. 30s, 2m)")
 	pf.BoolVar(&f.Globals.NoRetry, "no-retry", false, "disable retry on transient failures")
 	pf.StringVar(&f.Globals.Space, "space", "", "space id (for platform-scoped bots)")
+	pf.StringVar(&f.Globals.BotID, "bot-id", "", "select/assert the bot credential by robot id (env OCTO_BOT_ID)")
+	pf.StringVar(&f.Globals.Profile, "profile", "", "select the bot credential by profile name")
 
 	root.AddCommand(newSchemaCmd(f))
 	root.AddCommand(newVersionCmd(f))
 	root.AddCommand(newAPICmd(f))
 	root.AddCommand(newConfigCmd(f))
 	root.AddCommand(newSkillsCmd(f))
+	root.AddCommand(newAuthCmd(f))
 	service.RegisterServiceCommands(root, f)
 
 	return root
@@ -57,12 +60,12 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 
 // skipValidation is true for commands that must run without a configured
 // credential (e.g. `octo version`, `octo help`, `octo schema`, `octo config`,
-// and cobra's generated `completion`). Walks the parent chain so leaves like
-// `config show` match through their parent.
+// `octo auth`, and cobra's generated `completion`). Walks the parent chain so
+// leaves like `config show` match through their parent.
 func skipValidation(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "skills", "":
+		case "version", "help", "schema", "config", "completion", "skills", "auth", "":
 			return true
 		}
 	}

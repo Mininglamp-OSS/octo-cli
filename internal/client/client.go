@@ -285,7 +285,7 @@ func (c *Client) renderDryRun(method, urlStr string, headers map[string]string, 
 	}
 	hdr := map[string]string{}
 	if c.cred != nil && c.cred.Token != "" {
-		hdr["Authorization"] = "Bearer " + redactToken(c.cred.Token)
+		hdr["Authorization"] = "Bearer " + credential.MaskToken(c.cred.Token)
 	}
 	if c.cred != nil && c.cred.SpaceID != "" {
 		hdr["X-Space-Id"] = c.cred.SpaceID
@@ -343,18 +343,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "...(truncated)"
-}
-
-func redactToken(t string) string {
-	switch {
-	case t == "":
-		return "***"
-	case len(t) >= 4 && t[:4] == "app_":
-		return "app_***"
-	case len(t) >= 3 && t[:3] == "bf_":
-		return "bf_***"
-	}
-	return "***"
 }
 
 // --- retry logic ---

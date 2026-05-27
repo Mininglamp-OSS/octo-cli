@@ -12,10 +12,19 @@ import (
 // space-scoped bots have it resolved server-side; platform-scoped bots need
 // --space or OCTO_SPACE_ID to populate it. Source is a human tag (e.g.
 // "env:OCTO_BOT_TOKEN") used in verbose output and error messages.
+//
+// Profile, RobotID and BotKind are populated only when the credential is
+// resolved from a stored profile (see FileProvider); they feed the identity
+// echo in the success envelope. Credentials resolved from the environment leave
+// them empty — a raw env token carries no verifiable identity.
 type BotCredential struct {
 	Token   string
 	SpaceID string
 	Source  string
+
+	Profile string
+	RobotID string
+	BotKind string
 }
 
 // Source resolves a credential from a single source. Implementations should
@@ -26,6 +35,12 @@ type Source interface {
 	Name() string
 	Resolve() (*BotCredential, error)
 }
+
+// ErrNoCredential is wrapped into the error returned when every source in the
+// chain reports absent. Callers can errors.Is it to distinguish "nothing
+// configured" (fall back / prompt for a token) from a structured resolution
+// failure (which must surface).
+var ErrNoCredential = errors.New("no credential found")
 
 // Provider is a chain of credential sources tried in order. The first source
 // that yields a non-nil credential wins.
@@ -56,5 +71,5 @@ func (c *Provider) Resolve() (*BotCredential, error) {
 		}
 		sources = append(sources, p.Name())
 	}
-	return nil, fmt.Errorf("no credential found (tried: %v)", sources)
+	return nil, fmt.Errorf("%w (tried: %v)", ErrNoCredential, sources)
 }

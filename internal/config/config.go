@@ -14,6 +14,9 @@ const (
 	EnvBotToken   = "OCTO_BOT_TOKEN"
 	EnvSpaceID    = "OCTO_SPACE_ID"
 	EnvFormat     = "OCTO_FORMAT"
+	// EnvBotID is the env form of --bot-id: a robot id that selects a stored
+	// credential profile. It is a selector, not a secret (cf. EnvBotToken).
+	EnvBotID = "OCTO_BOT_ID"
 )
 
 // Config holds CLI configuration loaded from environment variables.

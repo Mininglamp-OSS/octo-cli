@@ -20,8 +20,9 @@ func TestWriteSuccess_ScalarData(t *testing.T) {
 	if got["ok"] != true {
 		t.Errorf("ok = %v, want true", got["ok"])
 	}
-	if got["identity"] != "bot" {
-		t.Errorf("identity = %v, want bot", got["identity"])
+	// identity is always an object with a consistent shape; here just {type}.
+	if id, ok := got["identity"].(map[string]any); !ok || id["type"] != "bot" {
+		t.Errorf("identity = %v, want {type:bot}", got["identity"])
 	}
 	data, ok := got["data"].(map[string]any)
 	if !ok {
