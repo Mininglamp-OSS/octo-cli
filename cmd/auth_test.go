@@ -89,6 +89,27 @@ func TestAuth_LoginListStatusLogout(t *testing.T) {
 	}
 }
 
+func TestAuth_DuplicateRobotIDRejected(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_x", "app_a") // profile name defaults to "cli_x", robot_id cli_x
+
+	// A different profile name claiming the same robot id is rejected — it would
+	// make --bot-id selection ambiguous.
+	f := newTestFactoryWithReg()
+	f.In.WriteString("app_b")
+	_, _, err := execRoot(t, f, "auth", "login", "--profile", "other", "--bot-id", "cli_x", "--with-token")
+	if ee := output.AsExitError(err); ee == nil || ee.Type != "validation" {
+		t.Errorf("want validation error for duplicate robot id, got %v", err)
+	}
+
+	// Re-login to the SAME profile (same robot id) is allowed — it updates the token.
+	f = newTestFactoryWithReg()
+	f.In.WriteString("app_a2")
+	if _, _, err := execRoot(t, f, "auth", "login", "--bot-id", "cli_x", "--with-token"); err != nil {
+		t.Errorf("re-login to the same profile should succeed, got %v", err)
+	}
+}
+
 func TestAuth_LoginRequiresIdentifier(t *testing.T) {
 	t.Setenv(authstore.EnvConfigDir, t.TempDir())
 	f := newTestFactoryWithReg()

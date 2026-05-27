@@ -6,6 +6,7 @@ package cmdutil
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -135,10 +136,11 @@ func NewDefaultFactory() *Factory {
 
 // buildConfig loads the env config and reflects the resolved credential into it
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
-// profile-based use and config show reports the active token. A structured
-// resolution error (ambiguous / missing profile) surfaces here; a plain "no
-// credential" error is swallowed so cfg.Validate reports the familiar
-// OCTO_BOT_TOKEN hint for the zero-config case.
+// profile-based use and config show reports the active token. Only the "no
+// credential found" case is swallowed (so cfg.Validate reports the familiar
+// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
+// surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
 	cfg := config.Load()
 	if f.Globals.Format != "" {
@@ -146,10 +148,10 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	}
 	cred, err := f.CredentialFunc()
 	if err != nil {
-		if output.AsExitError(err) != nil {
-			return nil, err
+		if errors.Is(err, credential.ErrNoCredential) {
+			return cfg, nil
 		}
-		return cfg, nil
+		return nil, err
 	}
 	if cred != nil {
 		if cred.Token != "" {

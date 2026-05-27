@@ -30,7 +30,9 @@ func (s *Store) loadTokens() (map[string]string, error) {
 	}
 	plain, err := open(blob, key)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt %s (corrupt, or key changed): %w", credFile, err)
+		return nil, fmt.Errorf(
+			"cannot decrypt %s — the encryption key changed (machine id changed via host re-image / VM migration / restored backup) or the file is corrupt; remove %s and run `octo auth login` to re-store: %w",
+			credFile, s.credPath(), err)
 	}
 	var tokens map[string]string
 	if err := json.Unmarshal(plain, &tokens); err != nil {
@@ -45,8 +47,8 @@ func (s *Store) loadTokens() (map[string]string, error) {
 // saveTokens encrypts the profile→token map to credentials.enc (0600). When the
 // map is empty the file is removed so the directory stays clean.
 func (s *Store) saveTokens(tokens map[string]string) error {
-	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return fmt.Errorf("create %s: %w", s.dir, err)
+	if err := s.ensureDir(); err != nil {
+		return err
 	}
 	if len(tokens) == 0 {
 		if err := os.Remove(s.credPath()); err != nil && !os.IsNotExist(err) {
@@ -97,14 +99,21 @@ func (s *Store) deriveKey() ([32]byte, error) {
 
 func (s *Store) getOrCreateSalt() ([]byte, error) {
 	salt, err := os.ReadFile(s.saltPath())
-	if err == nil && len(salt) == saltLen {
-		return salt, nil
+	if err == nil {
+		if len(salt) == saltLen {
+			return salt, nil
+		}
+		// A wrong-length salt must not be silently regenerated: a new salt
+		// changes the key and makes every stored token undecryptable. Fail loud.
+		return nil, fmt.Errorf(
+			"%s is corrupt: expected %d bytes, got %d — remove %s and run `octo auth login` to re-store",
+			saltFile, saltLen, len(salt), s.saltPath())
 	}
-	if err != nil && !os.IsNotExist(err) {
+	if !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read %s: %w", saltFile, err)
 	}
-	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
-		return nil, fmt.Errorf("create %s: %w", s.dir, err)
+	if err := s.ensureDir(); err != nil {
+		return nil, err
 	}
 	salt = make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {

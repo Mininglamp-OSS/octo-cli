@@ -77,7 +77,7 @@ Every successful invocation prints a single JSON object to stdout:
 }
 ```
 
-`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is the string `"bot"` when the token came from `OCTO_BOT_TOKEN` (raw env tokens carry no recorded identity).
+`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is **always an object**: a stored profile fills in `profile` / `robot_id` / `source: "profile:<name>"`; a raw `OCTO_BOT_TOKEN` yields `{ "type": "bot", "bot_kind": ..., "source": "env:OCTO_BOT_TOKEN" }` (no `profile`/`robot_id`); a command that resolves no credential (e.g. `version`) yields the minimal `{ "type": "bot" }`.
 
 Every failure prints an error envelope to **stderr** and exits non-zero:
 

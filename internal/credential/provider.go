@@ -36,6 +36,12 @@ type Source interface {
 	Resolve() (*BotCredential, error)
 }
 
+// ErrNoCredential is wrapped into the error returned when every source in the
+// chain reports absent. Callers can errors.Is it to distinguish "nothing
+// configured" (fall back / prompt for a token) from a structured resolution
+// failure (which must surface).
+var ErrNoCredential = errors.New("no credential found")
+
 // Provider is a chain of credential sources tried in order. The first source
 // that yields a non-nil credential wins.
 type Provider struct {
@@ -65,5 +71,5 @@ func (c *Provider) Resolve() (*BotCredential, error) {
 		}
 		sources = append(sources, p.Name())
 	}
-	return nil, fmt.Errorf("no credential found (tried: %v)", sources)
+	return nil, fmt.Errorf("%w (tried: %v)", ErrNoCredential, sources)
 }

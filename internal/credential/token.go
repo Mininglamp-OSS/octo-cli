@@ -41,12 +41,16 @@ func MaskToken(tok string) string {
 	if tok == "" {
 		return ""
 	}
-	prefix := ""
+	var prefix string
 	switch {
 	case hasPrefix(tok, prefixApp):
 		prefix = prefixApp
 	case hasPrefix(tok, prefixUser):
 		prefix = prefixUser
+	default:
+		// Unknown kind: reveal nothing. Without a recognized prefix there is no
+		// way to say what the revealed head/tail belong to, so don't leak it.
+		return "***"
 	}
 	body := tok[len(prefix):]
 	if len(body) < maskHead+maskTail+maskMinMiddle {

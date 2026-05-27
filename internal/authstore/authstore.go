@@ -122,9 +122,29 @@ func (s *Store) Count() (int, error) {
 	return len(p), nil
 }
 
-func (s *Store) saveProfiles(profiles map[string]ProfileMeta) error {
+// ensureDir creates the config directory and tightens its permissions when a
+// pre-existing directory is more permissive than dirPerm. MkdirAll alone leaves
+// an already-existing (e.g. 0755, restored-from-backup) directory untouched,
+// which would leak profile names via a directory listing.
+func (s *Store) ensureDir() error {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return fmt.Errorf("create %s: %w", s.dir, err)
+	}
+	info, err := os.Stat(s.dir)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", s.dir, err)
+	}
+	if info.Mode().Perm()&0o077 != 0 { // any group/other access → tighten
+		if err := os.Chmod(s.dir, dirPerm); err != nil {
+			return fmt.Errorf("chmod %s: %w", s.dir, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) saveProfiles(profiles map[string]ProfileMeta) error {
+	if err := s.ensureDir(); err != nil {
+		return err
 	}
 	data, err := json.MarshalIndent(configFileShape{Profiles: profiles}, "", "  ")
 	if err != nil {
@@ -178,6 +198,18 @@ func (s *Store) RemoveProfile(name string) error {
 		return err
 	}
 	return s.saveTokens(tokens)
+}
+
+// ProfileForRobotID returns the name of the profile that records the given
+// robot id, if any. Used at login to reject a second profile claiming a bot id
+// already owned by another profile (which would make --bot-id ambiguous).
+func (s *Store) ProfileForRobotID(robotID string) (name string, found bool, err error) {
+	profiles, err := s.LoadProfiles()
+	if err != nil {
+		return "", false, err
+	}
+	n, _, ok := findByRobotID(profiles, robotID)
+	return n, ok, nil
 }
 
 // GetToken returns the token for a profile, or an error if absent.

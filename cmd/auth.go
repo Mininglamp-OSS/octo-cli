@@ -54,20 +54,13 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 			botID := f.Globals.BotID
 			name := f.Globals.Profile
 
-			// Fully interactive entry: with no identifier on a terminal, prompt
-			// for the bot id (visible — it is not a secret). Non-terminals
-			// (agents / CI) skip this and hit the error below, so scripted use
-			// still requires an explicit --bot-id / --profile.
-			if botID == "" && name == "" && isTerminal(f.IOStreams.In) {
-				writeUI(f.IOStreams.ErrOut, "Bot id (robot id, e.g. cli_xxx): ")
-				line, err := readLineVisible(f.IOStreams.In)
-				if err != nil {
-					return failErr(f, output.ErrValidation(
-						fmt.Sprintf("read bot id: %v", err), ""))
+			if botID == "" && name == "" {
+				id, perr := promptBotID(f)
+				if perr != nil {
+					return failErr(f, output.ErrValidation(fmt.Sprintf("read bot id: %v", perr), ""))
 				}
-				botID = line
+				botID = id
 			}
-
 			if name == "" {
 				name = botID // profile name defaults to the robot id
 			}
@@ -88,6 +81,9 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 
 			store, err := f.AuthStore()
 			if err != nil {
+				return failErr(f, err)
+			}
+			if err := assertBotIDFree(store, botID, name); err != nil {
 				return failErr(f, err)
 			}
 			meta := authstore.ProfileMeta{
@@ -122,6 +118,7 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "read the token from stdin instead of a prompt")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the token from this file")
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "override OCTO_API_BASE_URL for this profile")
+	cmd.MarkFlagsMutuallyExclusive("with-token", "token-file")
 	return cmd
 }
 
@@ -237,6 +234,36 @@ func newAuthListCmd(f *cmdutil.Factory) *cobra.Command {
 			return emitJSON(f, payload)
 		},
 	}
+}
+
+// promptBotID asks for the bot id interactively when no selector was given and
+// stdin is a terminal (visible — the id is not a secret). Non-terminals return
+// "" so scripted/agent use still requires an explicit --bot-id / --profile.
+func promptBotID(f *cmdutil.Factory) (string, error) {
+	if !isTerminal(f.IOStreams.In) {
+		return "", nil
+	}
+	writeUI(f.IOStreams.ErrOut, "Bot id (robot id, e.g. cli_xxx): ")
+	return readLineVisible(f.IOStreams.In)
+}
+
+// assertBotIDFree rejects storing a bot id already owned by a different profile,
+// which would make --bot-id selection ambiguous. Re-login to the same profile
+// (owner == name) is allowed.
+func assertBotIDFree(store *authstore.Store, botID, name string) error {
+	if botID == "" {
+		return nil
+	}
+	owner, ok, err := store.ProfileForRobotID(botID)
+	if err != nil {
+		return err
+	}
+	if ok && owner != name {
+		return output.ErrValidation(
+			fmt.Sprintf("bot id %q is already stored under profile %q", botID, owner),
+			"log in under that profile, or remove it first with `octo auth logout`")
+	}
+	return nil
 }
 
 // selectorBotID returns the --bot-id flag, falling back to OCTO_BOT_ID — the
