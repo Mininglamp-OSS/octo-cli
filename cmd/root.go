@@ -49,6 +49,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newVersionCmd(f))
 	root.AddCommand(newAPICmd(f))
 	root.AddCommand(newConfigCmd(f))
+	root.AddCommand(newSkillsCmd(f))
 	service.RegisterServiceCommands(root, f)
 
 	return root
@@ -61,7 +62,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 func skipValidation(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "":
+		case "version", "help", "schema", "config", "completion", "skills", "":
 			return true
 		}
 	}
