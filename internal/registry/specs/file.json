@@ -110,7 +110,8 @@
         "summary": "Get a presigned PUT URL for direct upload",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "filename", "in": "query", "required": true, "schema": { "type": "string" } }
+          { "name": "filename", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "fileSize", "in": "query", "required": true, "schema": { "type": "integer", "format": "int64", "minimum": 1 }, "description": "file size in bytes; required, must be a positive integer within the server max" }
         ],
         "responses": {
           "200": {
@@ -126,7 +127,9 @@
                     "contentType": { "type": "string" },
                     "key": { "type": "string" },
                     "expiresIn": { "type": "integer" },
-                    "expiredTime": { "type": "integer" }
+                    "expiredTime": { "type": "integer" },
+                    "maxFileSize": { "type": "integer", "format": "int64", "description": "echoed fileSize (bytes) signed into the PUT Content-Length" },
+                    "contentDisposition": { "type": "string", "description": "present when set; must be echoed verbatim on the PUT or the gateway rejects with 403" }
                   }
                 }
               }
