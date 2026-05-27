@@ -19,9 +19,9 @@ Two small domains are covered here because they share a base URL (`$OCTO_API_BAS
 
 ```bash
 octo file upload      --file ./report.pdf [--type chat] [--path subdir/]
-octo file download    <path> --format json > saved.bin      # see note below
+octo file download    <path> --format json > saved.bin      # <path> = storage key (no bucket prefix), see note below
 octo file credentials --filename report.pdf
-octo file presigned   --filename report.pdf
+octo file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (bytes) is REQUIRED
 ```
 
 ### `upload` — multipart form
@@ -50,22 +50,23 @@ octo file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out
 For files too large for multipart, ask the backend for a presigned target and upload directly:
 
 ```bash
-cred=$(octo file presigned --filename big.zip)
+size=$(wc -c < big.zip)                                       # fileSize is REQUIRED (bytes)
+cred=$(octo file presigned --filename big.zip --fileSize "$size")
 url=$(jq  -r '.data.uploadUrl'   <<<"$cred")
 ctype=$(jq -r '.data.contentType' <<<"$cred")
 curl -X PUT -T big.zip -H "Content-Type: $ctype" "$url"
 ```
 
-`file presigned` returns `{uploadUrl, downloadUrl, method, contentType, key, expiresIn, expiredTime}` — a one-shot signed URL. `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, cdnBaseUrl, ...}`) for SDK-driven uploads. Pick the shape the backend gives you.
+`file presigned` **requires `--fileSize` (bytes)** — the size is signed into the PUT Content-Length, so a missing/oversized value is rejected (`HTTP 400 fileSize 参数必填`). It returns `{method, uploadUrl, downloadUrl, contentType, key, expiresIn, expiredTime, maxFileSize, [contentDisposition]}` — a one-shot signed URL (echo `contentDisposition` verbatim on the PUT if present). `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, startTime, expiredTime, cdnBaseUrl}`) for SDK-driven uploads. Pick the shape the backend gives you.
 
 ## 2. Bot housekeeping
 
 ```bash
-octo bot register       --data '{...registration payload...}'
-octo bot set-commands   --data '[{"name":"fix","desc":"create a matter"}, ...]'
-octo bot user-info      [--uid <uid>]      # no uid → info about *this* bot
-octo bot space-members                      # paginated (100 cap typical)
-octo bot typing         --channel-id <cid> --channel-type 1
+octo bot register       [--data '{"agent_platform":"…","agent_version":"…","plugin_version":"…"}']
+octo bot set-commands   --data '{"commands":[{"command":"fix","description":"create a matter"}]}'
+octo bot user-info      --uid <uid>         # --uid is REQUIRED; returns {uid,name,avatar} for that user
+octo bot space-members  [--keyword <q>]     # members of the bot's space (limit cap 200)
+octo bot typing         --channel-id <cid> --channel-type 1 [--on-behalf-of <uid>]
 octo bot heartbeat
 ```
 
@@ -75,10 +76,12 @@ octo bot heartbeat
 
 Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-commands` to advertise slash-command metadata.
 
-### `user-info` gives you the owner_uid
+### Get the owner_uid from `bot register`
+
+`bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from `bot register`:
 
 ```bash
-owner=$(octo bot user-info --jq '.data.owner_uid')
+owner=$(octo bot register --jq '.data.owner_uid')
 ```
 
 This is the value `matter extract` requires as `creator_uid` (see `octo-matter` skill §6).
