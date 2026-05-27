@@ -26,7 +26,8 @@
                   "channel_id": { "type": "string" },
                   "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
                   "stream_no": { "type": "string", "description": "optional stream session identifier" },
-                  "payload": { "type": "object", "description": "message payload (content, type, mention, etc.)" }
+                  "on_behalf_of": { "type": "string", "description": "OBO: send as this user persona; requires an active OBO grant + channel scope" },
+                  "payload": { "type": "object", "description": "message payload (content, type, mention, etc.). Pass via --data (object, not a flag)." }
                 }
               }
             }
@@ -40,7 +41,8 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "message_id": { "type": "string" },
+                    "client_msg_no": { "type": "string", "description": "client message number echoed back by the server" },
+                    "message_id": { "type": "integer", "format": "int64", "description": "int64; stringify it when passing to message.edit" },
                     "message_seq": { "type": "integer" }
                   }
                 }
