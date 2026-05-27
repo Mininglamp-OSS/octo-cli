@@ -1,8 +1,8 @@
 // Package cmd is the command tree. It wires cobra commands with the Factory DI
 // container and holds root-level persistent flags. Service-domain commands are
 // auto-registered from the embedded OpenAPI registry via cmd/service — the
-// only hand-written leaves are `schema`, `version`, and `api` (generic
-// passthrough).
+// hand-written leaves are `schema`, `version`, `api` (generic passthrough),
+// `config`, and `skills`.
 package cmd
 
 import (
@@ -49,6 +49,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newVersionCmd(f))
 	root.AddCommand(newAPICmd(f))
 	root.AddCommand(newConfigCmd(f))
+	root.AddCommand(newSkillsCmd(f))
 	service.RegisterServiceCommands(root, f)
 
 	return root
@@ -61,7 +62,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 func skipValidation(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "":
+		case "version", "help", "schema", "config", "completion", "skills", "":
 			return true
 		}
 	}
