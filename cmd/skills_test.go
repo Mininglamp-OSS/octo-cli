@@ -158,6 +158,19 @@ func TestCmd_SkillsInstall(t *testing.T) {
 	}
 }
 
+func TestCmd_SkillsInstallEmptyDir(t *testing.T) {
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{Format: "json"})
+
+	_, errOut, err := execRoot(t, f, "skills", "--install", "")
+	if err == nil {
+		t.Fatal("expected error when --install is given an empty directory")
+	}
+	if !strings.Contains(errOut, "validation") {
+		t.Errorf("expected a validation error, got: %s", errOut)
+	}
+}
+
 func TestCmd_SkillsInstallRejectsName(t *testing.T) {
 	dir := t.TempDir()
 	f := newTestFactoryWithReg()

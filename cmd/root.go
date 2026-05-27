@@ -1,8 +1,8 @@
 // Package cmd is the command tree. It wires cobra commands with the Factory DI
 // container and holds root-level persistent flags. Service-domain commands are
 // auto-registered from the embedded OpenAPI registry via cmd/service — the
-// only hand-written leaves are `schema`, `version`, and `api` (generic
-// passthrough).
+// hand-written leaves are `schema`, `version`, `api` (generic passthrough),
+// `config`, and `skills`.
 package cmd
 
 import (

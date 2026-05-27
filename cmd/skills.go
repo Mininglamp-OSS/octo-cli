@@ -86,6 +86,14 @@ func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
   octo skills --install <dir>    write every skill to <dir>/<name>/SKILL.md`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("install") && install == "" {
+				ee := output.ErrValidation(
+					"--install requires a directory",
+					"pass a target like --install ~/.config/octo/skills",
+				)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
+				return ee
+			}
 			entries, err := loadSkills()
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
