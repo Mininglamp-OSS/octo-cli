@@ -19,7 +19,7 @@
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure (7 domains, 51 operations)
+## Command Structure (7 domains, 48 operations / 51 commands incl. 3 matter transition aliases)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, and the cobra-generated `completion`.
 

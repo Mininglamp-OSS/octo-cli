@@ -13,6 +13,8 @@
 | `app_*` | App Bot | DM only, no group/thread write, no voice |
 | `bf_*` | User Bot | Full access (DM + group + thread + voice) |
 
+> The CLI recognizes the prefix for display only (`octo config show` → `bot_kind`); it does **not** gate commands by bot kind. An App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+
 ---
 
 ## Domain 1: matter (matters service, 17 commands)
@@ -65,7 +67,7 @@ Notes:
 | 21 | `octo message read-receipt` | POST | /v1/bot/readReceipt | Y | Y |
 
 Flags:
-- send: --channel-id*, --channel-type*(uint8), --payload*(JSON map), --stream-no
+- send: --channel-id*, --channel-type*(uint8), --stream-no, --on-behalf-of; payload (object) via --data
 - edit: --message-id*, --message-seq, --channel-id*, --channel-type*, --content-edit*
 - sync: --data (JSON body with channel_id, channel_type, etc.)
 - read-receipt: --channel-id*, --channel-type(default:1), --message-ids*(str[])
@@ -73,7 +75,7 @@ Flags:
 Notes:
 - App Bot sendMessage: checkSendPermission enforces channelType=1 (DM only), requires friend relationship.
 - User Bot sendMessage: DM + group (membership check) + thread (parent group membership check).
-- payload is map[string]interface{} — cannot auto-promote, must use --payload/--data JSON.
+- payload is map[string]interface{} — object fields aren't promoted to flags, so it goes inside --data JSON. payload.type is an integer code (1=Text…; see common.ContentType / octo-messaging skill).
 - sync: App Bot explicitly blocked for group channel type.
 
 ---
@@ -143,7 +145,7 @@ Notes:
 Flags:
 - upload: --file* (multipart), --type(default:"chat"), --path
 - credentials: --filename* (query)
-- presigned: --filename* (query)
+- presigned: --filename*, --fileSize* (query; fileSize in bytes is REQUIRED)
 
 Notes:
 - Upload is multipart form, not JSON body — special handling in engine.
@@ -165,9 +167,9 @@ Notes:
 
 Flags:
 - register: --data (JSON, registration payload)
-- set-commands: --data (JSON, command list)
-- user-info: --uid (query)
-- typing: --channel-id*, --channel-type*
+- set-commands: --data (JSON, body shape: {"commands":[{"command","description"}]})
+- user-info: --uid* (query, required)
+- typing: --channel-id*, --channel-type*, --on-behalf-of
 
 Notes:
 - register: NOT behind authBot middleware. Routes by token prefix (app_ → registerAppBot, bf_ → registerUserBot). Both supported.

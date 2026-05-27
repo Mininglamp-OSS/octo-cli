@@ -93,7 +93,7 @@ octo matter extract --data '{
 }'
 ```
 
-**Critical**: a bot must set `creator_uid` to its **owner_uid**, not its own bot_uid — the backend rejects the request otherwise. Retrieve the owner from `octo bot user-info`.
+**Critical**: a bot must set `creator_uid` to its **owner_uid**, not its own bot_uid — the backend rejects the request otherwise. Capture `owner_uid` from the one-time `octo bot register` response at publish (`--jq '.data.owner_uid'`) and cache it (env/config); reuse the cached value rather than re-registering on every extract. Note `bot user-info` does not return it (it needs `--uid` and returns only `{uid,name,avatar}`).
 
 ## 7. Common patterns
 
