@@ -213,6 +213,14 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
 
+These docs are also **embedded in the binary**, so a released `octo` ships them:
+
+```bash
+octo skills                       # list embedded skills
+octo skills octo-messaging        # print one skill (name, description, content)
+octo skills --install ~/.config/octo/skills   # write all SKILL.md to a dir
+```
+
 ## Shell Completion
 
 ```bash
