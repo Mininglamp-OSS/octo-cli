@@ -70,7 +70,7 @@ func TestMain_MissingTokenExitCode(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	cmd := exec.Command(bin, "matter", "list")
+	cmd := exec.Command(bin, "event", "list")
 	// Clear OCTO_BOT_TOKEN / OCTO_BOT_ID and point at an empty credential store
 	// so no profile resolves and Validate trips on the missing token.
 	cmd.Env = append(os.Environ(),

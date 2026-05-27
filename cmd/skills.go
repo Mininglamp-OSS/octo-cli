@@ -36,6 +36,12 @@ func loadSkills() ([]skillEntry, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Skills marked `disabled: true` in their frontmatter are withheld
+		// (e.g. octo-matter, whose backend API is not yet stable). The file
+		// stays embedded — drop the flag to re-list it.
+		if skillDisabled(b) {
+			continue
+		}
 		out = append(out, skillEntry{
 			Name:        strings.SplitN(p, "/", 2)[0],
 			Description: parseSkillDescription(b),
@@ -67,6 +73,27 @@ func parseSkillDescription(b []byte) string {
 		}
 	}
 	return ""
+}
+
+// skillDisabled reports whether the SKILL.md frontmatter sets `disabled: true`.
+// Uses the same single-line frontmatter scan as parseSkillDescription, and the
+// same "true" truthiness as the spec's x-octo-disabled flag (registry.truthy).
+func skillDisabled(b []byte) bool {
+	inFrontmatter := false
+	for _, ln := range strings.Split(string(b), "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "---" {
+			if inFrontmatter {
+				break
+			}
+			inFrontmatter = true
+			continue
+		}
+		if inFrontmatter && strings.HasPrefix(t, "disabled:") {
+			return strings.TrimSpace(strings.TrimPrefix(t, "disabled:")) == "true"
+		}
+	}
+	return false
 }
 
 // newSkillsCmd returns `octo skills`. Three mutually exclusive modes:

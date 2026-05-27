@@ -81,6 +81,47 @@ func (r *Registry) GetSpec(service string) map[string]any {
 	return r.specs[service]
 }
 
+// ServiceDisabled reports the x-octo-disabled extension for a service.
+// Disabled services stay loaded — so schema lookups and the metadata-driven
+// engine still see them — but are withheld from the command tree and the
+// global discovery listing. Flip the flag in the spec to re-enable.
+//
+// The flag is truthy as either a JSON boolean (`true`) or the string
+// `"true"`, matching the skill frontmatter convention so the two surfaces
+// can't drift. ListServices / ListAllOperations are deliberately NOT filtered
+// — use EnabledServices / EnabledOperations for a caller-facing view.
+func (r *Registry) ServiceDisabled(service string) bool {
+	return truthy(r.specs[service]["x-octo-disabled"])
+}
+
+// EnabledServices is ListServices minus any service whose spec sets
+// x-octo-disabled. This is the single source of truth for "what callers
+// should see" — command registration and global discovery both use it so the
+// filter can't be forgotten at one site and applied at another.
+func (r *Registry) EnabledServices() []string {
+	all := r.ListServices()
+	out := make([]string, 0, len(all))
+	for _, s := range all {
+		if !r.ServiceDisabled(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// EnabledOperations is ListAllOperations minus operations belonging to a
+// disabled service.
+func (r *Registry) EnabledOperations() []OperationInfo {
+	all := r.ListAllOperations()
+	out := make([]OperationInfo, 0, len(all))
+	for _, op := range all {
+		if !r.ServiceDisabled(op.Service) {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
 // OperationInfo is the summary view of an operation — what ListOperations
 // and ListAllOperations return. It carries the identifiers and metadata
 // needed to route to and describe the operation without loading its full
@@ -444,4 +485,18 @@ func stringOf(v any) string {
 func boolOf(v any) bool {
 	b, _ := v.(bool)
 	return b
+}
+
+// truthy accepts a JSON value that may be a boolean `true` or the string
+// `"true"`. It exists so the x-octo-disabled flag can't silently no-op when
+// written as a string in a spec — the same rule the skill frontmatter uses.
+func truthy(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return t == "true"
+	default:
+		return false
+	}
 }

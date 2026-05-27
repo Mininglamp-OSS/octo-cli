@@ -28,7 +28,7 @@ octo file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (b
 
 Unlike every other command, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path; `--type` (default `chat`) and `--path` become form text fields. Promoted body flags declared in the spec go in as text fields alongside the binary.
 
-The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `matter timeline add` or `message send`.
+The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `message send`.
 
 ### `download` — returns a presigned URL
 
@@ -85,13 +85,13 @@ Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-c
 owner=$(octo bot register --jq '.data.owner_uid')   # capture once at publish, then cache
 ```
 
-This is the value `matter extract` requires as `creator_uid` (see `octo-matter` skill §6).
+This is the value LLM-backed operations require as `creator_uid` (e.g. the withheld `matter extract`, once the matter domain is re-enabled).
 
 ### `typing` and `heartbeat`
 
 Both are fire-and-forget. `typing` signals an "…is typing" UI state in DM channels. `heartbeat` refreshes bot liveness — call it on a long-running poll loop so the platform knows the bot is alive.
 
-## 3. Common pattern: timeline attachment end-to-end
+## 3. Common pattern: message attachment end-to-end
 
 ```bash
 # 1. Upload the binary.
@@ -99,10 +99,10 @@ up=$(octo file upload --file ./log.txt --type chat)
 url=$(jq -r '.data.url'  <<<"$up")
 name=$(jq -r '.data.name' <<<"$up")
 
-# 2. Attach it to a matter timeline entry.
-octo matter timeline add <matter_id> --data "$(jq -n \
-  --arg u "$url" --arg n "$name" \
-  '{content:"see log", attachments:[{url:$u, name:$n, type:"text/plain"}]}')"
+# 2. Attach it to a message.
+octo message send --data "$(jq -n \
+  --arg c "chat-1" --arg u "$url" --arg n "$name" \
+  '{chat_id:$c, text:"see log", attachments:[{url:$u, name:$n, type:"text/plain"}]}')"
 ```
 
 ## 4. Error recovery

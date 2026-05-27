@@ -11,6 +11,8 @@ metadata:
 
 `octo` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
 
+> **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
+
 ## 1. Authentication
 
 Bots authenticate with a bearer token. There is no user login. Two ways to supply it:
@@ -147,9 +149,9 @@ The `hint` field is a one-line next action meant for an agent: follow it literal
 Simple top-level body fields auto-promote to typed flags (strings, integers, booleans, `[]string`). For objects, arrays-of-objects, or when sending a large payload, use `--data`:
 
 ```bash
-octo matter create --title "Fix login" --assignee me --assignee alice
-octo matter create --data '{"title":"Fix login","assignees":["me","alice"]}'
-octo matter create --data @body.json
+octo thread create --chat-id chat-1 --name "design review"
+octo message send --data '{"chat_id":"chat-1","text":"hi"}'
+octo message send --data @body.json
 octo some-cmd --data @-            # read JSON from stdin
 ```
 
@@ -158,21 +160,21 @@ Explicit flags override fields set in `--data`. The `--data` escape hatch exists
 ### Piping with `--jq`
 
 ```bash
-octo matter list --status open --jq '.data[].id' | xargs -I{} octo matter get {}
+octo group list --jq '.data[].id' | xargs -I{} octo group get {}
 ```
 
 ### Paginating
 
 ```bash
-octo matter list --status open --page-all --page-limit 20
+octo group list --page-all --page-limit 20
 ```
 
-The merged output drops `_pagination` — you get a flat `data` array.
+`--page-all` applies to any list operation that reports a cursor in `_pagination`. The merged output drops `_pagination` — you get a flat `data` array.
 
 ### Dry-run for agent self-verification
 
 ```bash
-octo matter create --title foo --dry-run
+octo message send --data '{"chat_id":"chat-1","text":"foo"}' --dry-run
 ```
 
 Prints the exact HTTP request body and URL, emits no side effect.
@@ -183,8 +185,8 @@ The registry is embedded in the binary — no network needed:
 
 ```bash
 octo schema --list                # all services + operation IDs
-octo schema --list matter         # operations in one domain
-octo schema matter.create         # full request/response schema
+octo schema --list message        # operations in one domain
+octo schema message.send          # full request/response schema
 octo config show                  # resolved config (token masked)
 octo auth status                  # active bot identity (whoami)
 octo auth list                    # stored profiles (no tokens)
@@ -193,14 +195,14 @@ octo auth list                    # stored profiles (no tokens)
 When an operation isn't auto-registered yet or you need low-level control:
 
 ```bash
-octo api GET  /api/v1/matters --params '{"status":"open"}'
-octo api POST /api/v1/matters --data @body.json
+octo api GET  /api/v1/messages --params '{"chat_id":"chat-1"}'
+octo api POST /api/v1/messages --data @body.json
 ```
 
 ## 8. Domain skills
 
 Once these fundamentals are understood, load the skill for the domain you need:
 
-- `octo-matter` — matters (todos/tasks), assignees, channels, timeline, AI extract
+- `octo-matter` — matters (todos/tasks), assignees, channels, timeline, AI extract — **temporarily withheld** (backend API stabilizing; not currently loadable)
 - `octo-messaging` — message send/edit/sync/read-receipt, groups, threads, events
 - `octo-files` — file upload/download, presigned credentials, bot housekeeping

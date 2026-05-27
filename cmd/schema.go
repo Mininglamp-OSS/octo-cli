@@ -74,10 +74,16 @@ func runSchemaList(f *cmdutil.Factory, args []string) error {
 			_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 			return ee
 		}
+		// An explicit domain (or operation lookup via runSchemaGet) still
+		// resolves a disabled service — introspection stays available even
+		// when the domain is withheld from the command tree.
 		payload["service"] = svc
 		payload["operations"] = ops
 	} else {
-		payload["operations"] = reg.ListAllOperations()
+		// Global discovery hides disabled domains so agents aren't pointed at
+		// a withheld surface. The registry owns the enabled view.
+		payload["services"] = reg.EnabledServices()
+		payload["operations"] = reg.EnabledOperations()
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {

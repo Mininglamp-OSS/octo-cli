@@ -165,3 +165,77 @@ func operationIDs(ops []OperationInfo) []string {
 	}
 	return out
 }
+
+// matter carries x-octo-disabled in its embedded spec — it must stay loaded
+// (engine + schema introspection depend on it) yet drop out of the
+// caller-facing enabled views.
+
+func TestServiceDisabled(t *testing.T) {
+	r := MustNew()
+	if !r.ServiceDisabled("matter") {
+		t.Error("matter should be disabled (x-octo-disabled in spec)")
+	}
+	if r.ServiceDisabled("message") {
+		t.Error("message should not be disabled")
+	}
+	if r.ServiceDisabled("nosuch") {
+		t.Error("unknown service should report not-disabled, not panic")
+	}
+}
+
+func TestEnabledServicesExcludesDisabledButKeepsLoaded(t *testing.T) {
+	r := MustNew()
+	// Invariant that protects the engine fixture + introspection: the raw
+	// listing still has matter even though the enabled view drops it.
+	if !contains(r.ListServices(), "matter") {
+		t.Fatal("ListServices must still include matter (raw view)")
+	}
+	if contains(r.EnabledServices(), "matter") {
+		t.Error("EnabledServices must exclude matter")
+	}
+	if !contains(r.EnabledServices(), "message") {
+		t.Error("EnabledServices must still include message")
+	}
+}
+
+func TestEnabledOperationsExcludesDisabledButResolvable(t *testing.T) {
+	r := MustNew()
+	for _, op := range r.EnabledOperations() {
+		if op.Service == "matter" {
+			t.Errorf("EnabledOperations leaked a matter op: %s", op.ID)
+		}
+	}
+	// Explicit lookup of a disabled service's op still resolves.
+	if _, ok := r.GetOperation("matter.create"); !ok {
+		t.Error("GetOperation(matter.create) must still resolve for introspection")
+	}
+}
+
+func TestTruthy(t *testing.T) {
+	cases := []struct {
+		in   any
+		want bool
+	}{
+		{true, true},
+		{"true", true},
+		{false, false},
+		{"false", false},
+		{"", false},
+		{nil, false},
+		{1, false},
+	}
+	for _, c := range cases {
+		if got := truthy(c.in); got != c.want {
+			t.Errorf("truthy(%#v) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}

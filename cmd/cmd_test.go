@@ -315,7 +315,7 @@ func TestCmd_MissingTokenOnServiceCommand(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{APIBaseURL: "http://x", Format: "json"}) // no BotToken
 
-	_, _, err := execRoot(t, f, "matter", "list")
+	_, _, err := execRoot(t, f, "event", "list")
 	if err == nil {
 		t.Fatal("expected PersistentPreRunE to reject missing token")
 	}
@@ -419,8 +419,86 @@ func TestSkipValidation(t *testing.T) {
 	}
 
 	// Pick any real service leaf — should NOT skip.
-	matterCmd := findCmd("matter")
-	if skipValidation(matterCmd) {
-		t.Error("matter should NOT skip validation")
+	svcLeaf := findCmd("event", "list")
+	if skipValidation(svcLeaf) {
+		t.Error("service leaf should NOT skip validation")
+	}
+}
+
+// --- x-octo-disabled withholding (matter) ---
+//
+// These lock the three consumption surfaces in place: a disabled service must
+// vanish from the command tree and from global discovery, yet stay reachable
+// for explicit introspection. Without them a refactor could silently re-expose
+// an unstable domain.
+
+func topLevelCmd(root *cobra.Command, name string) *cobra.Command {
+	for _, c := range root.Commands() {
+		if c.Name() == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestDisabledServiceWithheldFromCommandTree(t *testing.T) {
+	root := NewRootCmd(newTestFactoryWithReg().Factory)
+	if topLevelCmd(root, "matter") != nil {
+		t.Error("disabled service `matter` must not appear in the command tree")
+	}
+	if topLevelCmd(root, "message") == nil {
+		t.Error("enabled service `message` must still appear")
+	}
+	if topLevelCmd(root, "event") == nil {
+		t.Error("enabled service `event` must still appear")
+	}
+}
+
+func TestDisabledServiceHiddenFromGlobalSchemaList(t *testing.T) {
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{Format: "json"})
+
+	out, _, err := execRoot(t, f, "schema", "--list")
+	if err != nil {
+		t.Fatalf("schema --list: %v", err)
+	}
+	var env map[string]any
+	if jerr := json.Unmarshal([]byte(out), &env); jerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", jerr, out)
+	}
+	data, _ := env["data"].(map[string]any)
+
+	for _, s := range data["services"].([]any) {
+		if s == "matter" {
+			t.Error("global schema --list must not list disabled service `matter`")
+		}
+	}
+	for _, op := range data["operations"].([]any) {
+		m, _ := op.(map[string]any)
+		if m["service"] == "matter" {
+			t.Errorf("global schema --list leaked a matter op: %v", m["id"])
+		}
+	}
+}
+
+func TestDisabledServiceStillIntrospectable(t *testing.T) {
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{Format: "json"})
+
+	// Explicit domain listing still resolves.
+	out, _, err := execRoot(t, f, "schema", "--list", "matter")
+	if err != nil {
+		t.Fatalf("schema --list matter: %v", err)
+	}
+	var env map[string]any
+	_ = json.Unmarshal([]byte(out), &env)
+	data, _ := env["data"].(map[string]any)
+	if ops, _ := data["operations"].([]any); len(ops) == 0 {
+		t.Error("explicit `schema --list matter` must still return operations")
+	}
+
+	// Explicit operation lookup still resolves.
+	if _, _, err := execRoot(t, f, "schema", "matter.list"); err != nil {
+		t.Errorf("explicit `schema matter.list` must still resolve: %v", err)
 	}
 }
