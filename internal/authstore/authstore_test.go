@@ -134,6 +134,35 @@ func TestStore_CorruptEncErrors(t *testing.T) {
 	}
 }
 
+// TestStore_OrphanedTokenIsHarmless simulates the post-crash residue of the
+// write ordering (token written, metadata not yet): a token in credentials.enc
+// with no config.json entry must be invisible and must not break resolution.
+func TestStore_OrphanedTokenIsHarmless(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.saveTokens(map[string]string{"ghost": "app_ghost"}); err != nil {
+		t.Fatalf("seed orphan token: %v", err)
+	}
+
+	profiles, err := s.LoadProfiles()
+	if err != nil {
+		t.Fatalf("LoadProfiles: %v", err)
+	}
+	if len(profiles) != 0 {
+		t.Errorf("orphan token leaked into the catalog: %v", profiles)
+	}
+	if _, _, status, _ := s.ActiveProfile("", ""); status != StatusNone {
+		t.Errorf("status = %v, want StatusNone (orphan must not count as a profile)", status)
+	}
+
+	// A real save still works alongside the orphan.
+	if err := s.SaveProfile("real", ProfileMeta{RobotID: "cli_real"}, "app_real"); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+	if tok, err := s.GetToken("real"); err != nil || tok != "app_real" {
+		t.Errorf("GetToken(real) = %q, %v", tok, err)
+	}
+}
+
 func TestActiveProfile(t *testing.T) {
 	type want struct {
 		name   string

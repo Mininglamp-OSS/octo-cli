@@ -10,27 +10,32 @@ import (
 // to a success response. Fields are emitted with an underscore prefix to mark
 // them as CLI-added (not backend data).
 //
-// Identity, when non-nil, replaces the default constant identity tag. The
-// Factory sets it to an object describing the bot the command acted as (profile,
-// robot id, kind, source) so every response echoes the active identity.
+// Identity, when non-nil, replaces the default identity object. The Factory sets
+// it to an object describing the bot the command acted as (profile, robot id,
+// kind, source) so every response echoes the active identity.
 type EnvelopeMeta struct {
 	RateLimit json.RawMessage
 	Notice    json.RawMessage
 	Identity  any
 }
 
-// Identity is the default actor identity tag emitted on successful responses
-// when no richer identity is supplied (e.g. unauthenticated diagnostic
-// commands). When a credential is resolved the Factory replaces it with an
-// object via EnvelopeMeta.Identity.
-const Identity = "bot"
+// IdentityType is the actor type tag. The envelope's identity is always an
+// object so the field has one consistent shape; commands that resolve a
+// credential enrich it via EnvelopeMeta.Identity, others get just {type}.
+const IdentityType = "bot"
+
+// defaultIdentity is the minimal identity object emitted when no richer one is
+// supplied (e.g. unauthenticated diagnostic commands like version/schema).
+func defaultIdentity() map[string]any {
+	return map[string]any{"type": IdentityType}
+}
 
 // WriteSuccess emits a success envelope to w. If raw is an object containing
 // top-level "data" (array) + "pagination" (object) keys, those are flattened
 // onto the envelope as data + _pagination. Otherwise raw is placed under data
 // as-is. Meta fields (if non-nil) are attached as _rate_limit / _notice.
 func WriteSuccess(w io.Writer, raw json.RawMessage, meta EnvelopeMeta) error {
-	identity := any(Identity)
+	var identity any = defaultIdentity()
 	if meta.Identity != nil {
 		identity = meta.Identity
 	}

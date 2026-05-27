@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -78,7 +79,14 @@ func (s *Store) deriveKey() ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	id, _ := machineID() // best-effort; empty id degrades to salt-only
+	// A platform with no machine id derives a stable salt-only key. But a
+	// transient read failure on a platform that HAS one must surface — folding
+	// an empty id into the key would silently change it and make every stored
+	// token undecryptable for that run.
+	id, err := machineID()
+	if err != nil && !errors.Is(err, errMachineIDUnsupported) {
+		return [32]byte{}, fmt.Errorf("read machine id: %w", err)
+	}
 	h := sha256.New()
 	h.Write([]byte(id))
 	h.Write(salt)

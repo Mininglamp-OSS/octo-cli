@@ -443,8 +443,9 @@ func TestFactory_IdentityEcho(t *testing.T) {
 	}
 }
 
-// TestFactory_IdentityDefaultsToBot verifies the envelope keeps the plain "bot"
-// tag when no credential was resolved (e.g. unauthenticated diagnostic commands).
+// TestFactory_IdentityDefaultsToBot verifies the envelope emits the minimal
+// identity object {type:bot} when no credential was resolved — the field is
+// always an object, never a bare string.
 func TestFactory_IdentityDefaultsToBot(t *testing.T) {
 	tf := NewTestFactory()
 	if err := tf.EmitSuccess([]byte(`{}`)); err != nil {
@@ -454,7 +455,8 @@ func TestFactory_IdentityDefaultsToBot(t *testing.T) {
 	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if env["identity"] != "bot" {
-		t.Errorf("identity = %v, want \"bot\"", env["identity"])
+	id, ok := env["identity"].(map[string]any)
+	if !ok || id["type"] != "bot" {
+		t.Errorf("identity = %v, want {type:bot}", env["identity"])
 	}
 }

@@ -134,6 +134,12 @@ func (s *Store) saveProfiles(profiles map[string]ProfileMeta) error {
 }
 
 // SaveProfile stores (or replaces) a profile's metadata and token.
+//
+// The two files can't be written atomically together, so order them to keep the
+// invariant "a profile listed in config.json has a token in credentials.enc":
+// write the token first, then the metadata. A crash in between leaves an
+// orphaned token (invisible, since nothing lists it) rather than a listed
+// profile with no token.
 func (s *Store) SaveProfile(name string, meta ProfileMeta, token string) error {
 	profiles, err := s.LoadProfiles()
 	if err != nil {
@@ -145,14 +151,18 @@ func (s *Store) SaveProfile(name string, meta ProfileMeta, token string) error {
 	}
 	profiles[name] = meta
 	tokens[name] = token
-	if err := s.saveProfiles(profiles); err != nil {
+	if err := s.saveTokens(tokens); err != nil {
 		return err
 	}
-	return s.saveTokens(tokens)
+	return s.saveProfiles(profiles)
 }
 
 // RemoveProfile deletes a profile's metadata and token. Removing an absent
 // profile is a no-op.
+//
+// Mirror SaveProfile's ordering to preserve the same invariant: drop the
+// metadata first, then the token. A crash in between leaves an orphaned token
+// (harmless) rather than a listed profile whose token is already gone.
 func (s *Store) RemoveProfile(name string) error {
 	profiles, err := s.LoadProfiles()
 	if err != nil {

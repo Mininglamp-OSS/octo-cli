@@ -284,10 +284,19 @@ func readToken(f *cmdutil.Factory, withToken bool, tokenFile string) (string, er
 	}
 }
 
+// escape-sequence parser states for readPasswordMasked.
+const (
+	escNormal   = iota // not in an escape sequence
+	escAfterEsc        // saw ESC, awaiting the sequence introducer
+	escInCSI           // inside a CSI/SS3 body, awaiting the final byte
+)
+
 // readPasswordMasked reads a line from the terminal without echoing the typed
 // characters, printing a '*' per keystroke as feedback (and erasing one on
-// backspace). The terminal state is restored on return. Enter ends input;
-// Ctrl-C aborts.
+// backspace). It accepts only printable ASCII and swallows escape sequences
+// (arrow keys, bracketed-paste markers like ESC[200~) so they never land in the
+// token. The terminal state is restored on return; Enter ends input, Ctrl-C
+// aborts.
 func readPasswordMasked(file *os.File, out io.Writer) (string, error) {
 	fd := int(file.Fd())
 	oldState, err := term.MakeRaw(fd)
@@ -297,27 +306,40 @@ func readPasswordMasked(file *os.File, out io.Writer) (string, error) {
 	defer func() { _ = term.Restore(fd, oldState) }() //nolint:errcheck // best-effort restore
 
 	var pw []byte
+	state := escNormal
 	b := make([]byte, 1)
 	for {
 		n, rerr := file.Read(b)
 		if n > 0 {
-			switch c := b[0]; c {
-			case '\r', '\n':
+			c := b[0]
+			switch {
+			case state == escAfterEsc:
+				// ESC '[' (CSI) or 'O' (SS3) opens a sequence; anything else was
+				// a lone/Alt key — drop just this byte.
+				state = escNormal
+				if c == '[' || c == 'O' {
+					state = escInCSI
+				}
+			case state == escInCSI:
+				if c >= 0x40 && c <= 0x7e { // final byte ends the sequence
+					state = escNormal
+				}
+			case c == '\r' || c == '\n':
 				fmt.Fprint(out, "\r\n")
 				return string(pw), nil
-			case 0x03: // Ctrl-C
+			case c == 0x03: // Ctrl-C
 				fmt.Fprint(out, "\r\n")
 				return "", errors.New("interrupted")
-			case 0x7f, 0x08: // Backspace / Delete
+			case c == 0x7f || c == 0x08: // Backspace / Delete
 				if len(pw) > 0 {
 					pw = pw[:len(pw)-1]
 					fmt.Fprint(out, "\b \b")
 				}
-			default:
-				if c >= 0x20 { // ignore other control bytes
-					pw = append(pw, c)
-					fmt.Fprint(out, "*")
-				}
+			case c == 0x1b: // ESC — start of an escape sequence, do not capture
+				state = escAfterEsc
+			case c >= 0x20 && c < 0x7f: // printable ASCII only
+				pw = append(pw, c)
+				fmt.Fprint(out, "*")
 			}
 		}
 		if rerr != nil {
