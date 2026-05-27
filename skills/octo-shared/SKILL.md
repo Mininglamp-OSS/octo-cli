@@ -1,6 +1,6 @@
 ---
 name: octo-shared
-version: 0.4.0
+version: 0.5.0
 description: Shared knowledge for using the octo CLI — authentication, multi-service config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
 metadata:
   requires:
@@ -13,13 +13,33 @@ metadata:
 
 ## 1. Authentication
 
-Bots authenticate with a bearer token passed as an env var. There is no user login.
+Bots authenticate with a bearer token. There is no user login. Two ways to supply it:
+
+**Stored profile (recommended).** A human (or provisioning step) logs the token in once; it is encrypted at rest under `~/.octo-cli`, and the raw token never appears in any command line, shell history, or transcript afterward:
+
+```bash
+# Operator setup (token read from a hidden prompt, or --with-token < file):
+octo auth login --bot-id cli_xxxxxxxx          # robot id you got when creating the bot
+echo "$TOKEN" | octo auth login --bot-id cli_xxxxxxxx --with-token   # non-interactive
+```
+
+Then, at runtime, select which bot to act as — the agent passes its own **robot id**, which it knows:
+
+```bash
+octo --bot-id cli_xxxxxxxx matter list         # or env OCTO_BOT_ID=cli_xxxxxxxx
+octo --profile myname matter list              # or by the friendly profile name
+```
+
+With exactly one stored profile, the selector is optional. With **two or more, you must pass `--bot-id` or `--profile`** — omitting it is a hard error (the CLI never guesses which identity to use).
+
+**Env token (fallback).** When no profile is stored, the raw token is read from `OCTO_BOT_TOKEN`:
 
 ```bash
 export OCTO_BOT_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
-# or
 export OCTO_BOT_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
 ```
+
+> `OCTO_BOT_ID` is a selector (a robot id), not a secret; `OCTO_BOT_TOKEN` is the secret. If `OCTO_BOT_ID` names no stored profile the command fails — it never falls back to silently using `OCTO_BOT_TOKEN` under that id.
 
 Token prefix determines capability — the CLI does NOT enforce this locally; the backend rejects unsupported operations with `FORBIDDEN`.
 
@@ -28,7 +48,7 @@ Token prefix determines capability — the CLI does NOT enforce this locally; th
 | `app_*` | App Bot  | yes    | yes        | **no**      | **no** | **no**|
 | `bf_*`  | User Bot | yes    | yes        | yes         | yes    | yes   |
 
-Before acting, inspect `octo config show` to confirm the token in use.
+Before acting, inspect `octo auth status` (or `octo config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
 
 ## 2. Multi-service configuration
 
@@ -50,12 +70,14 @@ Every successful invocation prints a single JSON object to stdout:
 ```json
 {
   "ok": true,
-  "identity": "bot",
+  "identity": { "type": "bot", "profile": "prod", "robot_id": "cli_xxx", "bot_kind": "app_bot", "source": "profile:prod" },
   "data": { ... or [...] },
   "_pagination": { "has_more": true, "next_cursor": "..." },
   "_rate_limit": { "remaining": 99, "reset": 1730000000 }
 }
 ```
+
+`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is the string `"bot"` when the token came from `OCTO_BOT_TOKEN` (raw env tokens carry no recorded identity).
 
 Every failure prints an error envelope to **stderr** and exits non-zero:
 
@@ -91,6 +113,8 @@ These flags work on every command (they are root-level persistent flags):
 | `--timeout`     | Per-request deadline, e.g. `30s`, `2m`                                  |
 | `--no-retry`    | Disable the default retry-on-transient policy                           |
 | `--space`       | Override `OCTO_SPACE_ID` for this invocation                            |
+| `--bot-id`      | Select/assert the stored credential by robot id (env `OCTO_BOT_ID`)     |
+| `--profile`     | Select the stored credential by profile name                            |
 
 Paginated operations additionally expose:
 
@@ -162,6 +186,8 @@ octo schema --list                # all services + operation IDs
 octo schema --list matter         # operations in one domain
 octo schema matter.create         # full request/response schema
 octo config show                  # resolved config (token masked)
+octo auth status                  # active bot identity (whoami)
+octo auth list                    # stored profiles (no tokens)
 ```
 
 When an operation isn't auto-registered yet or you need low-level control:

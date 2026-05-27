@@ -2,7 +2,7 @@
 
 ## What is octo-cli
 
-`octo` is the command-line interface for the Octo ecosystem, built for **AI Agent Bots** to call via `exec` from agent runtimes (OpenClaw, Claude Code, etc.). Output is a JSON envelope; there is no interactive I/O.
+`octo` is the command-line interface for the Octo ecosystem, built for **AI Agent Bots** to call via `exec` from agent runtimes (OpenClaw, Claude Code, etc.). Output is a JSON envelope; agent-runtime commands take no interactive I/O. The sole exception is `octo auth login`, an operator-only setup step that reads the token from a hidden terminal prompt (or stdin).
 
 ## Architecture
 
@@ -15,13 +15,16 @@
 
 ## Identity Model
 
-- The CLI is **bot-only** — no user login. `OCTO_BOT_TOKEN` carries an `app_*` (App Bot) or `bf_*` (User Bot) token.
+- The CLI is **bot-only** — no user login. A bot token is an `app_*` (App Bot) or `bf_*` (User Bot) token.
+- **Credential resolution** (see `internal/credential`, `internal/authstore`): a token comes from a stored encrypted profile or, as a fallback, `OCTO_BOT_TOKEN`. Stored profiles live in `~/.octo-cli` (override `OCTO_CONFIG_DIR`): metadata in plaintext `config.json`, tokens in AES-256-GCM `credentials.enc`. Manage them with `octo auth`.
+- **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: selector > sole/implicit profile > `OCTO_BOT_TOKEN`. The success envelope's `identity` echoes the active `{profile, robot_id, bot_kind, source}` so misuse is visible.
+- **Isolation boundary = OS user**: the encryption key is machine-derived, so the store resists off-machine leakage (commit/backup/sync) but not a same-user process. Isolate mutually-distrusting bots with separate OS users or `OCTO_CONFIG_DIR` values.
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
 ## Command Structure (7 domains, 48 operations / 51 commands incl. 3 matter transition aliases)
 
-Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, and the cobra-generated `completion`.
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
 ```
 octo matter    create | list | get | update | delete
@@ -38,6 +41,7 @@ octo file      upload | download | credentials | presigned
 octo bot       register | set-commands | user-info | space-members | typing | heartbeat
 octo event     list | ack
 
+octo auth      login | status | logout | list
 octo schema [--list [domain] | <operation-id>]
 octo api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
 octo config show
@@ -45,18 +49,22 @@ octo completion bash|zsh|fish|powershell
 octo version
 ```
 
+`octo auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
+
 Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter`, `octo-messaging`, `octo-files`) — keep those in sync when command shapes change.
 
 ## Environment
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Required.                 |
+| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Fallback when no stored profile is selected. |
+| `OCTO_BOT_ID`       | Robot id selecting a stored profile (env form of `--bot-id`). Selector, not a secret. |
+| `OCTO_CONFIG_DIR`   | Override the credential dir (default `~/.octo-cli`).     |
 | `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` | `table` | `csv` | `ndjson`). |
 
-Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`, `--no-retry`, `--space`. Paginated ops additionally support `--page-all` / `--page-limit`.
+Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`, `--no-retry`, `--space`, `--bot-id`, `--profile`. Paginated ops additionally support `--page-all` / `--page-limit`.
 
 ## Code Style
 
@@ -64,7 +72,7 @@ Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`,
 - Errors wrap with `fmt.Errorf("context: %w", err)`; CLI errors use the `*output.ExitError` taxonomy so envelopes stay structured.
 - The `internal/output` package is a leaf — it must not import other `internal/*` packages.
 - No mutable package-level globals; state flows through the Factory. The only package-level `var` declarations allowed are (a) ldflags-injected build metadata (`cmd/build.go`), (b) `//go:embed` file systems (`internal/registry`), and (c) immutable lookup tables (e.g. `backendErrorMapping` in `internal/output/errors.go`, `httpMethods` in `internal/registry/loader.go`). These are const-equivalent — never mutated at runtime — and exist only because Go doesn't permit `const` for their types.
-- External deps limited to cobra, gojq, and the standard library.
+- External deps limited to cobra, gojq, `golang.org/x/term` (hidden token prompt in `octo auth login`), and the standard library.
 - All text in English.
 
 ## Build & Test
