@@ -22,7 +22,7 @@ func TestStore_RoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
 	meta := ProfileMeta{APIBaseURL: "https://api.example.com", BotKind: "app_bot", RobotID: "cli_demo"}
-	if err := s.SaveProfile("prod", meta, "app_secret_token"); err != nil {
+	if err := s.SaveProfile("prod", &meta, "app_secret_token"); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 
@@ -46,7 +46,7 @@ func TestStore_RoundTrip(t *testing.T) {
 func TestStore_CiphertextHidesToken(t *testing.T) {
 	s := newTestStore(t)
 	const secret = "app_super_secret_value"
-	if err := s.SaveProfile("prod", ProfileMeta{RobotID: "cli_x"}, secret); err != nil {
+	if err := s.SaveProfile("prod", &ProfileMeta{RobotID: "cli_x"}, secret); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 
@@ -70,7 +70,7 @@ func TestStore_CiphertextHidesToken(t *testing.T) {
 
 func TestStore_FilePermissions(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SaveProfile("p", ProfileMeta{RobotID: "cli_x"}, "app_t"); err != nil {
+	if err := s.SaveProfile("p", &ProfileMeta{RobotID: "cli_x"}, "app_t"); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 	for _, p := range []string{s.credPath(), s.saltPath()} {
@@ -86,10 +86,10 @@ func TestStore_FilePermissions(t *testing.T) {
 
 func TestStore_Remove(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SaveProfile("a", ProfileMeta{RobotID: "cli_a"}, "app_a"); err != nil {
+	if err := s.SaveProfile("a", &ProfileMeta{RobotID: "cli_a"}, "app_a"); err != nil {
 		t.Fatalf("SaveProfile a: %v", err)
 	}
-	if err := s.SaveProfile("b", ProfileMeta{RobotID: "cli_b"}, "app_b"); err != nil {
+	if err := s.SaveProfile("b", &ProfileMeta{RobotID: "cli_b"}, "app_b"); err != nil {
 		t.Fatalf("SaveProfile b: %v", err)
 	}
 	if err := s.RemoveProfile("a"); err != nil {
@@ -109,7 +109,7 @@ func TestStore_Remove(t *testing.T) {
 
 func TestStore_RemoveLastClearsEncFile(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SaveProfile("only", ProfileMeta{RobotID: "cli_o"}, "app_o"); err != nil {
+	if err := s.SaveProfile("only", &ProfileMeta{RobotID: "cli_o"}, "app_o"); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 	if err := s.RemoveProfile("only"); err != nil {
@@ -122,7 +122,7 @@ func TestStore_RemoveLastClearsEncFile(t *testing.T) {
 
 func TestStore_CorruptEncErrors(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.SaveProfile("p", ProfileMeta{RobotID: "cli_x"}, "app_t"); err != nil {
+	if err := s.SaveProfile("p", &ProfileMeta{RobotID: "cli_x"}, "app_t"); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 	// Flip bytes to break GCM authentication.
@@ -155,7 +155,7 @@ func TestStore_OrphanedTokenIsHarmless(t *testing.T) {
 	}
 
 	// A real save still works alongside the orphan.
-	if err := s.SaveProfile("real", ProfileMeta{RobotID: "cli_real"}, "app_real"); err != nil {
+	if err := s.SaveProfile("real", &ProfileMeta{RobotID: "cli_real"}, "app_real"); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
 	}
 	if tok, err := s.GetToken("real"); err != nil || tok != "app_real" {
@@ -234,7 +234,7 @@ func TestActiveProfile(t *testing.T) {
 		t.Run(c.desc, func(t *testing.T) {
 			s := newTestStore(t)
 			for n, m := range c.profiles {
-				if err := s.SaveProfile(n, m, "app_"+n); err != nil {
+				if err := s.SaveProfile(n, &m, "app_"+n); err != nil {
 					t.Fatalf("seed %s: %v", n, err)
 				}
 			}

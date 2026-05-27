@@ -423,7 +423,7 @@ func TestFactory_InjectedHooksUsed(t *testing.T) {
 // the success envelope's identity becomes an object describing the active bot.
 func TestFactory_IdentityEcho(t *testing.T) {
 	tf := NewTestFactory()
-	tf.Factory.cred = &credential.BotCredential{
+	tf.cred = &credential.BotCredential{
 		Token: "app_x", Profile: "prod", RobotID: "cli_x", Source: "profile:prod",
 	}
 	if err := tf.EmitSuccess([]byte(`{"k":"v"}`)); err != nil {

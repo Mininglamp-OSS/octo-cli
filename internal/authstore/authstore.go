@@ -35,13 +35,13 @@ const (
 type Status int
 
 const (
-	// StatusFound: exactly one profile resolved (by selector or as the sole entry).
+	// StatusFound means exactly one profile resolved (by selector or as the sole entry).
 	StatusFound Status = iota
-	// StatusNone: zero profiles configured — caller should fall back to env.
+	// StatusNone means zero profiles are configured — the caller should fall back to env.
 	StatusNone
-	// StatusAmbiguous: >=2 profiles and no selector given — caller must error.
+	// StatusAmbiguous means two or more profiles exist and no selector was given — the caller must error.
 	StatusAmbiguous
-	// StatusMissing: a selector was given but matched nothing / was inconsistent.
+	// StatusMissing means a selector was given but matched nothing or was inconsistent.
 	StatusMissing
 )
 
@@ -140,7 +140,7 @@ func (s *Store) saveProfiles(profiles map[string]ProfileMeta) error {
 // write the token first, then the metadata. A crash in between leaves an
 // orphaned token (invisible, since nothing lists it) rather than a listed
 // profile with no token.
-func (s *Store) SaveProfile(name string, meta ProfileMeta, token string) error {
+func (s *Store) SaveProfile(name string, meta *ProfileMeta, token string) error {
 	profiles, err := s.LoadProfiles()
 	if err != nil {
 		return err
@@ -149,7 +149,7 @@ func (s *Store) SaveProfile(name string, meta ProfileMeta, token string) error {
 	if err != nil {
 		return err
 	}
-	profiles[name] = meta
+	profiles[name] = *meta
 	tokens[name] = token
 	if err := s.saveTokens(tokens); err != nil {
 		return err
@@ -277,14 +277,14 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("create temp in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op after a successful rename
+	defer func() { _ = os.Remove(tmpName) }() //nolint:errcheck // no-op after a successful rename
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close() //nolint:errcheck // returning the write error, which is primary
 		return fmt.Errorf("write temp: %w", err)
 	}
 	if err := tmp.Chmod(perm); err != nil {
-		tmp.Close()
+		_ = tmp.Close() //nolint:errcheck // returning the chmod error, which is primary
 		return fmt.Errorf("chmod temp: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

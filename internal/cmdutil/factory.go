@@ -78,28 +78,9 @@ func NewDefaultFactory() *Factory {
 		if f.config != nil {
 			return f.config, nil
 		}
-		cfg := config.Load()
-		if f.Globals.Format != "" {
-			cfg.Format = f.Globals.Format
-		}
-		// Reflect the resolved credential into the config so cfg.Validate (the
-		// auth gate in root's PersistentPreRunE) passes for profile-based use,
-		// and config show reports the active token. A structured resolution
-		// error (ambiguous / missing profile) surfaces here; a plain "no
-		// credential" error is swallowed so cfg.Validate reports the familiar
-		// OCTO_BOT_TOKEN hint for the zero-config case.
-		if cred, err := f.CredentialFunc(); err != nil {
-			if output.AsExitError(err) != nil {
-				return nil, err
-			}
-		} else if cred != nil {
-			if cred.Token != "" {
-				cfg.BotToken = cred.Token
-			}
-			if cred.SpaceID != "" {
-				cfg.SpaceID = cred.SpaceID
-			}
-			f.overlayProfileBaseURL(cfg, cred.Profile)
+		cfg, err := f.buildConfig()
+		if err != nil {
+			return nil, err
 		}
 		f.config = cfg
 		return cfg, nil
@@ -109,24 +90,9 @@ func NewDefaultFactory() *Factory {
 		if f.cred != nil {
 			return f.cred, nil
 		}
-		store, err := f.AuthStore()
+		cred, err := f.buildCredential()
 		if err != nil {
 			return nil, err
-		}
-		botID := f.Globals.BotID
-		if botID == "" {
-			botID = os.Getenv(config.EnvBotID)
-		}
-		chain := credential.NewChain(
-			credential.NewFileProvider(store, f.Globals.Profile, botID),
-			credential.NewEnvProvider(),
-		)
-		cred, err := chain.Resolve()
-		if err != nil {
-			return nil, err
-		}
-		if f.Globals.Space != "" {
-			cred.SpaceID = f.Globals.Space
 		}
 		f.cred = cred
 		return cred, nil
@@ -165,6 +131,61 @@ func NewDefaultFactory() *Factory {
 	}
 
 	return f
+}
+
+// buildConfig loads the env config and reflects the resolved credential into it
+// so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
+// profile-based use and config show reports the active token. A structured
+// resolution error (ambiguous / missing profile) surfaces here; a plain "no
+// credential" error is swallowed so cfg.Validate reports the familiar
+// OCTO_BOT_TOKEN hint for the zero-config case.
+func (f *Factory) buildConfig() (*config.Config, error) {
+	cfg := config.Load()
+	if f.Globals.Format != "" {
+		cfg.Format = f.Globals.Format
+	}
+	cred, err := f.CredentialFunc()
+	if err != nil {
+		if output.AsExitError(err) != nil {
+			return nil, err
+		}
+		return cfg, nil
+	}
+	if cred != nil {
+		if cred.Token != "" {
+			cfg.BotToken = cred.Token
+		}
+		if cred.SpaceID != "" {
+			cfg.SpaceID = cred.SpaceID
+		}
+		f.overlayProfileBaseURL(cfg, cred.Profile)
+	}
+	return cfg, nil
+}
+
+// buildCredential resolves the credential through the file→env chain, applying
+// the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
+func (f *Factory) buildCredential() (*credential.BotCredential, error) {
+	store, err := f.AuthStore()
+	if err != nil {
+		return nil, err
+	}
+	botID := f.Globals.BotID
+	if botID == "" {
+		botID = os.Getenv(config.EnvBotID)
+	}
+	chain := credential.NewChain(
+		credential.NewFileProvider(store, f.Globals.Profile, botID),
+		credential.NewEnvProvider(),
+	)
+	cred, err := chain.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if f.Globals.Space != "" {
+		cred.SpaceID = f.Globals.Space
+	}
+	return cred, nil
 }
 
 // AuthStore lazily constructs and caches the credential store.

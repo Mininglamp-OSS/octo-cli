@@ -18,7 +18,7 @@ func fileTestStore(t *testing.T, profiles map[string]string) *authstore.Store {
 	}
 	for name, robotID := range profiles {
 		meta := authstore.ProfileMeta{RobotID: robotID, BotKind: "app_bot"}
-		if err := s.SaveProfile(name, meta, "app_"+name); err != nil {
+		if err := s.SaveProfile(name, &meta, "app_"+name); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}

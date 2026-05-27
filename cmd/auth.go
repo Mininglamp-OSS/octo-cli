@@ -59,7 +59,7 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 			// (agents / CI) skip this and hit the error below, so scripted use
 			// still requires an explicit --bot-id / --profile.
 			if botID == "" && name == "" && isTerminal(f.IOStreams.In) {
-				fmt.Fprint(f.IOStreams.ErrOut, "Bot id (robot id, e.g. cli_xxx): ")
+				writeUI(f.IOStreams.ErrOut, "Bot id (robot id, e.g. cli_xxx): ")
 				line, err := readLineVisible(f.IOStreams.In)
 				if err != nil {
 					return failErr(f, output.ErrValidation(
@@ -97,11 +97,11 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 				RobotID:    botID,
 				CreatedAt:  time.Now().UTC().Format(time.RFC3339),
 			}
-			if err := store.SaveProfile(name, meta, token); err != nil {
+			if err := store.SaveProfile(name, &meta, token); err != nil {
 				return failErr(f, err)
 			}
 
-			count, _ := store.Count()
+			count, _ := store.Count() //nolint:errcheck // advisory count for the hint only
 			payload := map[string]any{
 				"profile":       name,
 				"bot_kind":      credential.TokenKind(token),
@@ -159,7 +159,7 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 				putIfSet(active, "space_id", meta.SpaceID)
 				return emitJSON(f, map[string]any{"active": active})
 			case authstore.StatusAmbiguous:
-				count, _ := store.Count()
+				count, _ := store.Count() //nolint:errcheck // advisory count for the hint only
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": count,
@@ -270,7 +270,7 @@ func readToken(f *cmdutil.Factory, withToken bool, tokenFile string) (string, er
 
 	default:
 		if isTerminal(f.IOStreams.In) {
-			fmt.Fprint(f.IOStreams.ErrOut, "Paste bot token: ")
+			writeUI(f.IOStreams.ErrOut, "Paste bot token: ")
 			tok, err := readPasswordMasked(f.IOStreams.In.(*os.File), f.IOStreams.ErrOut)
 			if err != nil {
 				return "", output.ErrValidation(
@@ -291,12 +291,58 @@ const (
 	escInCSI           // inside a CSI/SS3 body, awaiting the final byte
 )
 
+// advanceEsc tracks a terminal escape sequence (CSI/SS3). Given the current
+// state and the next byte, it returns the new state and whether the byte was
+// part of a sequence — such bytes (ESC, arrow keys, bracketed-paste markers like
+// ESC[200~) must never be captured into the token.
+func advanceEsc(state int, c byte) (newState int, inSequence bool) {
+	switch state {
+	case escAfterEsc:
+		// ESC '[' (CSI) or 'O' (SS3) opens a sequence; anything else was a
+		// lone/Alt key — drop just this byte.
+		if c == '[' || c == 'O' {
+			return escInCSI, true
+		}
+		return escNormal, true
+	case escInCSI:
+		if c >= 0x40 && c <= 0x7e { // final byte ends the sequence
+			return escNormal, true
+		}
+		return escInCSI, true
+	default:
+		if c == 0x1b { // ESC starts a sequence
+			return escAfterEsc, true
+		}
+		return escNormal, false
+	}
+}
+
+// applyMaskByte applies a non-escape byte to the password buffer, echoing a '*'
+// (or erasing one on backspace). It reports done=true when input ends — Enter
+// (abort=false) or Ctrl-C (abort=true).
+func applyMaskByte(c byte, pw *[]byte, out io.Writer) (done, abort bool) {
+	switch {
+	case c == '\r' || c == '\n':
+		return true, false
+	case c == 0x03: // Ctrl-C
+		return true, true
+	case c == 0x7f || c == 0x08: // Backspace / Delete
+		if len(*pw) > 0 {
+			*pw = (*pw)[:len(*pw)-1]
+			writeUI(out, "\b \b")
+		}
+	case c >= 0x20 && c < 0x7f: // printable ASCII only
+		*pw = append(*pw, c)
+		writeUI(out, "*")
+	}
+	return false, false
+}
+
 // readPasswordMasked reads a line from the terminal without echoing the typed
-// characters, printing a '*' per keystroke as feedback (and erasing one on
-// backspace). It accepts only printable ASCII and swallows escape sequences
-// (arrow keys, bracketed-paste markers like ESC[200~) so they never land in the
-// token. The terminal state is restored on return; Enter ends input, Ctrl-C
-// aborts.
+// characters, printing a '*' per keystroke as feedback. It accepts only
+// printable ASCII and swallows escape sequences (see advanceEsc) so they never
+// land in the token. The terminal state is restored on return; Enter ends input,
+// Ctrl-C aborts.
 func readPasswordMasked(file *os.File, out io.Writer) (string, error) {
 	fd := int(file.Fd())
 	oldState, err := term.MakeRaw(fd)
@@ -311,40 +357,19 @@ func readPasswordMasked(file *os.File, out io.Writer) (string, error) {
 	for {
 		n, rerr := file.Read(b)
 		if n > 0 {
-			c := b[0]
-			switch {
-			case state == escAfterEsc:
-				// ESC '[' (CSI) or 'O' (SS3) opens a sequence; anything else was
-				// a lone/Alt key — drop just this byte.
-				state = escNormal
-				if c == '[' || c == 'O' {
-					state = escInCSI
+			if ns, inSeq := advanceEsc(state, b[0]); inSeq {
+				state = ns
+			} else if done, abort := applyMaskByte(b[0], &pw, out); done {
+				writeUI(out, "\r\n")
+				if abort {
+					return "", errors.New("interrupted")
 				}
-			case state == escInCSI:
-				if c >= 0x40 && c <= 0x7e { // final byte ends the sequence
-					state = escNormal
-				}
-			case c == '\r' || c == '\n':
-				fmt.Fprint(out, "\r\n")
 				return string(pw), nil
-			case c == 0x03: // Ctrl-C
-				fmt.Fprint(out, "\r\n")
-				return "", errors.New("interrupted")
-			case c == 0x7f || c == 0x08: // Backspace / Delete
-				if len(pw) > 0 {
-					pw = pw[:len(pw)-1]
-					fmt.Fprint(out, "\b \b")
-				}
-			case c == 0x1b: // ESC — start of an escape sequence, do not capture
-				state = escAfterEsc
-			case c >= 0x20 && c < 0x7f: // printable ASCII only
-				pw = append(pw, c)
-				fmt.Fprint(out, "*")
 			}
 		}
 		if rerr != nil {
 			if errors.Is(rerr, io.EOF) {
-				fmt.Fprint(out, "\r\n")
+				writeUI(out, "\r\n")
 				return string(pw), nil
 			}
 			return "", rerr
@@ -429,4 +454,10 @@ func emitJSON(f *cmdutil.Factory, payload any) error {
 func failErr(f *cmdutil.Factory, err error) error {
 	_ = f.EmitError(err) //nolint:errcheck // envelope write is best-effort
 	return err
+}
+
+// writeUI writes an interactive prompt or echo to a terminal stream; the error
+// is intentionally ignored (best-effort UI, never a command failure).
+func writeUI(w io.Writer, s string) {
+	_, _ = fmt.Fprint(w, s) //nolint:errcheck // best-effort interactive UI
 }
