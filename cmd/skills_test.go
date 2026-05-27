@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/skills"
 )
 
 func TestParseSkillDescription(t *testing.T) {
@@ -64,6 +65,21 @@ func hasSkill(entries []skillEntry, name string) bool {
 		}
 	}
 	return false
+}
+
+// octo-matter sets `disabled: true` in its frontmatter — it must drop out of
+// the listing while staying embedded (so re-enabling is just a flag flip).
+func TestLoadSkillsExcludesDisabled(t *testing.T) {
+	entries, err := loadSkills()
+	if err != nil {
+		t.Fatalf("loadSkills: %v", err)
+	}
+	if hasSkill(entries, "octo-matter") {
+		t.Error("disabled skill `octo-matter` must not be listed")
+	}
+	if _, err := skills.FS.ReadFile("octo-matter/SKILL.md"); err != nil {
+		t.Errorf("octo-matter/SKILL.md must stay embedded (only the listing filters it): %v", err)
+	}
 }
 
 // A config without a token must still let `octo skills` run — the command is

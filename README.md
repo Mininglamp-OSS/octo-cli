@@ -38,7 +38,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `matter`  | 14  | Todos/tasks — CRUD, transitions, assignees, channels, timeline |
+| `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 9   | Threads — create, list, get, members, join/leave, metadata     |
 | `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
@@ -84,13 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/instal
 export OCTO_BOT_TOKEN="bf_your_user_bot_token"
 export OCTO_API_BASE_URL="https://api.example.com"
 
-# Matters (todos/tasks)
-octo matter list --status open --assignee me
-octo matter create --title "Deploy v2.0" --assignee user-123
-octo matter get matter-abc
-octo matter update matter-abc --title "Deploy v2.1"
-octo matter close matter-abc
-octo matter assignee add matter-abc user-456
+# NOTE: the `matter` domain is temporarily withheld (backend API stabilizing).
 
 # Messaging
 octo message send --data '{"chat_id":"chat-1","text":"hi"}'
@@ -108,13 +102,13 @@ octo file download abc123 --jq '.data.url'
 
 # Discover the API — fully offline, specs are embedded.
 octo schema --list              # all operations across all domains
-octo schema --list matter       # operations in one domain
-octo schema matter.create       # request/response schema for one op
+octo schema --list message      # operations in one domain
+octo schema message.send        # request/response schema for one op
 octo config show                # resolved config (token masked)
 
 # Generic passthrough for ops that aren't auto-registered.
-octo api GET  /v1/matters --params '{"status":"open"}'
-octo api POST /v1/matters --data @body.json
+octo api GET  /v1/messages --params '{"chat_id":"chat-1"}'
+octo api POST /v1/messages --data @body.json
 ```
 
 ## Authentication
@@ -190,16 +184,16 @@ Exit codes: `3` auth, `2` validation/config, `1` everything else.
 
 ```bash
 # Dry-run to inspect the resolved request — no side effects.
-octo matter create --title "Hello" --dry-run
+octo message send --data '{"chat_id":"chat-1","text":"Hello"}' --dry-run
 
 # Extract a single field with jq.
-octo matter list --jq '.data[0].id'
+octo group list --jq '.data[0].id'
 
-# Auto-paginate.
-octo matter list --status open --page-all --page-limit 20
+# Auto-paginate any list operation that reports a cursor.
+octo group list --page-all --page-limit 20
 
 # Tabular output for human eyes.
-octo matter list --format table
+octo group list --format table
 ```
 
 ## Agent Skills
@@ -208,7 +202,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 
 - [`octo-shared`](./skills/octo-shared/SKILL.md) — fundamentals (auth,
   output, flags, error taxonomy). Load first.
-- [`octo-matter`](./skills/octo-matter/SKILL.md) — matter (todo/task) domain.
+- `octo-matter` — matter (todo/task) domain. **Temporarily withheld** while the
+  backend API stabilizes (not listed by `octo skills`).
 - [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.

@@ -1,6 +1,7 @@
 ---
 name: octo-matter
 version: 0.4.0
+disabled: true
 description: Matter (todo/task) domain — CRUD, status transitions, assignees, channels, timeline, and AI extract from chat messages. Load after octo-shared.
 metadata:
   requires:

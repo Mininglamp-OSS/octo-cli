@@ -54,8 +54,33 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newSkillsCmd(f))
 	root.AddCommand(newAuthCmd(f))
 	service.RegisterServiceCommands(root, f)
+	withholdDisabledServices(root, f)
 
 	return root
+}
+
+// withholdDisabledServices removes the command subtree for any service whose
+// spec sets x-octo-disabled (e.g. matter, whose backend API is not yet stable).
+// The spec stays embedded, so `octo schema` and the metadata-driven engine
+// still see it — flip the flag in the spec to re-enable. Done here (after
+// registration) rather than inside RegisterServiceCommands so the engine tests
+// that drive it directly keep their full fixture coverage.
+func withholdDisabledServices(root *cobra.Command, f *cmdutil.Factory) {
+	reg := f.Registry()
+	if reg == nil {
+		return
+	}
+	for _, svc := range reg.ListServices() {
+		if !reg.ServiceDisabled(svc) {
+			continue
+		}
+		for _, c := range root.Commands() {
+			if c.Name() == svc {
+				root.RemoveCommand(c)
+				break
+			}
+		}
+	}
 }
 
 // skipValidation is true for commands that must run without a configured

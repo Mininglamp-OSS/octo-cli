@@ -26,8 +26,14 @@
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
+> **`matter` is temporarily withheld** (backend API not yet stable). The spec
+> stays embedded — `octo schema matter.*` still introspects it — but the command
+> subtree and the `octo-matter` skill are hidden via the `x-octo-disabled` spec
+> flag (`internal/registry/specs/matter.json`) and the skill's `disabled: true`
+> frontmatter. Flip both off to re-enable. The tree below shows the full surface.
+
 ```
-octo matter    create | list | get | update | delete
+octo matter    create | list | get | update | delete        (withheld)
                transition | close | reopen | archive | extract
                assignee add|remove
                channel  link|unlink
@@ -51,7 +57,7 @@ octo version
 
 `octo auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
-Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter`, `octo-messaging`, `octo-files`) — keep those in sync when command shapes change.
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-messaging`, `octo-files`) — keep those in sync when command shapes change.
 
 ## Environment
 
