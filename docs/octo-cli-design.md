@@ -167,9 +167,8 @@ Notes:
 
 Flags:
 - register: --data (JSON, registration payload)
-- set-commands: --data (JSON, command list)
+- set-commands: --data (JSON, body shape: {"commands":[{"command","description"}]})
 - user-info: --uid* (query, required)
-- set-commands: body shape is {"commands":[{"command","description"}]} via --data
 - typing: --channel-id*, --channel-type*, --on-behalf-of
 
 Notes:

@@ -50,14 +50,15 @@ octo file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out
 For files too large for multipart, ask the backend for a presigned target and upload directly:
 
 ```bash
-size=$(wc -c < big.zip)                                       # fileSize is REQUIRED (bytes)
+size=$(stat -f%z big.zip 2>/dev/null || stat -c%s big.zip)    # fileSize in bytes (REQUIRED; no padding)
 cred=$(octo file presigned --filename big.zip --fileSize "$size")
-url=$(jq  -r '.data.uploadUrl'   <<<"$cred")
-ctype=$(jq -r '.data.contentType' <<<"$cred")
-curl -X PUT -T big.zip -H "Content-Type: $ctype" "$url"
+url=$(jq   -r '.data.uploadUrl'                   <<<"$cred")
+ctype=$(jq -r '.data.contentType'                 <<<"$cred")
+cdisp=$(jq -r '.data.contentDisposition // empty' <<<"$cred")
+curl -X PUT -T big.zip -H "Content-Type: $ctype" ${cdisp:+-H "Content-Disposition: $cdisp"} "$url"
 ```
 
-`file presigned` **requires `--fileSize` (bytes)** — the size is signed into the PUT Content-Length, so a missing/oversized value is rejected (`HTTP 400 fileSize 参数必填`). It returns `{method, uploadUrl, downloadUrl, contentType, key, expiresIn, expiredTime, maxFileSize, [contentDisposition]}` — a one-shot signed URL (echo `contentDisposition` verbatim on the PUT if present). `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, startTime, expiredTime, cdnBaseUrl}`) for SDK-driven uploads. Pick the shape the backend gives you.
+`file presigned` **requires `--fileSize` (bytes)** — the size is signed into the PUT Content-Length, so a missing/oversized value is rejected (`HTTP 400` — fileSize is required). It returns `{method, uploadUrl, downloadUrl, contentType, key, expiresIn, expiredTime, maxFileSize, [contentDisposition]}` — a one-shot signed URL (echo `contentDisposition` verbatim on the PUT if present). `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, startTime, expiredTime, cdnBaseUrl}`) for SDK-driven uploads. Pick the shape the backend gives you.
 
 ## 2. Bot housekeeping
 
@@ -78,10 +79,10 @@ Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-c
 
 ### Get the owner_uid from `bot register`
 
-`bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from `bot register`:
+`bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from the one-time `bot register` at publish; capture it then and cache it (env/config) rather than re-registering:
 
 ```bash
-owner=$(octo bot register --jq '.data.owner_uid')
+owner=$(octo bot register --jq '.data.owner_uid')   # capture once at publish, then cache
 ```
 
 This is the value `matter extract` requires as `creator_uid` (see `octo-matter` skill §6).
