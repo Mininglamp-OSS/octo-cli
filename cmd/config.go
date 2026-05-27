@@ -7,6 +7,8 @@ import (
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // newConfigCmd returns `octo config` and its subcommands. The group is
@@ -26,10 +28,9 @@ func newConfigCmd(f *cmdutil.Factory) *cobra.Command {
 // verify *which* bot is in use without leaking the secret.
 //
 // Resolution goes through the Factory so the values reflect the same path the
-// rest of the CLI takes (ConfigFunc may be stubbed by tests). When the Factory
-// can't produce a config — e.g. a future hook that returns an error for an
-// unconfigured env — fall back to config.Load() so `config show` still emits
-// a diagnostic envelope instead of failing the command.
+// rest of the CLI takes (ConfigFunc/CredentialFunc may be stubbed by tests).
+// When the Factory can't produce a config — e.g. ambiguous profiles — fall back
+// to config.Load() so `config show` still emits a diagnostic envelope.
 func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
@@ -37,20 +38,48 @@ func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := f.Config()
-			if err != nil || cfg == nil {
+			if err != nil {
+				// Surface structured resolution errors (e.g. a --bot-id that
+				// matches no profile, or ambiguous profiles) instead of hiding
+				// them behind a misleading env fallback. Only the unconfigured
+				// case (a plain error / nil cfg) falls back to a diagnostic view.
+				if ee := output.AsExitError(err); ee != nil {
+					_ = f.EmitError(ee) //nolint:errcheck // best-effort envelope write
+					return ee
+				}
+				cfg = config.Load()
+			}
+			if cfg == nil {
 				cfg = config.Load()
 			}
 			space := cfg.SpaceID
 			if f.Globals != nil && f.Globals.Space != "" {
 				space = f.Globals.Space
 			}
+
+			// Prefer the resolved credential so the displayed token/source/
+			// identity reflect the active profile (not just the env var).
+			token := cfg.BotToken
+			source := defaultTokenSource(cfg.BotToken)
+			var profileName, robotID string
+			if cred, cerr := f.Credential(); cerr == nil && cred != nil {
+				token = cred.Token
+				if cred.Source != "" {
+					source = cred.Source
+				}
+				profileName = cred.Profile
+				robotID = cred.RobotID
+			}
+
 			payload := map[string]any{
 				"api_base_url":     cfg.APIBaseURL,
 				"space_id":         nullableString(space),
 				"format":           cfg.Format,
-				"bot_token":        maskToken(cfg.BotToken),
-				"bot_token_source": tokenSource(cfg.BotToken),
-				"bot_kind":         botKind(cfg.BotToken),
+				"bot_token":        maskToken(token),
+				"bot_token_source": nullableString(source),
+				"bot_kind":         botKind(token),
+				"profile":          nullableString(profileName),
+				"robot_id":         nullableString(robotID),
 			}
 			raw, err := json.Marshal(payload)
 			if err != nil {
@@ -61,38 +90,29 @@ func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 }
 
-// maskToken returns only the known token type prefix followed by "***", so
-// the bot kind is visible without leaking any token entropy. Empty tokens
-// return null so envelope consumers can detect the unconfigured case cleanly.
+// maskToken masks a token to its kind prefix + "***", returning nil for empty
+// so envelope consumers can detect the unconfigured case cleanly.
 func maskToken(tok string) any {
-	switch {
-	case tok == "":
-		return nil
-	case len(tok) >= 4 && tok[:4] == "app_":
-		return "app_***"
-	case len(tok) >= 3 && tok[:3] == "bf_":
-		return "bf_***"
-	}
-	return "***"
-}
-
-func tokenSource(tok string) any {
 	if tok == "" {
 		return nil
+	}
+	return credential.MaskToken(tok)
+}
+
+// defaultTokenSource is the source tag used when no resolved credential is
+// available — the env var that would supply the token.
+func defaultTokenSource(tok string) string {
+	if tok == "" {
+		return ""
 	}
 	return "env:" + config.EnvBotToken
 }
 
 func botKind(tok string) any {
-	switch {
-	case tok == "":
+	if tok == "" {
 		return nil
-	case len(tok) >= 4 && tok[:4] == "app_":
-		return "app_bot"
-	case len(tok) >= 3 && tok[:3] == "bf_":
-		return "user_bot"
 	}
-	return "unknown"
+	return credential.TokenKind(tok)
 }
 
 func nullableString(s string) any {

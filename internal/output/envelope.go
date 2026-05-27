@@ -9,13 +9,20 @@ import (
 // EnvelopeMeta carries optional envelope-level metadata that callers may attach
 // to a success response. Fields are emitted with an underscore prefix to mark
 // them as CLI-added (not backend data).
+//
+// Identity, when non-nil, replaces the default constant identity tag. The
+// Factory sets it to an object describing the bot the command acted as (profile,
+// robot id, kind, source) so every response echoes the active identity.
 type EnvelopeMeta struct {
 	RateLimit json.RawMessage
 	Notice    json.RawMessage
+	Identity  any
 }
 
-// Identity is the actor identity tag emitted on successful responses. Phase 1
-// is bot-only; kept as a constant for now, may become a field later.
+// Identity is the default actor identity tag emitted on successful responses
+// when no richer identity is supplied (e.g. unauthenticated diagnostic
+// commands). When a credential is resolved the Factory replaces it with an
+// object via EnvelopeMeta.Identity.
 const Identity = "bot"
 
 // WriteSuccess emits a success envelope to w. If raw is an object containing
@@ -23,9 +30,13 @@ const Identity = "bot"
 // onto the envelope as data + _pagination. Otherwise raw is placed under data
 // as-is. Meta fields (if non-nil) are attached as _rate_limit / _notice.
 func WriteSuccess(w io.Writer, raw json.RawMessage, meta EnvelopeMeta) error {
+	identity := any(Identity)
+	if meta.Identity != nil {
+		identity = meta.Identity
+	}
 	env := map[string]any{
 		"ok":       true,
-		"identity": Identity,
+		"identity": identity,
 	}
 
 	dataField, paginationField, ok := splitPagination(raw)

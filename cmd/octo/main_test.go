@@ -71,8 +71,10 @@ func TestMain_MissingTokenExitCode(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "matter", "list")
-	// Clear OCTO_BOT_TOKEN so Validate trips.
-	cmd.Env = append(os.Environ(), "OCTO_BOT_TOKEN=")
+	// Clear OCTO_BOT_TOKEN / OCTO_BOT_ID and point at an empty credential store
+	// so no profile resolves and Validate trips on the missing token.
+	cmd.Env = append(os.Environ(),
+		"OCTO_BOT_TOKEN=", "OCTO_BOT_ID=", "OCTO_CONFIG_DIR="+t.TempDir())
 	errOut, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("expected non-zero exit")

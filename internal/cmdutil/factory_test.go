@@ -3,6 +3,7 @@ package cmdutil
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -10,6 +11,22 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
+
+// TestMain isolates the credential store for the whole package: NewDefaultFactory
+// now resolves credentials through the on-disk store first, so env-based tests
+// must not see a developer's real ~/.octo-cli. An empty OCTO_CONFIG_DIR yields
+// zero profiles, so resolution falls through to OCTO_BOT_TOKEN as these tests
+// expect. Individual tests may still override OCTO_CONFIG_DIR via t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "octo-cmdutil-test")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("OCTO_CONFIG_DIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func TestNewDefaultFactory_InitializesFields(t *testing.T) {
 	f := NewDefaultFactory()
@@ -399,5 +416,45 @@ func TestFactory_InjectedHooksUsed(t *testing.T) {
 	}
 	if cred.Token != "stub_tok" {
 		t.Errorf("injected credential not used: %q", cred.Token)
+	}
+}
+
+// TestFactory_IdentityEcho verifies mechanism B: when a credential is resolved,
+// the success envelope's identity becomes an object describing the active bot.
+func TestFactory_IdentityEcho(t *testing.T) {
+	tf := NewTestFactory()
+	tf.Factory.cred = &credential.BotCredential{
+		Token: "app_x", Profile: "prod", RobotID: "cli_x", Source: "profile:prod",
+	}
+	if err := tf.EmitSuccess([]byte(`{"k":"v"}`)); err != nil {
+		t.Fatalf("EmitSuccess: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, tf.Out.String())
+	}
+	id, ok := env["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity is not an object: %v", env["identity"])
+	}
+	if id["profile"] != "prod" || id["robot_id"] != "cli_x" ||
+		id["bot_kind"] != "app_bot" || id["source"] != "profile:prod" {
+		t.Errorf("identity = %v", id)
+	}
+}
+
+// TestFactory_IdentityDefaultsToBot verifies the envelope keeps the plain "bot"
+// tag when no credential was resolved (e.g. unauthenticated diagnostic commands).
+func TestFactory_IdentityDefaultsToBot(t *testing.T) {
+	tf := NewTestFactory()
+	if err := tf.EmitSuccess([]byte(`{}`)); err != nil {
+		t.Fatalf("EmitSuccess: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if env["identity"] != "bot" {
+		t.Errorf("identity = %v, want \"bot\"", env["identity"])
 	}
 }

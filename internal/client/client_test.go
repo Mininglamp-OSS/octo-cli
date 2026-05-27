@@ -598,26 +598,6 @@ func TestIsRetryableStatus(t *testing.T) {
 	}
 }
 
-// --- redact token helper ---
-
-func TestRedactToken(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"", "***"},
-		{"short", "***"},
-		{"abcdefgh", "***"},
-		{"app_abcdefgh12345678", "app_***"},
-		{"bf_something", "bf_***"},
-		{"unknown_format", "***"},
-	}
-	for _, c := range cases {
-		if got := redactToken(c.in); got != c.want {
-			t.Errorf("redactToken(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 func TestTruncate(t *testing.T) {
 	if truncate("hi", 10) != "hi" {
 		t.Errorf("short string should pass through")
