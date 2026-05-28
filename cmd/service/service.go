@@ -51,8 +51,10 @@ func ensureServiceCmd(parent *cobra.Command, svc string) *cobra.Command {
 		return existing
 	}
 	c := &cobra.Command{
-		Use:   svc,
-		Short: fmt.Sprintf("Operations on the %s domain", svc),
+		Use:         svc,
+		Short:       fmt.Sprintf("Operations on the %s domain", svc),
+		RunE:        rejectUnknownSubcommand,
+		Annotations: map[string]string{"skipValidation": "true"},
 	}
 	parent.AddCommand(c)
 	return c
@@ -73,8 +75,10 @@ func attachOperation(svcCmd *cobra.Command, f *cmdutil.Factory, d *registry.Oper
 		sub := findChild(cur, name)
 		if sub == nil {
 			sub = &cobra.Command{
-				Use:   name,
-				Short: fmt.Sprintf("%s %s operations", cur.Use, name),
+				Use:         name,
+				Short:       fmt.Sprintf("%s %s operations", cur.Use, name),
+				RunE:        rejectUnknownSubcommand,
+				Annotations: map[string]string{"skipValidation": "true"},
 			}
 			cur.AddCommand(sub)
 		}
@@ -91,6 +95,18 @@ func findChild(parent *cobra.Command, name string) *cobra.Command {
 		}
 	}
 	return nil
+}
+
+// rejectUnknownSubcommand makes parent commands fail loudly on an
+// unrecognised subcommand. Without it, cobra treats the unknown token
+// as args, finds no RunE on the parent (Runnable()==false), prints
+// help, and exits 0 — which can let automation treat a removed
+// command as a success.
+func rejectUnknownSubcommand(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("unknown subcommand %q for %q", args[0], cmd.CommandPath())
+	}
+	return cmd.Help()
 }
 
 // buildOperationCmd builds the leaf cobra.Command for one operation.

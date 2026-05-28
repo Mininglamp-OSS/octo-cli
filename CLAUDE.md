@@ -22,7 +22,7 @@
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure (7 domains, 48 operations / 51 commands incl. 3 matter transition aliases)
+## Command Structure (7 domains, 47 operations / 50 commands incl. 3 matter transition aliases)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -41,7 +41,7 @@ octo matter    create | list | get | update | delete        (withheld)
 octo message   send | edit | sync | read-receipt
 octo group     list | get | members | md-get | md-update
                create | update | member-add | member-remove       (User Bot only)
-octo thread    create | list | get | delete | members
+octo thread    create | list | get | members
                join | leave | md-get | md-update                  (User Bot only)
 octo file      upload | download | credentials | presigned
 octo bot       register | set-commands | user-info | space-members | typing | heartbeat

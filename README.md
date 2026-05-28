@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 48 operations
+octo-cli is **metadata-driven**. The entire command tree — 47 operations
 across 7 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
@@ -40,7 +40,7 @@ Key properties:
 |-----------|-----|----------------------------------------------------------------|
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
-| `thread`  | 9   | Threads — create, list, get, members, join/leave, metadata     |
+| `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
 | `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
 | `message` | 4   | Messaging — send, edit, sync, read-receipt                     |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |

@@ -105,7 +105,7 @@ octo group member-remove <group_no> --members u3
 
 App Bot attempting any of the four write operations gets `FORBIDDEN` with message `"app bot does not support group operations"`.
 
-## 3. `thread` — 9 commands, **User Bot only**
+## 3. `thread` — 8 commands, **User Bot only**
 
 Every thread operation calls `validateBotGroupAccess()` on the backend and rejects App Bot unconditionally. Don't attempt these with an `app_*` token.
 
@@ -113,7 +113,6 @@ Every thread operation calls `validateBotGroupAccess()` on the backend and rejec
 octo thread create    <group_no> --name "Incident #42"
 octo thread list      <group_no>                          # paginated
 octo thread get       <group_no> <short_id>
-octo thread delete    <group_no> <short_id>
 octo thread members   <group_no> <short_id>
 octo thread join      <group_no> <short_id>
 octo thread leave     <group_no> <short_id>

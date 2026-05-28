@@ -56,16 +56,6 @@
           { "name": "short_id", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": { "200": { "description": "Thread detail" } }
-      },
-      "delete": {
-        "operationId": "thread.delete",
-        "summary": "Delete a thread (User Bot only)",
-        "x-octo-risk": "high-risk-write",
-        "parameters": [
-          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "short_id", "in": "path", "required": true, "schema": { "type": "string" } }
-        ],
-        "responses": { "200": { "description": "Deleted" } }
       }
     },
     "/v1/bot/groups/{group_no}/threads/{short_id}/members": {

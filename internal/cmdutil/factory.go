@@ -355,6 +355,7 @@ func WrapCLIError(err error) error {
 		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an app_* or bf_* token")
 	case strings.Contains(lower, "unknown flag"),
 		strings.Contains(lower, "unknown command"),
+		strings.Contains(lower, "unknown subcommand"),
 		strings.Contains(lower, "unknown shorthand"),
 		strings.Contains(lower, "required flag"),
 		strings.Contains(lower, "invalid argument"),
