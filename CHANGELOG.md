@@ -111,4 +111,4 @@ Factory-based DI throughout.
 
 [Unreleased]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Mininglamp-OSS/octo-cli/releases/tag/v0.4.0
+[0.4.0]: https://github.com/Mininglamp-OSS/octo-cli/tree/v0.4.0
