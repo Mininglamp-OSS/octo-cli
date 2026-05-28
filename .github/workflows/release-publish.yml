@@ -29,3 +29,38 @@ jobs:
     permissions:
       contents: write
       actions: read
+
+  build-artifacts:
+    needs: publish
+    if: ${{ inputs.draft == false }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Build with GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean --skip=publish,announce
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List dist artifacts
+        run: ls -lh dist/
+
+      - name: Upload artifacts to release
+        run: gh release upload "${{ inputs.tag }}" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
