@@ -521,3 +521,37 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 		t.Errorf("expected validation ExitError, got %T: %v", err, err)
 	}
 }
+
+// TestParentCommand_RejectsUnknownSubcommand guards against cobra's default
+// fallback: a parent command with no RunE silently prints help and exits 0
+// when given an unknown token, which can let automation treat a removed or
+// mistyped command as a success. Regression test for the removal of
+// thread.delete (where `octo thread delete ...` previously printed help).
+func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"thread + removed leaf (delete)", []string{"thread", "delete", "g", "s"}},
+		{"thread + bogus", []string{"thread", "bogus"}},
+		{"group + bogus", []string{"group", "nope"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Fatalf("HTTP handler must not be called when subcommand is unknown")
+			})
+			root.SetArgs(tc.args)
+			var buf bytes.Buffer
+			root.SetOut(&buf)
+			root.SetErr(&buf)
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("expected error for %v, got nil; output=%s", tc.args, buf.String())
+			}
+			if !strings.Contains(err.Error(), "unknown subcommand") {
+				t.Errorf("error should mention 'unknown subcommand', got %q", err.Error())
+			}
+		})
+	}
+}

@@ -40,7 +40,7 @@ Key properties:
 |-----------|-----|----------------------------------------------------------------|
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
-| `thread`  | 9   | Threads — create, list, get, members, join/leave, metadata     |
+| `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
 | `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
 | `message` | 4   | Messaging — send, edit, sync, read-receipt                     |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
