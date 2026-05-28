@@ -51,9 +51,10 @@ func ensureServiceCmd(parent *cobra.Command, svc string) *cobra.Command {
 		return existing
 	}
 	c := &cobra.Command{
-		Use:   svc,
-		Short: fmt.Sprintf("Operations on the %s domain", svc),
-		RunE:  rejectUnknownSubcommand,
+		Use:         svc,
+		Short:       fmt.Sprintf("Operations on the %s domain", svc),
+		RunE:        rejectUnknownSubcommand,
+		Annotations: map[string]string{"skipValidation": "true"},
 	}
 	parent.AddCommand(c)
 	return c
@@ -74,9 +75,10 @@ func attachOperation(svcCmd *cobra.Command, f *cmdutil.Factory, d *registry.Oper
 		sub := findChild(cur, name)
 		if sub == nil {
 			sub = &cobra.Command{
-				Use:   name,
-				Short: fmt.Sprintf("%s %s operations", cur.Use, name),
-				RunE:  rejectUnknownSubcommand,
+				Use:         name,
+				Short:       fmt.Sprintf("%s %s operations", cur.Use, name),
+				RunE:        rejectUnknownSubcommand,
+				Annotations: map[string]string{"skipValidation": "true"},
 			}
 			cur.AddCommand(sub)
 		}

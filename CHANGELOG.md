@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is untouched; only the CLI command and its `thread.delete` spec entry are
   removed. Command/operation totals drop 51/48 → 50/47.
 
+### Changed
+- Service-domain parent commands (`octo thread`, `octo group`, `octo file`, …)
+  now reject unknown subcommands with `unknown subcommand %q for %q` and exit 2
+  instead of silently printing help and exiting 0. Required by the `thread
+  delete` removal above so automation can detect a missing operation; also
+  catches typos like `octo group lisst`. Parent help (`octo thread`,
+  `octo thread --help`) is unchanged and still works without a token; only
+  leaf operations require authentication.
+
 ## [0.4.0] — 2026-05
 
 ### Architectural overhaul — metadata-driven command tree

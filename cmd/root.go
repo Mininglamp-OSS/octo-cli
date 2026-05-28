@@ -88,6 +88,13 @@ func withholdDisabledServices(root *cobra.Command, f *cmdutil.Factory) {
 // `octo auth`, and cobra's generated `completion`). Walks the parent chain so
 // leaves like `config show` match through their parent.
 func skipValidation(cmd *cobra.Command) bool {
+	// Per-command annotation, deliberately NOT inherited through the parent
+	// chain: service parents (`octo thread`, `octo group`, …) opt out of the
+	// auth gate so their help / unknown-subcommand path works without a token,
+	// but their leaf operations (`octo thread create …`) must still authenticate.
+	if cmd.Annotations["skipValidation"] == "true" {
+		return true
+	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
 		case "version", "help", "schema", "config", "completion", "skills", "auth", "":
