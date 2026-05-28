@@ -7,21 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed
-- `octo thread delete` — withdrew the thread-deletion command. Threads expose no
-  bot-accessible archive or soft-close path, so a hard delete was inconsistent
-  with the convention that bots get no destructive operations. The backend route
-  is untouched; only the CLI command and its `thread.delete` spec entry are
-  removed. Command/operation totals drop 51/48 → 50/47.
+## [0.5.0] — 2026-05-28
+
+### Added
+- **`octo skills` command** for embedded skill discovery — lists or
+  extracts the Agent skills bundled in the binary (`octo-shared`,
+  `octo-messaging`, `octo-files`, `octo-matter`). Useful for agent
+  runtimes that load skills from `octo` at startup. (#16)
+- **Encrypted credential profiles** via `octo auth login | status |
+  logout | list` — bot tokens now live in `~/.octo-cli` (plaintext
+  `config.json` metadata + AES-256-GCM `credentials.enc` token store)
+  keyed by `--profile` / `--bot-id` (env `OCTO_BOT_ID`). `OCTO_BOT_TOKEN`
+  remains a fallback. Each success envelope echoes the active
+  `identity` (`{profile, robot_id, bot_kind, source}`) so agents can
+  detect credential misuse. (#17)
 
 ### Changed
-- Service-domain parent commands (`octo thread`, `octo group`, `octo file`, …)
-  now reject unknown subcommands with `unknown subcommand %q for %q` and exit 2
-  instead of silently printing help and exiting 0. Required by the `thread
-  delete` removal above so automation can detect a missing operation; also
-  catches typos like `octo group lisst`. Parent help (`octo thread`,
-  `octo thread --help`) is unchanged and still works without a token; only
-  leaf operations require authentication.
+- **Matter domain withheld** behind a new `x-octo-disabled` spec flag —
+  the spec stays embedded (`octo schema matter.*` still introspects it)
+  but the command subtree and the `octo-matter` skill are hidden until
+  the backend Matter API stabilises. Flip the spec flag and the skill
+  frontmatter to re-enable. (#19)
+- **Service-domain parent commands** (`octo thread`, `octo group`,
+  `octo file`, …) now reject unknown subcommands with
+  `unknown subcommand %q for %q` and exit 2 instead of silently printing
+  help and exiting 0. Required by the `thread delete` removal so
+  automation can detect a missing operation; also catches typos like
+  `octo group lisst`. Parent help (`octo thread`, `octo thread --help`)
+  still works without a token; only leaf operations require
+  authentication.
+
+### Removed
+- **`octo thread delete`** — withdrew the thread-deletion command.
+  Threads expose no bot-accessible archive or soft-close path, so a
+  hard delete was inconsistent with the convention that bots get no
+  destructive operations. The backend route is untouched; only the CLI
+  command and its `thread.delete` spec entry are removed.
+
+### Fixed
+- **`octo file presigned`** and other `bot_api` specs realigned with
+  octo-server — `file.presigned` now declares the required `fileSize`
+  query param (previous calls failed with `HTTP 400 fileSize 参数必填`).
+  Several other spec drifts also corrected. (#14)
+- **Auth gate on service parents** no longer fires for parent help or
+  unknown-subcommand handling — the `unknown subcommand` envelope and
+  `octo thread --help` now work without a bot token, restoring the
+  safety property of the `thread delete` removal.
 
 ## [0.4.0] — 2026-05
 
@@ -78,5 +109,6 @@ Factory-based DI throughout.
   subcommand trees. All equivalent functionality is now under `octo matter`
   and auto-registered from the spec.
 
-[Unreleased]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Mininglamp-OSS/octo-cli/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Mininglamp-OSS/octo-cli/releases/tag/v0.4.0
