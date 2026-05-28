@@ -1,6 +1,6 @@
 ---
 name: octo-messaging
-version: 0.4.0
+version: 0.4.1
 description: Messaging domain — send/edit/sync messages, read receipts, groups and threads (User Bot), and event polling. Covers App Bot DM-only constraints. Load after octo-shared.
 metadata:
   requires:
