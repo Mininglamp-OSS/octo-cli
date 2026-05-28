@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 48 operations
+octo-cli is **metadata-driven**. The entire command tree — 47 operations
 across 7 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.

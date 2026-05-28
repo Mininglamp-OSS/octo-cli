@@ -109,19 +109,18 @@ Notes:
 
 ---
 
-## Domain 4: thread (dmworkim bot_api, 9 commands)
+## Domain 4: thread (dmworkim bot_api, 8 commands)
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
 | 31 | `octo thread create <group_no>` | POST | /v1/bot/groups/:group_no/threads | **N** | Y |
 | 32 | `octo thread list <group_no>` | GET | /v1/bot/groups/:group_no/threads | **N** | Y |
 | 33 | `octo thread get <group_no> <short_id>` | GET | .../:short_id | **N** | Y |
-| 34 | `octo thread delete <group_no> <short_id>` | DELETE | .../:short_id | **N** | Y |
-| 35 | `octo thread members <group_no> <short_id>` | GET | .../:short_id/members | **N** | Y |
-| 36 | `octo thread join <group_no> <short_id>` | POST | .../:short_id/join | **N** | Y |
-| 37 | `octo thread leave <group_no> <short_id>` | POST | .../:short_id/leave | **N** | Y |
-| 38 | `octo thread md-get <group_no> <short_id>` | GET | .../:short_id/md | **N** | Y |
-| 39 | `octo thread md-update <group_no> <short_id>` | PUT | .../:short_id/md | **N** | Y |
+| 34 | `octo thread members <group_no> <short_id>` | GET | .../:short_id/members | **N** | Y |
+| 35 | `octo thread join <group_no> <short_id>` | POST | .../:short_id/join | **N** | Y |
+| 36 | `octo thread leave <group_no> <short_id>` | POST | .../:short_id/leave | **N** | Y |
+| 37 | `octo thread md-get <group_no> <short_id>` | GET | .../:short_id/md | **N** | Y |
+| 38 | `octo thread md-update <group_no> <short_id>` | PUT | .../:short_id/md | **N** | Y |
 
 Flags:
 - create: --name* (thread name), --data (additional fields)
@@ -137,10 +136,10 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 40 | `octo file upload` | POST | /v1/bot/file/upload | Y | Y |
-| 41 | `octo file download <path>` | GET | /v1/bot/file/download/*path | Y | Y |
-| 42 | `octo file credentials` | GET | /v1/bot/upload/credentials | Y | Y |
-| 43 | `octo file presigned` | GET | /v1/bot/upload/presigned | Y | Y |
+| 39 | `octo file upload` | POST | /v1/bot/file/upload | Y | Y |
+| 40 | `octo file download <path>` | GET | /v1/bot/file/download/*path | Y | Y |
+| 41 | `octo file credentials` | GET | /v1/bot/upload/credentials | Y | Y |
+| 42 | `octo file presigned` | GET | /v1/bot/upload/presigned | Y | Y |
 
 Flags:
 - upload: --file* (multipart), --type(default:"chat"), --path
@@ -158,12 +157,12 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 44 | `octo bot register` | POST | /v1/bot/register | Y | Y |
-| 45 | `octo bot set-commands` | POST | /v1/bot/setCommands | Y | Y |
-| 46 | `octo bot user-info` | GET | /v1/bot/user/info | Y | Y |
-| 47 | `octo bot space-members` | GET | /v1/bot/space/members | Y | Y |
-| 48 | `octo bot typing` | POST | /v1/bot/typing | Y | Y |
-| 49 | `octo bot heartbeat` | POST | /v1/bot/heartbeat | Y | Y |
+| 43 | `octo bot register` | POST | /v1/bot/register | Y | Y |
+| 44 | `octo bot set-commands` | POST | /v1/bot/setCommands | Y | Y |
+| 45 | `octo bot user-info` | GET | /v1/bot/user/info | Y | Y |
+| 46 | `octo bot space-members` | GET | /v1/bot/space/members | Y | Y |
+| 47 | `octo bot typing` | POST | /v1/bot/typing | Y | Y |
+| 48 | `octo bot heartbeat` | POST | /v1/bot/heartbeat | Y | Y |
 
 Flags:
 - register: --data (JSON, registration payload)
@@ -180,8 +179,8 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 50 | `octo event list` | POST | /v1/bot/events | Y | Y |
-| 51 | `octo event ack <event_id>` | POST | /v1/bot/events/:event_id/ack | Y | Y |
+| 49 | `octo event list` | POST | /v1/bot/events | Y | Y |
+| 50 | `octo event ack <event_id>` | POST | /v1/bot/events/:event_id/ack | Y | Y |
 
 Flags:
 - list: --event-id (int64, start cursor), --limit (int64, default:20, max:100)
@@ -198,12 +197,12 @@ Notes:
 | matter | 17 | 17 | 0 | 17 | 0 |
 | message | 4 | 4 (DM only) | 0 | 4 | 0 |
 | group | 9 | 5 | 4 | 9 | 0 |
-| thread | 9 | 0 | 9 | 9 | 0 |
+| thread | 8 | 0 | 8 | 8 | 0 |
 | file | 4 | 4 | 0 | 4 | 0 |
 | bot | 6 | 6 | 0 | 6 | 0 |
 | event | 2 | 2 | 0 | 2 | 0 |
-| **Total** | **51** | **38** | **13** | **51** | **0** |
+| **Total** | **50** | **38** | **12** | **50** | **0** |
 
-- **App Bot**: 38/51 commands available (75%)
-- **User Bot**: 51/51 commands available (100%)
-- **App Bot blocked**: group write (4) + thread all (9) = 13 commands
+- **App Bot**: 38/50 commands available (76%)
+- **User Bot**: 50/50 commands available (100%)
+- **App Bot blocked**: group write (4) + thread all (8) = 12 commands

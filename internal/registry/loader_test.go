@@ -37,7 +37,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"matter":  14,
 		"message": 4,
 		"group":   9,
-		"thread":  9,
+		"thread":  8,
 		"file":    4,
 		"bot":     6,
 		"event":   2,

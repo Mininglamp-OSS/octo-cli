@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- `octo thread delete` — withdrew the thread-deletion command. Threads expose no
+  bot-accessible archive or soft-close path, so a hard delete was inconsistent
+  with the convention that bots get no destructive operations. The backend route
+  is untouched; only the CLI command and its `thread.delete` spec entry are
+  removed. Command/operation totals drop 51/48 → 50/47.
+
 ## [0.4.0] — 2026-05
 
 ### Architectural overhaul — metadata-driven command tree
