@@ -60,7 +60,14 @@ jobs:
       - name: List dist artifacts
         run: ls -lh dist/
 
-      - name: Upload artifacts to release
-        run: gh release upload "${{ inputs.tag }}" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+      - name: Validate tag before upload
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([-.][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid tag: $TAG"; exit 1; }
         env:
+          TAG: ${{ inputs.tag }}
+
+      - name: Upload artifacts to release
+        run: gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
+        env:
+          TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
