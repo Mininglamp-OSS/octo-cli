@@ -20,7 +20,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// newAuthCmd returns `octo auth` and its subcommands. These manage stored bot
+// newAuthCmd returns `octo-cli auth` and its subcommands. These manage stored bot
 // credentials; tokens enter via stdin or a hidden prompt and are never accepted
 // on argv, so they don't leak into shell history or transcripts.
 func newAuthCmd(f *cmdutil.Factory) *cobra.Command {
@@ -160,17 +160,17 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": count,
-					"hint":          "no bot selected; pass --bot-id <id> or --profile <name> (or set OCTO_BOT_ID), or run `octo auth list`",
+					"hint":          "no bot selected; pass --bot-id <id> or --profile <name> (or set OCTO_BOT_ID), or run `octo-cli auth list`",
 				})
 			case authstore.StatusMissing:
 				return failErr(f, output.ErrAuth(
-					"no matching profile", "check `octo auth list`"))
+					"no matching profile", "check `octo-cli auth list`"))
 			default: // none
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": 0,
 					"env_token_set": os.Getenv(config.EnvBotToken) != "",
-					"hint":          "no stored profiles; run `octo auth login`",
+					"hint":          "no stored profiles; run `octo-cli auth login`",
 				})
 			}
 		},
@@ -203,7 +203,7 @@ func newAuthLogoutCmd(f *cmdutil.Factory) *cobra.Command {
 					"pass --bot-id <robot_id> or --profile <name>"))
 			case authstore.StatusMissing:
 				return failErr(f, output.ErrValidation(
-					"no matching profile to remove", "check `octo auth list`"))
+					"no matching profile to remove", "check `octo-cli auth list`"))
 			default: // none
 				return failErr(f, output.ErrValidation(
 					"no stored profiles", "nothing to remove"))
@@ -261,7 +261,7 @@ func assertBotIDFree(store *authstore.Store, botID, name string) error {
 	if ok && owner != name {
 		return output.ErrValidation(
 			fmt.Sprintf("bot id %q is already stored under profile %q", botID, owner),
-			"log in under that profile, or remove it first with `octo auth logout`")
+			"log in under that profile, or remove it first with `octo-cli auth logout`")
 	}
 	return nil
 }

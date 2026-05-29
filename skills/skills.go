@@ -1,5 +1,5 @@
 // Package skills embeds the agent-facing SKILL.md documents so the binary can
-// export them via `octo skills` without shipping separate files alongside it.
+// export them via `octo-cli skills` without shipping separate files alongside it.
 package skills
 
 import "embed"

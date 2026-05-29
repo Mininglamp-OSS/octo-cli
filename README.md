@@ -66,8 +66,10 @@ Download the latest binary for your platform from
 [GitHub Releases](https://github.com/Mininglamp-OSS/octo-cli/releases):
 
 ```bash
-curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/latest/download/octo-cli_Linux_amd64.tar.gz
-tar xzf octo-cli_Linux_amd64.tar.gz
+# Archives are named octo-cli_<version>_<os>_<arch>.{tar.gz,zip}; pick the one
+# for your platform and substitute <version> (e.g. 0.5.0):
+curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/download/v<version>/octo-cli_<version>_linux_amd64.tar.gz
+tar xzf octo-cli_<version>_linux_amd64.tar.gz
 sudo mv octo-cli /usr/local/bin/
 ```
 

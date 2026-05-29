@@ -9,7 +9,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
-// attachMatterStatusAliases registers `octo matter close/reopen/archive <id>`
+// attachMatterStatusAliases registers `octo-cli matter close/reopen/archive <id>`
 // as fixed-payload wrappers over the matter.transition operation. Status
 // transitions have no state machine (architecture §8.1): any → any is a
 // valid move, so each alias just hardcodes the target status value.

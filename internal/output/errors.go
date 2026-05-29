@@ -94,8 +94,8 @@ var backendErrorMapping = map[string]struct {
 }{
 	"UNAUTHORIZED":         {"auth_error", "check OCTO_BOT_TOKEN; bot may be unpublished"},
 	"AUTH_UNAVAILABLE":     {"network", "auth service unreachable; retry later"},
-	"VALIDATION_ERROR":     {"validation", "check params with `octo schema <op>`"},
-	"MATTER_NOT_FOUND":     {"api_error", "verify ID with `octo matters list`"},
+	"VALIDATION_ERROR":     {"validation", "check params with `octo-cli schema <op>`"},
+	"MATTER_NOT_FOUND":     {"api_error", "verify ID with `octo-cli matters list`"},
 	"NOT_FOUND":            {"api_error", "resource not found"},
 	"ASSIGNEE_NOT_FOUND":   {"api_error", "assignee not in space or invalid UID"},
 	"FORBIDDEN":            {"permission", "bot lacks permission; check space membership"},

@@ -30,7 +30,7 @@ This policy covers:
 
 ## Token Handling
 
-A bot token never appears on the command line. `octo auth login` reads it from a
+A bot token never appears on the command line. `octo-cli auth login` reads it from a
 hidden, asterisk-masked terminal prompt, from stdin (`--with-token`), or from a
 file (`--token-file`) — so it is never written to argv, shell history, or an
 agent transcript.
@@ -51,7 +51,7 @@ fixed-width so token length is not leaked):
 
 ## Credential Storage
 
-`octo auth login` stores tokens encrypted on disk under `~/.octo-cli` (override
+`octo-cli auth login` stores tokens encrypted on disk under `~/.octo-cli` (override
 with `OCTO_CONFIG_DIR`):
 
 - **`credentials.enc`** (0600) — tokens, AES-256-GCM with a random per-message
@@ -65,7 +65,7 @@ with `OCTO_CONFIG_DIR`):
   cannot eventually decrypt it given the same host.
 
 **Trust boundary: the OS user account.** Any process running as the same user
-can run `octo` and therefore decrypt the store; the encryption defends against
+can run `octo-cli` and therefore decrypt the store; the encryption defends against
 off-machine leakage (accidental commit, backup, cloud sync), not a co-resident
 process. Isolate mutually-distrusting bots with separate OS users or separate
 `OCTO_CONFIG_DIR` values. The CLI's anti-misuse guards (ambiguous selection is a

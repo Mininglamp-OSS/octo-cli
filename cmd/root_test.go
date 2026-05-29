@@ -18,7 +18,7 @@ import (
 //
 // Regression guard for PR #20 review: the parent-`RunE` change made parents
 // Runnable() and routed them through the auth gate, turning
-// `octo thread bogus` into UNAUTHORIZED instead of "unknown subcommand".
+// `octo-cli thread bogus` into UNAUTHORIZED instead of "unknown subcommand".
 func TestNewRootCmd_ParentCommandSkipAuthAndRejectUnknown(t *testing.T) {
 	cases := []struct {
 		name          string
@@ -94,7 +94,7 @@ func TestNewRootCmd_LeafStillRequiresAuth(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{APIBaseURL: "http://localhost", BotToken: ""})
 	root := NewRootCmd(f.Factory)
-	// `octo group list` is a leaf under `group` (which has the annotation).
+	// `octo-cli group list` is a leaf under `group` (which has the annotation).
 	root.SetArgs([]string{"group", "list"})
 	var buf bytes.Buffer
 	root.SetOut(&buf)

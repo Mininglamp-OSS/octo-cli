@@ -10,9 +10,9 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// newSchemaCmd returns `octo schema`. Two modes:
-//   - `octo schema <operation-id>`: print the full schema for one operation.
-//   - `octo schema --list [domain]`: enumerate operations; optionally filter
+// newSchemaCmd returns `octo-cli schema`. Two modes:
+//   - `octo-cli schema <operation-id>`: print the full schema for one operation.
+//   - `octo-cli schema --list [domain]`: enumerate operations; optionally filter
 //     by service name.
 //
 // Output is a success envelope so agents can jq over it the same way as any
@@ -24,13 +24,13 @@ func newSchemaCmd(f *cmdutil.Factory) *cobra.Command {
 		Use:   "schema [operation-id | domain]",
 		Short: "Inspect operation parameters and response schema from the registry",
 		Long: `Print the request parameters, request body, and response schema for an
-operation (e.g. "octo schema matter.create"), or list available operations
+operation (e.g. "octo-cli schema matter.create"), or list available operations
 with --list.
 
 Examples:
-  octo schema --list                # all services and operations
-  octo schema --list matter         # only matter operations
-  octo schema matter.create         # full schema for one operation`,
+  octo-cli schema --list                # all services and operations
+  octo-cli schema --list matter         # only matter operations
+  octo-cli schema matter.create         # full schema for one operation`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			reg := f.Registry()
@@ -45,7 +45,7 @@ Examples:
 			}
 
 			if len(args) == 0 {
-				ee := output.ErrValidation("operation-id is required (or pass --list)", "try `octo schema --list` to see available operations")
+				ee := output.ErrValidation("operation-id is required (or pass --list)", "try `octo-cli schema --list` to see available operations")
 				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 				return ee
 			}
@@ -98,7 +98,7 @@ func runSchemaGet(f *cmdutil.Factory, operationID string) error {
 	if !ok {
 		ee := output.ErrValidation(
 			fmt.Sprintf("unknown operation %q", operationID),
-			"try `octo schema --list` to see available operations",
+			"try `octo-cli schema --list` to see available operations",
 		)
 		_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 		return ee

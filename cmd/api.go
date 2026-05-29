@@ -15,7 +15,7 @@ import (
 
 // newAPICmd implements the generic passthrough:
 //
-//	octo api <METHOD> <PATH> [--params '{...}'] [--data '{...}']
+//	octo-cli api <METHOD> <PATH> [--params '{...}'] [--data '{...}']
 //
 // Auth, service URL routing, retry, envelope, and universal flags are reused
 // verbatim. No spec consultation, no flag auto-generation, no pagination
@@ -30,11 +30,11 @@ func newAPICmd(f *cmdutil.Factory) *cobra.Command {
 		Long: `Generic REST passthrough that reuses credentials, retry, and envelope output.
 
 Examples:
-  octo api GET /api/v1/matters --params '{"status":"open"}'
-  octo api POST /api/v1/matters --data '{"title":"test"}'
-  octo api GET /v1/bot/events --service dmworkim
-  octo api POST /api/v1/matters --data @body.json
-  octo api POST /api/v1/matters --data @-       # read from stdin
+  octo-cli api GET /api/v1/matters --params '{"status":"open"}'
+  octo-cli api POST /api/v1/matters --data '{"title":"test"}'
+  octo-cli api GET /v1/bot/events --service dmworkim
+  octo-cli api POST /api/v1/matters --data @body.json
+  octo-cli api POST /api/v1/matters --data @-       # read from stdin
 
 Unlike service commands, this command does NOT consult the registry, so
 flags are not auto-generated and --page-all is not available.`,

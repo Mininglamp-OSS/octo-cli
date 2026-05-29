@@ -362,7 +362,7 @@ func WrapCLIError(err error) error {
 		strings.Contains(lower, "accepts "),
 		strings.Contains(lower, "requires at "),
 		strings.Contains(lower, "arg(s)"):
-		return output.ErrValidation(msg, "run `octo <command> --help` to see valid flags and args")
+		return output.ErrValidation(msg, "run `octo-cli <command> --help` to see valid flags and args")
 	}
 	return output.ErrWithHint("config", "CLI_ERROR", msg, "")
 }
