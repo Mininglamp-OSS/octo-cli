@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X github.com/Mininglamp-OSS/octo-cli/cmd.Version=$(VERSION)
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o bin/octo ./cmd/octo
+	go build -ldflags "$(LDFLAGS)" -o bin/octo-cli ./cmd/octo-cli
 
 test:
 	go test -race -count=1 ./...
@@ -27,7 +27,7 @@ ci: fmt vet lint test build
 
 help:
 	@echo "Targets:"
-	@echo "  build   build ./bin/octo with version from git"
+	@echo "  build   build ./bin/octo-cli with version from git"
 	@echo "  test    go test -race -count=1 ./..."
 	@echo "  lint    golangci-lint run"
 	@echo "  fmt     fail if any Go file needs gofmt"

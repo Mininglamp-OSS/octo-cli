@@ -5,7 +5,7 @@
 set -e
 
 REPO="Mininglamp-OSS/octo-cli"
-BINARY="octo"
+BINARY="octo-cli"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect OS
@@ -73,9 +73,9 @@ fi
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
 echo ""
-echo "✅ octo v${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
+echo "✅ octo-cli v${VERSION} installed to ${INSTALL_DIR}/${BINARY}"
 echo ""
 echo "Quick start:"
 echo "  export OCTO_BOT_TOKEN=\"your-bot-token\""
 echo "  export OCTO_API_BASE_URL=\"https://api.example.com\""
-echo "  octo matter list"
+echo "  octo-cli matter list"

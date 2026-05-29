@@ -4,14 +4,14 @@ version: 0.5.0
 description: Shared knowledge for using the octo CLI — authentication, multi-service config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
 metadata:
   requires:
-    bins: ["octo"]
+    bins: ["octo-cli"]
 ---
 
 # octo-shared — CLI fundamentals for AI Agents
 
-`octo` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
+`octo-cli` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
 
-> **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
+> **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo-cli matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
 
 ## 1. Authentication
 
@@ -21,15 +21,15 @@ Bots authenticate with a bearer token. There is no user login. Two ways to suppl
 
 ```bash
 # Operator setup (token read from a hidden prompt, or --with-token < file):
-octo auth login --bot-id cli_xxxxxxxx          # robot id you got when creating the bot
-echo "$TOKEN" | octo auth login --bot-id cli_xxxxxxxx --with-token   # non-interactive
+octo-cli auth login --bot-id cli_xxxxxxxx          # robot id you got when creating the bot
+echo "$TOKEN" | octo-cli auth login --bot-id cli_xxxxxxxx --with-token   # non-interactive
 ```
 
 Then, at runtime, select which bot to act as — the agent passes its own **robot id**, which it knows:
 
 ```bash
-octo --bot-id cli_xxxxxxxx matter list         # or env OCTO_BOT_ID=cli_xxxxxxxx
-octo --profile myname matter list              # or by the friendly profile name
+octo-cli --bot-id cli_xxxxxxxx matter list         # or env OCTO_BOT_ID=cli_xxxxxxxx
+octo-cli --profile myname matter list              # or by the friendly profile name
 ```
 
 With exactly one stored profile, the selector is optional. With **two or more, you must pass `--bot-id` or `--profile`** — omitting it is a hard error (the CLI never guesses which identity to use).
@@ -50,7 +50,7 @@ Token prefix determines capability — the CLI does NOT enforce this locally; th
 | `app_*` | App Bot  | yes    | yes        | **no**      | **no** | **no**|
 | `bf_*`  | User Bot | yes    | yes        | yes         | yes    | yes   |
 
-Before acting, inspect `octo auth status` (or `octo config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
+Before acting, inspect `octo-cli auth status` (or `octo-cli config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
 
 ## 2. Multi-service configuration
 
@@ -63,7 +63,7 @@ export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bo
 export OCTO_FORMAT=json                            # default output format
 ```
 
-Routing: all services go through `OCTO_API_BASE_URL`. The `--service` flag on `octo api` is for documentation only — all traffic routes to the same gateway.
+Routing: all services go through `OCTO_API_BASE_URL`. The `--service` flag on `octo-cli api` is for documentation only — all traffic routes to the same gateway.
 
 ## 3. Output: the JSON envelope
 
@@ -90,7 +90,7 @@ Every failure prints an error envelope to **stderr** and exits non-zero:
     "type": "validation",
     "code": "VALIDATION_ERROR",
     "message": "title is required",
-    "hint": "check params with `octo schema <op>`",
+    "hint": "check params with `octo-cli schema <op>`",
     "detail": { ...original backend payload... }
   }
 }
@@ -140,7 +140,7 @@ Paginated operations additionally expose:
 
 Agents should switch on **`error.code` first** (specific, deterministic), then `error.type` (broad), then `exit_code` (coarse).
 
-The `hint` field is a one-line next action meant for an agent: follow it literally where it applies. E.g. `MATTER_NOT_FOUND` → "verify ID with `octo matters list`".
+The `hint` field is a one-line next action meant for an agent: follow it literally where it applies. E.g. `MATTER_NOT_FOUND` → "verify ID with `octo-cli matters list`".
 
 ## 6. Input patterns
 
@@ -149,10 +149,10 @@ The `hint` field is a one-line next action meant for an agent: follow it literal
 Simple top-level body fields auto-promote to typed flags (strings, integers, booleans, `[]string`). For objects, arrays-of-objects, or when sending a large payload, use `--data`:
 
 ```bash
-octo thread create --chat-id chat-1 --name "design review"
-octo message send --data '{"chat_id":"chat-1","text":"hi"}'
-octo message send --data @body.json
-octo some-cmd --data @-            # read JSON from stdin
+octo-cli thread create --chat-id chat-1 --name "design review"
+octo-cli message send --data '{"chat_id":"chat-1","text":"hi"}'
+octo-cli message send --data @body.json
+octo-cli some-cmd --data @-            # read JSON from stdin
 ```
 
 Explicit flags override fields set in `--data`. The `--data` escape hatch exists on every non-multipart command.
@@ -160,13 +160,13 @@ Explicit flags override fields set in `--data`. The `--data` escape hatch exists
 ### Piping with `--jq`
 
 ```bash
-octo group list --jq '.data[].id' | xargs -I{} octo group get {}
+octo-cli group list --jq '.data[].id' | xargs -I{} octo-cli group get {}
 ```
 
 ### Paginating
 
 ```bash
-octo group list --page-all --page-limit 20
+octo-cli group list --page-all --page-limit 20
 ```
 
 `--page-all` applies to any list operation that reports a cursor in `_pagination`. The merged output drops `_pagination` — you get a flat `data` array.
@@ -174,7 +174,7 @@ octo group list --page-all --page-limit 20
 ### Dry-run for agent self-verification
 
 ```bash
-octo message send --data '{"chat_id":"chat-1","text":"foo"}' --dry-run
+octo-cli message send --data '{"chat_id":"chat-1","text":"foo"}' --dry-run
 ```
 
 Prints the exact HTTP request body and URL, emits no side effect.
@@ -184,19 +184,19 @@ Prints the exact HTTP request body and URL, emits no side effect.
 The registry is embedded in the binary — no network needed:
 
 ```bash
-octo schema --list                # all services + operation IDs
-octo schema --list message        # operations in one domain
-octo schema message.send          # full request/response schema
-octo config show                  # resolved config (token masked)
-octo auth status                  # active bot identity (whoami)
-octo auth list                    # stored profiles (no tokens)
+octo-cli schema --list                # all services + operation IDs
+octo-cli schema --list message        # operations in one domain
+octo-cli schema message.send          # full request/response schema
+octo-cli config show                  # resolved config (token masked)
+octo-cli auth status                  # active bot identity (whoami)
+octo-cli auth list                    # stored profiles (no tokens)
 ```
 
 When an operation isn't auto-registered yet or you need low-level control:
 
 ```bash
-octo api GET  /api/v1/messages --params '{"chat_id":"chat-1"}'
-octo api POST /api/v1/messages --data @body.json
+octo-cli api GET  /api/v1/messages --params '{"chat_id":"chat-1"}'
+octo-cli api POST /api/v1/messages --data @body.json
 ```
 
 ## 8. Domain skills

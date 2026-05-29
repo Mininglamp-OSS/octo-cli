@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/Mininglamp-OSS/octo-cli.svg)](https://pkg.go.dev/github.com/Mininglamp-OSS/octo-cli)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-`octo` is the command-line interface for the **Octo ecosystem** — a thin,
+`octo-cli` is the command-line interface for the **Octo ecosystem** — a thin,
 single-binary REST client designed for **AI Agent Bots** to call via `exec`
 from agent runtimes (OpenClaw, Claude Code, and similar). Every invocation
 emits a structured JSON envelope on stdout; errors go to stderr with a
@@ -51,13 +51,13 @@ Key properties:
 ### Go install
 
 ```bash
-go install github.com/Mininglamp-OSS/octo-cli/cmd/octo@latest
+go install github.com/Mininglamp-OSS/octo-cli/cmd/octo-cli@latest
 ```
 
 ### Homebrew (coming soon)
 
 ```bash
-brew install Mininglamp-OSS/tap/octo
+brew install Mininglamp-OSS/tap/octo-cli
 ```
 
 ### GitHub Releases
@@ -66,9 +66,9 @@ Download the latest binary for your platform from
 [GitHub Releases](https://github.com/Mininglamp-OSS/octo-cli/releases):
 
 ```bash
-curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/latest/download/octo_Linux_amd64.tar.gz
-tar xzf octo_Linux_amd64.tar.gz
-sudo mv octo /usr/local/bin/
+curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/latest/download/octo-cli_Linux_amd64.tar.gz
+tar xzf octo-cli_Linux_amd64.tar.gz
+sudo mv octo-cli /usr/local/bin/
 ```
 
 ### install.sh
@@ -87,33 +87,33 @@ export OCTO_API_BASE_URL="https://api.example.com"
 # NOTE: the `matter` domain is temporarily withheld (backend API stabilizing).
 
 # Messaging
-octo message send --data '{"chat_id":"chat-1","text":"hi"}'
-octo message edit --data '{"msg_id":"m-1","text":"updated"}'
+octo-cli message send --data '{"chat_id":"chat-1","text":"hi"}'
+octo-cli message edit --data '{"msg_id":"m-1","text":"updated"}'
 
 # Groups and threads
-octo group list
-octo group members group-abc
-octo thread list --chat-id chat-1
-octo thread create --chat-id chat-1 --name "design review"
+octo-cli group list
+octo-cli group members group-abc
+octo-cli thread list --chat-id chat-1
+octo-cli thread create --chat-id chat-1 --name "design review"
 
 # Files
-octo file upload --file ./report.pdf
-octo file download abc123 --jq '.data.url'
+octo-cli file upload --file ./report.pdf
+octo-cli file download abc123 --jq '.data.url'
 
 # Discover the API — fully offline, specs are embedded.
-octo schema --list              # all operations across all domains
-octo schema --list message      # operations in one domain
-octo schema message.send        # request/response schema for one op
-octo config show                # resolved config (token masked)
+octo-cli schema --list              # all operations across all domains
+octo-cli schema --list message      # operations in one domain
+octo-cli schema message.send        # request/response schema for one op
+octo-cli config show                # resolved config (token masked)
 
 # Generic passthrough for ops that aren't auto-registered.
-octo api GET  /v1/messages --params '{"chat_id":"chat-1"}'
-octo api POST /v1/messages --data @body.json
+octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
+octo-cli api POST /v1/messages --data @body.json
 ```
 
 ## Authentication
 
-`octo` is bot-only — there is no user login. `OCTO_BOT_TOKEN` carries either
+`octo-cli` is bot-only — there is no user login. `OCTO_BOT_TOKEN` carries either
 an **App Bot** (`app_*`) or **User Bot** (`bf_*`) token:
 
 | Prefix  | Type     | DM | Group read | Group write | Thread | Voice |
@@ -158,7 +158,7 @@ Every failure prints an error envelope on **stderr** and exits non-zero:
     "type": "validation",
     "code": "VALIDATION_ERROR",
     "message": "title is required",
-    "hint": "check params with `octo schema <op>`",
+    "hint": "check params with `octo-cli schema <op>`",
     "detail": { ... }
   }
 }
@@ -184,16 +184,16 @@ Exit codes: `3` auth, `2` validation/config, `1` everything else.
 
 ```bash
 # Dry-run to inspect the resolved request — no side effects.
-octo message send --data '{"chat_id":"chat-1","text":"Hello"}' --dry-run
+octo-cli message send --data '{"chat_id":"chat-1","text":"Hello"}' --dry-run
 
 # Extract a single field with jq.
-octo group list --jq '.data[0].id'
+octo-cli group list --jq '.data[0].id'
 
 # Auto-paginate any list operation that reports a cursor.
-octo group list --page-all --page-limit 20
+octo-cli group list --page-all --page-limit 20
 
 # Tabular output for human eyes.
-octo group list --format table
+octo-cli group list --format table
 ```
 
 ## Agent Skills
@@ -203,25 +203,25 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-shared`](./skills/octo-shared/SKILL.md) — fundamentals (auth,
   output, flags, error taxonomy). Load first.
 - `octo-matter` — matter (todo/task) domain. **Temporarily withheld** while the
-  backend API stabilizes (not listed by `octo skills`).
+  backend API stabilizes (not listed by `octo-cli skills`).
 - [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
 
-These docs are also **embedded in the binary**, so a released `octo` ships them:
+These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 
 ```bash
-octo skills                       # list embedded skills
-octo skills octo-messaging        # print one skill (name, description, content)
-octo skills --install ~/.config/octo/skills   # write all SKILL.md to a dir
+octo-cli skills                       # list embedded skills
+octo-cli skills octo-messaging        # print one skill (name, description, content)
+octo-cli skills --install ~/.config/octo/skills   # write all SKILL.md to a dir
 ```
 
 ## Shell Completion
 
 ```bash
-octo completion bash   > /etc/bash_completion.d/octo
-octo completion zsh    > "${fpath[1]}/_octo"
-octo completion fish   > ~/.config/fish/completions/octo.fish
+octo-cli completion bash   > /etc/bash_completion.d/octo-cli
+octo-cli completion zsh    > "${fpath[1]}/_octo-cli"
+octo-cli completion fish   > ~/.config/fish/completions/octo-cli.fish
 ```
 
 ## Contributing

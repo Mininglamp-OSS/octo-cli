@@ -13,7 +13,7 @@
 | `app_*` | App Bot | DM only, no group/thread write, no voice |
 | `bf_*` | User Bot | Full access (DM + group + thread + voice) |
 
-> The CLI recognizes the prefix for display only (`octo config show` → `bot_kind`); it does **not** gate commands by bot kind. An App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind. An App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
 
 ---
 
@@ -21,23 +21,23 @@
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 1 | `octo matter create` | POST | /api/v1/matters | Y | Y |
-| 2 | `octo matter list` | GET | /api/v1/matters | Y | Y |
-| 3 | `octo matter get <id>` | GET | /api/v1/matters/:id | Y | Y |
-| 4 | `octo matter update <id>` | PUT | /api/v1/matters/:id | Y | Y |
-| 5 | `octo matter delete <id>` | DELETE | /api/v1/matters/:id | Y | Y |
-| 6 | `octo matter transition <id>` | PUT | /api/v1/matters/:id/status | Y | Y |
-| 7 | `octo matter close <id>` | alias | → transition {status:done} | Y | Y |
-| 8 | `octo matter reopen <id>` | alias | → transition {status:open} | Y | Y |
-| 9 | `octo matter archive <id>` | alias | → transition {status:archived} | Y | Y |
-| 10 | `octo matter extract` | POST | /api/v1/matters/extract | Y | Y |
-| 11 | `octo matter assignee add <id>` | POST | /api/v1/matters/:id/assignees | Y | Y |
-| 12 | `octo matter assignee remove <id> <uid>` | DELETE | /api/v1/matters/:id/assignees/:uid | Y | Y |
-| 13 | `octo matter channel link <id>` | POST | /api/v1/matters/:id/channels | Y | Y |
-| 14 | `octo matter channel unlink <id> <ch_id>` | DELETE | /api/v1/matters/:id/channels/:channel_id | Y | Y |
-| 15 | `octo matter timeline add <id>` | POST | /api/v1/matters/:id/timeline | Y | Y |
-| 16 | `octo matter timeline list <id>` | GET | /api/v1/matters/:id/timeline | Y | Y |
-| 17 | `octo matter timeline delete <id> <entry>` | DELETE | /api/v1/matters/:id/timeline/:entry_id | Y | Y |
+| 1 | `octo-cli matter create` | POST | /api/v1/matters | Y | Y |
+| 2 | `octo-cli matter list` | GET | /api/v1/matters | Y | Y |
+| 3 | `octo-cli matter get <id>` | GET | /api/v1/matters/:id | Y | Y |
+| 4 | `octo-cli matter update <id>` | PUT | /api/v1/matters/:id | Y | Y |
+| 5 | `octo-cli matter delete <id>` | DELETE | /api/v1/matters/:id | Y | Y |
+| 6 | `octo-cli matter transition <id>` | PUT | /api/v1/matters/:id/status | Y | Y |
+| 7 | `octo-cli matter close <id>` | alias | → transition {status:done} | Y | Y |
+| 8 | `octo-cli matter reopen <id>` | alias | → transition {status:open} | Y | Y |
+| 9 | `octo-cli matter archive <id>` | alias | → transition {status:archived} | Y | Y |
+| 10 | `octo-cli matter extract` | POST | /api/v1/matters/extract | Y | Y |
+| 11 | `octo-cli matter assignee add <id>` | POST | /api/v1/matters/:id/assignees | Y | Y |
+| 12 | `octo-cli matter assignee remove <id> <uid>` | DELETE | /api/v1/matters/:id/assignees/:uid | Y | Y |
+| 13 | `octo-cli matter channel link <id>` | POST | /api/v1/matters/:id/channels | Y | Y |
+| 14 | `octo-cli matter channel unlink <id> <ch_id>` | DELETE | /api/v1/matters/:id/channels/:channel_id | Y | Y |
+| 15 | `octo-cli matter timeline add <id>` | POST | /api/v1/matters/:id/timeline | Y | Y |
+| 16 | `octo-cli matter timeline list <id>` | GET | /api/v1/matters/:id/timeline | Y | Y |
+| 17 | `octo-cli matter timeline delete <id> <entry>` | DELETE | /api/v1/matters/:id/timeline/:entry_id | Y | Y |
 
 Flags (from handler req structs):
 - create: --title*(max500), --description(max10000), --assignee(str[]), --deadline(RFC3339), --remind-at(RFC3339), --source-channel, --source-type(1|2|5), --source-name
@@ -61,10 +61,10 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 18 | `octo message send` | POST | /v1/bot/sendMessage | Y (DM only) | Y (DM+group+thread) |
-| 19 | `octo message edit` | POST | /v1/bot/message/edit | Y | Y |
-| 20 | `octo message sync` | POST | /v1/bot/messages/sync | Y (DM only) | Y (DM+group) |
-| 21 | `octo message read-receipt` | POST | /v1/bot/readReceipt | Y | Y |
+| 18 | `octo-cli message send` | POST | /v1/bot/sendMessage | Y (DM only) | Y (DM+group+thread) |
+| 19 | `octo-cli message edit` | POST | /v1/bot/message/edit | Y | Y |
+| 20 | `octo-cli message sync` | POST | /v1/bot/messages/sync | Y (DM only) | Y (DM+group) |
+| 21 | `octo-cli message read-receipt` | POST | /v1/bot/readReceipt | Y | Y |
 
 Flags:
 - send: --channel-id*, --channel-type*(uint8), --stream-no, --on-behalf-of; payload (object) via --data
@@ -84,15 +84,15 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 22 | `octo group list` | GET | /v1/bot/groups | Y | Y |
-| 23 | `octo group get <group_no>` | GET | /v1/bot/groups/:group_no | Y | Y |
-| 24 | `octo group members <group_no>` | GET | /v1/bot/groups/:group_no/members | Y | Y |
-| 25 | `octo group md-get <group_no>` | GET | /v1/bot/groups/:group_no/md | Y | Y |
-| 26 | `octo group md-update <group_no>` | PUT | /v1/bot/groups/:group_no/md | Y | Y |
-| 27 | `octo group create` | POST | /v1/bot/createGroup | **N** | Y |
-| 28 | `octo group update <group_no>` | PUT | /v1/bot/groups/:group_no/info | **N** | Y |
-| 29 | `octo group member-add <group_no>` | POST | /v1/bot/groups/:group_no/members/add | **N** | Y |
-| 30 | `octo group member-remove <group_no>` | POST | /v1/bot/groups/:group_no/members/remove | **N** | Y |
+| 22 | `octo-cli group list` | GET | /v1/bot/groups | Y | Y |
+| 23 | `octo-cli group get <group_no>` | GET | /v1/bot/groups/:group_no | Y | Y |
+| 24 | `octo-cli group members <group_no>` | GET | /v1/bot/groups/:group_no/members | Y | Y |
+| 25 | `octo-cli group md-get <group_no>` | GET | /v1/bot/groups/:group_no/md | Y | Y |
+| 26 | `octo-cli group md-update <group_no>` | PUT | /v1/bot/groups/:group_no/md | Y | Y |
+| 27 | `octo-cli group create` | POST | /v1/bot/createGroup | **N** | Y |
+| 28 | `octo-cli group update <group_no>` | PUT | /v1/bot/groups/:group_no/info | **N** | Y |
+| 29 | `octo-cli group member-add <group_no>` | POST | /v1/bot/groups/:group_no/members/add | **N** | Y |
+| 30 | `octo-cli group member-remove <group_no>` | POST | /v1/bot/groups/:group_no/members/remove | **N** | Y |
 
 Flags:
 - list: --space-id (query param, optional filter)
@@ -113,14 +113,14 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 31 | `octo thread create <group_no>` | POST | /v1/bot/groups/:group_no/threads | **N** | Y |
-| 32 | `octo thread list <group_no>` | GET | /v1/bot/groups/:group_no/threads | **N** | Y |
-| 33 | `octo thread get <group_no> <short_id>` | GET | .../:short_id | **N** | Y |
-| 34 | `octo thread members <group_no> <short_id>` | GET | .../:short_id/members | **N** | Y |
-| 35 | `octo thread join <group_no> <short_id>` | POST | .../:short_id/join | **N** | Y |
-| 36 | `octo thread leave <group_no> <short_id>` | POST | .../:short_id/leave | **N** | Y |
-| 37 | `octo thread md-get <group_no> <short_id>` | GET | .../:short_id/md | **N** | Y |
-| 38 | `octo thread md-update <group_no> <short_id>` | PUT | .../:short_id/md | **N** | Y |
+| 31 | `octo-cli thread create <group_no>` | POST | /v1/bot/groups/:group_no/threads | **N** | Y |
+| 32 | `octo-cli thread list <group_no>` | GET | /v1/bot/groups/:group_no/threads | **N** | Y |
+| 33 | `octo-cli thread get <group_no> <short_id>` | GET | .../:short_id | **N** | Y |
+| 34 | `octo-cli thread members <group_no> <short_id>` | GET | .../:short_id/members | **N** | Y |
+| 35 | `octo-cli thread join <group_no> <short_id>` | POST | .../:short_id/join | **N** | Y |
+| 36 | `octo-cli thread leave <group_no> <short_id>` | POST | .../:short_id/leave | **N** | Y |
+| 37 | `octo-cli thread md-get <group_no> <short_id>` | GET | .../:short_id/md | **N** | Y |
+| 38 | `octo-cli thread md-update <group_no> <short_id>` | PUT | .../:short_id/md | **N** | Y |
 
 Flags:
 - create: --name* (thread name), --data (additional fields)
@@ -136,10 +136,10 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 39 | `octo file upload` | POST | /v1/bot/file/upload | Y | Y |
-| 40 | `octo file download <path>` | GET | /v1/bot/file/download/*path | Y | Y |
-| 41 | `octo file credentials` | GET | /v1/bot/upload/credentials | Y | Y |
-| 42 | `octo file presigned` | GET | /v1/bot/upload/presigned | Y | Y |
+| 39 | `octo-cli file upload` | POST | /v1/bot/file/upload | Y | Y |
+| 40 | `octo-cli file download <path>` | GET | /v1/bot/file/download/*path | Y | Y |
+| 41 | `octo-cli file credentials` | GET | /v1/bot/upload/credentials | Y | Y |
+| 42 | `octo-cli file presigned` | GET | /v1/bot/upload/presigned | Y | Y |
 
 Flags:
 - upload: --file* (multipart), --type(default:"chat"), --path
@@ -157,12 +157,12 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 43 | `octo bot register` | POST | /v1/bot/register | Y | Y |
-| 44 | `octo bot set-commands` | POST | /v1/bot/setCommands | Y | Y |
-| 45 | `octo bot user-info` | GET | /v1/bot/user/info | Y | Y |
-| 46 | `octo bot space-members` | GET | /v1/bot/space/members | Y | Y |
-| 47 | `octo bot typing` | POST | /v1/bot/typing | Y | Y |
-| 48 | `octo bot heartbeat` | POST | /v1/bot/heartbeat | Y | Y |
+| 43 | `octo-cli bot register` | POST | /v1/bot/register | Y | Y |
+| 44 | `octo-cli bot set-commands` | POST | /v1/bot/setCommands | Y | Y |
+| 45 | `octo-cli bot user-info` | GET | /v1/bot/user/info | Y | Y |
+| 46 | `octo-cli bot space-members` | GET | /v1/bot/space/members | Y | Y |
+| 47 | `octo-cli bot typing` | POST | /v1/bot/typing | Y | Y |
+| 48 | `octo-cli bot heartbeat` | POST | /v1/bot/heartbeat | Y | Y |
 
 Flags:
 - register: --data (JSON, registration payload)
@@ -179,8 +179,8 @@ Notes:
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
-| 49 | `octo event list` | POST | /v1/bot/events | Y | Y |
-| 50 | `octo event ack <event_id>` | POST | /v1/bot/events/:event_id/ack | Y | Y |
+| 49 | `octo-cli event list` | POST | /v1/bot/events | Y | Y |
+| 50 | `octo-cli event ack <event_id>` | POST | /v1/bot/events/:event_id/ack | Y | Y |
 
 Flags:
 - list: --event-id (int64, start cursor), --limit (int64, default:20, max:100)

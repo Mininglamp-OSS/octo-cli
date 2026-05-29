@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Renamed the binary and CLI command from `octo` to `octo-cli`** for
+  consistency with the repository and Go module name. This affects every
+  install path: release archives are now `octo-cli_<version>_<os>_<arch>`,
+  `go install` builds `./cmd/octo-cli`, the Homebrew formula and `install.sh`
+  install an `octo-cli` binary, and all commands are invoked as
+  `octo-cli <command>`. **Breaking:** scripts, aliases, and shell completions
+  that call `octo` must switch to `octo-cli`.
+
 ## [0.5.0] — 2026-05-28
 
 ### Added

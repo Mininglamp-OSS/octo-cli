@@ -1,10 +1,10 @@
 version: 2
 
-project_name: octo
+project_name: octo-cli
 
 builds:
-  - main: ./cmd/octo
-    binary: octo
+  - main: ./cmd/octo-cli
+    binary: octo-cli
     env:
       - CGO_ENABLED=0
     goos:

@@ -45,7 +45,7 @@ func rootWithService(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *c
 	// exercises the real specs.
 	tf.RegistryFunc = registry.MustNew
 
-	root := &cobra.Command{Use: "octo", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
 
 	return root, tf, srv
@@ -240,7 +240,7 @@ func TestDryRun_NoRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	t.Cleanup(srv.Close)
 
-	root := &cobra.Command{Use: "octo", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
 
 	root.SetArgs([]string{"matter", "list", "--status", "open"})
