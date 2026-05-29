@@ -1,0 +1,76 @@
+# Publish the npm wrapper (@mininglamp-oss/octo-cli) when a GitHub Release is
+# published. goreleaser builds and uploads the platform binaries to the same
+# release; the npm package's postinstall downloads the matching one, so the
+# published npm version MUST correspond to a real release tag.
+#
+# Tag → npm dist-tag:
+#   v1.2.3        → @latest   (matches /^v\d+\.\d+\.\d+$/)
+#   v1.2.3-rc.1   → @next     (any tag containing "-")
+#
+# A manual workflow_dispatch run supports --dry-run for testing without
+# uploading.
+name: npm publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.6.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Run npm publish with --dry-run (no actual upload)"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Resolve version and dist-tag
+        id: version
+        # On a release event GITHUB_REF_NAME is the tag; on manual dispatch use
+        # the `tag` input. VERSION drops the leading `v`; a version containing
+        # `-` (prerelease) publishes to @next so it never clobbers @latest.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            REF="${{ inputs.tag }}"
+            DRY="${{ inputs.dry_run && '--dry-run' || '' }}"
+          else
+            REF="${GITHUB_REF_NAME}"
+            DRY=""
+          fi
+          VERSION="${REF#v}"
+          if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
+          {
+            echo "VERSION=$VERSION"
+            echo "DIST_TAG=$DIST_TAG"
+            echo "DRY_RUN=$DRY"
+          } >> "$GITHUB_OUTPUT"
+          echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
+
+      - name: Set package version
+        run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag "${{ steps.version.outputs.DIST_TAG }}" ${{ steps.version.outputs.DRY_RUN }}
