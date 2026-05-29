@@ -60,7 +60,7 @@ func (p *FileProvider) Resolve() (*BotCredential, error) {
 	case authstore.StatusAmbiguous:
 		return nil, output.ErrValidation(
 			"multiple profiles configured; specify which bot to act as",
-			"pass --bot-id <robot_id> or --profile <name> (see `octo auth list`)")
+			"pass --bot-id <robot_id> or --profile <name> (see `octo-cli auth list`)")
 	default: // StatusNone
 		return nil, nil
 	}
@@ -71,14 +71,14 @@ func (p *FileProvider) missingErr() error {
 	case p.ExplicitProfile != "" && p.ExplicitBotID != "":
 		return output.ErrAuth(
 			fmt.Sprintf("profile %q does not match bot id %q", p.ExplicitProfile, p.ExplicitBotID),
-			"check `octo auth list`; the profile's robot id differs from --bot-id")
+			"check `octo-cli auth list`; the profile's robot id differs from --bot-id")
 	case p.ExplicitBotID != "":
 		return output.ErrAuth(
 			fmt.Sprintf("no profile found for bot id %q", p.ExplicitBotID),
-			"run `octo auth login --bot-id "+p.ExplicitBotID+"` or check `octo auth list`")
+			"run `octo-cli auth login --bot-id "+p.ExplicitBotID+"` or check `octo-cli auth list`")
 	default:
 		return output.ErrAuth(
 			fmt.Sprintf("profile %q not found", p.ExplicitProfile),
-			"run `octo auth login --profile "+p.ExplicitProfile+"` or check `octo auth list`")
+			"run `octo-cli auth login --profile "+p.ExplicitProfile+"` or check `octo-cli auth list`")
 	}
 }

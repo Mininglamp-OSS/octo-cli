@@ -82,7 +82,7 @@ func TestLoadSkillsExcludesDisabled(t *testing.T) {
 	}
 }
 
-// A config without a token must still let `octo skills` run — the command is
+// A config without a token must still let `octo-cli skills` run — the command is
 // offline and on the skipValidation list.
 func TestCmd_SkillsList(t *testing.T) {
 	f := newTestFactoryWithReg()

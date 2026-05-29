@@ -5,7 +5,7 @@
 // backend endpoint is "update the spec", nothing more.
 //
 // operationId "domain.verb" or "domain.resource.verb" maps to
-// "octo <domain> [<resource>] <verb>" (architecture §5.2). Path parameters
+// "octo-cli <domain> [<resource>] <verb>" (architecture §5.2). Path parameters
 // become positional args; query parameters become typed flags; simple
 // top-level body fields are auto-promoted to flags (Rule 5a), with a --data
 // escape hatch for complex bodies.

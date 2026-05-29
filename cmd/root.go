@@ -19,9 +19,9 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	root := &cobra.Command{
-		Use:   "octo",
+		Use:   "octo-cli",
 		Short: "Octo CLI — command-line interface for the Octo ecosystem",
-		Long:  "octo is a CLI for AI Agent Bots to interact with Octo services.\nService commands are generated from the embedded OpenAPI registry.",
+		Long:  "octo-cli is a CLI for AI Agent Bots to interact with Octo services.\nService commands are generated from the embedded OpenAPI registry.",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if skipValidation(cmd) {
 				return nil
@@ -61,7 +61,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 
 // withholdDisabledServices removes the command subtree for any service whose
 // spec sets x-octo-disabled (e.g. matter, whose backend API is not yet stable).
-// The spec stays embedded, so `octo schema` and the metadata-driven engine
+// The spec stays embedded, so `octo-cli schema` and the metadata-driven engine
 // still see it — flip the flag in the spec to re-enable. Done here (after
 // registration) rather than inside RegisterServiceCommands so the engine tests
 // that drive it directly keep their full fixture coverage.
@@ -84,14 +84,14 @@ func withholdDisabledServices(root *cobra.Command, f *cmdutil.Factory) {
 }
 
 // skipValidation is true for commands that must run without a configured
-// credential (e.g. `octo version`, `octo help`, `octo schema`, `octo config`,
-// `octo auth`, and cobra's generated `completion`). Walks the parent chain so
+// credential (e.g. `octo-cli version`, `octo-cli help`, `octo-cli schema`, `octo-cli config`,
+// `octo-cli auth`, and cobra's generated `completion`). Walks the parent chain so
 // leaves like `config show` match through their parent.
 func skipValidation(cmd *cobra.Command) bool {
 	// Per-command annotation, deliberately NOT inherited through the parent
-	// chain: service parents (`octo thread`, `octo group`, …) opt out of the
+	// chain: service parents (`octo-cli thread`, `octo-cli group`, …) opt out of the
 	// auth gate so their help / unknown-subcommand path works without a token,
-	// but their leaf operations (`octo thread create …`) must still authenticate.
+	// but their leaf operations (`octo-cli thread create …`) must still authenticate.
 	if cmd.Annotations["skipValidation"] == "true" {
 		return true
 	}

@@ -8,11 +8,11 @@ import (
 	"testing"
 )
 
-// TestMain_VersionCommand builds the binary and runs `octo version` as a
+// TestMain_VersionCommand builds the binary and runs `octo-cli version` as a
 // subprocess so the real main() path (including signal wiring, error
 // classification, and os.Exit) is exercised.
 func TestMain_VersionCommand(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "octo")
+	bin := filepath.Join(t.TempDir(), "octo-cli")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
@@ -35,7 +35,7 @@ func TestMain_VersionCommand(t *testing.T) {
 // TestMain_UnknownCommandExitCode confirms that cobra framework errors reach
 // main() and are wrapped into a validation-exit-code=2 envelope on stderr.
 func TestMain_UnknownCommandExitCode(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "octo")
+	bin := filepath.Join(t.TempDir(), "octo-cli")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
@@ -63,7 +63,7 @@ func TestMain_UnknownCommandExitCode(t *testing.T) {
 // TestMain_MissingTokenExitCode verifies that the missing-token
 // PersistentPreRunE error produces exit code 3 (auth_error).
 func TestMain_MissingTokenExitCode(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "octo")
+	bin := filepath.Join(t.TempDir(), "octo-cli")
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {

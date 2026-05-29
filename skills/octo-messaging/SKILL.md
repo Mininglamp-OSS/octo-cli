@@ -4,7 +4,7 @@ version: 0.4.1
 description: Messaging domain — send/edit/sync messages, read receipts, groups and threads (User Bot), and event polling. Covers App Bot DM-only constraints. Load after octo-shared.
 metadata:
   requires:
-    bins: ["octo"]
+    bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
@@ -19,28 +19,28 @@ Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*`.
 | `thread`  | **blocked**       | full     |
 | `event`   | yes               | yes      |
 
-Before attempting a write, confirm the token type with `octo config show` — App Bot writes outside DM get `FORBIDDEN` from the server ("app bot does not support group operations").
+Before attempting a write, confirm the token type with `octo-cli config show` — App Bot writes outside DM get `FORBIDDEN` from the server ("app bot does not support group operations").
 
 ## 1. `message` — 4 commands
 
 ```bash
 # Send a message. payload is a JSON object (not a flag) — pass it inside --data.
 # payload.type is an INTEGER code (1=text); see the payload table below.
-octo message send --channel-id <cid> --channel-type 1 \
+octo-cli message send --channel-id <cid> --channel-type 1 \
   --data '{"payload":{"type":1,"content":"hello"}}' \
   [--stream-no <n>] [--on-behalf-of <uid>]
 
 # Edit by (message-id, channel-id, channel-type). content-edit is the new
 # content, stored opaquely server-side — carry the new payload, same shape as send.
-octo message edit --message-id <mid> --message-seq <seq> \
+octo-cli message edit --message-id <mid> --message-seq <seq> \
   --channel-id <cid> --channel-type <t> \
   --content-edit '{"type":1,"content":"updated"}'
 
 # Pull history for a channel. Use --data for non-trivial filters.
-octo message sync --data '{"channel_id":"ch_abc","channel_type":1,"limit":50}'
+octo-cli message sync --data '{"channel_id":"ch_abc","channel_type":1,"limit":50}'
 
 # Mark messages read.
-octo message read-receipt --channel-id <cid> --channel-type 1 \
+octo-cli message read-receipt --channel-id <cid> --channel-type 1 \
   --message-ids m1 --message-ids m2
 ```
 
@@ -87,20 +87,20 @@ Chat content types:
 Read operations (both bot types):
 
 ```bash
-octo group list    [--space-id <sid>]                 # groups the bot is a member of
-octo group get     <group_no>
-octo group members <group_no>                          # paginated
-octo group md-get  <group_no>                          # group markdown description
+octo-cli group list    [--space-id <sid>]                 # groups the bot is a member of
+octo-cli group get     <group_no>
+octo-cli group members <group_no>                          # paginated
+octo-cli group md-get  <group_no>                          # group markdown description
 ```
 
 Write operations (**User Bot only**):
 
 ```bash
-octo group md-update     <group_no> --content "# Updated description"
-octo group create        --members u1 --members u2 --name "eng" --creator u0
-octo group update        <group_no> --data '{"name":"new name"}'
-octo group member-add    <group_no> --members u3 --members u4
-octo group member-remove <group_no> --members u3
+octo-cli group md-update     <group_no> --content "# Updated description"
+octo-cli group create        --members u1 --members u2 --name "eng" --creator u0
+octo-cli group update        <group_no> --data '{"name":"new name"}'
+octo-cli group member-add    <group_no> --members u3 --members u4
+octo-cli group member-remove <group_no> --members u3
 ```
 
 App Bot attempting any of the four write operations gets `FORBIDDEN` with message `"app bot does not support group operations"`.
@@ -110,14 +110,14 @@ App Bot attempting any of the four write operations gets `FORBIDDEN` with messag
 Every thread operation calls `validateBotGroupAccess()` on the backend and rejects App Bot unconditionally. Don't attempt these with an `app_*` token.
 
 ```bash
-octo thread create    <group_no> --name "Incident #42"
-octo thread list      <group_no>                          # paginated
-octo thread get       <group_no> <short_id>
-octo thread members   <group_no> <short_id>
-octo thread join      <group_no> <short_id>
-octo thread leave     <group_no> <short_id>
-octo thread md-get    <group_no> <short_id>
-octo thread md-update <group_no> <short_id> --content "# …"
+octo-cli thread create    <group_no> --name "Incident #42"
+octo-cli thread list      <group_no>                          # paginated
+octo-cli thread get       <group_no> <short_id>
+octo-cli thread members   <group_no> <short_id>
+octo-cli thread join      <group_no> <short_id>
+octo-cli thread leave     <group_no> <short_id>
+octo-cli thread md-get    <group_no> <short_id>
+octo-cli thread md-update <group_no> <short_id> --content "# …"
 ```
 
 The User Bot must be a member of the parent group.
@@ -125,26 +125,26 @@ The User Bot must be a member of the parent group.
 ## 4. `event` — polling for inbound events
 
 ```bash
-octo event list                          # newest page
-octo event list --event-id 1234 --limit 50   # cursor = highest event-id seen
-octo event ack  <event_id>
+octo-cli event list                          # newest page
+octo-cli event list --event-id 1234 --limit 50   # cursor = highest event-id seen
+octo-cli event ack  <event_id>
 ```
 
 ### Important: `event list` is a **POST**
 
-Even though the semantics are "list", the handler is `POST /v1/bot/events` — the cursor travels in the body, not the query string. The CLI handles this; agents calling `octo api` must use `POST`.
+Even though the semantics are "list", the handler is `POST /v1/bot/events` — the cursor travels in the body, not the query string. The CLI handles this; agents calling `octo-cli api` must use `POST`.
 
 ### Standard poll loop
 
 ```bash
 cursor=0
 while :; do
-  batch=$(octo event list --event-id "$cursor" --limit 100)
+  batch=$(octo-cli event list --event-id "$cursor" --limit 100)
   # response shape: {ok, data:{status, results:[{event_id, event_type, message{...}}]}}
   echo "$batch" | jq -c '.data.results[]' | while read -r ev; do
     id=$(jq -r '.event_id' <<<"$ev")
     process "$ev"
-    octo event ack "$id"
+    octo-cli event ack "$id"
     cursor=$id
   done
   sleep 2
@@ -166,8 +166,8 @@ done
 ## 6. Schema lookup
 
 ```bash
-octo schema message.send
-octo schema group.members
-octo schema thread.create
-octo schema event.list
+octo-cli schema message.send
+octo-cli schema group.members
+octo-cli schema thread.create
+octo-cli schema event.list
 ```

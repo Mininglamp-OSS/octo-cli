@@ -96,10 +96,10 @@ func skillDisabled(b []byte) bool {
 	return false
 }
 
-// newSkillsCmd returns `octo skills`. Three mutually exclusive modes:
-//   - `octo skills`: list embedded skills (name + description).
-//   - `octo skills <name>`: print one skill's name, description, and content.
-//   - `octo skills --install <dir>`: write every skill to <dir>/<name>/SKILL.md.
+// newSkillsCmd returns `octo-cli skills`. Three mutually exclusive modes:
+//   - `octo-cli skills`: list embedded skills (name + description).
+//   - `octo-cli skills <name>`: print one skill's name, description, and content.
+//   - `octo-cli skills --install <dir>`: write every skill to <dir>/<name>/SKILL.md.
 func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 	var install string
 
@@ -108,9 +108,9 @@ func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "List, print, or install the embedded agent skill docs",
 		Long: `Agent-facing SKILL.md docs are embedded in this binary.
 
-  octo skills                    list available skills
-  octo skills <name>             print one skill (name, description, content)
-  octo skills --install <dir>    write every skill to <dir>/<name>/SKILL.md`,
+  octo-cli skills                    list available skills
+  octo-cli skills <name>             print one skill (name, description, content)
+  octo-cli skills --install <dir>    write every skill to <dir>/<name>/SKILL.md`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("install") && install == "" {

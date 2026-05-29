@@ -1,6 +1,6 @@
 # Contributing to octo-cli
 
-Thanks for your interest in improving `octo`. This document covers what you
+Thanks for your interest in improving `octo-cli`. This document covers what you
 need to know to get a change merged.
 
 ## Prerequisites
@@ -15,7 +15,7 @@ need to know to get a change merged.
 git clone https://github.com/Mininglamp-OSS/octo-cli.git
 cd octo-cli
 
-make build            # builds ./bin/octo
+make build            # builds ./bin/octo-cli
 make test             # go test -race -count=1 ./...
 make lint             # golangci-lint run
 make ci               # fmt + vet + lint + test + build (what CI runs)

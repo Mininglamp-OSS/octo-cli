@@ -45,7 +45,7 @@ func rootWithService(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *c
 	// exercises the real specs.
 	tf.RegistryFunc = registry.MustNew
 
-	root := &cobra.Command{Use: "octo", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
 
 	return root, tf, srv
@@ -240,7 +240,7 @@ func TestDryRun_NoRequest(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
 	t.Cleanup(srv.Close)
 
-	root := &cobra.Command{Use: "octo", SilenceUsage: true, SilenceErrors: true}
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
 
 	root.SetArgs([]string{"matter", "list", "--status", "open"})
@@ -526,7 +526,7 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 // fallback: a parent command with no RunE silently prints help and exits 0
 // when given an unknown token, which can let automation treat a removed or
 // mistyped command as a success. Regression test for the removal of
-// thread.delete (where `octo thread delete ...` previously printed help).
+// thread.delete (where `octo-cli thread delete ...` previously printed help).
 func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
 	cases := []struct {
 		name string

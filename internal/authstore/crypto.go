@@ -31,7 +31,7 @@ func (s *Store) loadTokens() (map[string]string, error) {
 	plain, err := open(blob, key)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"cannot decrypt %s — the encryption key changed (machine id changed via host re-image / VM migration / restored backup) or the file is corrupt; remove %s and run `octo auth login` to re-store: %w",
+			"cannot decrypt %s — the encryption key changed (machine id changed via host re-image / VM migration / restored backup) or the file is corrupt; remove %s and run `octo-cli auth login` to re-store: %w",
 			credFile, s.credPath(), err)
 	}
 	var tokens map[string]string
@@ -106,7 +106,7 @@ func (s *Store) getOrCreateSalt() ([]byte, error) {
 		// A wrong-length salt must not be silently regenerated: a new salt
 		// changes the key and makes every stored token undecryptable. Fail loud.
 		return nil, fmt.Errorf(
-			"%s is corrupt: expected %d bytes, got %d — remove %s and run `octo auth login` to re-store",
+			"%s is corrupt: expected %d bytes, got %d — remove %s and run `octo-cli auth login` to re-store",
 			saltFile, saltLen, len(salt), s.saltPath())
 	}
 	if !os.IsNotExist(err) {

@@ -11,9 +11,9 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// newConfigCmd returns `octo config` and its subcommands. The group is
+// newConfigCmd returns `octo-cli config` and its subcommands. The group is
 // diagnostic-only — commands under it must tolerate an unconfigured env so an
-// agent can run `octo config show` to find out what's missing.
+// agent can run `octo-cli config show` to find out what's missing.
 func newConfigCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",

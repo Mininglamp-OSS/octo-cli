@@ -1,5 +1,5 @@
 # Binary (root only)
-/octo
+/octo-cli
 /bin/
 coverage.out
 

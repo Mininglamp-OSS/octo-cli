@@ -4,7 +4,7 @@ version: 0.4.0
 description: File operations (upload/download, presigned S3 credentials) plus bot housekeeping (register, set-commands, user-info, space-members, typing, heartbeat). Load after octo-shared.
 metadata:
   requires:
-    bins: ["octo"]
+    bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
@@ -18,10 +18,10 @@ Two small domains are covered here because they share a base URL (`$OCTO_API_BAS
 ## 1. File operations
 
 ```bash
-octo file upload      --file ./report.pdf [--type chat] [--path subdir/]
-octo file download    <path> --format json > saved.bin      # <path> = storage key (no bucket prefix), see note below
-octo file credentials --filename report.pdf
-octo file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (bytes) is REQUIRED
+octo-cli file upload      --file ./report.pdf [--type chat] [--path subdir/]
+octo-cli file download    <path> --format json > saved.bin      # <path> = storage key (no bucket prefix), see note below
+octo-cli file credentials --filename report.pdf
+octo-cli file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (bytes) is REQUIRED
 ```
 
 ### `upload` — multipart form
@@ -35,14 +35,14 @@ The response envelope carries the returned file descriptor under `data` — use 
 `file download <path>` issues a GET. The backend responds with a 302 redirect to the storage tier. The CLI does **not** stream raw bytes — instead it returns a JSON envelope containing the presigned URL:
 
 ```bash
-octo file download /chat/2026/05/abc123.png
+octo-cli file download /chat/2026/05/abc123.png
 # → {"ok":true,"data":{"url":"https://s3.../abc123.png?...","status":302,"content_type":"image/png"}}
 ```
 
 To actually fetch the file, use the URL from the response:
 
 ```bash
-octo file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out.png
+octo-cli file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o out.png
 ```
 
 ### Direct-to-S3 uploads
@@ -51,7 +51,7 @@ For files too large for multipart, ask the backend for a presigned target and up
 
 ```bash
 size=$(stat -f%z big.zip 2>/dev/null || stat -c%s big.zip)    # fileSize in bytes (REQUIRED; no padding)
-cred=$(octo file presigned --filename big.zip --fileSize "$size")
+cred=$(octo-cli file presigned --filename big.zip --fileSize "$size")
 url=$(jq   -r '.data.uploadUrl'                   <<<"$cred")
 ctype=$(jq -r '.data.contentType'                 <<<"$cred")
 cdisp=$(jq -r '.data.contentDisposition // empty' <<<"$cred")
@@ -63,12 +63,12 @@ curl -X PUT -T big.zip -H "Content-Type: $ctype" ${cdisp:+-H "Content-Dispositio
 ## 2. Bot housekeeping
 
 ```bash
-octo bot register       [--data '{"agent_platform":"…","agent_version":"…","plugin_version":"…"}']
-octo bot set-commands   --data '{"commands":[{"command":"fix","description":"create a matter"}]}'
-octo bot user-info      --uid <uid>         # --uid is REQUIRED; returns {uid,name,avatar} for that user
-octo bot space-members  [--keyword <q>]     # members of the bot's space (limit cap 200)
-octo bot typing         --channel-id <cid> --channel-type 1 [--on-behalf-of <uid>]
-octo bot heartbeat
+octo-cli bot register       [--data '{"agent_platform":"…","agent_version":"…","plugin_version":"…"}']
+octo-cli bot set-commands   --data '{"commands":[{"command":"fix","description":"create a matter"}]}'
+octo-cli bot user-info      --uid <uid>         # --uid is REQUIRED; returns {uid,name,avatar} for that user
+octo-cli bot space-members  [--keyword <q>]     # members of the bot's space (limit cap 200)
+octo-cli bot typing         --channel-id <cid> --channel-type 1 [--on-behalf-of <uid>]
+octo-cli bot heartbeat
 ```
 
 ### `bot register` — special auth
@@ -82,7 +82,7 @@ Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-c
 `bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from the one-time `bot register` at publish; capture it then and cache it (env/config) rather than re-registering:
 
 ```bash
-owner=$(octo bot register --jq '.data.owner_uid')   # capture once at publish, then cache
+owner=$(octo-cli bot register --jq '.data.owner_uid')   # capture once at publish, then cache
 ```
 
 This is the value LLM-backed operations require as `creator_uid` (e.g. the withheld `matter extract`, once the matter domain is re-enabled).
@@ -95,12 +95,12 @@ Both are fire-and-forget. `typing` signals an "…is typing" UI state in DM chan
 
 ```bash
 # 1. Upload the binary.
-up=$(octo file upload --file ./log.txt --type chat)
+up=$(octo-cli file upload --file ./log.txt --type chat)
 url=$(jq -r '.data.url'  <<<"$up")
 name=$(jq -r '.data.name' <<<"$up")
 
 # 2. Attach it to a message.
-octo message send --data "$(jq -n \
+octo-cli message send --data "$(jq -n \
   --arg c "chat-1" --arg u "$url" --arg n "$name" \
   '{chat_id:$c, text:"see log", attachments:[{url:$u, name:$n, type:"text/plain"}]}')"
 ```
@@ -113,13 +113,13 @@ octo message send --data "$(jq -n \
 | `upload` → `validation` "--file is required"     | Path is empty or unreadable; check permissions and absolute path.  |
 | `download` returns JSON instead of bytes          | Expected; extract `.data.url` and fetch with curl/wget.            |
 | `bot typing` returns 200 but no UI update        | Channel type must be `1` and the DM must exist.                    |
-| `bot register` rejected with `UNAUTHORIZED`      | Token prefix/env mismatch — confirm with `octo config show`.       |
+| `bot register` rejected with `UNAUTHORIZED`      | Token prefix/env mismatch — confirm with `octo-cli config show`.       |
 
 ## 5. Schema lookup
 
 ```bash
-octo schema file.upload
-octo schema file.download
-octo schema bot.register
-octo schema bot.user-info
+octo-cli schema file.upload
+octo-cli schema file.download
+octo-cli schema bot.register
+octo-cli schema bot.user-info
 ```

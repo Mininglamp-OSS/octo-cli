@@ -205,7 +205,7 @@ Service commands resolve base URL: `spec.x-octo-base-url` → config override �
     "type": "api_error",
     "code": "MATTER_NOT_FOUND",
     "message": "matter not found",
-    "hint": "verify the matter ID with `octo matters list`",
+    "hint": "verify the matter ID with `octo-cli matters list`",
     "detail": {"code": "MATTER_NOT_FOUND", "message": "matter not found"}
   }
 }
@@ -224,8 +224,8 @@ before invoking.
 |-------------|------|----------|----------|
 | `UNAUTHORIZED` | 401 | `auth_error` | "check OCTO_BOT_TOKEN; bot may be unpublished" |
 | `AUTH_UNAVAILABLE` | 503 | `network` | "auth service unreachable; retry later" |
-| `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo schema <op>`" |
-| `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo matters list`" |
+| `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo-cli schema <op>`" |
+| `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo-cli matters list`" |
 | `NOT_FOUND` | 404 | `api_error` | "resource not found" |
 | `ASSIGNEE_NOT_FOUND` | 404 | `api_error` | "assignee not in space or invalid UID" |
 | `FORBIDDEN` | 403 | `permission` | "bot lacks permission; check space membership" |
@@ -307,7 +307,7 @@ Current v0.x outputs raw server JSON. Break immediately — only internal Agent 
 
 **Body field auto-promotion (Rule 5a):**
 - When individual flags AND `--data` both provided, flags take precedence (merge into data)
-- Makes `octo matters create --title "Deploy" --assignee user-1` work from engine alone
+- Makes `octo-cli matters create --title "Deploy" --assignee user-1` work from engine alone
 
 ### 5.3 Spec Versioning
 
@@ -432,16 +432,16 @@ Discovered from backend code, relevant to CLI alias design and Skill documentati
 | `--space <id>` | Space context (when bot is platform-scoped) |
 | `--profile <name>` | Credential profile (Phase 4a) |
 
-`octo schema`:
+`octo-cli schema`:
 - `--list` — list all operations (optionally filtered by domain)
 
 ---
 
-## 10. `octo api` Generic Command
+## 10. `octo-cli api` Generic Command
 
 Passthrough for API calls not in specs:
 ```bash
-octo api GET /api/v1/matters --params '{"status":"open"}'
+octo-cli api GET /api/v1/matters --params '{"status":"open"}'
 ```
 Uses credential provider, outputs envelope, supports universal flags. No spec consultation, no flag auto-gen, no --page-all.
 
@@ -489,10 +489,10 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 |---|------|--------|
 | 2a.1 | Write matters spec in OpenAPI 3.x (with response schemas, from actual router.go) | 1.5d |
 | 2a.2 | Minimal spec loader (JSON parse) | 1d |
-| 2a.3 | `octo schema <operation>` + `octo schema --list` | 1d |
+| 2a.3 | `octo-cli schema <operation>` + `octo-cli schema --list` | 1d |
 | 2a.4 | Spec version tracking + CI validation (kin-openapi test-only) | 0.5d |
 
-**Exit**: `octo schema --list` works. Spec matches actual backend routes. Go/no-go for 2b.
+**Exit**: `octo-cli schema --list` works. Spec matches actual backend routes. Go/no-go for 2b.
 
 ### Phase 2b: Auto-Registration Engine (Week 4-6)
 
@@ -503,7 +503,7 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 | 2b.1 | operationId → command mapping engine | 2.5d |
 | 2b.2 | Flag auto-registration (query→flags, body top-level→flags, path→positional) | 3d |
 | 2b.3 | Pagination engine (--page-all, cursor-based per backend format) | 1d |
-| 2b.4 | `octo api` generic command | 0.5d |
+| 2b.4 | `octo-cli api` generic command | 0.5d |
 | 2b.5 | Spec-driven test generator + mock response generator | 2.5d |
 | 2b.6 | Migrate matters domain, delete all hand-written code (incl. 7 goal commands, 3 attachment commands) | 1d |
 | 2b.7 | Minimal alias mechanism for status transitions (close/reopen/archive) | 0.5d |
@@ -518,14 +518,14 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 | 3.2 | Matters domain skill (workflows, examples, error recovery) | 1d |
 | 3.3 | Skill packaging | 0.5d |
 
-**Exit**: All Skill examples match `octo schema --list` output exactly.
+**Exit**: All Skill examples match `octo-cli schema --list` output exactly.
 
 ### Phase 4a: Multi-Profile + Credential (Week 8)
 
 | # | Task | Effort |
 |---|------|--------|
 | 4a.1 | Config file format (per-profile: token + per-service URLs + space_id) | 1d |
-| 4a.2 | `octo config init` + `octo config show` | 1d |
+| 4a.2 | `octo-cli config init` + `octo-cli config show` | 1d |
 | 4a.3 | Config file credential provider + --profile | 1d |
 
 ### Phase 4b: Toolchain (Week 9)
@@ -555,5 +555,5 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 | 1 | Can backend export OpenAPI? | Phase 2b | Hand-write first from router.go |
 | 2 | Remote spec hot-update? | Post Phase 4 | Re-release is fine at current scale |
 | 3 | Sidecar auth for sandboxed agents? | When daemon ships | Design slot exists |
-| 4 | Should `octo matters` be renamed to `octo todo` for UX? | Phase 2a | Match backend naming; alias if needed |
+| 4 | Should `octo-cli matters` be renamed to `octo todo` for UX? | Phase 2a | Match backend naming; alias if needed |
 | 5 | Bot API (messaging) as second domain for validation? | Phase 2b acceptance | Good candidate — different service URL |
