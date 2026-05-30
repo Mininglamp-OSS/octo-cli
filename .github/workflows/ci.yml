@@ -58,3 +58,17 @@ jobs:
 
       - name: build
         run: go build -o octo-cli ./cmd/octo-cli
+
+  npm-test:
+    name: npm test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: node --test
+        run: node --test scripts/install.test.js
