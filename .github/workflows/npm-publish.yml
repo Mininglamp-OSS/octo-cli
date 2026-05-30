@@ -27,7 +27,9 @@ on:
         default: true
 
 concurrency:
-  group: npm-publish-${{ github.ref }}
+  # Key on the version so a `release: published` run and a `workflow_dispatch`
+  # of the same tag (which has a different github.ref) still serialize.
+  group: npm-publish-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions: {}
@@ -35,6 +37,10 @@ permissions: {}
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # contents:read lets `gh release view` enumerate assets while waiting for
+    # goreleaser to finish uploading; nothing else uses elevated tokens.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: npm
@@ -59,13 +65,61 @@ jobs:
             DRY=""
           fi
           VERSION="${REF#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Refusing to publish: tag '$REF' does not look like a semver release."
+            exit 1
+          fi
           if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
           {
             echo "VERSION=$VERSION"
+            echo "TAG=v$VERSION"
             echo "DIST_TAG=$DIST_TAG"
             echo "DRY_RUN=$DRY"
           } >> "$GITHUB_OUTPUT"
           echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
+
+      # The `release: published` event fires before goreleaser uploads the
+      # platform archives (release-publish.yml runs `build-artifacts` after the
+      # release is published). The npm package's postinstall downloads those
+      # archives, so publishing before they exist would leave a permanently
+      # broken npm version. Wait until every expected asset is on the release.
+      # Skipped on --dry-run to allow validation against tags that have no
+      # release yet.
+      - name: Wait for goreleaser artifacts on the release
+        if: steps.version.outputs.DRY_RUN == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          deadline=$(( $(date +%s) + 1800 ))   # 30 minutes
+          expected=(
+            "octo-cli_${VERSION}_linux_amd64.tar.gz"
+            "octo-cli_${VERSION}_linux_arm64.tar.gz"
+            "octo-cli_${VERSION}_darwin_amd64.tar.gz"
+            "octo-cli_${VERSION}_darwin_arm64.tar.gz"
+            "octo-cli_${VERSION}_windows_amd64.zip"
+            "octo-cli_${VERSION}_windows_arm64.zip"
+            "checksums.txt"
+          )
+          while :; do
+            have=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[].name' 2>/dev/null || true)
+            missing=()
+            for f in "${expected[@]}"; do
+              printf '%s\n' "$have" | grep -Fxq "$f" || missing+=("$f")
+            done
+            if [ ${#missing[@]} -eq 0 ]; then
+              echo "[npm-publish] all artifacts present on $TAG"
+              break
+            fi
+            if [ "$(date +%s)" -gt "$deadline" ]; then
+              echo "::error::Timed out waiting for goreleaser artifacts on $TAG. Missing: ${missing[*]}"
+              exit 1
+            fi
+            echo "[npm-publish] waiting for ${#missing[@]} artifact(s) on $TAG: ${missing[*]}"
+            sleep 15
+          done
 
       - name: Set package version
         run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
