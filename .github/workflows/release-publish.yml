@@ -36,6 +36,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # actions:write lets the final step dispatch npm-publish.yml. We do this
+      # explicitly rather than letting npm-publish hook `on: release: published`,
+      # because the publish job above changes the release state using
+      # GITHUB_TOKEN, and GitHub's recursion rule suppresses workflow runs for
+      # events caused by GITHUB_TOKEN — workflow_dispatch and
+      # repository_dispatch are the only exempt events.
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,3 +78,13 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Hand off to the npm wrapper publish workflow. Sequenced after upload
+      # so the archives + checksums.txt are guaranteed to be on the release
+      # by the time the npm postinstall tries to download them. Uses
+      # workflow_dispatch (exempt from GITHUB_TOKEN recursion suppression).
+      - name: Trigger npm publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh workflow run npm-publish.yml -f tag="$TAG" -f dry_run=false

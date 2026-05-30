@@ -2,9 +2,28 @@
 "use strict";
 
 // postinstall: download the prebuilt octo-cli binary that matches this package
-// version and the host platform from the GitHub Release, verify its checksum,
-// and extract it into ../bin. Mirrors goreleaser's archive naming
+// version and the host platform from the GitHub Release, verify its sha256
+// against the `checksums.txt` published on the same release, and extract it
+// into ../bin. Mirrors goreleaser's archive naming
 // (octo-cli_<version>_<os>_<arch>.tar.gz, .zip on Windows; os/arch lowercase).
+//
+// Trust model: the checksum proves the archive matches whatever
+// `checksums.txt` that release currently serves — i.e. it catches transport
+// corruption, partial CDN poisoning, and accidental clobber. It does NOT
+// prove provenance: both files share one trust root (the GitHub Release), so
+// an actor who can write to the release replaces both consistently. Treat
+// this as an integrity check; provenance is the GitHub Release itself plus
+// the npm publish pipeline.
+//
+// Failure behavior: every error path calls `fail()` which logs to stderr and
+// `process.exit(1)`. This is deliberate for a CLI installed with `-g`: a
+// silent partial install would leave the user with an `octo-cli` shim that
+// can't find its binary, surfacing as a confusing ENOENT only when the user
+// tries to run a command later. Loud failure at install time is the right
+// signal. There is intentionally no `OCTO_CLI_SKIP_DOWNLOAD` opt-out — if a
+// transitive/air-gapped consumer ever needs one, add it then; today it would
+// be unused complexity. The retry loop in `download()` already handles
+// transient network failures, so a single ECONNRESET does not trip `fail()`.
 
 const fs = require("fs");
 const path = require("path");
@@ -18,6 +37,7 @@ const VERSION = require("../package.json").version;
 const OS = { darwin: "darwin", linux: "linux", win32: "windows" }[process.platform];
 const ARCH = { x64: "amd64", arm64: "arm64" }[process.arch];
 const isWin = process.platform === "win32";
+const BIN_NAME = isWin ? "octo-cli.exe" : "octo-cli";
 
 // Redirects are followed only to these hosts. github.com is the first hop;
 // release assets currently 302 to release-assets.githubusercontent.com (a
@@ -35,6 +55,7 @@ const MAX_REDIRECTS = 5;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
 const MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024; // 200 MiB, far above any sane archive
+const TOTAL_DOWNLOAD_DEADLINE_MS = 5 * 60_000; // wall-clock cap per asset
 
 function fail(msg) {
   console.error(`\n[octo-cli] install failed: ${msg}`);
@@ -42,18 +63,60 @@ function fail(msg) {
   process.exit(1);
 }
 
+// Mark errors that must not be retried (allowlist / parse failures, deadline
+// exceeded). retryable status codes are still retried; everything explicitly
+// marked here is not.
+function nonRetryable(err) {
+  err.nonRetryable = true;
+  return err;
+}
+
 function assertSafeHost(u, label) {
   if (u.protocol !== "https:") {
-    throw new Error(`${label}: refusing non-https URL (${u.protocol}//${u.hostname})`);
+    throw nonRetryable(new Error(`${label}: refusing non-https URL (${u.protocol}//${u.hostname})`));
   }
   if (!ALLOWED_HOSTS.has(u.hostname)) {
-    throw new Error(`${label}: host '${u.hostname}' is not in the redirect allowlist`);
+    throw nonRetryable(new Error(`${label}: host '${u.hostname}' is not in the redirect allowlist`));
   }
+}
+
+// True if `s` matches the strict semver subset we accept as a release tag:
+// MAJOR.MINOR.PATCH with optional prerelease. No `+build` metadata — CI never
+// produces it, so accepting it on the install side would be a silent
+// divergence from .github/workflows/npm-publish.yml.
+function isValidReleaseSemver(s) {
+  return typeof s === "string" && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(s);
+}
+
+// The archive filename goreleaser produces for (version, os, arch). The shape
+// is fixed by .goreleaser.yaml's `name_template` — keep these in sync.
+function assetName(version, os, arch, win) {
+  const ext = win ? "zip" : "tar.gz";
+  return `octo-cli_${version}_${os}_${arch}.${ext}`;
+}
+
+// Look up `asset` in a `checksums.txt`-style payload ("<sha256>  <filename>"
+// per line). Returns the expected 64-char lowercase hex digest. Throws if
+// the entry is missing or the digest doesn't match that shape — so the
+// caller doesn't have to special-case a "garbage line that happens to match
+// by filename" scenario.
+function parseChecksumEntry(sums, asset) {
+  const entry = sums
+    .split("\n")
+    .map((l) => l.trim().split(/\s+/))
+    .find((p) => p[1] === asset);
+  if (!entry) throw new Error(`no checksum entry for ${asset}`);
+  const digest = entry[0];
+  if (!/^[0-9a-f]{64}$/.test(digest)) {
+    throw new Error(`malformed checksum entry for ${asset}: '${digest}'`);
+  }
+  return digest;
 }
 
 // Single HTTPS GET. Resolves to either a buffered body or a redirect target,
 // never both. Times out on socket idle so a half-open connection cannot hang
-// the install indefinitely.
+// the install indefinitely; a separate wall-clock deadline (download() below)
+// guards against slow-trickle attacks that stay just under the idle timeout.
 function getOnce(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(
@@ -66,7 +129,14 @@ function getOnce(url) {
         const status = res.statusCode || 0;
         if (status >= 300 && status < 400 && res.headers.location) {
           res.resume();
-          resolve({ kind: "redirect", next: new URL(res.headers.location, url) });
+          let nextUrl;
+          try {
+            nextUrl = new URL(res.headers.location, url);
+          } catch (e) {
+            reject(nonRetryable(new Error(`malformed redirect location for ${url}: ${e.message}`)));
+            return;
+          }
+          resolve({ kind: "redirect", next: nextUrl });
           return;
         }
         if (status !== 200) {
@@ -81,7 +151,7 @@ function getOnce(url) {
         res.on("data", (c) => {
           size += c.length;
           if (size > MAX_DOWNLOAD_BYTES) {
-            req.destroy(new Error(`response exceeded ${MAX_DOWNLOAD_BYTES} bytes for ${url}`));
+            req.destroy(nonRetryable(new Error(`response exceeded ${MAX_DOWNLOAD_BYTES} bytes for ${url}`)));
             return;
           }
           chunks.push(c);
@@ -100,24 +170,38 @@ function getOnce(url) {
 async function downloadOnce(url) {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    assertSafeHost(new URL(current), hop === 0 ? "request" : `redirect #${hop}`);
+    let parsed;
+    try {
+      parsed = new URL(current);
+    } catch (e) {
+      throw nonRetryable(new Error(`malformed URL at hop ${hop}: ${e.message}`));
+    }
+    assertSafeHost(parsed, hop === 0 ? "request" : `redirect #${hop}`);
     const r = await getOnce(current);
     if (r.kind === "body") return r.body;
     current = r.next.toString();
   }
-  throw new Error(`too many redirects (>${MAX_REDIRECTS})`);
+  throw nonRetryable(new Error(`too many redirects (>${MAX_REDIRECTS})`));
 }
 
 // Retry the whole download on transient errors (timeout, socket reset, 5xx).
 // 404 is treated as a non-retryable signal that the version doesn't exist on
-// the release yet — fast-fail with a clear error rather than spin.
+// the release yet — fast-fail with a clear error rather than spin. Errors
+// explicitly flagged `nonRetryable` (allowlist / parse / deadline) are not
+// retried either. A wall-clock deadline caps the total time spent across all
+// retries so a slow-trickle peer cannot keep the install alive.
 async function download(url) {
+  const deadline = Date.now() + TOTAL_DOWNLOAD_DEADLINE_MS;
   for (let attempt = 0; ; attempt++) {
+    if (Date.now() >= deadline) {
+      throw nonRetryable(new Error(`download exceeded ${TOTAL_DOWNLOAD_DEADLINE_MS / 1000}s wall-clock deadline: ${url}`));
+    }
     try {
       return await downloadOnce(url);
     } catch (e) {
       const status = e && e.httpStatus;
       const retryable =
+        !(e && e.nonRetryable) &&
         attempt < MAX_RETRIES - 1 &&
         (status === undefined || (status >= 500 && status < 600));
       if (!retryable) throw e;
@@ -128,40 +212,49 @@ async function download(url) {
   }
 }
 
-// On a global install, warn (without modifying anything) if the directory npm
-// links the `octo-cli` command into is not on PATH, so the command would not be
-// found. Best-effort: any failure here must not break the install.
+// On a global install, warn (without modifying anything) if `octo-cli` would
+// not be found on PATH. Best-effort: any failure here must not break the
+// install.
+//
+// Strategy: if npm's own bin (<prefix>/bin on unix, <prefix> on Windows) is
+// already on PATH, do nothing — npm's bin shim works, the user is fine. If
+// it isn't (or we can't tell because npm_config_prefix isn't set), point at
+// the directory the postinstall just wrote the Go binary into. That path is
+// `path.join(__dirname, "..", "bin")` — derived from __dirname, so it's
+// always exact and doesn't depend on guessing npm's directory layout
+// (counting `..` to reach <prefix>). Cost: adding our bin to PATH only
+// helps octo-cli, not other global npm packages — but if npm's bin isn't on
+// PATH the user already has that problem repo-wide.
 function maybeHintPath() {
   try {
     const isGlobal =
       process.env.npm_config_global === "true" || process.env.npm_config_location === "global";
     if (!isGlobal) return;
 
-    // npm links bins into <prefix>/bin on unix, and into <prefix> itself on Windows.
-    let prefix = process.env.npm_config_prefix || process.env.PREFIX;
-    if (!prefix) {
-      // Fallback: __dirname is <prefix>/lib/node_modules/@scope/pkg/scripts (unix,
-      // 5 levels under prefix) or <prefix>/node_modules/@scope/pkg/scripts
-      // (Windows, 4 levels).
-      prefix = isWin
-        ? path.resolve(__dirname, "..", "..", "..", "..")
-        : path.resolve(__dirname, "..", "..", "..", "..", "..");
-    }
-    const binDir = isWin ? prefix : path.join(prefix, "bin");
+    const PATH = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+    const onPath = (dir) => PATH.some((p) => path.resolve(p) === path.resolve(dir));
 
-    const onPath = (process.env.PATH || "")
-      .split(path.delimiter)
-      .some((p) => p && path.resolve(p) === path.resolve(binDir));
-    if (onPath) return;
+    // Common case: npm's bin is on PATH, the shim it installed for `octo-cli`
+    // will be found, no hint needed.
+    const npmPrefix = process.env.npm_config_prefix || process.env.PREFIX;
+    if (npmPrefix) {
+      const npmBin = isWin ? npmPrefix : path.join(npmPrefix, "bin");
+      if (onPath(npmBin)) return;
+    }
+
+    // Either we don't know where npm put its bin, or it isn't on PATH. Tell
+    // the user to add our own bin (where the Go binary lives) instead. That
+    // path is exact; the npm-bin path would be a guess.
+    const ourBinDir = path.resolve(__dirname, "..", "bin");
+    if (onPath(ourBinDir)) return;
 
     const lines = [
       "",
-      `[octo-cli] Installed, but ${binDir} is not on your PATH —`,
-      "[octo-cli] the `octo-cli` command will not be found until you add it.",
+      `[octo-cli] Installed ${ourBinDir}/${BIN_NAME}, but that directory is not on PATH.`,
+      "[octo-cli] Add it to use the `octo-cli` command:",
     ];
     if (isWin) {
-      lines.push("[octo-cli] Add it for your user (then reopen the terminal):");
-      lines.push(`    setx PATH "%PATH%;${binDir}"`);
+      lines.push(`    setx PATH "%PATH%;${ourBinDir}"`);
     } else {
       const shell = path.basename(process.env.SHELL || "");
       const rc =
@@ -174,10 +267,10 @@ function maybeHintPath() {
               : "your shell profile";
       if (shell === "fish") {
         lines.push(`[octo-cli] Add this to ${rc}, then reopen the terminal:`);
-        lines.push(`    fish_add_path ${binDir}`);
+        lines.push(`    fish_add_path ${ourBinDir}`);
       } else {
         lines.push(`[octo-cli] Add this to ${rc}, then reopen the terminal:`);
-        lines.push(`    export PATH="${binDir}:$PATH"`);
+        lines.push(`    export PATH="${ourBinDir}:$PATH"`);
       }
     }
     lines.push("");
@@ -192,16 +285,12 @@ async function main() {
   if (!VERSION || VERSION === "0.0.0") {
     fail("package version is a placeholder (0.0.0); this package must be published with a real release version");
   }
-  // The version is interpolated into both the download URL and a filesystem
-  // path; reject anything that isn't strict semver before either use.
-  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(VERSION)) {
-    fail(`package version '${VERSION}' is not a valid semver`);
+  if (!isValidReleaseSemver(VERSION)) {
+    fail(`package version '${VERSION}' is not a valid release semver`);
   }
 
-  const ext = isWin ? "zip" : "tar.gz";
-  const asset = `octo-cli_${VERSION}_${OS}_${ARCH}.${ext}`;
+  const asset = assetName(VERSION, OS, ARCH, isWin);
   const base = `https://github.com/${REPO}/releases/download/v${VERSION}`;
-  const binName = isWin ? "octo-cli.exe" : "octo-cli";
   const binDir = path.join(__dirname, "..", "bin");
 
   console.log(`[octo-cli] downloading ${asset} ...`);
@@ -213,15 +302,11 @@ async function main() {
     fail(e.message);
   }
 
-  // Verify sha256 against checksums.txt ("<sha256>  <filename>" per line).
-  const entry = sums
-    .split("\n")
-    .map((l) => l.trim().split(/\s+/))
-    .find((p) => p[1] === asset);
-  if (!entry || entry.length < 2) fail(`no checksum entry for ${asset}`);
-  const expected = entry[0];
-  if (!/^[0-9a-f]{64}$/.test(expected)) {
-    fail(`malformed checksum entry for ${asset}: '${expected}'`);
+  let expected;
+  try {
+    expected = parseChecksumEntry(sums, asset);
+  } catch (e) {
+    fail(e.message);
   }
   const got = crypto.createHash("sha256").update(archive).digest("hex");
   if (got !== expected) fail(`checksum mismatch for ${asset} (want ${expected}, got ${got})`);
@@ -232,11 +317,30 @@ async function main() {
   // a targeted message instead of a bare ENOENT.
   fs.mkdirSync(binDir, { recursive: true });
   const tmp = path.join(binDir, asset);
+  const extractedPath = path.join(binDir, BIN_NAME);
   fs.writeFileSync(tmp, archive);
   try {
-    const args = isWin ? ["-xf", tmp, "-C", binDir, binName] : ["-xzf", tmp, "-C", binDir, binName];
+    const args = isWin ? ["-xf", tmp, "-C", binDir, BIN_NAME] : ["-xzf", tmp, "-C", binDir, BIN_NAME];
     execFileSync("tar", args, { stdio: "inherit" });
-    fs.chmodSync(path.join(binDir, binName), 0o755);
+
+    // Refuse non-regular files (symlink/dir/...). Named-member extraction
+    // prevents zip-slip from other members of the archive, but the named
+    // member itself can be a symlink; a later chmodSync / spawnSync would
+    // follow it, letting a malicious archive chmod files outside bin/ or
+    // execute an arbitrary local binary as `octo-cli`. goreleaser never emits
+    // symlink members, so this is defense-in-depth behind the release trust
+    // root, not a remotely-reachable bug. Use lstat (not stat) so we see the
+    // symlink itself rather than its target.
+    const st = fs.lstatSync(extractedPath);
+    if (!st.isFile()) {
+      try {
+        fs.unlinkSync(extractedPath);
+      } catch {
+        /* leave it; the fail() below is what matters */
+      }
+      fail(`extracted '${BIN_NAME}' is not a regular file (mode ${(st.mode & 0o170000).toString(8)})`);
+    }
+    fs.chmodSync(extractedPath, 0o755);
   } catch (e) {
     if (e && e.code === "ENOENT") {
       fail(
@@ -262,4 +366,11 @@ async function main() {
 if (require.main === module) {
   main();
 }
-module.exports = { maybeHintPath };
+module.exports = {
+  maybeHintPath,
+  assertSafeHost,
+  isValidReleaseSemver,
+  assetName,
+  parseChecksumEntry,
+  ALLOWED_HOSTS,
+};

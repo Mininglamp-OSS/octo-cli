@@ -1,19 +1,22 @@
-# Publish the npm wrapper (@mininglamp-oss/octo-cli) when a GitHub Release is
-# published. goreleaser builds and uploads the platform binaries to the same
-# release; the npm package's postinstall downloads the matching one, so the
-# published npm version MUST correspond to a real release tag.
+# Publish the npm wrapper (@mininglamp-oss/octo-cli).
+#
+# This workflow is sequenced AFTER `release-publish.yml`'s `build-artifacts`
+# job: that job ends by explicitly invoking us with `gh workflow run` (i.e.
+# a workflow_dispatch event), so by the time we run the goreleaser archives
+# and `checksums.txt` are already on the GitHub Release. There is no
+# `on: release: published` trigger: that event is fired by GITHUB_TOKEN
+# (in the release-publish flow), which GitHub's recursion-prevention rule
+# would suppress, so it never actually delivered.
 #
 # Tag → npm dist-tag:
 #   v1.2.3        → @latest   (matches /^v\d+\.\d+\.\d+$/)
 #   v1.2.3-rc.1   → @next     (any tag containing "-")
 #
-# A manual workflow_dispatch run supports --dry-run for testing without
-# uploading.
+# A manual workflow_dispatch run defaults to --dry-run, so re-running by
+# hand is safe and doesn't accidentally re-publish.
 name: npm publish
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -27,9 +30,8 @@ on:
         default: true
 
 concurrency:
-  # Key on the version so a `release: published` run and a `workflow_dispatch`
-  # of the same tag (which has a different github.ref) still serialize.
-  group: npm-publish-${{ inputs.tag || github.ref_name }}
+  # Key on the version so two dispatches of the same tag still serialize.
+  group: npm-publish-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions: {}
@@ -37,10 +39,10 @@ permissions: {}
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # contents:read lets `gh release view` enumerate assets while waiting for
-    # goreleaser to finish uploading; nothing else uses elevated tokens.
+    # id-token:write lets npm provenance generate an OIDC-signed Sigstore
+    # attestation linking the published tarball back to this workflow run.
     permissions:
-      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: npm
@@ -53,17 +55,21 @@ jobs:
 
       - name: Resolve version and dist-tag
         id: version
-        # On a release event GITHUB_REF_NAME is the tag; on manual dispatch use
-        # the `tag` input. VERSION drops the leading `v`; a version containing
-        # `-` (prerelease) publishes to @next so it never clobbers @latest.
+        # VERSION drops the leading `v`; a version containing `-`
+        # (prerelease) publishes to @next so it never clobbers @latest.
+        #
+        # IMPORTANT: dispatch inputs are read through env: shell variables,
+        # not interpolated into the run: block. Direct `${{ inputs.tag }}`
+        # would be substituted as literal text before bash parses the line,
+        # letting a crafted tag value break out of the assignment and run
+        # arbitrary commands in a step that later has NPM_TOKEN in scope
+        # (CWE-94).
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            REF="${{ inputs.tag }}"
-            DRY="${{ inputs.dry_run && '--dry-run' || '' }}"
-          else
-            REF="${GITHUB_REF_NAME}"
-            DRY=""
-          fi
+          REF="$INPUT_TAG"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then DRY="--dry-run"; else DRY=""; fi
           VERSION="${REF#v}"
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Refusing to publish: tag '$REF' does not look like a semver release."
@@ -72,59 +78,24 @@ jobs:
           if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
           {
             echo "VERSION=$VERSION"
-            echo "TAG=v$VERSION"
             echo "DIST_TAG=$DIST_TAG"
             echo "DRY_RUN=$DRY"
           } >> "$GITHUB_OUTPUT"
           echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
 
-      # The `release: published` event fires before goreleaser uploads the
-      # platform archives (release-publish.yml runs `build-artifacts` after the
-      # release is published). The npm package's postinstall downloads those
-      # archives, so publishing before they exist would leave a permanently
-      # broken npm version. Wait until every expected asset is on the release.
-      # Skipped on --dry-run to allow validation against tags that have no
-      # release yet.
-      - name: Wait for goreleaser artifacts on the release
-        if: steps.version.outputs.DRY_RUN == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.VERSION }}
-          TAG: ${{ steps.version.outputs.TAG }}
-        run: |
-          deadline=$(( $(date +%s) + 1800 ))   # 30 minutes
-          expected=(
-            "octo-cli_${VERSION}_linux_amd64.tar.gz"
-            "octo-cli_${VERSION}_linux_arm64.tar.gz"
-            "octo-cli_${VERSION}_darwin_amd64.tar.gz"
-            "octo-cli_${VERSION}_darwin_arm64.tar.gz"
-            "octo-cli_${VERSION}_windows_amd64.zip"
-            "octo-cli_${VERSION}_windows_arm64.zip"
-            "checksums.txt"
-          )
-          while :; do
-            have=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-              --json assets --jq '.assets[].name' 2>/dev/null || true)
-            missing=()
-            for f in "${expected[@]}"; do
-              printf '%s\n' "$have" | grep -Fxq "$f" || missing+=("$f")
-            done
-            if [ ${#missing[@]} -eq 0 ]; then
-              echo "[npm-publish] all artifacts present on $TAG"
-              break
-            fi
-            if [ "$(date +%s)" -gt "$deadline" ]; then
-              echo "::error::Timed out waiting for goreleaser artifacts on $TAG. Missing: ${missing[*]}"
-              exit 1
-            fi
-            echo "[npm-publish] waiting for ${#missing[@]} artifact(s) on $TAG: ${missing[*]}"
-            sleep 15
-          done
-
       - name: Set package version
-        run: npm version "${{ steps.version.outputs.VERSION }}" --no-git-tag-version --allow-same-version
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # `--provenance` produces an OIDC-signed Sigstore attestation linking
+      # the tarball to this workflow run (npm ≥ 9.5, public repo + public
+      # package — both satisfied). Consumers can verify the link with
+      # `npm audit signatures`; this is the only origin link the user gets
+      # for the wrapper itself (the binary's sha256 check is independent).
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --tag "${{ steps.version.outputs.DIST_TAG }}" ${{ steps.version.outputs.DRY_RUN }}
+          DIST_TAG: ${{ steps.version.outputs.DIST_TAG }}
+          DRY_RUN: ${{ steps.version.outputs.DRY_RUN }}
+        run: npm publish --access public --provenance --tag "$DIST_TAG" $DRY_RUN

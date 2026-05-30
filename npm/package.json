@@ -9,8 +9,10 @@
     "postinstall": "node scripts/install.js"
   },
   "files": [
-    "scripts/",
-    "README.md"
+    "scripts/install.js",
+    "scripts/run.js",
+    "README.md",
+    "LICENSE"
   ],
   "os": [
     "darwin",
