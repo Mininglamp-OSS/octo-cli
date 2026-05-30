@@ -20,10 +20,13 @@ const ARCH = { x64: "amd64", arm64: "arm64" }[process.arch];
 const isWin = process.platform === "win32";
 
 // Redirects are followed only to these hosts. github.com is the first hop;
-// release assets redirect to objects.githubusercontent.com via S3; codeload
-// covers source archives. Anything else is treated as hostile.
+// release assets currently 302 to release-assets.githubusercontent.com (a
+// signed-URL CDN); objects.githubusercontent.com is the older asset CDN and
+// is kept for backwards/forwards compatibility; codeload covers source
+// archives. Anything else is treated as hostile.
 const ALLOWED_HOSTS = new Set([
   "github.com",
+  "release-assets.githubusercontent.com",
   "objects.githubusercontent.com",
   "codeload.github.com",
 ]);
