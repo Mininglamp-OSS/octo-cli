@@ -51,46 +51,45 @@ jobs:
       run:
         working-directory: npm
     steps:
-      # Pin to the release tag so the wrapper code in the published npm
-      # tarball matches the commit that the GitHub Release was cut from.
-      # Without this, workflow_dispatch resolves to the default-branch HEAD,
-      # which can have moved past the tag — and the `--provenance`
-      # attestation below would then point at the wrong SHA, breaking the
-      # `npm audit signatures` guarantee.
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ inputs.tag }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-
+      # Resolve runs BEFORE checkout — only reads inputs and writes outputs,
+      # no filesystem dependency. Putting it first means a rejected input
+      # never reaches actions/checkout, so attacker-supplied refs can't
+      # land any content in the workspace before validation runs.
+      #
+      # `working-directory: .` overrides the job-level default of `npm`,
+      # which doesn't exist yet (checkout is the next step).
+      #
+      # IMPORTANT: dispatch inputs are read through env: shell variables,
+      # not interpolated into the run: block. Direct `${{ inputs.tag }}`
+      # would be substituted as literal text before bash parses the line,
+      # letting a crafted tag value break out of the assignment and run
+      # arbitrary commands in a step that later has NPM_TOKEN in scope
+      # (CWE-94).
       - name: Resolve version and dist-tag
         id: version
-        # VERSION drops the leading `v`; a version containing `-`
-        # (prerelease) publishes to @next so it never clobbers @latest.
-        #
-        # IMPORTANT: dispatch inputs are read through env: shell variables,
-        # not interpolated into the run: block. Direct `${{ inputs.tag }}`
-        # would be substituted as literal text before bash parses the line,
-        # letting a crafted tag value break out of the assignment and run
-        # arbitrary commands in a step that later has NPM_TOKEN in scope
-        # (CWE-94).
+        working-directory: .
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
         run: |
           REF="$INPUT_TAG"
           if [ "$INPUT_DRY_RUN" = "true" ]; then DRY="--dry-run"; else DRY=""; fi
-          VERSION="${REF#v}"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::Refusing to publish: tag '$REF' does not look like a semver release."
+          # Strict v-prefixed semver. Bare semver like "0.6.0" is rejected
+          # so that the downstream `refs/tags/$INPUT_TAG` checkout cannot
+          # be tricked into picking up an attacker-created branch named
+          # "0.6.0" (no v) while the release gate validates the legitimate
+          # "v0.6.0" release. Enforcing the 'v' here keeps every consumer
+          # in lockstep: checkout, gate, set-version, and publish all see
+          # the same normalized form.
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::inputs.tag must be v-prefixed semver (got '$REF'). Bare semver like '0.6.0' is rejected to prevent branch/tag-name confusion."
             exit 1
           fi
+          VERSION="${REF#v}"
           if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
-          # TAG is the normalized v-prefixed form (independent of whether the
-          # caller passed "v0.6.0" or "0.6.0"). Consumers: "Verify release
-          # exists and is published" step below.
+          # TAG is the v-prefixed form (same as INPUT_TAG, just spelled out
+          # for downstream readability). Consumers: checkout ref below and
+          # the "Verify release exists and is published" step.
           {
             echo "VERSION=$VERSION"
             echo "TAG=v$VERSION"
@@ -98,6 +97,20 @@ jobs:
             echo "DRY_RUN=$DRY"
           } >> "$GITHUB_OUTPUT"
           echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
+
+      # Pin to the release tag so the wrapper code in the published npm
+      # tarball matches the commit that the GitHub Release was cut from.
+      # Without `refs/tags/` prefix, actions/checkout will accept a same-
+      # named branch — letting an attacker who creates a branch matching
+      # the tag substitute branch contents into the published tarball
+      # while the gate still validates the legitimate release.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/tags/${{ steps.version.outputs.TAG }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
       # Gate: refuse to publish unless `tag` corresponds to a real,
       # already-published (non-draft) GitHub Release. Without this gate, any
