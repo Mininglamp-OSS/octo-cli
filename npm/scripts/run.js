@@ -26,7 +26,14 @@ if (res.error) {
 
 // If the binary was killed by a signal, propagate it so callers observe the
 // conventional 128+signum exit code instead of a generic 1 that hides
-// Ctrl-C / kill from shells and supervisors. Two cases, handled in order:
+// Ctrl-C / kill from shells and supervisors.
+//
+// POSIX-only path: on win32, Node's spawnSync rarely (~never) sets
+// res.signal — the OS does not deliver POSIX signals to child processes the
+// same way — so this block is effectively a no-op on Windows. We don't
+// short-circuit on platform because that would needlessly skip the
+// faithful fallback if any future Node version starts surfacing signals
+// there. The two POSIX cases, handled in order:
 //
 //   1. Terminating signals (SIGINT, SIGTERM, SIGQUIT, SIGHUP, ...) —
 //      `process.kill(self, sig)` re-raises the signal, the Node runtime

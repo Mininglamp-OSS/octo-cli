@@ -95,6 +95,35 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
 
+      # Gate: refuse to publish unless `tag` corresponds to a real,
+      # already-published (non-draft) GitHub Release. Without this gate, any
+      # actor with repo:write could directly workflow_dispatch this workflow
+      # against any resolvable ref (incl. a lightweight tag at a malicious
+      # commit), set dry_run=false, and ship that ref to npm @latest with a
+      # valid Sigstore provenance attestation pointing at the malicious SHA.
+      # The release-publish.yml chain (with its validate_run_id evidence
+      # check) is the intended publish trigger; this gate enforces that
+      # invariant on the downstream workflow too.
+      # Skipped on dry_run so developers can validate workflow plumbing
+      # against tags whose Release doesn't exist yet.
+      - name: Verify release exists and is published
+        if: steps.version.outputs.DRY_RUN == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          set -euo pipefail
+          info=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null) || {
+            echo "::error::No GitHub Release for $TAG. npm-publish requires a published Release for the tag — use release-publish.yml to cut one; direct workflow_dispatch of an arbitrary tag is not permitted."
+            exit 1
+          }
+          is_draft=$(printf '%s' "$info" | jq -r '.isDraft')
+          if [ "$is_draft" = "true" ]; then
+            echo "::error::Release $TAG is still a draft; publish it first (release-publish.yml flips it out of draft after artifacts upload)."
+            exit 1
+          fi
+          echo "[npm-publish] release $TAG exists and is published, proceeding."
+
       - name: Set package version
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}

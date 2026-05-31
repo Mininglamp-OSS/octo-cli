@@ -348,10 +348,17 @@ async function main() {
   // GNU tar (Linux) both handle the formats we ship (.tar.gz via -xzf, .zip
   // via -xf). On older Windows / minimal containers tar may be absent — give
   // a targeted message instead of a bare ENOENT.
+  //
+  // NOTE on cleanup: we can't use a try/finally to remove the tmp archive,
+  // because every failure path calls fail() → process.exit(1) and Node does
+  // NOT run finally blocks across process.exit(). Capture the error,
+  // unlink unconditionally, then fail() once at the end.
   fs.mkdirSync(binDir, { recursive: true });
   const tmp = path.join(binDir, asset);
   const extractedPath = path.join(binDir, BIN_NAME);
   fs.writeFileSync(tmp, archive);
+
+  let extractErr = null;
   try {
     const args = isWin ? ["-xf", tmp, "-C", binDir, BIN_NAME] : ["-xzf", tmp, "-C", binDir, BIN_NAME];
     execFileSync("tar", args, { stdio: "inherit" });
@@ -371,24 +378,33 @@ async function main() {
       } catch {
         /* leave it; the fail() below is what matters */
       }
-      fail(`extracted '${BIN_NAME}' is not a regular file (mode ${(st.mode & 0o170000).toString(8)})`);
+      extractErr = new Error(
+        `extracted '${BIN_NAME}' is not a regular file (mode ${(st.mode & 0o170000).toString(8)})`,
+      );
+    } else {
+      fs.chmodSync(extractedPath, 0o755);
     }
-    fs.chmodSync(extractedPath, 0o755);
   } catch (e) {
-    if (e && e.code === "ENOENT") {
+    extractErr = e;
+  }
+
+  // Always remove the tmp archive (200 MiB cap) regardless of outcome — see
+  // the NOTE above.
+  try {
+    fs.unlinkSync(tmp);
+  } catch {
+    /* ignore */
+  }
+
+  if (extractErr) {
+    if (extractErr.code === "ENOENT") {
       fail(
         isWin
           ? "`tar.exe` not found on PATH. Windows 10 build 1803+ ships bsdtar; on older systems install Git for Windows or 7-Zip and re-run."
           : "`tar` not found on PATH. Install GNU tar or bsdtar (e.g. apt-get install tar, apk add tar) and re-run.",
       );
     }
-    fail(`extract failed: ${e.message}`);
-  } finally {
-    try {
-      fs.unlinkSync(tmp);
-    } catch {
-      /* ignore */
-    }
+    fail(`extract failed: ${extractErr.message}`);
   }
 
   console.log(`[octo-cli] installed octo-cli ${VERSION} (${OS}/${ARCH})`);
