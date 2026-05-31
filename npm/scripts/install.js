@@ -114,10 +114,16 @@ function parseChecksumEntry(sums, asset) {
 }
 
 // Single HTTPS GET. Resolves to either a buffered body or a redirect target,
-// never both. Times out on socket idle so a half-open connection cannot hang
-// the install indefinitely; a separate wall-clock deadline (download() below)
-// guards against slow-trickle attacks that stay just under the idle timeout.
-function getOnce(url) {
+// never both. Two timeouts apply:
+//   - REQUEST_TIMEOUT_MS  — socket-idle timeout (resets on each received
+//     byte). Catches half-open connections / dead sockets.
+//   - deadline (epoch ms) — wall-clock deadline armed via setTimeout, calls
+//     req.destroy() when reached. Catches a peer that trickles bytes just
+//     under the idle threshold and would otherwise stall the install
+//     indefinitely. The caller (download) passes a deadline that bounds the
+//     entire retry chain, not just this single request.
+// Both are non-retryable so the caller fails fast instead of looping.
+function getOnce(url, deadline) {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -161,13 +167,39 @@ function getOnce(url) {
       },
     );
     req.on("timeout", () => {
-      req.destroy(new Error(`request timed out after ${REQUEST_TIMEOUT_MS}ms: ${url}`));
+      // Idle timeout (no bytes for REQUEST_TIMEOUT_MS) IS retryable — a flaky
+      // network can recover on the next attempt. Only the wall-clock deadline
+      // below is non-retryable.
+      req.destroy(new Error(`request idle for ${REQUEST_TIMEOUT_MS}ms: ${url}`));
     });
     req.on("error", reject);
+
+    // Wall-clock deadline. Fires *during* the response body so a slow-trickle
+    // peer is aborted mid-stream, not just between retries.
+    if (deadline) armDeadline(req, deadline, url);
   });
 }
 
-async function downloadOnce(url) {
+// Arm a wall-clock deadline on an in-flight request. When `deadline` is
+// reached, `req.destroy(err)` raises an error on the request — caught by
+// the caller's `.on('error', reject)` — and the promise rejects with our
+// deadline error. The timer is cleared on `'close'` so a successful request
+// doesn't leave a hanging timer that prevents Node from exiting. Exported
+// for tests; production callers use `getOnce(url, deadline)`.
+function armDeadline(req, deadline, url) {
+  const remaining = Math.max(deadline - Date.now(), 0);
+  const timer = setTimeout(() => {
+    req.destroy(
+      nonRetryable(
+        new Error(`download exceeded wall-clock deadline (${TOTAL_DOWNLOAD_DEADLINE_MS / 1000}s): ${url}`),
+      ),
+    );
+  }, remaining);
+  req.on("close", () => clearTimeout(timer));
+  return timer;
+}
+
+async function downloadOnce(url, deadline) {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     let parsed;
@@ -177,7 +209,7 @@ async function downloadOnce(url) {
       throw nonRetryable(new Error(`malformed URL at hop ${hop}: ${e.message}`));
     }
     assertSafeHost(parsed, hop === 0 ? "request" : `redirect #${hop}`);
-    const r = await getOnce(current);
+    const r = await getOnce(current, deadline);
     if (r.kind === "body") return r.body;
     current = r.next.toString();
   }
@@ -188,8 +220,9 @@ async function downloadOnce(url) {
 // 404 is treated as a non-retryable signal that the version doesn't exist on
 // the release yet — fast-fail with a clear error rather than spin. Errors
 // explicitly flagged `nonRetryable` (allowlist / parse / deadline) are not
-// retried either. A wall-clock deadline caps the total time spent across all
-// retries so a slow-trickle peer cannot keep the install alive.
+// retried either. The deadline is passed all the way down to getOnce so it
+// can abort an in-flight request mid-stream, not just guard the gap between
+// retries.
 async function download(url) {
   const deadline = Date.now() + TOTAL_DOWNLOAD_DEADLINE_MS;
   for (let attempt = 0; ; attempt++) {
@@ -197,7 +230,7 @@ async function download(url) {
       throw nonRetryable(new Error(`download exceeded ${TOTAL_DOWNLOAD_DEADLINE_MS / 1000}s wall-clock deadline: ${url}`));
     }
     try {
-      return await downloadOnce(url);
+      return await downloadOnce(url, deadline);
     } catch (e) {
       const status = e && e.httpStatus;
       const retryable =
@@ -373,4 +406,5 @@ module.exports = {
   assetName,
   parseChecksumEntry,
   ALLOWED_HOSTS,
+  armDeadline,
 };

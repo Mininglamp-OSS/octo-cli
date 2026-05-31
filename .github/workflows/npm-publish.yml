@@ -39,15 +39,27 @@ permissions: {}
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # contents:read is required by actions/checkout under GITHUB_TOKEN auth
+    # (works without it on public repos via the unauthenticated-clone
+    # fallback, but that's not a contract we want to rely on).
     # id-token:write lets npm provenance generate an OIDC-signed Sigstore
     # attestation linking the published tarball back to this workflow run.
     permissions:
+      contents: read
       id-token: write
     defaults:
       run:
         working-directory: npm
     steps:
+      # Pin to the release tag so the wrapper code in the published npm
+      # tarball matches the commit that the GitHub Release was cut from.
+      # Without this, workflow_dispatch resolves to the default-branch HEAD,
+      # which can have moved past the tag — and the `--provenance`
+      # attestation below would then point at the wrong SHA, breaking the
+      # `npm audit signatures` guarantee.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "20"

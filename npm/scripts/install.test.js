@@ -11,6 +11,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 
+const { EventEmitter } = require("node:events");
+
 const {
   assertSafeHost,
   isValidReleaseSemver,
@@ -18,6 +20,7 @@ const {
   parseChecksumEntry,
   maybeHintPath,
   ALLOWED_HOSTS,
+  armDeadline,
 } = require("./install.js");
 
 // ---------- assertSafeHost --------------------------------------------------
@@ -176,6 +179,49 @@ test("parseChecksumEntry: rejects uppercase hex (locking lowercase invariant)", 
 test("parseChecksumEntry: rejects a digest of the wrong length", () => {
   const sums = `${"a".repeat(63)}  ${ASSET}\n`;
   assert.throws(() => parseChecksumEntry(sums, ASSET), /malformed checksum entry/i);
+});
+
+// ---------- armDeadline (wall-clock guard on an in-flight request) ---------
+
+// Minimal stand-in for http.ClientRequest: an EventEmitter with destroy().
+function fakeReq() {
+  const e = new EventEmitter();
+  e.destroyed = false;
+  e.destroyError = null;
+  e.destroy = (err) => {
+    e.destroyed = true;
+    e.destroyError = err;
+  };
+  return e;
+}
+
+test("armDeadline: destroys req with a nonRetryable error when deadline elapses", async () => {
+  const req = fakeReq();
+  armDeadline(req, Date.now() + 30, "https://example/x");
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(req.destroyed, true);
+  assert.ok(req.destroyError, "expected a destroy error");
+  assert.equal(req.destroyError.nonRetryable, true);
+  assert.match(req.destroyError.message, /wall-clock deadline/i);
+  assert.match(req.destroyError.message, /example/);
+});
+
+test("armDeadline: fires immediately when deadline is in the past", async () => {
+  const req = fakeReq();
+  armDeadline(req, Date.now() - 5000, "https://example/x");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(req.destroyed, true);
+});
+
+test("armDeadline: cleared by 'close' so a fast request leaves no pending timer", async () => {
+  const req = fakeReq();
+  armDeadline(req, Date.now() + 30, "https://example/x");
+  // Simulate the request completing well before the deadline.
+  req.emit("close");
+  // Wait past the original deadline and confirm destroy was never called.
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(req.destroyed, false);
+  assert.equal(req.destroyError, null);
 });
 
 // ---------- maybeHintPath ---------------------------------------------------
