@@ -105,9 +105,19 @@ jobs:
       # package — both satisfied). Consumers can verify the link with
       # `npm audit signatures`; this is the only origin link the user gets
       # for the wrapper itself (the binary's sha256 check is independent).
+      #
+      # The dry-run path is split into a separate branch rather than relying
+      # on an unquoted `$DRY_RUN` expansion (SC2086 / actionlint). The value
+      # is workflow-derived and never user-controlled, so the original idiom
+      # was safe — but actionlint flags it and clarity isn't worse this way.
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ steps.version.outputs.DIST_TAG }}
           DRY_RUN: ${{ steps.version.outputs.DRY_RUN }}
-        run: npm publish --access public --provenance --tag "$DIST_TAG" $DRY_RUN
+        run: |
+          if [ -n "$DRY_RUN" ]; then
+            npm publish --access public --provenance --tag "$DIST_TAG" --dry-run
+          else
+            npm publish --access public --provenance --tag "$DIST_TAG"
+          fi
