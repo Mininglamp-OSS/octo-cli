@@ -1,0 +1,42 @@
+{
+  "name": "@mininglamp-oss/octo-cli",
+  "version": "0.0.0",
+  "description": "Command-line interface for the Octo ecosystem — a single-binary REST client for AI Agent Bots. This package downloads the matching prebuilt Go binary on install.",
+  "bin": {
+    "octo-cli": "scripts/run.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js",
+    "test": "node --test scripts/install.test.js"
+  },
+  "files": [
+    "scripts/install.js",
+    "scripts/run.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "octo",
+    "cli",
+    "ai-agent",
+    "bot"
+  ],
+  "homepage": "https://github.com/Mininglamp-OSS/octo-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mininglamp-OSS/octo-cli.git"
+  },
+  "license": "Apache-2.0"
+}

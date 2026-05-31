@@ -1,0 +1,252 @@
+# Publish the npm wrapper (@mininglamp-oss/octo-cli).
+#
+# This workflow is sequenced AFTER `release-publish.yml`'s `build-artifacts`
+# job: that job ends by explicitly invoking us with `gh workflow run` (i.e.
+# a workflow_dispatch event), so by the time we run the goreleaser archives
+# and `checksums.txt` are already on the GitHub Release. There is no
+# `on: release: published` trigger: that event is fired by GITHUB_TOKEN
+# (in the release-publish flow), which GitHub's recursion-prevention rule
+# would suppress, so it never actually delivered.
+#
+# Tag → npm dist-tag:
+#   v1.2.3        → @latest   (matches /^v\d+\.\d+\.\d+$/)
+#   v1.2.3-rc.1   → @next     (any tag containing "-")
+#
+# A manual workflow_dispatch run defaults to --dry-run, so re-running by
+# hand is safe and doesn't accidentally re-publish.
+name: npm publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.6.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Run npm publish with --dry-run (no actual upload)"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  # Key on the version so two dispatches of the same tag still serialize.
+  group: npm-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # contents:read is required by actions/checkout under GITHUB_TOKEN auth
+    # (works without it on public repos via the unauthenticated-clone
+    # fallback, but that's not a contract we want to rely on).
+    # actions:read lets the CI-evidence gate query workflow_runs for the
+    # tagged commit, mirroring release-publish.yml's validate_run_id check.
+    # id-token:write lets npm provenance generate an OIDC-signed Sigstore
+    # attestation linking the published tarball back to this workflow run.
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      # Resolve runs BEFORE checkout — only reads inputs and writes outputs,
+      # no filesystem dependency. Putting it first means a rejected input
+      # never reaches actions/checkout, so attacker-supplied refs can't
+      # land any content in the workspace before validation runs.
+      #
+      # `working-directory: .` overrides the job-level default of `npm`,
+      # which doesn't exist yet (checkout is the next step).
+      #
+      # IMPORTANT: dispatch inputs are read through env: shell variables,
+      # not interpolated into the run: block. Direct `${{ inputs.tag }}`
+      # would be substituted as literal text before bash parses the line,
+      # letting a crafted tag value break out of the assignment and run
+      # arbitrary commands in a step that later has NPM_TOKEN in scope
+      # (CWE-94).
+      - name: Resolve version and dist-tag
+        id: version
+        working-directory: .
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          REF="$INPUT_TAG"
+          if [ "$INPUT_DRY_RUN" = "true" ]; then DRY="--dry-run"; else DRY=""; fi
+          # Strict v-prefixed semver. Bare semver like "0.6.0" is rejected
+          # so that the downstream `refs/tags/$INPUT_TAG` checkout cannot
+          # be tricked into picking up an attacker-created branch named
+          # "0.6.0" (no v) while the release gate validates the legitimate
+          # "v0.6.0" release. Enforcing the 'v' here keeps every consumer
+          # in lockstep: checkout, gate, set-version, and publish all see
+          # the same normalized form.
+          if [[ ! "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::inputs.tag must be v-prefixed semver (got '$REF'). Bare semver like '0.6.0' is rejected to prevent branch/tag-name confusion."
+            exit 1
+          fi
+          VERSION="${REF#v}"
+          if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
+          # TAG is the v-prefixed form (same as INPUT_TAG, just spelled out
+          # for downstream readability). Consumers: checkout ref below and
+          # the "Verify release exists and is published" step.
+          {
+            echo "VERSION=$VERSION"
+            echo "TAG=v$VERSION"
+            echo "DIST_TAG=$DIST_TAG"
+            echo "DRY_RUN=$DRY"
+          } >> "$GITHUB_OUTPUT"
+          echo "[npm-publish] version=$VERSION dist-tag=$DIST_TAG dry_run='$DRY'"
+
+      # Pin to the release tag so the wrapper code in the published npm
+      # tarball matches the commit that the GitHub Release was cut from.
+      # Without `refs/tags/` prefix, actions/checkout will accept a same-
+      # named branch — letting an attacker who creates a branch matching
+      # the tag substitute branch contents into the published tarball
+      # while the gate still validates the legitimate release.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/tags/${{ steps.version.outputs.TAG }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # Gate (part 1 of 2) — release existence and publication state.
+      # Refuse to publish unless `tag` corresponds to a real, already-
+      # published (non-draft) GitHub Release. This alone is not sufficient:
+      # a repo:write actor can create a Release via the API/UI without
+      # going through release-publish.yml, bypassing its validate_run_id
+      # check. The "Verify CI evidence" step below closes that loop by
+      # mirroring the reusable workflow's invariant — together the two
+      # gates assert (a) a Release exists for the tag, and (b) the tagged
+      # commit has a successful CI run on record. Skipped on dry_run so
+      # developers can validate workflow plumbing against tags whose
+      # Release doesn't exist yet.
+      - name: Verify release exists and is published
+        if: steps.version.outputs.DRY_RUN == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          set -euo pipefail
+
+          # Footgun guard #1 — `gh release view ""` does NOT error: it
+          # resolves to the latest release. If a future regression makes
+          # this output empty (it has happened in this PR's history), the
+          # gate would silently validate the latest release instead of the
+          # requested tag and let an arbitrary ref through. Bail explicitly.
+          if [ -z "$TAG" ]; then
+            echo "::error::Empty TAG output from resolver step — gate cannot run. This is an internal workflow bug, not an input error."
+            exit 1
+          fi
+
+          info=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null) || {
+            echo "::error::No GitHub Release for $TAG. npm-publish requires a published Release for the tag — use release-publish.yml to cut one; direct workflow_dispatch of an arbitrary tag is not permitted."
+            exit 1
+          }
+
+          # Footgun guard #2 — even with a non-empty TAG, defensively assert
+          # gh actually returned the release we asked for. Belt-and-braces
+          # against any future gh CLI change that adds a different
+          # silently-resolves-to-latest fallback.
+          returned_tag=$(printf '%s' "$info" | jq -r '.tagName')
+          if [ "$returned_tag" != "$TAG" ]; then
+            echo "::error::gh release view returned a different tag ('$returned_tag') than requested ('$TAG'). Refusing to publish."
+            exit 1
+          fi
+
+          is_draft=$(printf '%s' "$info" | jq -r '.isDraft')
+          if [ "$is_draft" = "true" ]; then
+            echo "::error::Release $TAG is still a draft; publish it first (release-publish.yml flips it out of draft after artifacts upload)."
+            exit 1
+          fi
+          echo "[npm-publish] release $TAG exists, is published, and matches the requested tag — proceeding."
+
+      # Gate (part 2 of 2) — CI evidence on the tagged commit.
+      # release-publish.yml's reusable workflow requires the operator to
+      # supply `validate_run_id` (a successful CI run whose head_sha is
+      # the tagged commit). That check enforces "the commit you're about
+      # to publish actually passed CI." Without an equivalent here, a
+      # repo:write actor could bypass release-publish.yml entirely:
+      #
+      #   1. push tag v9.9.9 at any commit (no CI required to push a tag)
+      #   2. create a published Release for v9.9.9 via API/UI
+      #   3. dispatch this workflow
+      #
+      # The release-existence gate above passes (a real, non-draft
+      # Release exists), checkout pulls refs/tags/v9.9.9, and npm publish
+      # ships the attacker-controlled commit with a valid Sigstore
+      # provenance attestation. This step closes that path by re-doing
+      # the validate_run_id check inline: resolve the tag to its commit
+      # SHA (handling annotated tags) and require at least one successful
+      # CI workflow run on that SHA. Without a CI pass, refuse.
+      #
+      # Skipped on dry_run for the same reason as the release-existence
+      # gate (developer plumbing tests against tags that may not exist).
+      - name: Verify CI evidence for the tagged commit
+        if: steps.version.outputs.DRY_RUN == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          set -euo pipefail
+
+          # Resolve refs/tags/$TAG → commit SHA. Handle annotated tags
+          # (which point at a tag object that in turn points at a commit)
+          # by dereferencing one extra hop.
+          ref_data=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          ref_type=$(printf '%s' "$ref_data" | jq -r '.object.type')
+          ref_sha=$(printf '%s' "$ref_data" | jq -r '.object.sha')
+          if [ "$ref_type" = "tag" ]; then
+            tag_obj=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha")
+            target_type=$(printf '%s' "$tag_obj" | jq -r '.object.type')
+            if [ "$target_type" != "commit" ]; then
+              echo "::error::Annotated tag $TAG points to '$target_type', not a commit. Refusing to publish."
+              exit 1
+            fi
+            ref_sha=$(printf '%s' "$tag_obj" | jq -r '.object.sha')
+          fi
+
+          # Require at least one successful "CI" workflow run on this
+          # exact commit. Matches release-publish.yml/reusable's
+          # ci_workflow_name default (`CI`); if that workflow is ever
+          # renamed, update both. The query filters by head_sha and
+          # status=success server-side so we don't iterate a long list.
+          ci_count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$ref_sha&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | length')
+          if [ "$ci_count" -eq 0 ]; then
+            echo "::error::No successful CI run found for $TAG (commit $ref_sha). The tagged commit must have passed CI before it can be published to npm. Push the commit through a PR to main, wait for CI to pass, then cut the release via release-publish.yml."
+            exit 1
+          fi
+          echo "[npm-publish] CI evidence OK: $ci_count successful CI run(s) on commit $ref_sha for tag $TAG."
+
+      - name: Set package version
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      # `--provenance` produces an OIDC-signed Sigstore attestation linking
+      # the tarball to this workflow run (npm ≥ 9.5, public repo + public
+      # package — both satisfied). Consumers can verify the link with
+      # `npm audit signatures`; this is the only origin link the user gets
+      # for the wrapper itself (the binary's sha256 check is independent).
+      #
+      # The dry-run path is split into a separate branch rather than relying
+      # on an unquoted `$DRY_RUN` expansion (SC2086 / actionlint). The value
+      # is workflow-derived and never user-controlled, so the original idiom
+      # was safe — but actionlint flags it and clarity isn't worse this way.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.version.outputs.DIST_TAG }}
+          DRY_RUN: ${{ steps.version.outputs.DRY_RUN }}
+        run: |
+          if [ -n "$DRY_RUN" ]; then
+            npm publish --access public --provenance --tag "$DIST_TAG" --dry-run
+          else
+            npm publish --access public --provenance --tag "$DIST_TAG"
+          fi

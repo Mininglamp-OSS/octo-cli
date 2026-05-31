@@ -36,21 +36,54 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # actions:write lets the final step dispatch npm-publish.yml. We do this
+      # explicitly rather than letting npm-publish hook `on: release: published`,
+      # because the publish job above changes the release state using
+      # GITHUB_TOKEN, and GitHub's recursion rule suppresses workflow runs for
+      # events caused by GITHUB_TOKEN — workflow_dispatch and
+      # repository_dispatch are the only exempt events.
+      actions: write
     steps:
+      # Validate the tag input BEFORE checkout so attacker-supplied refs
+      # never land in the workspace. Same regex as npm-publish.yml's
+      # resolver: strict v-prefixed MAJOR.MINOR.PATCH (+ optional
+      # prerelease). Bare semver like "0.6.0" is rejected because the
+      # checkout below uses `refs/tags/${{ inputs.tag }}` — a non-v input
+      # would either fail to resolve (good) or pick up an attacker-created
+      # tag named without the v (bad), so reject ambiguous shapes up front.
+      - name: Validate tag input (pre-checkout)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::inputs.tag must be v-prefixed semver (got '$TAG')."
+            exit 1
+          fi
+
+      # SHA-pinned actions. build-artifacts holds contents:write +
+      # actions:write and runs third-party code (goreleaser-action) that
+      # builds the binaries whose checksums become the install-time trust
+      # root, so any compromise here propagates into every install.
+      #
+      # `refs/tags/` prefix is required: with a bare ref like `v0.6.0`,
+      # actions/checkout will accept either a tag OR a same-named branch.
+      # An attacker creating a branch matching the tag could substitute
+      # the build source while the release evidence still refers to the
+      # legitimate tag. Forcing the tags namespace disambiguates.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.24.x"
           cache: true
 
       - name: Build with GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           version: "~> v2"
           args: release --clean --skip=publish,announce
@@ -60,14 +93,27 @@ jobs:
       - name: List dist artifacts
         run: ls -lh dist/
 
-      - name: Validate tag before upload
-        run: |
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?([-.][0-9A-Za-z.-]+)?$ ]] || { echo "Invalid tag: $TAG"; exit 1; }
-        env:
-          TAG: ${{ inputs.tag }}
-
       - name: Upload artifacts to release
         run: gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
         env:
           TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Hand off to the npm wrapper publish workflow. Sequenced after upload
+      # so the archives + checksums.txt are guaranteed to be on the release
+      # by the time the npm postinstall tries to download them. Uses
+      # workflow_dispatch (exempt from GITHUB_TOKEN recursion suppression).
+      #
+      # No `--ref` argument: gh dispatches against the repo's default
+      # branch, so the npm-publish.yml definition is taken from a trusted
+      # ref (not from the release tag, which could in theory be a fake one
+      # in a branch/tag ambiguity scenario). The packaging contents are
+      # separately pinned by npm-publish.yml's internal checkout of
+      # `refs/tags/${{ inputs.tag }}`, so the published tarball still
+      # matches the release commit. This separates "which workflow file
+      # runs" (trusted) from "which source it packages" (release tag).
+      - name: Trigger npm publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh workflow run npm-publish.yml -f tag="$TAG" -f dry_run=false

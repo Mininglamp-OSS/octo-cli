@@ -48,6 +48,16 @@ Key properties:
 
 ## Installation
 
+### npm
+
+For Node-based agent runtimes (OpenClaw, etc.):
+
+```bash
+npm install -g @mininglamp-oss/octo-cli
+```
+
+A thin wrapper that downloads the matching prebuilt binary on install.
+
 ### Go install
 
 ```bash

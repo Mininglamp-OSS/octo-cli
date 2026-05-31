@@ -28,6 +28,12 @@ archives:
       - LICENSE*
 
 checksum:
+  # Pin the algorithm so it doesn't silently drift with goreleaser defaults.
+  # Lockstep with npm/scripts/install.js's parseChecksumEntry, which asserts
+  # `^[0-9a-f]{64}$` (64 lowercase hex chars = sha256). If you change this
+  # algorithm here, update the regex and the corresponding test in
+  # npm/scripts/install.test.js.
+  algorithm: sha256
   name_template: "checksums.txt"
 
 changelog:
