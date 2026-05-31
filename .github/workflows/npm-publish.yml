@@ -117,16 +117,38 @@ jobs:
           TAG: ${{ steps.version.outputs.TAG }}
         run: |
           set -euo pipefail
+
+          # Footgun guard #1 — `gh release view ""` does NOT error: it
+          # resolves to the latest release. If a future regression makes
+          # this output empty (it has happened in this PR's history), the
+          # gate would silently validate the latest release instead of the
+          # requested tag and let an arbitrary ref through. Bail explicitly.
+          if [ -z "$TAG" ]; then
+            echo "::error::Empty TAG output from resolver step — gate cannot run. This is an internal workflow bug, not an input error."
+            exit 1
+          fi
+
           info=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName 2>/dev/null) || {
             echo "::error::No GitHub Release for $TAG. npm-publish requires a published Release for the tag — use release-publish.yml to cut one; direct workflow_dispatch of an arbitrary tag is not permitted."
             exit 1
           }
+
+          # Footgun guard #2 — even with a non-empty TAG, defensively assert
+          # gh actually returned the release we asked for. Belt-and-braces
+          # against any future gh CLI change that adds a different
+          # silently-resolves-to-latest fallback.
+          returned_tag=$(printf '%s' "$info" | jq -r '.tagName')
+          if [ "$returned_tag" != "$TAG" ]; then
+            echo "::error::gh release view returned a different tag ('$returned_tag') than requested ('$TAG'). Refusing to publish."
+            exit 1
+          fi
+
           is_draft=$(printf '%s' "$info" | jq -r '.isDraft')
           if [ "$is_draft" = "true" ]; then
             echo "::error::Release $TAG is still a draft; publish it first (release-publish.yml flips it out of draft after artifacts upload)."
             exit 1
           fi
-          echo "[npm-publish] release $TAG exists and is published, proceeding."
+          echo "[npm-publish] release $TAG exists, is published, and matches the requested tag — proceeding."
 
       - name: Set package version
         env:
