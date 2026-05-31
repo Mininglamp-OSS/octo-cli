@@ -44,14 +44,36 @@ jobs:
       # repository_dispatch are the only exempt events.
       actions: write
     steps:
+      # Validate the tag input BEFORE checkout so attacker-supplied refs
+      # never land in the workspace. Same regex as npm-publish.yml's
+      # resolver: strict v-prefixed MAJOR.MINOR.PATCH (+ optional
+      # prerelease). Bare semver like "0.6.0" is rejected because the
+      # checkout below uses `refs/tags/${{ inputs.tag }}` — a non-v input
+      # would either fail to resolve (good) or pick up an attacker-created
+      # tag named without the v (bad), so reject ambiguous shapes up front.
+      - name: Validate tag input (pre-checkout)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::inputs.tag must be v-prefixed semver (got '$TAG')."
+            exit 1
+          fi
+
       # SHA-pinned actions. build-artifacts holds contents:write +
       # actions:write and runs third-party code (goreleaser-action) that
       # builds the binaries whose checksums become the install-time trust
       # root, so any compromise here propagates into every install.
+      #
+      # `refs/tags/` prefix is required: with a bare ref like `v0.6.0`,
+      # actions/checkout will accept either a tag OR a same-named branch.
+      # An attacker creating a branch matching the tag could substitute
+      # the build source while the release evidence still refers to the
+      # legitimate tag. Forcing the tags namespace disambiguates.
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: refs/tags/${{ inputs.tag }}
           fetch-depth: 0
 
       - name: Set up Go
@@ -71,16 +93,6 @@ jobs:
       - name: List dist artifacts
         run: ls -lh dist/
 
-      - name: Validate tag before upload
-        # Kept in lockstep with npm-publish.yml's resolver: MAJOR.MINOR.PATCH
-        # is required (no patchless `v1.2`) so a tag accepted by this workflow
-        # cannot be rejected by npm-publish.yml after archives are already on
-        # the release.
-        run: |
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "Invalid tag: $TAG"; exit 1; }
-        env:
-          TAG: ${{ inputs.tag }}
-
       - name: Upload artifacts to release
         run: gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/checksums.txt --clobber
         env:
@@ -92,12 +104,16 @@ jobs:
       # by the time the npm postinstall tries to download them. Uses
       # workflow_dispatch (exempt from GITHUB_TOKEN recursion suppression).
       #
-      # --ref "$TAG" pins both (a) which version of npm-publish.yml runs and
-      # (b) what its checkout step pulls — so the wrapper sources packaged
-      # into the npm tarball match the release commit, not whatever main HEAD
-      # happens to be at dispatch time.
+      # No `--ref` argument: gh dispatches against the repo's default
+      # branch, so the npm-publish.yml definition is taken from a trusted
+      # ref (not from the release tag, which could in theory be a fake one
+      # in a branch/tag ambiguity scenario). The packaging contents are
+      # separately pinned by npm-publish.yml's internal checkout of
+      # `refs/tags/${{ inputs.tag }}`, so the published tarball still
+      # matches the release commit. This separates "which workflow file
+      # runs" (trusted) from "which source it packages" (release tag).
       - name: Trigger npm publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag }}
-        run: gh workflow run npm-publish.yml --ref "$TAG" -f tag="$TAG" -f dry_run=false
+        run: gh workflow run npm-publish.yml -f tag="$TAG" -f dry_run=false
