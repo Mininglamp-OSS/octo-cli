@@ -42,10 +42,13 @@ jobs:
     # contents:read is required by actions/checkout under GITHUB_TOKEN auth
     # (works without it on public repos via the unauthenticated-clone
     # fallback, but that's not a contract we want to rely on).
+    # actions:read lets the CI-evidence gate query workflow_runs for the
+    # tagged commit, mirroring release-publish.yml's validate_run_id check.
     # id-token:write lets npm provenance generate an OIDC-signed Sigstore
     # attestation linking the published tarball back to this workflow run.
     permissions:
       contents: read
+      actions: read
       id-token: write
     defaults:
       run:
@@ -112,17 +115,17 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      # Gate: refuse to publish unless `tag` corresponds to a real,
-      # already-published (non-draft) GitHub Release. Without this gate, any
-      # actor with repo:write could directly workflow_dispatch this workflow
-      # against any resolvable ref (incl. a lightweight tag at a malicious
-      # commit), set dry_run=false, and ship that ref to npm @latest with a
-      # valid Sigstore provenance attestation pointing at the malicious SHA.
-      # The release-publish.yml chain (with its validate_run_id evidence
-      # check) is the intended publish trigger; this gate enforces that
-      # invariant on the downstream workflow too.
-      # Skipped on dry_run so developers can validate workflow plumbing
-      # against tags whose Release doesn't exist yet.
+      # Gate (part 1 of 2) — release existence and publication state.
+      # Refuse to publish unless `tag` corresponds to a real, already-
+      # published (non-draft) GitHub Release. This alone is not sufficient:
+      # a repo:write actor can create a Release via the API/UI without
+      # going through release-publish.yml, bypassing its validate_run_id
+      # check. The "Verify CI evidence" step below closes that loop by
+      # mirroring the reusable workflow's invariant — together the two
+      # gates assert (a) a Release exists for the tag, and (b) the tagged
+      # commit has a successful CI run on record. Skipped on dry_run so
+      # developers can validate workflow plumbing against tags whose
+      # Release doesn't exist yet.
       - name: Verify release exists and is published
         if: steps.version.outputs.DRY_RUN == ''
         env:
@@ -162,6 +165,64 @@ jobs:
             exit 1
           fi
           echo "[npm-publish] release $TAG exists, is published, and matches the requested tag — proceeding."
+
+      # Gate (part 2 of 2) — CI evidence on the tagged commit.
+      # release-publish.yml's reusable workflow requires the operator to
+      # supply `validate_run_id` (a successful CI run whose head_sha is
+      # the tagged commit). That check enforces "the commit you're about
+      # to publish actually passed CI." Without an equivalent here, a
+      # repo:write actor could bypass release-publish.yml entirely:
+      #
+      #   1. push tag v9.9.9 at any commit (no CI required to push a tag)
+      #   2. create a published Release for v9.9.9 via API/UI
+      #   3. dispatch this workflow
+      #
+      # The release-existence gate above passes (a real, non-draft
+      # Release exists), checkout pulls refs/tags/v9.9.9, and npm publish
+      # ships the attacker-controlled commit with a valid Sigstore
+      # provenance attestation. This step closes that path by re-doing
+      # the validate_run_id check inline: resolve the tag to its commit
+      # SHA (handling annotated tags) and require at least one successful
+      # CI workflow run on that SHA. Without a CI pass, refuse.
+      #
+      # Skipped on dry_run for the same reason as the release-existence
+      # gate (developer plumbing tests against tags that may not exist).
+      - name: Verify CI evidence for the tagged commit
+        if: steps.version.outputs.DRY_RUN == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.TAG }}
+        run: |
+          set -euo pipefail
+
+          # Resolve refs/tags/$TAG → commit SHA. Handle annotated tags
+          # (which point at a tag object that in turn points at a commit)
+          # by dereferencing one extra hop.
+          ref_data=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          ref_type=$(printf '%s' "$ref_data" | jq -r '.object.type')
+          ref_sha=$(printf '%s' "$ref_data" | jq -r '.object.sha')
+          if [ "$ref_type" = "tag" ]; then
+            tag_obj=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$ref_sha")
+            target_type=$(printf '%s' "$tag_obj" | jq -r '.object.type')
+            if [ "$target_type" != "commit" ]; then
+              echo "::error::Annotated tag $TAG points to '$target_type', not a commit. Refusing to publish."
+              exit 1
+            fi
+            ref_sha=$(printf '%s' "$tag_obj" | jq -r '.object.sha')
+          fi
+
+          # Require at least one successful "CI" workflow run on this
+          # exact commit. Matches release-publish.yml/reusable's
+          # ci_workflow_name default (`CI`); if that workflow is ever
+          # renamed, update both. The query filters by head_sha and
+          # status=success server-side so we don't iterate a long list.
+          ci_count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$ref_sha&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | length')
+          if [ "$ci_count" -eq 0 ]; then
+            echo "::error::No successful CI run found for $TAG (commit $ref_sha). The tagged commit must have passed CI before it can be published to npm. Push the commit through a PR to main, wait for CI to pass, then cut the release via release-publish.yml."
+            exit 1
+          fi
+          echo "[npm-publish] CI evidence OK: $ci_count successful CI run(s) on commit $ref_sha for tag $TAG."
 
       - name: Set package version
         env:
