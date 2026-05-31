@@ -88,8 +88,12 @@ jobs:
             exit 1
           fi
           if [[ "$VERSION" == *-* ]]; then DIST_TAG="next"; else DIST_TAG="latest"; fi
+          # TAG is the normalized v-prefixed form (independent of whether the
+          # caller passed "v0.6.0" or "0.6.0"). Consumers: "Verify release
+          # exists and is published" step below.
           {
             echo "VERSION=$VERSION"
+            echo "TAG=v$VERSION"
             echo "DIST_TAG=$DIST_TAG"
             echo "DRY_RUN=$DRY"
           } >> "$GITHUB_OUTPUT"
