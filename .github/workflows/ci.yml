@@ -55,7 +55,7 @@ jobs:
           version: v2.12.2
 
       - name: test (race, coverage)
-        run: go test -race -count=1 -covermode=atomic -coverprofile=coverage.out ./...
+        run: go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: coverage summary
         run: go tool cover -func=coverage.out | tail -n 20
