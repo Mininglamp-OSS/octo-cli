@@ -13,6 +13,7 @@ jobs:
   build:
     name: build & test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +63,7 @@ jobs:
   npm-test:
     name: npm test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: npm
