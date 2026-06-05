@@ -57,8 +57,11 @@ jobs:
           #   dotfiles:     all negations=true → every=true → CI runs ✅
           #   Dockerfile:   all negations=true → CI runs ✅
           #
-          # Do NOT add '**': picomatch('**') doesn't match dotfiles (e.g. .golangci.yml)
-          # causing them to incorrectly skip CI with the 'every' quantifier.
+          # Do NOT add '**' as an inclusion pattern: with the 'every' quantifier
+          # the bare '**' pattern adds no useful constraint and risks regressing
+          # the negation logic on future picomatch upgrades. Stick to negation-only.
+          # (dorny/paths-filter v3 already sets picomatch dot:true so dotfiles like
+          # .golangci.yml ARE matched by '**' under v3 — earlier versions did not.)
           # Do NOT use 'some' + negation: every changed file matches at least one
           # negation pattern (e.g. main.go matches !**/*.md), so some=true always
           # and the skip logic becomes a no-op.
@@ -77,16 +80,12 @@ jobs:
       needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        go-version: ["1.24.x"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: "1.24.x"
           check-latest: true
 
       - name: gofmt
