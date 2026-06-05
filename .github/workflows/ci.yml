@@ -75,20 +75,43 @@ jobs:
   build:
     name: build & test
     needs: [changes]
-    if: |
-      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
-      needs.changes.outputs.code == 'true'
+    # Draft guard stays at the job level. The code-vs-docs skip is enforced
+    # per-step (below) instead, so the matrix child check
+    # `build & test (1.24.x)` is always emitted (success on docs-only PRs,
+    # real run on code PRs). Job-level `if: code == 'true'` would skip the
+    # whole job BEFORE matrix expansion, so the parenthesised child check
+    # required by the repository ruleset (id 16222449) would never be
+    # created — recreating the very deadlock this workflow is meant to fix,
+    # just on docs-only PRs instead of all PRs.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Single-value matrix intentionally retained. The repository ruleset
+        # (id 16222449, "main branch protection") pins the exact check name
+        # "build & test (1.24.x)" — the parenthesised form GitHub emits only
+        # for matrix jobs. Dropping the matrix renames the check to
+        # "build & test" and breaks the required-status gate on every PR.
+        # Add new Go versions here instead of removing the matrix.
+        go-version: ["1.24.x"]
     steps:
+      - name: skip notice (docs-only PR)
+        if: needs.changes.outputs.code != 'true'
+        run: echo "docs-only PR — skipping build & test (matrix=${{ matrix.go-version }})"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: needs.changes.outputs.code == 'true'
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: needs.changes.outputs.code == 'true'
         with:
-          go-version: "1.24.x"
+          go-version: ${{ matrix.go-version }}
           check-latest: true
 
       - name: gofmt
+        if: needs.changes.outputs.code == 'true'
         run: |
           out=$(gofmt -l . | grep -v '^vendor/' || true)
           if [ -n "$out" ]; then
@@ -98,9 +121,11 @@ jobs:
           fi
 
       - name: go vet
+        if: needs.changes.outputs.code == 'true'
         run: go vet ./...
 
       - name: go mod tidy check
+        if: needs.changes.outputs.code == 'true'
         run: |
           go mod tidy
           if ! git diff --exit-code go.mod go.sum; then
@@ -109,17 +134,21 @@ jobs:
           fi
 
       - name: golangci-lint
+        if: needs.changes.outputs.code == 'true'
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.12.2
 
       - name: test (race, coverage)
+        if: needs.changes.outputs.code == 'true'
         run: go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: coverage summary
+        if: needs.changes.outputs.code == 'true'
         run: go tool cover -func=coverage.out | tail -n 20
 
       - name: build
+        if: needs.changes.outputs.code == 'true'
         run: go build -o octo-cli ./cmd/octo-cli
 
   npm-test:
