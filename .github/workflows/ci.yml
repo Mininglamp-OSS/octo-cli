@@ -42,7 +42,6 @@ jobs:
         id: filter
         if: github.event_name == 'pull_request'
         with:
-          predicate-quantifier: 'every'
           filters: |
             code:
               - '!**/*.md'
