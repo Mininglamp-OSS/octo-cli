@@ -1,0 +1,58 @@
+# Git hooks managed by lefthook (https://lefthook.dev).
+# Activate after cloning: `make hooks` (or `lefthook install`).
+#
+# Hooks stay fast: pre-commit / pre-push run gofmt, go vet, go build, and the
+# go mod tidy drift check. The heavier suite (`go test -race -shuffle` +
+# coverage) runs in CI, not on every push — duplicating it locally is slow and
+# invites `--no-verify`.
+#
+# Heavy *optional* tools (golangci-lint) are skipped with a hint when not
+# installed — CI enforces them regardless. Go-native checks always run since
+# the Go toolchain guarantees them.
+min_version: 1.11.0
+
+pre-commit:
+  parallel: true
+  commands:
+    gofmt:
+      glob: "*.go"
+      run: |
+        unformatted=$(gofmt -l {staged_files})
+        if [ -n "$unformatted" ]; then
+          echo "gofmt needed on:"
+          echo "$unformatted"
+          echo "Fix: gofmt -w {staged_files}"
+          exit 1
+        fi
+    govet:
+      glob: "*.go"
+      run: go vet ./...
+    golangci-lint:
+      glob: "*.go"
+      run: |
+        if command -v golangci-lint >/dev/null 2>&1; then
+          golangci-lint run
+        else
+          echo "⚠ golangci-lint not installed — skipped (CI enforces it)."
+          echo "  Install: make tools   (or: brew install golangci-lint)"
+        fi
+
+commit-msg:
+  commands:
+    conventional:
+      run: bash .lefthook/commit-msg-check.sh {1}
+
+pre-push:
+  parallel: false
+  commands:
+    mod-tidy:
+      run: |
+        go mod tidy
+        if ! git diff --exit-code go.mod go.sum >/dev/null 2>&1; then
+          echo "go.mod / go.sum drift — run 'go mod tidy' and commit the result."
+          exit 1
+        fi
+    build:
+      run: go build ./...
+    vet:
+      run: go vet ./...
