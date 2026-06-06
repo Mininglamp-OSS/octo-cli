@@ -15,11 +15,33 @@ need to know to get a change merged.
 git clone https://github.com/Mininglamp-OSS/octo-cli.git
 cd octo-cli
 
+make hooks            # install git hooks (lefthook) — do this once
 make build            # builds ./bin/octo-cli
 make test             # go test -race -count=1 ./...
 make lint             # golangci-lint run
 make ci               # fmt + vet + lint + test + build (what CI runs)
 ```
+
+## Git Hooks
+
+Hooks are managed by [lefthook](https://lefthook.dev) and mirror the CI checks
+so problems surface locally instead of on the remote. Activate them once after
+cloning with `make hooks` (installs into `.git/hooks/`); the config lives in
+[`lefthook.yml`](./lefthook.yml).
+
+| Hook | Runs | Notes |
+|------|------|-------|
+| `pre-commit` | `gofmt` (staged files) + `go vet` + `golangci-lint` | Fast. `golangci-lint` is skipped with a hint if not installed — CI still enforces it. |
+| `commit-msg` | Conventional Commits check | See [`.lefthook/commit-msg-check.sh`](./.lefthook/commit-msg-check.sh). |
+| `pre-push` | `go mod tidy` drift check + `go build ./...` + `go vet ./...` | Fast gate. The full `go test -race -shuffle` + coverage suite runs in CI, not on every push. |
+
+`lefthook` is the only extra tool required — install it with `brew install lefthook`
+or `go install github.com/evilmartians/lefthook@latest`. Optional linters used by
+the hooks and CI install via `make tools` (`golangci-lint`, `gci`).
+
+> Hooks can be bypassed with `--no-verify` (`git commit --no-verify`,
+> `git push --no-verify`) **in genuine emergencies only** — CI runs the same
+> checks, so a bypass just defers the failure.
 
 ## Architecture Overview
 

@@ -1,4 +1,4 @@
-.PHONY: build test lint fmt vet clean ci help
+.PHONY: build test lint fmt vet clean ci hooks hooks-install tools help
 
 # Build metadata is injected at link time. Release builds override VERSION.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -25,6 +25,21 @@ clean:
 
 ci: fmt vet lint test build
 
+# Install & activate git hooks (lefthook). Run once after cloning.
+hooks: hooks-install
+hooks-install:
+	@command -v lefthook >/dev/null 2>&1 || { \
+	  echo "lefthook not found. Install one of:"; \
+	  echo "  brew install lefthook"; \
+	  echo "  go install github.com/evilmartians/lefthook@latest"; \
+	  exit 1; }
+	lefthook install
+
+# Install optional dev tools the hooks/CI use (golangci-lint, gci).
+tools:
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install github.com/daixiang0/gci@latest
+
 help:
 	@echo "Targets:"
 	@echo "  build   build ./bin/octo-cli with version from git"
@@ -33,6 +48,8 @@ help:
 	@echo "  fmt     fail if any Go file needs gofmt"
 	@echo "  vet     go vet ./..."
 	@echo "  ci      fmt + vet + lint + test + build (what CI runs)"
+	@echo "  hooks   install & activate git hooks (lefthook)"
+	@echo "  tools   install optional dev tools (golangci-lint, gci)"
 	@echo "  clean   remove ./bin"
 	@echo ""
 	@echo "Add a new service domain: write spec → embed → auto-register"
