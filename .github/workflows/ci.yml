@@ -3,8 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches: [main]
+    # paths-ignore is intentionally NOT set here — workflow-level path filtering
+    # prevents GitHub from creating any check run, which deadlocks required-status
+    # checks on docs-only PRs. Path-based skipping is handled by the `changes`
+    # preflight job below instead (dorny/paths-filter produces "skipped" statuses
+    # that GitHub counts as passing for required checks).
 
 permissions:
   contents: read
@@ -14,23 +24,93 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # code=true when at least one changed file matches the code filter.
+      # predicate-quantifier:every + negation patterns (no bare '**'):
+      # a file matches 'code' iff ALL negation patterns are satisfied
+      # (file is not a doc/template). code=false only when all changed files
+      # are docs/templates. Push events default to 'true'.
+      code: ${{ github.event_name == 'pull_request' && steps.filter.outputs.code || 'true' }}
+    steps:
+      # No checkout: on pull_request events dorny/paths-filter lists changed
+      # files via the GitHub API (needs only pull-requests: read, granted
+      # above), so a working tree is unnecessary here.
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          # predicate-quantifier: every — a file matches 'code' only when ALL
+          # negation patterns are satisfied (file is NOT a doc/template file).
+          #
+          # Validated by picomatch v4 unit test (same library used internally):
+          #   README.md:    !**/*.md=false → every=false → not match → code=false ✅
+          #   main file:    all negations=true → every=true → match → code=true ✅
+          #   mixed PR:     code file matches → code=true (some over changed files) ✅
+          #   dotfiles:     all negations=true → every=true → CI runs ✅
+          #   Dockerfile:   all negations=true → CI runs ✅
+          #
+          # Do NOT add '**' as an inclusion pattern: with the 'every' quantifier
+          # the bare '**' pattern adds no useful constraint and risks regressing
+          # the negation logic on future picomatch upgrades. Stick to negation-only.
+          # (dorny/paths-filter v3 already sets picomatch dot:true so dotfiles like
+          # .golangci.yml ARE matched by '**' under v3 — earlier versions did not.)
+          # Do NOT use 'some' + negation: every changed file matches at least one
+          # negation pattern (e.g. main.go matches !**/*.md), so some=true always
+          # and the skip logic becomes a no-op.
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '!**/*.md'
+              - '!docs/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+
   build:
     name: build & test
+    needs: [changes]
+    # Draft guard stays at the job level. The code-vs-docs skip is enforced
+    # per-step (below) instead, so the matrix child check
+    # `build & test (1.24.x)` is always emitted (success on docs-only PRs,
+    # real run on code PRs). Job-level `if: code == 'true'` would skip the
+    # whole job BEFORE matrix expansion, so the parenthesised child check
+    # required by the repository ruleset (id 16222449) would never be
+    # created — recreating the very deadlock this workflow is meant to fix,
+    # just on docs-only PRs instead of all PRs.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        # Single-value matrix intentionally retained. The repository ruleset
+        # (id 16222449, "main branch protection") pins the exact check name
+        # "build & test (1.24.x)" — the parenthesised form GitHub emits only
+        # for matrix jobs. Dropping the matrix renames the check to
+        # "build & test" and breaks the required-status gate on every PR.
+        # Add new Go versions here instead of removing the matrix.
         go-version: ["1.24.x"]
     steps:
+      - name: skip notice (docs-only PR)
+        if: needs.changes.outputs.code != 'true'
+        run: echo "docs-only PR — skipping build & test (matrix=${{ matrix.go-version }})"
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: needs.changes.outputs.code == 'true'
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        if: needs.changes.outputs.code == 'true'
         with:
           go-version: ${{ matrix.go-version }}
           check-latest: true
 
       - name: gofmt
+        if: needs.changes.outputs.code == 'true'
         run: |
           out=$(gofmt -l . | grep -v '^vendor/' || true)
           if [ -n "$out" ]; then
@@ -40,9 +120,11 @@ jobs:
           fi
 
       - name: go vet
+        if: needs.changes.outputs.code == 'true'
         run: go vet ./...
 
       - name: go mod tidy check
+        if: needs.changes.outputs.code == 'true'
         run: |
           go mod tidy
           if ! git diff --exit-code go.mod go.sum; then
@@ -51,21 +133,36 @@ jobs:
           fi
 
       - name: golangci-lint
+        if: needs.changes.outputs.code == 'true'
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
         with:
           version: v2.12.2
 
       - name: test (race, coverage)
+        if: needs.changes.outputs.code == 'true'
         run: go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=coverage.out ./...
 
       - name: coverage summary
+        if: needs.changes.outputs.code == 'true'
         run: go tool cover -func=coverage.out | tail -n 20
 
       - name: build
+        if: needs.changes.outputs.code == 'true'
         run: go build -o octo-cli ./cmd/octo-cli
 
   npm-test:
     name: npm test
+    needs: [changes]
+    # Job-level skip is intentional here and asymmetric with `build` above.
+    # `npm test` is NOT a required status check (ruleset 16222449 pins only
+    # "build & test (1.24.x)" and "code-review"), so skipping the whole job on
+    # docs-only PRs is safe — there is no required check to keep alive. `build`
+    # must use per-step gating instead because skipping it job-level would drop
+    # its required matrix child check and re-create the deadlock. Do not "align"
+    # these two jobs onto the same strategy.
+    if: |
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+      needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
