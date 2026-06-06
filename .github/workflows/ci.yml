@@ -39,10 +39,9 @@ jobs:
       # are docs/templates. Push events default to 'true'.
       code: ${{ github.event_name == 'pull_request' && steps.filter.outputs.code || 'true' }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        if: github.event_name == 'pull_request'
-        with:
-          persist-credentials: false
+      # No checkout: on pull_request events dorny/paths-filter lists changed
+      # files via the GitHub API (needs only pull-requests: read, granted
+      # above), so a working tree is unnecessary here.
       - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
         id: filter
         if: github.event_name == 'pull_request'
@@ -154,6 +153,13 @@ jobs:
   npm-test:
     name: npm test
     needs: [changes]
+    # Job-level skip is intentional here and asymmetric with `build` above.
+    # `npm test` is NOT a required status check (ruleset 16222449 pins only
+    # "build & test (1.24.x)" and "code-review"), so skipping the whole job on
+    # docs-only PRs is safe — there is no required check to keep alive. `build`
+    # must use per-step gating instead because skipping it job-level would drop
+    # its required matrix child check and re-create the deadlock. Do not "align"
+    # these two jobs onto the same strategy.
     if: |
       (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
       needs.changes.outputs.code == 'true'
