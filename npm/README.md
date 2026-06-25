@@ -8,11 +8,11 @@ npm install -g @mininglamp-oss/octo-cli
 octo-cli --help
 ```
 
-This package is a thin Node wrapper around the prebuilt Go binary. On install it
-downloads the binary matching your platform and this package's version from the
-[GitHub Release](https://github.com/Mininglamp-OSS/octo-cli/releases) and
-verifies its sha256 against the `checksums.txt` published on the same release;
-the `octo-cli` command then execs that binary directly.
+This package is a thin Node wrapper around the prebuilt Go binary. The matching
+platform binary is shipped inside an npm optional dependency such as
+`@mininglamp-oss/octo-cli-darwin-arm64`; the `octo-cli` command resolves that
+sub-package and execs the binary directly. Install does not download anything
+from GitHub.
 
 Supported platforms: macOS, Linux, Windows on `x64` / `arm64`.
 
@@ -21,23 +21,17 @@ see the [main README](https://github.com/Mininglamp-OSS/octo-cli#readme).
 
 ## Trust model
 
-The sha256 check is an **integrity** check, not a **provenance** check: the
-archive and its `checksums.txt` are fetched from the same GitHub Release over
-the same channel, so an actor who can write to the release replaces both
-consistently. The effective trust root is GitHub Release integrity plus the
-npm publish pipeline.
-
-The wrapper itself (the tarball you install from npm) is published with npm
-`--provenance`, producing a Sigstore attestation that links the tarball back
-to the GitHub Actions workflow that published it. You can verify it with:
+The main package and platform sub-packages are published with npm
+`--provenance`, producing Sigstore attestations that link each tarball back to
+the GitHub Actions workflow that published it. You can verify them with:
 
 ```bash
 npm audit signatures
 ```
 
-A future release may sign `checksums.txt` itself (cosign keyless) so the
-installer can verify a signature whose key is not co-located with the
-artifact.
+GitHub Release archives are still published for non-npm channels and are
+covered by `checksums.txt`, but npm installs use npm registry tarballs and npm's
+own integrity checks.
 
 ## License
 

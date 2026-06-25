@@ -18,21 +18,23 @@ builds:
       - -s -w -X github.com/Mininglamp-OSS/octo-cli/cmd.Version={{.Version}} -X github.com/Mininglamp-OSS/octo-cli/cmd.Commit={{.Commit}} -X github.com/Mininglamp-OSS/octo-cli/cmd.BuildDate={{.Date}}
 
 archives:
-  - format: tar.gz
+  # tar.gz for every platform — including windows. The npm packaging path
+  # (npm/scripts/prepare-packages.js) unpacks these archives on a Linux CI
+  # runner with `tar`, so a single format keeps that step free of a zip
+  # branch. Windows users who pull straight from the GitHub Release get a
+  # tar.gz too; Windows 10+ ships bsdtar (`tar -xf`) that reads it, and the
+  # primary distribution path is now npm where the binary ships inside the
+  # platform sub-package (no download at all).
+  - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    format_overrides:
-      - goos: windows
-        format: zip
     files:
       - README.md
       - LICENSE*
 
 checksum:
   # Pin the algorithm so it doesn't silently drift with goreleaser defaults.
-  # Lockstep with npm/scripts/install.js's parseChecksumEntry, which asserts
-  # `^[0-9a-f]{64}$` (64 lowercase hex chars = sha256). If you change this
-  # algorithm here, update the regex and the corresponding test in
-  # npm/scripts/install.test.js.
+  # npm-publish.yml verifies this file before repacking the archives into npm
+  # platform packages, so a future algorithm change must update that step too.
   algorithm: sha256
   name_template: "checksums.txt"
 
