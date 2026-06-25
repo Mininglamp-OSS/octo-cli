@@ -5,6 +5,8 @@
 # Job graph:
 #
 #   publish ── build ── release-upload: gh release upload ── publish-npm: npm packages
+#                         │                                     │
+#                         └──────────── cleanup-dist-artifact ◀──┘
 #
 # Why this shape:
 #   * publish is the CI-evidence gate. Build intentionally waits for it so an
@@ -14,6 +16,8 @@
 #     Release).
 #   * npm publish waits for release-upload, so immutable npm versions do not
 #     appear before the matching GitHub Release assets/checksums are attached.
+#   * the run-scoped artifact uses GitHub's minimum retention and is deleted
+#     once both consumers have finished.
 name: Release Publish
 
 on:
@@ -89,7 +93,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Run-scoped artifact consumed by both release-upload and publish-npm in
-      # this same run. Contains every *.tar.gz plus checksums.txt.
+      # this same run. Contains every *.tar.gz plus checksums.txt. GitHub's
+      # minimum retention is 1 day; cleanup-dist-artifact deletes it earlier.
       - name: Upload dist artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -116,7 +121,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$TAG" dist/*.tar.gz dist/checksums.txt --clobber
+        run: gh release upload "$TAG" dist/*.tar.gz dist/checksums.txt --clobber --repo "$GITHUB_REPOSITORY"
 
   # Repack the SAME build artifact into npm packages after the Release assets
   # are attached. Reuses npm-publish.yml via workflow_call (from_artifact: true)
@@ -136,3 +141,33 @@ jobs:
       contents: read
       actions: read
       id-token: write
+
+  # Delete the run-scoped build artifact after both release-upload and
+  # publish-npm have had a chance to consume it. This keeps GitHub Release assets
+  # as the durable binary store while Actions storage is only temporary plumbing.
+  cleanup-dist-artifact:
+    needs: [build, release-upload, publish-npm]
+    if: ${{ always() && inputs.draft == false && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete dist artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          artifact_ids=$(gh api \
+            --paginate \
+            "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "goreleaser-dist") | .id')
+          if [ -z "$artifact_ids" ]; then
+            echo "[release-publish] goreleaser-dist artifact already deleted or not found."
+            exit 0
+          fi
+
+          for artifact_id in $artifact_ids; do
+            echo "[release-publish] deleting goreleaser-dist artifact $artifact_id"
+            gh api --method DELETE "/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id"
+          done
