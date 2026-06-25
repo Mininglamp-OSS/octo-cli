@@ -10,6 +10,7 @@ const { execFileSync, spawnSync } = require("child_process");
 const SCRIPT = path.join(__dirname, "prepare-packages.js");
 const SHIM = path.join(__dirname, "..", "bin", "octo-cli.js");
 const GORELEASER_YAML = path.join(__dirname, "..", "..", ".goreleaser.yaml");
+const NPM_PUBLISH_YAML = path.join(__dirname, "..", "..", ".github", "workflows", "npm-publish.yml");
 const { PLATFORMS, binFileName } = require(SCRIPT);
 const shim = require(SHIM);
 const VERSION = "9.9.9";
@@ -214,4 +215,78 @@ test("shim reports a missing platform package", (t) => {
   assert.strictEqual(res.status, 1);
   assert.match(res.stderr, new RegExp(`platform package ${scopedPkg} is not installed`));
   assert.match(res.stderr, /Try reinstalling: npm install -g @mininglamp-oss\/octo-cli/);
+});
+
+test("npm publish helper treats registry 404 as not published", () => {
+  if (process.platform === "win32") {
+    return;
+  }
+
+  const workflow = fs.readFileSync(NPM_PUBLISH_YAML, "utf8");
+  const start = workflow.indexOf("          npm_view() {\n");
+  const end = workflow.indexOf('\n          if [ "$DIST_TAG" = "latest" ]; then', start);
+  assert.notStrictEqual(start, -1, "cannot find npm_view helper in npm-publish.yml");
+  assert.notStrictEqual(end, -1, "cannot find helper terminator in npm-publish.yml");
+  const helpers = workflow.slice(start, end).replace(/^ {10}/gm, "");
+
+  const res = spawnSync(
+    "bash",
+    [
+      "-c",
+      `
+set -euo pipefail
+VERSION=9.9.9
+NPM_VIEW_MODE=exists
+
+npm() {
+  if [ "$1" != "view" ]; then
+    echo "unexpected npm command: $*" >&2
+    return 70
+  fi
+  case "$NPM_VIEW_MODE" in
+    exists)
+      printf '9.9.9\\n'
+      return 0
+      ;;
+    missing)
+      printf 'npm ERR! code E404\\n' >&2
+      printf 'npm ERR! 404 Not Found - GET https://registry.npmjs.org/%s - Not found\\n' "$2" >&2
+      return 1
+      ;;
+    hard)
+      printf 'npm ERR! network timeout\\n' >&2
+      return 1
+      ;;
+  esac
+}
+
+sleep() { :; }
+
+${helpers}
+
+NPM_VIEW_MODE=exists
+if ! version_exists "@mininglamp-oss/octo-cli-darwin-arm64"; then
+  echo "expected existing version to return 0" >&2
+  exit 1
+fi
+
+NPM_VIEW_MODE=missing
+if version_exists "@mininglamp-oss/octo-cli-darwin-arm64"; then
+  echo "expected missing version to return 1" >&2
+  exit 1
+fi
+
+NPM_VIEW_MODE=hard
+if (version_exists "@mininglamp-oss/octo-cli-darwin-arm64"); then
+  echo "expected hard npm view failure to exit non-zero" >&2
+  exit 1
+fi
+
+echo helper-ok
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.strictEqual(res.status, 0, res.stderr || res.stdout);
+  assert.match(res.stdout, /helper-ok/);
 });

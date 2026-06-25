@@ -248,10 +248,12 @@ jobs:
 
           version_exists() {
             local name="$1"
+            local status
             if npm_view "$name@$VERSION" "$name@$VERSION" version >/dev/null; then
               return 0
+            else
+              status=$?
             fi
-            local status=$?
             if [ "$status" -eq 1 ]; then
               return 1
             fi
