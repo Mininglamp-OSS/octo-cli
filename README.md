@@ -56,7 +56,8 @@ For Node-based agent runtimes (OpenClaw, etc.):
 npm install -g @mininglamp-oss/octo-cli
 ```
 
-A thin wrapper that downloads the matching prebuilt binary on install.
+The npm package resolves the matching platform sub-package, which already
+contains the prebuilt binary. Install does not download binaries from GitHub.
 
 ### Go install
 
@@ -76,12 +77,15 @@ Download the latest binary for your platform from
 [GitHub Releases](https://github.com/Mininglamp-OSS/octo-cli/releases):
 
 ```bash
-# Archives are named octo-cli_<version>_<os>_<arch>.{tar.gz,zip}; pick the one
-# for your platform and substitute <version> (e.g. 0.5.0):
+# Archives are named octo-cli_<version>_<os>_<arch>.tar.gz for every platform,
+# including Windows. Pick the one for your platform and substitute <version>
+# (e.g. 0.5.0):
 curl -LO https://github.com/Mininglamp-OSS/octo-cli/releases/download/v<version>/octo-cli_<version>_linux_amd64.tar.gz
 tar xzf octo-cli_<version>_linux_amd64.tar.gz
 sudo mv octo-cli /usr/local/bin/
 ```
+
+Windows release archives are `.tar.gz` as well; Windows 10+ includes `tar.exe`.
 
 ### install.sh
 

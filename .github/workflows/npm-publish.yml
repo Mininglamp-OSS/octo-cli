@@ -54,6 +54,8 @@ on:
         default: false
 
 concurrency:
+  # A package version is immutable on npm; never let two publish attempts for the
+  # same tag race each other.
   group: npm-publish-${{ inputs.tag }}
   cancel-in-progress: false
 
@@ -110,6 +112,8 @@ jobs:
           TAG: ${{ steps.version.outputs.TAG }}
         run: |
           set -euo pipefail
+          # Gate: a repo writer can create a Release outside this workflow; npm
+          # publishing still requires the expected non-draft Release tag.
           if [ -z "$TAG" ]; then
             echo "::error::Empty TAG output from resolver step."
             exit 1
@@ -137,6 +141,7 @@ jobs:
           TAG: ${{ steps.version.outputs.TAG }}
         run: |
           set -euo pipefail
+          # Gate: only publish tags whose target commit has a successful CI run.
           ref_data=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
           ref_type=$(printf '%s' "$ref_data" | jq -r '.object.type')
           ref_sha=$(printf '%s' "$ref_data" | jq -r '.object.sha')
@@ -183,10 +188,26 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           cd dist
-          sha256sum --check --ignore-missing checksums.txt
+          # Verify exactly the archives we are about to package. Do not use
+          # --ignore-missing: a missing or only substring-matched archive must
+          # fail before npm packages are generated.
+          subset=$(mktemp)
+          trap 'rm -f "$subset"' EXIT
+          archive_count=0
           for f in *.tar.gz; do
-            grep -qF "  $f" checksums.txt || { echo "::error::$f not covered by checksums.txt"; exit 1; }
+            archive_count=$((archive_count + 1))
+            line=$(awk -v file="$f" '$2 == file { print }' checksums.txt)
+            if [ -z "$line" ]; then
+              echo "::error::$f not covered exactly by checksums.txt"
+              exit 1
+            fi
+            printf '%s\n' "$line" >> "$subset"
           done
+          if [ "$archive_count" -eq 0 ]; then
+            echo "::error::No release archives (*.tar.gz) found in dist/."
+            exit 1
+          fi
+          sha256sum --check "$subset"
 
       - name: Generate npm packages
         env:
@@ -203,8 +224,48 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
 
+          npm_view() {
+            local label="$1"
+            shift
+            local output=""
+            for attempt in 1 2 3; do
+              if output=$(npm view "$@" 2>&1); then
+                printf '%s\n' "$output"
+                return 0
+              fi
+              if printf '%s' "$output" | grep -Eiq '(^|[[:space:]])E404([[:space:]]|$)|404 Not Found|is not in this registry'; then
+                return 1
+              fi
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::npm view failed for $label after $attempt attempts." >&2
+                printf '%s\n' "$output" >&2
+                return 2
+              fi
+              echo "[npm-publish] npm view failed for $label (attempt $attempt/3); retrying" >&2
+              sleep $((attempt * 5))
+            done
+          }
+
+          version_exists() {
+            local name="$1"
+            if npm_view "$name@$VERSION" "$name@$VERSION" version >/dev/null; then
+              return 0
+            fi
+            local status=$?
+            if [ "$status" -eq 1 ]; then
+              return 1
+            fi
+            exit 1
+          }
+
           if [ "$DIST_TAG" = "latest" ]; then
-            reg_latest=$(npm view "@mininglamp-oss/octo-cli" dist-tags.latest 2>/dev/null || true)
+            reg_latest=""
+            if reg_latest=$(npm_view "@mininglamp-oss/octo-cli dist-tags.latest" "@mininglamp-oss/octo-cli" dist-tags.latest); then
+              :
+            else
+              status=$?
+              if [ "$status" -ne 1 ]; then exit 1; fi
+            fi
             if [ -n "$reg_latest" ] && [ "$reg_latest" != "$VERSION" ] && \
                [ "$(printf '%s\n%s\n' "$reg_latest" "$VERSION" | sort -V | tail -n1)" = "$reg_latest" ]; then
               DIST_TAG="release-$VERSION"
@@ -216,9 +277,11 @@ jobs:
             local dir="$1"
             local name
             name=$(node -p "require('./$dir/package.json').name")
-            if [ -z "$DRY_RUN" ] && npm view "$name@$VERSION" version >/dev/null 2>&1; then
-              echo "[npm-publish] $name@$VERSION already on the registry — skipping"
-              return 0
+            if [ -z "$DRY_RUN" ]; then
+              if version_exists "$name"; then
+                echo "[npm-publish] $name@$VERSION already on the registry — skipping"
+                return 0
+              fi
             fi
             echo "[npm-publish] publishing $name@$VERSION"
             if [ -n "$DRY_RUN" ]; then
@@ -228,6 +291,8 @@ jobs:
             fi
           }
 
+          # Publish platform packages first; the main package pins them via
+          # optionalDependencies and must be last.
           for dir in build/octo-cli-*; do
             publish_one "$dir"
           done

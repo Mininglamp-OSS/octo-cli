@@ -4,15 +4,16 @@
 #
 # Job graph:
 #
-#   publish ── build ──┬─ release-upload: gh release upload
-#                      └─ publish-npm: npm packages
+#   publish ── build ── release-upload: gh release upload ── publish-npm: npm packages
 #
 # Why this shape:
 #   * publish is the CI-evidence gate. Build intentionally waits for it so an
 #     arbitrary tag cannot run build steps before the gate passes.
-#   * the binaries are built EXACTLY ONCE; release-upload and publish-npm both
-#     consume the same `goreleaser-dist` artifact (npm no longer re-downloads
-#     from the Release).
+#   * the binaries are built EXACTLY ONCE; release-upload and publish-npm consume
+#     the same `goreleaser-dist` artifact (npm no longer re-downloads from the
+#     Release).
+#   * npm publish waits for release-upload, so immutable npm versions do not
+#     appear before the matching GitHub Release assets/checksums are attached.
 name: Release Publish
 
 on:
@@ -117,11 +118,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$TAG" dist/*.tar.gz dist/checksums.txt --clobber
 
-  # Repack the SAME build artifact into npm packages and publish. Reuses
-  # npm-publish.yml via workflow_call (from_artifact: true) so there is no
-  # duplicate publish logic and no second download from the Release.
+  # Repack the SAME build artifact into npm packages after the Release assets
+  # are attached. Reuses npm-publish.yml via workflow_call (from_artifact: true)
+  # so there is no duplicate publish logic and no second download from the
+  # Release.
   publish-npm:
-    needs: [publish, build]
+    needs: [publish, build, release-upload]
     if: ${{ inputs.draft == false }}
     uses: ./.github/workflows/npm-publish.yml
     with:
