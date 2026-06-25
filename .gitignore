@@ -1,8 +1,11 @@
 # Binary (root only)
 /octo-cli
 /bin/
-# npm postinstall downloads the prebuilt binary here — never commit it
-/npm/bin/
+# npm publishes the checked-in Node shim from npm/bin/, but local packaging
+# smoke tests may still place generated binaries there.
+!/npm/bin/
+/npm/bin/octo-cli
+/npm/bin/octo-cli.exe
 coverage.out
 
 # Go
