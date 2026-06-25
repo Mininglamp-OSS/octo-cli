@@ -33,6 +33,7 @@ const { execFileSync } = require("child_process");
 
 const SCOPE = "@mininglamp-oss";
 const PROJECT = "octo-cli";
+const ARG_KEYS = new Set(["version", "dist", "out"]);
 
 // goreleaser (os, arch) -> npm (os, cpu). Single source of truth for the
 // platform matrix on the npm side; the guard test asserts set-equality with
@@ -66,7 +67,10 @@ function parseArgs(argv) {
     const key = argv[i];
     const val = argv[i + 1];
     if (!key.startsWith("--") || val === undefined) fail(`bad argument: ${key}`);
-    args[key.slice(2)] = val;
+    const name = key.slice(2);
+    if (!ARG_KEYS.has(name)) fail(`unknown argument: ${key}`);
+    if (Object.prototype.hasOwnProperty.call(args, name)) fail(`duplicate argument: ${key}`);
+    args[name] = val;
   }
   for (const required of ["version", "dist", "out"]) {
     if (!args[required]) fail(`--${required} is required`);
@@ -80,6 +84,12 @@ function parseArgs(argv) {
 
 function writeJson(file, obj) {
   fs.writeFileSync(file, JSON.stringify(obj, null, 2) + "\n");
+}
+
+function copyProjectDoc(npmDir, destDir, doc) {
+  const src = path.join(npmDir, doc);
+  const fallback = path.join(npmDir, "..", doc);
+  fs.copyFileSync(fs.existsSync(src) ? src : fallback, path.join(destDir, doc));
 }
 
 function main() {
@@ -101,7 +111,7 @@ function main() {
     const binFile = binFileName(p.goOs);
     const workDir = path.join(outDir, `.extract-${p.goOs}-${p.goArch}`);
     fs.mkdirSync(workDir, { recursive: true });
-    execFileSync("tar", ["-xzf", archive, "-C", workDir]);
+    execFileSync("tar", ["-xzf", archive, "-C", workDir, binFile]);
     const extracted = path.join(workDir, binFile);
     if (!fs.existsSync(extracted)) fail(`archive ${archive} does not contain ${binFile}`);
     const extractedStat = fs.lstatSync(extracted);
@@ -114,6 +124,7 @@ function main() {
     fs.mkdirSync(path.join(pkgDir, "bin"), { recursive: true });
     fs.copyFileSync(extracted, path.join(pkgDir, "bin", binFile));
     fs.chmodSync(path.join(pkgDir, "bin", binFile), 0o755);
+    copyProjectDoc(npmDir, pkgDir, "LICENSE");
     fs.rmSync(workDir, { recursive: true, force: true });
 
     writeJson(path.join(pkgDir, "package.json"), {
@@ -122,7 +133,7 @@ function main() {
       description: `${PROJECT} prebuilt binary for ${p.npmOs}-${p.npmCpu}.`,
       os: [p.npmOs],
       cpu: [p.npmCpu],
-      files: [`bin/${binFile}`],
+      files: [`bin/${binFile}`, "LICENSE"],
       engines: { node: ">=18" },
       homepage: "https://github.com/Mininglamp-OSS/octo-cli#readme",
       repository: {
@@ -144,11 +155,7 @@ function main() {
     path.join(npmDir, "bin", "octo-cli.js"),
     path.join(mainDir, "bin", "octo-cli.js"),
   );
-  for (const doc of ["README.md", "LICENSE"]) {
-    const src = path.join(npmDir, doc);
-    const fallback = path.join(npmDir, "..", doc);
-    fs.copyFileSync(fs.existsSync(src) ? src : fallback, path.join(mainDir, doc));
-  }
+  for (const doc of ["README.md", "LICENSE"]) copyProjectDoc(npmDir, mainDir, doc);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(npmDir, "package.json"), "utf8"));
   manifest.version = version;
@@ -159,7 +166,7 @@ function main() {
   console.log(`[prepare-packages] ${SCOPE}/${PROJECT}@${version} (main, ${PLATFORMS.length} platform deps)`);
 }
 
-module.exports = { PLATFORMS, binFileName };
+module.exports = { PLATFORMS, binFileName, parseArgs };
 
 if (require.main === module) {
   main();
