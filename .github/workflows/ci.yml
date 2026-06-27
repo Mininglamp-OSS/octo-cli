@@ -42,7 +42,7 @@ jobs:
       # No checkout: on pull_request events dorny/paths-filter lists changed
       # files via the GitHub API (needs only pull-requests: read, granted
       # above), so a working tree is unnecessary here.
-      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         if: github.event_name == 'pull_request'
         with:
