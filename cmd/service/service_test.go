@@ -60,6 +60,7 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 		"matter":  {"archive", "assignee", "channel", "close", "create", "delete", "extract", "get", "list", "reopen", "timeline", "transition", "update"},
 		"message": {"edit", "read-receipt", "send", "sync"},
 		"event":   {"ack", "list"},
+		"mail":    {"delete", "draft", "flag", "forward", "get", "list", "mailboxes", "reply", "reply-all", "send", "suppression", "thread"},
 	}
 	for svc, wantCmds := range want {
 		svcCmd := findCmd(root, svc)
@@ -83,6 +84,90 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	timeline := findCmd(matter, "timeline")
 	if timeline == nil || !contains(childNames(timeline), "add") || !contains(childNames(timeline), "list") || !contains(childNames(timeline), "delete") {
 		t.Errorf("matter timeline should nest add/list/delete; got %v", childNames(timeline))
+	}
+
+	// mail sub-resource nesting: draft, thread, suppression.
+	mail := findCmd(root, "mail")
+	draft := findCmd(mail, "draft")
+	if draft == nil || !contains(childNames(draft), "create") || !contains(childNames(draft), "list") || !contains(childNames(draft), "send") || !contains(childNames(draft), "delete") {
+		t.Errorf("mail draft should nest create/list/send/delete; got %v", childNames(draft))
+	}
+	thread := findCmd(mail, "thread")
+	if thread == nil || !contains(childNames(thread), "get") {
+		t.Errorf("mail thread should nest get; got %v", childNames(thread))
+	}
+	supp := findCmd(mail, "suppression")
+	if supp == nil || !contains(childNames(supp), "add") || !contains(childNames(supp), "remove") || !contains(childNames(supp), "list") || !contains(childNames(supp), "check") {
+		t.Errorf("mail suppression should nest add/remove/list/check; got %v", childNames(supp))
+	}
+}
+
+// --- mail operation execution ---
+
+// TestMailSend_BodyFlagsToJSON proves mail.send promotes to/cc/subject/text to
+// JSON body fields and POSTs to /webapi/v0/messages.
+func TestMailSend_BodyFlagsToJSON(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(202)
+		_, _ = w.Write([]byte(`{"submissionIds":["s1"]}`))
+	})
+	root.SetArgs([]string{
+		"mail", "send",
+		"--to", "a@x.test,b@y.test",
+		"--subject", "hi",
+		"--text", "hello there",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/webapi/v0/messages" {
+		t.Fatalf("got %s %s, want POST /webapi/v0/messages", gotMethod, gotPath)
+	}
+	to, ok := gotBody["to"].([]any)
+	if !ok || len(to) != 2 {
+		t.Fatalf("to = %v, want 2 recipients", gotBody["to"])
+	}
+	if gotBody["subject"] != "hi" || gotBody["text"] != "hello there" {
+		t.Fatalf("body = %v", gotBody)
+	}
+}
+
+// TestMailGet_PathParam proves mail.get maps the positional id into the path.
+func TestMailGet_PathParam(t *testing.T) {
+	var gotPath, gotMethod string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"E7","subject":"x"}`))
+	})
+	root.SetArgs([]string{"mail", "get", "E7"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/webapi/v0/messages/E7" {
+		t.Fatalf("got %s %s, want GET /webapi/v0/messages/E7", gotMethod, gotPath)
+	}
+}
+
+// TestMailList_QueryFlags proves mail.list turns mailbox/limit into query params.
+func TestMailList_QueryFlags(t *testing.T) {
+	var gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"messages":[],"total":0}`))
+	})
+	root.SetArgs([]string{"mail", "list", "--mailbox", "Inbox", "--limit", "10"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(gotQuery, "mailbox=Inbox") || !strings.Contains(gotQuery, "limit=10") {
+		t.Fatalf("query = %q, want mailbox=Inbox&limit=10", gotQuery)
 	}
 }
 

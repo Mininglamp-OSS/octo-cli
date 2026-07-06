@@ -1,0 +1,423 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "octo-mail REST API",
+    "version": "0.0.0",
+    "description": "Programmatic mail for agents, backed by octo-mail's resource-oriented REST surface under /webapi/v0. Account-scoped: an API key reaches only its own mailbox. Field names are camelCase to match the octo-mail wire contract. Provisioning is intentionally not exposed here — it lives on octo-mail's admin surface, not in the agent CLI."
+  },
+  "x-octo-service": "mail",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/webapi/v0/messages": {
+      "get": {
+        "operationId": "mail.list",
+        "summary": "List messages (newest first, deduplicated by email)",
+        "description": "Lists messages in the account. Filter by mailbox and/or full-text search; page with limit/offset.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "mailbox", "in": "query", "schema": { "type": "string" }, "description": "restrict to a mailbox by name (e.g. Inbox, Sent, Drafts)" },
+          { "name": "search", "in": "query", "schema": { "type": "string" }, "description": "full-text search query" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 }, "description": "max messages to return" },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 }, "description": "number of messages to skip" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "opaque message id (E<n>), shared with JMAP" },
+                          "threadId": { "type": "string" },
+                          "mailbox": { "type": "string" },
+                          "subject": { "type": "string" },
+                          "from": { "type": "string" },
+                          "to": { "type": "array", "items": { "type": "string" } },
+                          "preview": { "type": "string" },
+                          "receivedAt": { "type": "string" },
+                          "size": { "type": "integer", "format": "int64" },
+                          "keywords": { "type": "array", "items": { "type": "string" } },
+                          "unread": { "type": "boolean" }
+                        }
+                      }
+                    },
+                    "total": { "type": "integer" },
+                    "offset": { "type": "integer" },
+                    "limit": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "mail.send",
+        "summary": "Send a message",
+        "description": "Composes an RFC 5322 message server-side and submits it to the outbound queue. Attachments are objects ({filename, contentType, content(base64)}) — pass them via --data.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["to"],
+                "properties": {
+                  "to": { "type": "array", "items": { "type": "string" }, "description": "recipient addresses (required)" },
+                  "cc": { "type": "array", "items": { "type": "string" } },
+                  "bcc": { "type": "array", "items": { "type": "string" } },
+                  "subject": { "type": "string" },
+                  "text": { "type": "string", "description": "plain-text body" },
+                  "html": { "type": "string", "description": "HTML body (sent as multipart/alternative with text)" },
+                  "attachments": { "type": "array", "description": "base64 attachments; pass via --data", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "submissionIds": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/webapi/v0/messages/{id}": {
+      "get": {
+        "operationId": "mail.get",
+        "summary": "Get one message with parsed bodies",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "message id (E<n>)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "threadId": { "type": "string" },
+                    "mailbox": { "type": "string" },
+                    "subject": { "type": "string" },
+                    "from": { "type": "string" },
+                    "to": { "type": "array", "items": { "type": "string" } },
+                    "cc": { "type": "array", "items": { "type": "string" } },
+                    "preview": { "type": "string" },
+                    "receivedAt": { "type": "string" },
+                    "size": { "type": "integer", "format": "int64" },
+                    "keywords": { "type": "array", "items": { "type": "string" } },
+                    "unread": { "type": "boolean" },
+                    "bodyText": { "type": "string" },
+                    "bodyHtml": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "No such message" }
+        }
+      },
+      "patch": {
+        "operationId": "mail.flag",
+        "summary": "Add or remove keywords/flags on a message",
+        "description": "Adds and/or removes IMAP flags (e.g. \\\\Seen, \\\\Flagged) or free-form keywords. Provide addKeywords and/or removeKeywords.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "addKeywords": { "type": "array", "items": { "type": "string" }, "description": "flags/keywords to set" },
+                  "removeKeywords": { "type": "array", "items": { "type": "string" }, "description": "flags/keywords to clear" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated" } }
+      },
+      "delete": {
+        "operationId": "mail.delete",
+        "summary": "Delete (expunge) a message",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/webapi/v0/messages/{id}/reply": {
+      "post": {
+        "operationId": "mail.reply",
+        "summary": "Reply to a message (sender only)",
+        "description": "Derives the recipient and In-Reply-To/References from the original; you supply the body.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": { "type": "string" },
+                  "html": { "type": "string" },
+                  "attachments": { "type": "array", "description": "pass via --data", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "202": { "description": "Accepted for delivery", "content": { "application/json": { "schema": { "type": "object", "properties": { "submissionIds": { "type": "array", "items": { "type": "string" } } } } } } } }
+      }
+    },
+    "/webapi/v0/messages/{id}/reply-all": {
+      "post": {
+        "operationId": "mail.reply-all",
+        "summary": "Reply to all recipients of a message",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": { "type": "string" },
+                  "html": { "type": "string" },
+                  "attachments": { "type": "array", "description": "pass via --data", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "202": { "description": "Accepted for delivery", "content": { "application/json": { "schema": { "type": "object", "properties": { "submissionIds": { "type": "array", "items": { "type": "string" } } } } } } } }
+      }
+    },
+    "/webapi/v0/messages/{id}/forward": {
+      "post": {
+        "operationId": "mail.forward",
+        "summary": "Forward a message",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["to"],
+                "properties": {
+                  "to": { "type": "array", "items": { "type": "string" }, "description": "recipient addresses (required)" },
+                  "text": { "type": "string", "description": "optional note prepended to the quoted original" },
+                  "attachments": { "type": "array", "description": "pass via --data", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "202": { "description": "Accepted for delivery", "content": { "application/json": { "schema": { "type": "object", "properties": { "submissionIds": { "type": "array", "items": { "type": "string" } } } } } } } }
+      }
+    },
+    "/webapi/v0/threads/{id}": {
+      "get": {
+        "operationId": "mail.thread.get",
+        "summary": "Get a thread and its messages",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "thread id (T<n>)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Thread",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "messages": { "type": "array", "items": { "type": "object" } }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "No such thread" }
+        }
+      }
+    },
+    "/webapi/v0/drafts": {
+      "get": {
+        "operationId": "mail.draft.list",
+        "summary": "List drafts",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Drafts",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "drafts": { "type": "array", "items": { "type": "object" } } } } } }
+          }
+        }
+      },
+      "post": {
+        "operationId": "mail.draft.create",
+        "summary": "Create a draft (compose without sending)",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": { "type": "array", "items": { "type": "string" } },
+                  "cc": { "type": "array", "items": { "type": "string" } },
+                  "bcc": { "type": "array", "items": { "type": "string" } },
+                  "subject": { "type": "string" },
+                  "text": { "type": "string" },
+                  "html": { "type": "string" },
+                  "attachments": { "type": "array", "description": "pass via --data", "items": { "type": "object" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Draft created", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "string" } } } } } } }
+      }
+    },
+    "/webapi/v0/drafts/{id}/send": {
+      "post": {
+        "operationId": "mail.draft.send",
+        "summary": "Send an existing draft",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "202": { "description": "Accepted for delivery", "content": { "application/json": { "schema": { "type": "object", "properties": { "submissionIds": { "type": "array", "items": { "type": "string" } } } } } } } }
+      }
+    },
+    "/webapi/v0/drafts/{id}": {
+      "delete": {
+        "operationId": "mail.draft.delete",
+        "summary": "Delete a draft",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/webapi/v0/mailboxes": {
+      "get": {
+        "operationId": "mail.mailboxes",
+        "summary": "List mailboxes with counts",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Mailboxes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mailboxes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "name": { "type": "string" },
+                          "total": { "type": "integer", "format": "int64" },
+                          "unread": { "type": "integer", "format": "int64" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webapi/v0/suppressions": {
+      "get": {
+        "operationId": "mail.suppression.list",
+        "summary": "List suppressed recipient addresses",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Suppressions",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "suppressions": { "type": "array", "items": { "type": "string" } } } } } }
+          }
+        }
+      }
+    },
+    "/webapi/v0/suppressions/{address}": {
+      "get": {
+        "operationId": "mail.suppression.check",
+        "summary": "Check whether an address is suppressed",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "address", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Suppressed" },
+          "404": { "description": "Not suppressed" }
+        }
+      },
+      "put": {
+        "operationId": "mail.suppression.add",
+        "summary": "Suppress an address (idempotent)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "address", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "reason": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Suppressed" } }
+      },
+      "delete": {
+        "operationId": "mail.suppression.remove",
+        "summary": "Remove an address from the suppression list",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "address", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Removed" } }
+      }
+    }
+  }
+}
