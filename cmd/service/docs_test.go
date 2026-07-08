@@ -208,6 +208,33 @@ func TestSpacedCredential_SendsSpaceHeaderOnDefaultOp(t *testing.T) {
 	}
 }
 
+// TestMessageSend_SendsSpaceHeader is the regression guard for the fix: the
+// message spec declares x-octo-space-header:true, so a spaced credential MUST
+// send X-Space-Id on a message op. sendMessage for a multi-space bot uses the
+// header as the DM multi-space selection hint; dropping it silently
+// mis-attributes the message. This uses message (a real product service),
+// unlike the matter companion above, so a future flip of the message flag is
+// caught here rather than masked by the always-true matter domain.
+func TestMessageSend_SendsSpaceHeader(t *testing.T) {
+	var gotSpace, gotPath string
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
+		gotSpace = r.Header.Get("X-Space-Id")
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message_id":1,"message_seq":1}`))
+	})
+	root.SetArgs([]string{"message", "send", "--data", `{"channel_id":"c1","channel_type":1,"payload":{"type":1,"content":"hi"}}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotPath != "/v1/bot/sendMessage" {
+		t.Errorf("path = %q, want /v1/bot/sendMessage", gotPath)
+	}
+	if gotSpace != "space-1" {
+		t.Errorf("X-Space-Id = %q, want space-1 — message must keep sending the header for multi-space DM selection", gotSpace)
+	}
+}
+
 // TestDocsList_QueryParamsFromFlags checks the page-based list flags land in the
 // query string.
 func TestDocsList_QueryParamsFromFlags(t *testing.T) {

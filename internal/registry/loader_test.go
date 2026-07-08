@@ -131,8 +131,52 @@ func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
 	if op.BaseURLEnv != "OCTO_API_BASE_URL" {
 		t.Errorf("base url env: got %q, want OCTO_API_BASE_URL", op.BaseURLEnv)
 	}
-	if op.SpaceHeader {
-		t.Error("space header: want false for dmworkim domain")
+	// message declares x-octo-space-header:true so the client keeps sending
+	// X-Space-Id: sendMessage for a multi-space bot uses the header as the DM
+	// multi-space selection hint, and dropping it silently mis-attributes the
+	// message.
+	if !op.SpaceHeader {
+		t.Error("space header: want true for message domain (sendMessage uses X-Space-Id for multi-space DM selection)")
+	}
+}
+
+// TestServiceSpaceHeaderContract pins the space-header declaration of every
+// service spec so an accidental flip is caught. The client suppresses
+// X-Space-Id only when a spec explicitly declares x-octo-space-header:false
+// (SpaceHeaderSet && !SpaceHeader); the values below are the intended,
+// server-verified per-service behaviour:
+//   - message / matter: true  — the server reads X-Space-Id (DM multi-space
+//     hint / space-scoped matters), so the client must keep sending it.
+//   - docs and the rest: false — those bot mounts server-resolve the space and
+//     ignore the header, so the client honestly suppresses it.
+func TestServiceSpaceHeaderContract(t *testing.T) {
+	r := MustNew()
+	cases := []struct {
+		service string
+		opID    string
+		want    bool
+	}{
+		{"message", "message.send", true},
+		{"matter", "matter.create", true},
+		{"docs", "docs.create", false},
+		{"bot", "bot.register", false},
+		{"thread", "thread.create", false},
+		{"group", "group.create", false},
+		{"file", "file.upload", false},
+		{"event", "event.list", false},
+	}
+	for _, c := range cases {
+		op, ok := r.GetOperation(c.opID)
+		if !ok {
+			t.Errorf("%s: operation %q not found", c.service, c.opID)
+			continue
+		}
+		if !op.SpaceHeaderSet {
+			t.Errorf("%s: x-octo-space-header must be declared explicitly (SpaceHeaderSet=false)", c.service)
+		}
+		if op.SpaceHeader != c.want {
+			t.Errorf("%s: space header = %v, want %v", c.service, op.SpaceHeader, c.want)
+		}
 	}
 }
 
