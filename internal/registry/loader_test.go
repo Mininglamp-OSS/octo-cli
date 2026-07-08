@@ -10,7 +10,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "event", "file", "group", "matter", "message", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "matter", "message", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -41,6 +41,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":    4,
 		"bot":     6,
 		"event":   2,
+		"docs":    22,
 	}
 	totalWant := 0
 	for svc, want := range expected {
