@@ -41,7 +41,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":    4,
 		"bot":     6,
 		"event":   2,
-		"docs":    22,
+		"docs":    24,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -184,6 +184,38 @@ func TestGetOperationNotFound(t *testing.T) {
 	r := MustNew()
 	if _, ok := r.GetOperation("does.not.exist"); ok {
 		t.Fatal("GetOperation: expected ok=false for unknown id")
+	}
+}
+
+// TestHeaderParamWithFlagAlias pins the general spec-declared header capability:
+// docs.content.edit declares an If-Match header parameter carrying the
+// x-octo-flag alias `base-version`, so the request engine can drive the
+// optimistic-concurrency base-version token from a first-class flag onto a
+// per-request header — no docs-specific carve-out in the transport.
+func TestHeaderParamWithFlagAlias(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("docs.content.edit")
+	if !ok {
+		t.Fatal("docs.content.edit not found")
+	}
+	var found *ParamInfo
+	for i := range op.Parameters {
+		if op.Parameters[i].In == "header" {
+			found = &op.Parameters[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("docs.content.edit: expected a header parameter (If-Match)")
+	}
+	if found.Name != "If-Match" {
+		t.Errorf("header param name = %q, want If-Match", found.Name)
+	}
+	if found.FlagName != "base-version" {
+		t.Errorf("header param flag alias = %q, want base-version (from x-octo-flag)", found.FlagName)
+	}
+	if !found.Required {
+		t.Error("If-Match header must be required (mandatory base-version guard)")
 	}
 }
 

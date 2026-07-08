@@ -1,23 +1,28 @@
 ---
 name: octo-docs
 version: 0.1.0
-description: Docs domain — create and govern documents, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Live body/outline editing is NOT available over the CLI. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
-# octo-docs — documents, members, comments, versions, attachments
+# octo-docs — documents, body content, members, comments, versions, attachments
 
-> **Live document content editing is NOT available from the CLI.** A document's
-> body and outline live in a Yjs (Hocuspocus) websocket session, not in any REST
-> endpoint. This skill drives everything *around* the content — metadata,
-> members, sharing, comments, versions, and attachment references — but it cannot
-> read or write the live body. Creating a doc makes an **empty** document; you
-> cannot seed or edit its text here. To inspect content, take a snapshot
-> (`docs versions create`) and read it back with `docs versions state`, which
-> returns a **read-only** decoded preview of that snapshot.
+> **Live body editing IS available for `doc_type: doc`.** You can read a
+> document's live body with `docs content get` and apply **incremental block-op
+> edits** with `docs content edit` under an `If-Match` base-version guard. These
+> are **not** a free-form "set the whole body" — each edit is a batch of insert /
+> replace / delete ops addressed by block path, and concurrency is controlled by
+> a base-version token: read to get the token, then edit with that token so the
+> server can prove the body did not change underneath you (a stale token is
+> rejected with `412 base_version_stale`). Only `doc_type: doc` bodies are
+> editable this way; **whiteboard and board bodies are a different Y.Doc shape
+> and are not editable here** (they return `409 unsupported_doc_type`). The
+> document *outline* still lives only in the Yjs session and is not a REST
+> surface. Creating a doc still makes an **empty** document; seed its text with
+> an initial `docs content edit`.
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
@@ -34,7 +39,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 ## 1. Document lifecycle
 
 ```bash
-# Create an empty doc (caller becomes owner/admin). Body content is NOT set here.
+# Create an empty doc (caller becomes owner/admin). Seed the body with `docs content edit` (§2).
 octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc]
 
 # List docs you own or are a member of. Page-based (see the pagination note below).
@@ -45,7 +50,63 @@ octo-cli docs rename <docId> --title "New title"
 octo-cli docs delete <docId>                 # soft delete (admin)
 ```
 
-## 2. Members & sharing
+## 2. Document body (read + incremental edit)
+
+Available for `doc_type: doc` only. Read the live body and its base-version
+token, then apply a batch of incremental block ops guarded by that token.
+
+```bash
+# Read the LIVE body + baseVersion (reader). Response:
+#   { docId, doc: <ProseMirror JSON>, schemaVersion, baseVersion }
+octo-cli docs content get <docId>
+
+# Apply an incremental edit (writer). --base-version is REQUIRED and is sent as
+# the If-Match header; the ops batch goes through --data as a JSON array.
+octo-cli docs content edit <docId> --base-version "<token>" --data '<ops JSON>'
+```
+
+Ops are addressed by **block path** (child indices from the doc root) and come
+in three shapes — this is not a whole-body replace:
+
+- `insert` — `{"type":"insert","at":{"path":[i,...],"position":"before|after|inside_start|inside_end"},"content":[<block nodes>]}`. Use `path: []` with `inside_start`/`inside_end` to write the first block of an empty doc.
+- `replace` — `{"type":"replace","range":{"from":{"path":[...]},"to":{"path":[...]}},"content":[<block nodes>]}`
+- `delete` — `{"type":"delete","range":{"from":{"path":[...]},"to":{"path":[...]}}}`
+
+Range endpoints must share a parent. Each op may carry `"expect":{"type":"<nodeType>"}` to assert the addressed node type. On success the response returns a **new** `baseVersion` — use it for the next edit.
+
+### Worked example: read, then append a paragraph
+
+```bash
+# 1. Read the current body and capture the base version.
+BV=$(octo-cli docs content get d_123 --output json | jq -r '.data.baseVersion')
+
+# 2. Append a paragraph at the end of the doc, guarded by that base version.
+octo-cli docs content edit d_123 --base-version "$BV" --data '{
+  "ops": [
+    {
+      "type": "insert",
+      "at": { "path": [], "position": "inside_end" },
+      "content": [
+        { "type": "paragraph", "content": [ { "type": "text", "text": "Appended by the bot." } ] }
+      ]
+    }
+  ]
+}'
+```
+
+**Concurrency / errors.** The base version is optimistic-concurrency: if the
+live body changed since your `docs content get`, the edit is rejected with
+`412 base_version_stale` — re-read to get a fresh token and rebuild your ops.
+Other backend gates surface unchanged: `409 unsupported_doc_type` (target is a
+board/whiteboard), `413 too_many_ops` / `413 op_content_too_large` /
+`413 doc_too_large` (size caps), `400 path_too_deep` or `400 invalid_body`
+(missing base version or malformed shape), and `422` for a bad anchor
+(`anchor_not_found` / `anchor_mismatch`), invalid ops (`invalid_ops`), an
+attachment that is not this doc's (`attachment_not_found`), or content the
+schema rejects (`schema_incompatible`). Whiteboard and board bodies remain
+un-editable through this surface.
+
+## 3. Members & sharing
 
 ```bash
 octo-cli docs members list   <docId>                        # admin
@@ -60,7 +121,7 @@ octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 role if already present. The target uid must be a real Octo user — a miss returns
 `404 user_not_found` and writes no ghost member.
 
-## 3. Comments
+## 4. Comments
 
 Comments are anchored to a text range and live out-of-band from the body.
 
@@ -88,7 +149,7 @@ Anchors are opaque base64-encoded Yjs positions produced by the editor — the
 backend never parses them. A bot that does not have live positions typically only
 posts replies (`--parentId`) or resolves threads.
 
-## 4. Versions (snapshots)
+## 5. Versions (snapshots)
 
 ```bash
 octo-cli docs versions list    <docId> [--kind manual|auto|all] [--cursor <id>] [--limit <n>]
@@ -99,12 +160,13 @@ octo-cli docs versions delete  <docId> <versionId>                       # admin
 octo-cli docs versions restore <docId> <versionId>                       # admin
 ```
 
-`versions state` is the sanctioned way to read historical content: it returns the
-snapshot decoded to ProseMirror JSON (`{doc, sheetCells, sheetDims, ...}`). It is a
-preview of a *past* version, not the live document, and is not writable. `restore`
-is non-destructive and records a safety snapshot first, so it is itself undoable.
+`versions state` reads *historical* content: it returns a past snapshot decoded
+to ProseMirror JSON (`{doc, sheetCells, sheetDims, ...}`), is a preview of that
+version rather than the live document, and is not writable. To read the **live**
+body instead, use `docs content get` (§2). `restore` is non-destructive and
+records a safety snapshot first, so it is itself undoable.
 
-## 5. Attachments (metadata only)
+## 6. Attachments (metadata only)
 
 The docs backend is **presign-only**: the CLI never streams the binary. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
@@ -147,13 +209,17 @@ so `--page-all` is intentionally not offered on them:
 
 ## Not in this version
 
-`docs attachments upload` (binary helper), invites, access-requests, link-card,
-and any live-content/body editing are out of scope here.
+`docs attachments upload` (binary helper), invites, access-requests, and
+link-card are out of scope here. Body editing is limited to `doc_type: doc`
+incremental block ops (§2) — whiteboard/board bodies and the document outline
+are not editable through the CLI.
 
 ## Schema lookup
 
 ```bash
 octo-cli schema docs.create
+octo-cli schema docs.content.get
+octo-cli schema docs.content.edit
 octo-cli schema docs.members.set
 octo-cli schema docs.comments.add
 octo-cli schema docs.attachments.presign

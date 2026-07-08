@@ -147,6 +147,13 @@ type ParamInfo struct {
 	Description string `json:"description,omitempty"`
 	Default     any    `json:"default,omitempty"`
 	Enum        []any  `json:"enum,omitempty"`
+	// FlagName is the optional CLI flag override from the x-octo-flag
+	// extension on the parameter. It lets a spec expose a header/query param
+	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
+	// clean, first-class flag name (e.g. `base-version`) without a hard-coded
+	// carve-out in the engine. Empty when the spec does not set it, in which
+	// case the engine derives the flag from Name.
+	FlagName string `json:"flag_name,omitempty"`
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
@@ -318,6 +325,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 				In:          stringOf(pm["in"]),
 				Required:    boolOf(pm["required"]),
 				Description: stringOf(pm["description"]),
+				FlagName:    stringOf(pm["x-octo-flag"]),
 			}
 			if sch, ok := pm["schema"].(map[string]any); ok {
 				pi.Type = stringOf(sch["type"])

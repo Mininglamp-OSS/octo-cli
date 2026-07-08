@@ -161,6 +161,88 @@
         "responses": { "200": { "description": "Deleted" } }
       }
     },
+    "/v1/bot/docs/{docId}/content": {
+      "get": {
+        "operationId": "docs.content.get",
+        "summary": "Read a document's live body + its base version (needs reader)",
+        "description": "Reads the LIVE ProseMirror body of a doc_type 'doc' plus the base-version token that pins the read. Pass that token to `docs content edit` as --base-version so the optimistic-concurrency guard can prove the body did not change between read and write. board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live body + base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "doc": { "type": "object", "description": "the live body as ProseMirror document JSON" },
+                    "schemaVersion": { "type": "integer", "description": "ProseMirror schema version the body was decoded with" },
+                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs content edit --base-version`" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.content.edit",
+        "summary": "Apply an incremental block-op edit to a document body (needs writer)",
+        "description": "Applies a batch of incremental block ops to a doc_type 'doc' body under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs content get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live body moved since that read. The ops batch is a structured array, so pass it as JSON through --data. Only doc_type 'doc' is accepted (board / whiteboard return 409 unsupported_doc_type). Gates: op count over the max → 413 too_many_ops, a single op's content too large → 413 op_content_too_large, block-path too deep → 400 path_too_deep, missing base version or malformed shape → 400 invalid_body, bad anchor / invalid ops → 422.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from 'docs content get' (sent as the If-Match header for optimistic concurrency; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ops"],
+                "properties": {
+                  "ops": {
+                    "type": "array",
+                    "description": "ordered batch of incremental block edit ops. Each op is one of: insert {\"type\":\"insert\",\"at\":{\"path\":[i,...],\"position\":\"before|after|inside_start|inside_end\"},\"content\":[<ProseMirror block nodes>],\"expect\":{\"type\":\"<nodeType>\"}?}; replace {\"type\":\"replace\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"content\":[...],\"expect\":?}; delete {\"type\":\"delete\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"expect\":?}. `path` is child indices from the doc root; range endpoints must share a parent. Pass via --data.",
+                    "items": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edit applied; carries the new base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "bytes": { "type": "integer", "description": "encoded size of the doc after the edit" },
+                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
+                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/members": {
       "get": {
         "operationId": "docs.members.list",

@@ -50,6 +50,21 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		}
 	}
 
+	// Header parameters (spec `"in": "header"`). Emit only headers the user
+	// explicitly set so an omitted optional header stays absent. This is how a
+	// spec-declared header such as If-Match (optimistic-concurrency base
+	// version) reaches the wire from a flag — no per-endpoint transport code.
+	var headers map[string]string
+	for flagName, hf := range rt.headerFlags {
+		if !cobraCmd.Flags().Changed(flagName) {
+			continue
+		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		headers[hf.apiName] = *hf.strVal
+	}
+
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
@@ -57,6 +72,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		Method:         d.Method,
 		Path:           urlPath,
 		Query:          q,
+		Headers:        headers,
 		BinaryResponse: d.BinaryResponse,
 		// Suppress X-Space-Id only when the spec explicitly declares
 		// x-octo-space-header:false. An omitted flag keeps the default

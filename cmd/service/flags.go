@@ -13,14 +13,15 @@ import (
 // operationRuntime holds everything the RunE closure needs to build the
 // outbound request from the user's flag values.
 type operationRuntime struct {
-	detail     *registry.OperationDetail
-	pathParams []string              // path param names in order
-	queryFlags map[string]*queryFlag // flag name → query param binding
-	bodyFlags  map[string]*bodyFlag  // flag name → body field binding
-	bodyData   *string               // --data (nil when command has no body)
-	pageAll    *bool                 // --page-all (nil when no pagination)
-	pageLimit  *int                  // --page-limit
-	filePath   *string               // --file (multipart operations only)
+	detail      *registry.OperationDetail
+	pathParams  []string               // path param names in order
+	queryFlags  map[string]*queryFlag  // flag name → query param binding
+	headerFlags map[string]*headerFlag // flag name → header param binding
+	bodyFlags   map[string]*bodyFlag   // flag name → body field binding
+	bodyData    *string                // --data (nil when command has no body)
+	pageAll     *bool                  // --page-all (nil when no pagination)
+	pageLimit   *int                   // --page-limit
+	filePath    *string                // --file (multipart operations only)
 }
 
 type queryFlag struct {
@@ -30,6 +31,15 @@ type queryFlag struct {
 	intVal  *int
 	boolVal *bool
 	strSlc  *[]string
+}
+
+// headerFlag binds a CLI flag to a request header declared in the spec
+// (`"in": "header"`). Header values are always strings on the wire, so a
+// header flag is string-valued; run.go sends it only when the user set the
+// flag, so an omitted optional header stays absent.
+type headerFlag struct {
+	apiName string // HTTP header name (e.g. "If-Match")
+	strVal  *string
 }
 
 type bodyFlag struct {
@@ -55,7 +65,7 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 		if p.In != "query" {
 			continue
 		}
-		flagName := strings.ReplaceAll(p.Name, "_", "-")
+		flagName := paramFlagName(p)
 		qf := &queryFlag{apiName: p.Name, kind: schemaTypeKind(p.Type)}
 		desc := p.Description
 		if len(p.Enum) > 0 {
@@ -88,6 +98,40 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 			cmd.Flags().StringVar(qf.strVal, flagName, dv, desc)
 		}
 		rt.queryFlags[flagName] = qf
+		if p.Required {
+			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
+		}
+	}
+}
+
+// paramFlagName is the CLI flag name for a spec parameter: the explicit
+// x-octo-flag override when present, else the wire name with underscores
+// turned into dashes (the historical derivation). The override lets a header
+// like `If-Match` surface as a clean first-class flag (`--base-version`)
+// without a hard-coded per-endpoint carve-out.
+func paramFlagName(p registry.ParamInfo) string {
+	if p.FlagName != "" {
+		return p.FlagName
+	}
+	return strings.ReplaceAll(p.Name, "_", "-")
+}
+
+// registerHeaderFlags binds every `"in": "header"` parameter to a string flag.
+// This is the general spec-declared header capability: the request engine can
+// set any per-request header from a flag, so an endpoint needing (say) an
+// If-Match optimistic-concurrency token declares it in the spec rather than
+// requiring bespoke code. run.go emits the header only when the flag is set.
+// Registered before body flags so a header flag never collides with a promoted
+// body field of the same name.
+func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
+	for _, p := range d.Parameters {
+		if p.In != "header" {
+			continue
+		}
+		flagName := paramFlagName(p)
+		hf := &headerFlag{apiName: p.Name, strVal: new(string)}
+		cmd.Flags().StringVar(hf.strVal, flagName, "", p.Description)
+		rt.headerFlags[flagName] = hf
 		if p.Required {
 			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
 		}
@@ -141,8 +185,10 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 			continue
 		}
 		flagName := strings.ReplaceAll(name, "_", "-")
-		// Avoid collisions with --data, --file or a query param of the same name.
-		if flagName == "data" || flagName == "file" || rt.queryFlags[flagName] != nil {
+		// Avoid collisions with --data, --file, a query param, or a spec-declared
+		// header flag of the same name (e.g. an If-Match header exposed as
+		// --base-version takes precedence over a body baseVersion mirror).
+		if flagName == "data" || flagName == "file" || rt.queryFlags[flagName] != nil || rt.headerFlags[flagName] != nil {
 			continue
 		}
 		desc := prop.Description

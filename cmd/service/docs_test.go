@@ -33,6 +33,7 @@ func TestDocs_TreeShape(t *testing.T) {
 	}
 
 	groups := map[string][]string{
+		"content":     {"get", "edit"},
 		"members":     {"list", "set", "remove"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
@@ -66,6 +67,8 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
 		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
 		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
+		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
+		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
 		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
 		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
 		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
@@ -425,5 +428,94 @@ func TestDocsAttachmentsPresign_BodyTypes(t *testing.T) {
 	}
 	if sz, ok := gotBody["sizeBytes"].(float64); !ok || sz != 2048 {
 		t.Errorf("sizeBytes = %v (%T), want 2048", gotBody["sizeBytes"], gotBody["sizeBytes"])
+	}
+}
+
+// TestDocsContentGet_ReadsBodyAndBaseVersion checks docs.content.get hits
+// GET /v1/bot/docs/{docId}/content (reader), sends no body, and surfaces the
+// backend's {doc, baseVersion} response through the success envelope so the
+// caller can capture the base-version token for a follow-up edit.
+func TestDocsContentGet_ReadsBodyAndBaseVersion(t *testing.T) {
+	var gotMethod, gotPath string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","doc":{"type":"doc","content":[]},"schemaVersion":3,"baseVersion":"BV_ABC=="}`))
+	})
+	root.SetArgs([]string{"docs", "content", "get", "d1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/content" {
+		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/content", gotMethod, gotPath)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			BaseVersion string `json:"baseVersion"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.BaseVersion != "BV_ABC==" {
+		t.Errorf("expected baseVersion BV_ABC== in envelope, got %+v", env)
+	}
+}
+
+// TestDocsContentEdit_SendsOpsBatchAndIfMatch checks docs.content.edit hits
+// PATCH /v1/bot/docs/{docId}/content, carries the ops batch (passed via the
+// generic --data escape hatch) as a JSON array in the body, and sends the
+// base-version token as the If-Match header — the spec-declared header
+// capability wiring --base-version to If-Match, not a body/query field.
+func TestDocsContentEdit_SendsOpsBatchAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":128,"baseVersion":"BV_NEXT==","newDocVersionSeq":9}`))
+	})
+	ops := `{"ops":[{"type":"insert","at":{"path":[],"position":"inside_end"},"content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}]}`
+	root.SetArgs([]string{"docs", "content", "edit", "d1", "--base-version", "BV_ABC==", "--data", ops})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/content" {
+		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/content", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
+	}
+	opsArr, ok := gotBody["ops"].([]any)
+	if !ok || len(opsArr) != 1 {
+		t.Fatalf("ops = %v, want a 1-element array", gotBody["ops"])
+	}
+	op0, ok := opsArr[0].(map[string]any)
+	if !ok || op0["type"] != "insert" {
+		t.Errorf("ops[0] = %v, want an insert op", opsArr[0])
+	}
+	// The base version travels in the header, not the JSON body.
+	if _, present := gotBody["baseVersion"]; present {
+		t.Errorf("baseVersion must not be duplicated into the JSON body; got %v", gotBody["baseVersion"])
+	}
+}
+
+// TestDocsContentEdit_RequiresBaseVersion confirms --base-version is required:
+// the command fails before any request when the base-version token is missing,
+// mirroring the backend's mandatory optimistic-concurrency guard.
+func TestDocsContentEdit_RequiresBaseVersion(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	root.SetArgs([]string{"docs", "content", "edit", "d1", "--data", `{"ops":[]}`})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error when --base-version is omitted")
+	}
+	if called {
+		t.Error("server must not be called when required --base-version is missing")
 	}
 }
