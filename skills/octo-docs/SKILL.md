@@ -78,7 +78,7 @@ octo-cli docs comments add <docId> --body "Agreed" --parentId <rootId>
 
 # Edit your own comment's text, OR resolve/reopen a thread root (pass one).
 octo-cli docs comments edit   <docId> <id> --body "edited text"
-octo-cli docs comments edit   <docId> <id> --resolved true      # writer; false reopens
+octo-cli docs comments edit   <docId> <id> --resolved=true      # writer; false reopens
 
 octo-cli docs comments delete <docId> <id>          # soft delete (author)
 octo-cli docs comments delete <docId> <id> --hard 1 # hard delete (admin)

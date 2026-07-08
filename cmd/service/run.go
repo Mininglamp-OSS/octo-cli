@@ -58,6 +58,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		Path:           urlPath,
 		Query:          q,
 		BinaryResponse: d.BinaryResponse,
+		// Suppress X-Space-Id only when the spec explicitly declares
+		// x-octo-space-header:false. An omitted flag keeps the default
+		// behaviour of sending the header when the credential has a space.
+		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
 	}
 	if d.Multipart {
 		raw, ct, err := buildMultipartBody(cobraCmd, rt)
@@ -189,12 +193,13 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		}
 		nextQ.Set(cursorParam, nextCursor)
 		req = client.Request{
-			Service: req.Service,
-			Method:  req.Method,
-			Path:    req.Path,
-			Query:   nextQ,
-			Body:    req.Body,
-			Headers: req.Headers,
+			Service:             req.Service,
+			Method:              req.Method,
+			Path:                req.Path,
+			Query:               nextQ,
+			Body:                req.Body,
+			Headers:             req.Headers,
+			SuppressSpaceHeader: req.SuppressSpaceHeader,
 		}
 	}
 

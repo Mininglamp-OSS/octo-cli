@@ -151,11 +151,16 @@ func TestDocs_NoPagination(t *testing.T) {
 
 // TestDocsCreate_PostsBodyNoSpaceHeader checks docs.create hits POST /v1/bot/docs
 // with the promoted body field, carries the bearer token, and sends no
-// X-Space-Id (the bot mount server-resolves the space).
+// X-Space-Id even when the active credential carries a SpaceID — the docs bot
+// mount resolves the space server-side (x-octo-space-header:false), so the
+// header must be gated off rather than merely absent because the test bot has no
+// space. The companion assertion below proves the same spaced credential DOES
+// send X-Space-Id on a default/true operation, so the gating is real in both
+// directions and no existing service silently loses the header.
 func TestDocsCreate_PostsBodyNoSpaceHeader(t *testing.T) {
 	var gotMethod, gotPath, gotAuth, gotSpace string
 	var gotBody map[string]any
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotSpace = r.Header.Get("X-Space-Id")
@@ -177,7 +182,29 @@ func TestDocsCreate_PostsBodyNoSpaceHeader(t *testing.T) {
 		t.Errorf("Authorization = %q, want Bearer app_test", gotAuth)
 	}
 	if gotSpace != "" {
-		t.Errorf("X-Space-Id must not be sent for docs; got %q", gotSpace)
+		t.Errorf("X-Space-Id must not be sent for docs even with a spaced credential; got %q", gotSpace)
+	}
+}
+
+// TestSpacedCredential_SendsSpaceHeaderOnDefaultOp is the companion to the docs
+// suppression test: with the SAME spaced credential, an operation whose spec
+// declares x-octo-space-header:true (matter, the canonical space-scoped domain)
+// still sends X-Space-Id. This guards against the gating over-reaching and
+// stripping the header from services that must keep it — only an explicit
+// x-octo-space-header:false suppresses it.
+func TestSpacedCredential_SendsSpaceHeaderOnDefaultOp(t *testing.T) {
+	var gotSpace string
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
+		gotSpace = r.Header.Get("X-Space-Id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"matter":{"id":"m1"}}`))
+	})
+	root.SetArgs([]string{"matter", "create", "--title", "Case"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotSpace != "space-1" {
+		t.Errorf("X-Space-Id = %q, want space-1 for a space-header:true op", gotSpace)
 	}
 }
 
