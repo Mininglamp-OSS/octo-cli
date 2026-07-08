@@ -61,7 +61,8 @@ const (
 )
 
 func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
-	for _, p := range d.Parameters {
+	for i := range d.Parameters {
+		p := &d.Parameters[i]
 		if p.In != "query" {
 			continue
 		}
@@ -109,7 +110,7 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 // turned into dashes (the historical derivation). The override lets a header
 // like `If-Match` surface as a clean first-class flag (`--base-version`)
 // without a hard-coded per-endpoint carve-out.
-func paramFlagName(p registry.ParamInfo) string {
+func paramFlagName(p *registry.ParamInfo) string {
 	if p.FlagName != "" {
 		return p.FlagName
 	}
@@ -124,7 +125,8 @@ func paramFlagName(p registry.ParamInfo) string {
 // Registered before body flags so a header flag never collides with a promoted
 // body field of the same name.
 func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
-	for _, p := range d.Parameters {
+	for i := range d.Parameters {
+		p := &d.Parameters[i]
 		if p.In != "header" {
 			continue
 		}

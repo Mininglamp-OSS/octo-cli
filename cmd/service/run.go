@@ -31,39 +31,13 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 
 	// Query parameters (only emit flags explicitly set by the user so defaults
 	// don't override backend defaults).
-	q := url.Values{}
-	for flagName, qf := range rt.queryFlags {
-		if !cobraCmd.Flags().Changed(flagName) {
-			continue
-		}
-		switch qf.kind {
-		case kindInt:
-			q.Set(qf.apiName, strconv.Itoa(*qf.intVal))
-		case kindBool:
-			q.Set(qf.apiName, strconv.FormatBool(*qf.boolVal))
-		case kindStringSlice:
-			for _, v := range *qf.strSlc {
-				q.Add(qf.apiName, v)
-			}
-		default:
-			q.Set(qf.apiName, *qf.strVal)
-		}
-	}
+	q := buildQuery(cobraCmd, rt)
 
 	// Header parameters (spec `"in": "header"`). Emit only headers the user
 	// explicitly set so an omitted optional header stays absent. This is how a
 	// spec-declared header such as If-Match (optimistic-concurrency base
 	// version) reaches the wire from a flag — no per-endpoint transport code.
-	var headers map[string]string
-	for flagName, hf := range rt.headerFlags {
-		if !cobraCmd.Flags().Changed(flagName) {
-			continue
-		}
-		if headers == nil {
-			headers = map[string]string{}
-		}
-		headers[hf.apiName] = *hf.strVal
-	}
+	headers := buildHeaders(cobraCmd, rt)
 
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
@@ -102,6 +76,47 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, &req)
+}
+
+// buildQuery assembles the URL query from flags the user explicitly set, so
+// omitted flags don't override backend defaults.
+func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) url.Values {
+	q := url.Values{}
+	for flagName, qf := range rt.queryFlags {
+		if !cobraCmd.Flags().Changed(flagName) {
+			continue
+		}
+		switch qf.kind {
+		case kindInt:
+			q.Set(qf.apiName, strconv.Itoa(*qf.intVal))
+		case kindBool:
+			q.Set(qf.apiName, strconv.FormatBool(*qf.boolVal))
+		case kindStringSlice:
+			for _, v := range *qf.strSlc {
+				q.Add(qf.apiName, v)
+			}
+		default:
+			q.Set(qf.apiName, *qf.strVal)
+		}
+	}
+	return q
+}
+
+// buildHeaders assembles the per-request headers from spec-declared header
+// flags the user explicitly set. Returns nil when none were set, so an omitted
+// optional header stays absent from the wire.
+func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) map[string]string {
+	var headers map[string]string
+	for flagName, hf := range rt.headerFlags {
+		if !cobraCmd.Flags().Changed(flagName) {
+			continue
+		}
+		if headers == nil {
+			headers = map[string]string{}
+		}
+		headers[hf.apiName] = *hf.strVal
+	}
+	return headers
 }
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data
