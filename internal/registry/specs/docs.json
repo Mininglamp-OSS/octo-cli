@@ -375,7 +375,7 @@
       "post": {
         "operationId": "docs.comments.add",
         "summary": "Add a root comment (anchored) or a reply (needs reader)",
-        "description": "Root comments require anchorStart and anchorEnd (opaque base64 Yjs positions). A reply sets parentId and omits anchors. Anchors are complex/base64 values — pass them via the flags below or --data.",
+        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor: either the opaque base64 Yjs positions anchorStart/anchorEnd (from a live editor selection), or anchorText — the selected text — which the backend resolves against the document. When anchorText matches more than one place the request fails with 422 ambiguous_anchor; narrow it with blockPath (the block's child-index path, e.g. 0,2) and/or occurrence (1-based match index).",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -390,9 +390,11 @@
                 "properties": {
                   "body": { "type": "string", "description": "comment text" },
                   "parentId": { "type": "integer", "description": "thread root id to reply to (omit for a root comment)" },
-                  "anchorStart": { "type": "string", "description": "root only: base64-encoded Yjs start position" },
-                  "anchorEnd": { "type": "string", "description": "root only: base64-encoded Yjs end position" },
-                  "anchorText": { "type": "string", "description": "root only: the anchored text snippet (optional)" }
+                  "anchorStart": { "type": "string", "description": "root only: base64-encoded Yjs start position (from a live editor selection)" },
+                  "anchorEnd": { "type": "string", "description": "root only: base64-encoded Yjs end position (from a live editor selection)" },
+                  "anchorText": { "type": "string", "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)" },
+                  "blockPath": { "type": "string", "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)" },
+                  "occurrence": { "type": "integer", "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates" }
                 }
               }
             }

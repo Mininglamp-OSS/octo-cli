@@ -345,6 +345,73 @@ func TestDocsCommentsAdd_ReplyBody(t *testing.T) {
 	}
 }
 
+// TestDocsCommentsAdd_RootAnchorText checks a bot root comment carries the
+// anchorText resolution inputs {body, anchorText, blockPath, occurrence} in the
+// body, with occurrence promoted to a JSON number.
+func TestDocsCommentsAdd_RootAnchorText(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"id":7}`))
+	})
+	root.SetArgs([]string{
+		"docs", "comments", "add", "d1",
+		"--body", "please clarify",
+		"--anchorText", "the quoted span",
+		"--blockPath", "0,2",
+		"--occurrence", "2",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/bot/docs/d1/comments" {
+		t.Errorf("got %s %s, want POST /v1/bot/docs/d1/comments", gotMethod, gotPath)
+	}
+	if gotBody["body"] != "please clarify" {
+		t.Errorf("body = %v", gotBody["body"])
+	}
+	if gotBody["anchorText"] != "the quoted span" {
+		t.Errorf("anchorText = %v", gotBody["anchorText"])
+	}
+	if gotBody["blockPath"] != "0,2" {
+		t.Errorf("blockPath = %v", gotBody["blockPath"])
+	}
+	// Promoted integer flag must serialize as a JSON number.
+	if occ, ok := gotBody["occurrence"].(float64); !ok || occ != 2 {
+		t.Errorf("occurrence = %v (%T), want 2", gotBody["occurrence"], gotBody["occurrence"])
+	}
+	// No anchorStart/anchorEnd on the text-resolution path.
+	if _, ok := gotBody["anchorStart"]; ok {
+		t.Errorf("anchorStart should be absent, got %v", gotBody["anchorStart"])
+	}
+}
+
+// TestDocsCommentsAdd_RootLegacyAnchors checks the legacy explicit-anchor path
+// still carries {anchorStart, anchorEnd} unchanged.
+func TestDocsCommentsAdd_RootLegacyAnchors(t *testing.T) {
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"id":9}`))
+	})
+	root.SetArgs([]string{
+		"docs", "comments", "add", "d1",
+		"--body", "note",
+		"--anchorStart", "AA==",
+		"--anchorEnd", "Ag==",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotBody["anchorStart"] != "AA==" || gotBody["anchorEnd"] != "Ag==" {
+		t.Errorf("legacy anchors = start:%v end:%v", gotBody["anchorStart"], gotBody["anchorEnd"])
+	}
+}
+
 // TestDocsCommentsDelete_HardQuery checks the hard-delete query flag and the two
 // path args.
 func TestDocsCommentsDelete_HardQuery(t *testing.T) {

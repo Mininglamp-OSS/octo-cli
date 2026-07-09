@@ -129,10 +129,19 @@ Comments are anchored to a text range and live out-of-band from the body.
 # List thread roots + replies. --includeResolved 1 also returns resolved threads.
 octo-cli docs comments list <docId> [--includeResolved 1] [--cursor <id>] [--limit 50]
 
-# Root comment: requires both anchors (opaque base64 Yjs positions).
+# Root comment: needs an anchor. With a live editor selection, pass the opaque
+# base64 Yjs positions. Without one (a bot), pass --anchorText and the backend
+# resolves it to an anchor.
 octo-cli docs comments add <docId> \
   --body "Please clarify this" \
   --anchorStart <base64> --anchorEnd <base64> [--anchorText "the quoted span"]
+
+# Bot root comment (no live positions): anchor by text. Disambiguate a text that
+# appears more than once with --blockPath (comma-separated child-index path) and
+# --occurrence (1-based match index); an ambiguous match returns 422.
+octo-cli docs comments add <docId> \
+  --body "Please clarify this" --anchorText "the quoted span" \
+  [--blockPath "0,2"] [--occurrence 2]
 
 # Reply to a thread root: set --parentId, omit anchors.
 octo-cli docs comments add <docId> --body "Agreed" --parentId <rootId>
@@ -146,8 +155,12 @@ octo-cli docs comments delete <docId> <id> --hard 1 # hard delete (admin)
 ```
 
 Anchors are opaque base64-encoded Yjs positions produced by the editor — the
-backend never parses them. A bot that does not have live positions typically only
-posts replies (`--parentId`) or resolves threads.
+backend never parses base64 anchors. A bot that has no live editor selection can
+still start an anchored thread with `--anchorText`: the backend locates that text
+in the stored document and computes the anchor. When the text occurs more than
+once the request fails loudly with `422 ambiguous_anchor` (never a silent guess)
+— narrow it with `--blockPath` and/or `--occurrence`. Text that is not found
+returns `422 anchor_text_not_found`.
 
 ## 5. Versions (snapshots)
 
