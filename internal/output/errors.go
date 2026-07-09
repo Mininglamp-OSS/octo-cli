@@ -105,6 +105,9 @@ var backendErrorMapping = map[string]struct {
 	"UPSTREAM_UNAVAILABLE": {"network", "upstream dependency unavailable; retry later"},
 	"INTERNAL_ERROR":       {"api_error", "internal server error; retry or report"},
 	"PAYLOAD_TOO_LARGE":    {"validation", "request body exceeds 1MB limit"},
+	"CONFLICT":             {"validation", "resource state conflicts; re-read and retry"},
+	"PRECONDITION_FAILED":  {"validation", "base version stale; re-read to get the current base version, then retry"},
+	"UNPROCESSABLE_ENTITY": {"validation", "request understood but semantically invalid; check field shapes"},
 }
 
 // ParseBackendError converts an HTTP response body (and status) to an *ExitError.
@@ -192,8 +195,14 @@ func codeFromStatus(status int) string {
 		return "FORBIDDEN"
 	case 404:
 		return "NOT_FOUND"
+	case 409:
+		return "CONFLICT"
+	case 412:
+		return "PRECONDITION_FAILED"
 	case 413:
 		return "PAYLOAD_TOO_LARGE"
+	case 422:
+		return "UNPROCESSABLE_ENTITY"
 	case 429:
 		return "RATE_LIMITED"
 	case 500:

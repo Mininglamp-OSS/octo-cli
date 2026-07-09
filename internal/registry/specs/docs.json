@@ -243,6 +243,153 @@
         }
       }
     },
+    "/v1/bot/docs/{docId}/sheet": {
+      "get": {
+        "operationId": "docs.sheet.get",
+        "summary": "Read a spreadsheet's live cells + dims + base version (needs reader)",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s}), its column-width / row-height overrides (sheetDims), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read of a grid over the 1MB cap returns 413 sheet_too_large; pass --limit (and follow nextCursor via --cursor) to read it in pages instead. In paged mode each page is bounded by both --limit and the byte cap, sheetDims is returned on the first page only, and the response carries hasMore + nextCursor. A --cursor whose snapshot moved returns 409 sheet_changed (restart from the first page); a bad --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "max cells per page; opts into paged reads. Bounded by the server byte cap regardless. Omit for a whole-sheet read."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "opaque nextCursor from the previous page; also opts into paged reads. A cursor whose snapshot moved returns 409 sheet_changed."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live cells + dims + base version (paged when --limit/--cursor is set)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "sheetCells": {
+                      "type": "object",
+                      "description": "flat cell map keyed `sheetId!row:col`; each value is {v?,f?,s?}. A page slice in paged mode."
+                    },
+                    "sheetDims": {
+                      "type": "object",
+                      "description": "column-width / row-height overrides keyed c<idx>/r<idx>. Returned on the first page only in paged mode."
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "opaque base64 base-version token; pass to `docs sheet edit --base-version`"
+                    },
+                    "hasMore": {
+                      "type": "boolean",
+                      "description": "paged mode: more cells remain after this page"
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "description": "paged mode: opaque cursor for the next page (null when hasMore is false); pass back via --cursor"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.sheet.edit",
+        "summary": "Apply a batch cell edit to a spreadsheet (needs writer)",
+        "description": "Applies a batch of cell set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell), so pass it as JSON through --data. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version or malformed shape → 400 invalid_body, a cell violating the {v,f,s} contract or key shape → 422 sheet_snapshot_invalid.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header for optimistic concurrency; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "cells"
+                ],
+                "properties": {
+                  "cells": {
+                    "type": "object",
+                    "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?} to set the cell, or null to delete it. At least one of v/f/s must be present on a set. Pass via --data."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edit applied; carries the new base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "encoded size of the sheet after the edit"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "new base-version token for the next edit"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "sequence of the auto safety snapshot taken before the edit"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/members": {
       "get": {
         "operationId": "docs.members.list",

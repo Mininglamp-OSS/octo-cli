@@ -1,7 +1,7 @@
 ---
 name: octo-docs
 version: 0.1.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheet cells (with paged reads for large sheets), members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -106,7 +106,58 @@ attachment that is not this doc's (`attachment_not_found`), or content the
 schema rejects (`schema_incompatible`). Whiteboard and board bodies remain
 un-editable through this surface.
 
-## 3. Members & sharing
+## 3. Spreadsheet cells (read + batch edit)
+
+Available for `doc_type: sheet` only. A spreadsheet stores a flat cell map on the
+Y.Doc, keyed `sheetId!row:col` (e.g. `default!0:0`), with values `{v,f,s}` —
+`v` a string/number/boolean/null, `f` an optional formula, `s` an opaque resolved
+style object. Same read-token-then-guarded-write discipline as the body surface.
+
+```bash
+# Read the LIVE cells + dims + baseVersion (reader). Response:
+#   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px }, baseVersion }
+octo-cli docs sheet get <docId>
+
+# Batch-edit cells (writer). --base-version is REQUIRED and is sent as the
+# If-Match header; the cells batch goes through --data as a JSON object.
+# A cell value of null DELETES that cell.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+```
+
+### Reading a large sheet in pages
+
+A whole-sheet `docs sheet get` of a grid over the server's ~1MB read cap returns
+`413 sheet_too_large`. Pass `--limit <n>` to read it in pages instead: each
+response carries `hasMore` and an opaque `nextCursor`; feed that back via
+`--cursor` until `hasMore` is false. `sheetDims` comes back on the first page
+only. Each page is bounded by both `--limit` and the byte cap, so no page
+exceeds ~1MB regardless of `--limit`.
+
+```bash
+cursor=""
+while : ; do
+  page=$(octo-cli docs sheet get d_123 --limit 1000 ${cursor:+--cursor "$cursor"} --output json)
+  echo "$page" | jq '.data.sheetCells'          # process this page
+  more=$(echo "$page" | jq -r '.data.hasMore')
+  [ "$more" = "true" ] || break
+  cursor=$(echo "$page" | jq -r '.data.nextCursor')
+done
+```
+
+**Concurrency / errors.** The base version is optimistic-concurrency: if the
+sheet changed since your `docs sheet get`, an edit is rejected with
+`412 base_version_stale` — re-read for a fresh token. During a paged read, if the
+sheet is written between pages your `--cursor` is rejected with
+`409 sheet_changed` (restart from the first page for a consistent snapshot).
+Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
+`413 too_many_cells` / `413 cell_too_large` (write size caps),
+`400 invalid_body` (missing base version or malformed shape),
+`400 invalid_limit` / `400 invalid_cursor` (bad pagination params), and
+`422 sheet_snapshot_invalid` (a cell violates the `{v,f,s}` contract or the
+`sheetId!row:col` key shape).
+
+## 4. Members & sharing
 
 ```bash
 octo-cli docs members list   <docId>                        # admin
@@ -121,7 +172,7 @@ octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 role if already present. The target uid must be a real Octo user — a miss returns
 `404 user_not_found` and writes no ghost member.
 
-## 4. Comments
+## 5. Comments
 
 Comments are anchored to a text range and live out-of-band from the body.
 
@@ -162,7 +213,7 @@ once the request fails loudly with `422 ambiguous_anchor` (never a silent guess)
 — narrow it with `--blockPath` and/or `--occurrence`. Text that is not found
 returns `422 anchor_text_not_found`.
 
-## 5. Versions (snapshots)
+## 6. Versions (snapshots)
 
 ```bash
 octo-cli docs versions list    <docId> [--kind manual|auto|all] [--cursor <id>] [--limit <n>]
@@ -179,7 +230,7 @@ version rather than the live document, and is not writable. To read the **live**
 body instead, use `docs content get` (§2). `restore` is non-destructive and
 records a safety snapshot first, so it is itself undoable.
 
-## 6. Attachments (metadata only)
+## 7. Attachments (metadata only)
 
 The docs backend is **presign-only**: the CLI never streams the binary. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT

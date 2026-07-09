@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 71 operations
+octo-cli is **metadata-driven**. The entire command tree — 73 operations
 across 8 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
@@ -38,7 +38,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 24  | Documents — lifecycle, body content, members, comments, versions, attachments |
+| `docs`    | 26  | Documents & spreadsheets — lifecycle, body content, sheet cells (paged read), members, comments, versions, attachments |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
@@ -124,6 +124,12 @@ octo-cli docs get doc-123
 octo-cli docs content get doc-123          # returns the body + base version token
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
+
+# Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
+octo-cli docs sheet get sheet-9                      # whole sheet + base version token
+octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follow --cursor <nextCursor>
+octo-cli docs sheet edit sheet-9 --base-version "<token>" \
+  --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains

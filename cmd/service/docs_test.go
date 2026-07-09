@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -34,6 +35,7 @@ func TestDocs_TreeShape(t *testing.T) {
 
 	groups := map[string][]string{
 		"content":     {"get", "edit"},
+		"sheet":       {"get", "edit"},
 		"members":     {"list", "set", "remove"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
@@ -69,6 +71,8 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
 		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
 		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
+		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
 		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
 		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
 		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
@@ -579,6 +583,123 @@ func TestDocsContentEdit_RequiresBaseVersion(t *testing.T) {
 		called = true
 	})
 	root.SetArgs([]string{"docs", "content", "edit", "d1", "--data", `{"ops":[]}`})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error when --base-version is omitted")
+	}
+	if called {
+		t.Error("server must not be called when required --base-version is missing")
+	}
+}
+
+// TestDocsSheetGet_WholeSheet checks docs.sheet.get hits
+// GET /v1/bot/docs/{docId}/sheet (reader), sends no body and no pagination
+// query when neither flag is set, and surfaces {sheetCells, sheetDims,
+// baseVersion} through the success envelope.
+func TestDocsSheetGet_WholeSheet(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{"default!0:0":{"v":"A1"}},"sheetDims":{"c0":120},"baseVersion":"BV_ABC=="}`))
+	})
+	root.SetArgs([]string{"docs", "sheet", "get", "d1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/sheet" {
+		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	}
+	// No pagination flags set -> no limit/cursor on the wire (whole-sheet read).
+	if strings.Contains(gotQuery, "limit") || strings.Contains(gotQuery, "cursor") {
+		t.Errorf("query = %q, want no limit/cursor for a whole-sheet read", gotQuery)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			BaseVersion string `json:"baseVersion"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.BaseVersion != "BV_ABC==" {
+		t.Errorf("expected baseVersion BV_ABC== in envelope, got %+v", env)
+	}
+}
+
+// TestDocsSheetGet_Paginated checks that --limit and --cursor reach the wire as
+// query parameters (opting into a paged read), so a caller can page an oversized
+// sheet that a whole-sheet read would reject with 413.
+func TestDocsSheetGet_Paginated(t *testing.T) {
+	var gotQuery url.Values
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{},"baseVersion":"BV==","hasMore":true,"nextCursor":"CURS_NEXT"}`))
+	})
+	root.SetArgs([]string{"docs", "sheet", "get", "d1", "--limit", "500", "--cursor", "CURS_PREV"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotQuery.Get("limit") != "500" {
+		t.Errorf("limit = %q, want 500", gotQuery.Get("limit"))
+	}
+	if gotQuery.Get("cursor") != "CURS_PREV" {
+		t.Errorf("cursor = %q, want CURS_PREV", gotQuery.Get("cursor"))
+	}
+}
+
+// TestDocsSheetEdit_SendsCellsBatchAndIfMatch checks docs.sheet.edit hits
+// PATCH /v1/bot/docs/{docId}/sheet, carries the cells batch (via --data) as a
+// JSON object in the body, and sends the base-version token as the If-Match
+// header (the --base-version flag wired to If-Match, not a body/query field).
+func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":64,"baseVersion":"BV_NEXT==","newDocVersionSeq":4}`))
+	})
+	cells := `{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}`
+	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--base-version", "BV_ABC==", "--data", cells})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/sheet" {
+		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
+	}
+	cellsMap, ok := gotBody["cells"].(map[string]any)
+	if !ok || len(cellsMap) != 2 {
+		t.Fatalf("cells = %v, want a 2-entry object", gotBody["cells"])
+	}
+	set0, ok := cellsMap["default!0:0"].(map[string]any)
+	if !ok || set0["v"] != "hi" {
+		t.Errorf("cells[default!0:0] = %v, want {v:hi}", cellsMap["default!0:0"])
+	}
+	if v, present := cellsMap["default!1:0"]; !present || v != nil {
+		t.Errorf("cells[default!1:0] = %v, want an explicit null (delete)", cellsMap["default!1:0"])
+	}
+	// The base version travels in the header, not the JSON body.
+	if _, present := gotBody["baseVersion"]; present {
+		t.Errorf("baseVersion must not be duplicated into the JSON body; got %v", gotBody["baseVersion"])
+	}
+}
+
+// TestDocsSheetEdit_RequiresBaseVersion confirms --base-version is required:
+// the command fails before any request when the base-version token is missing,
+// mirroring the backend's mandatory optimistic-concurrency guard.
+func TestDocsSheetEdit_RequiresBaseVersion(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--data", `{"cells":{}}`})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error when --base-version is omitted")
 	}
