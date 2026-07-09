@@ -58,6 +58,12 @@ type Request struct {
 	// BinaryResponse asks the client to treat 3xx/non-JSON responses as
 	// structured metadata envelopes rather than parsing JSON. See file.download.
 	BinaryResponse bool
+	// SuppressSpaceHeader omits the X-Space-Id header even when the active
+	// credential carries a SpaceID. It is set for operations whose spec declares
+	// x-octo-space-header:false (e.g. the docs bot mount resolves the space
+	// server-side). The default (false) preserves the historical behaviour of
+	// sending X-Space-Id whenever the credential has a space.
+	SuppressSpaceHeader bool
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
@@ -134,14 +140,14 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	}
 
 	if c.options.DryRun {
-		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes)
+		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes, req.SuppressSpaceHeader)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse)
+	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.SuppressSpaceHeader)
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -165,7 +171,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp)
+		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, suppressSpaceHeader)
 		if err == nil {
 			return body, nil
 		}
@@ -179,7 +185,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -193,7 +199,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	if c.cred != nil && c.cred.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.cred.Token)
 	}
-	if c.cred != nil && c.cred.SpaceID != "" {
+	if c.cred != nil && c.cred.SpaceID != "" && !suppressSpaceHeader {
 		httpReq.Header.Set("X-Space-Id", c.cred.SpaceID)
 	}
 	if body != nil && contentType != "" {
@@ -276,7 +282,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 
 // renderDryRun writes a human-readable request description and returns a
 // synthetic success body containing the same payload for envelope rendering.
-func (c *Client) renderDryRun(method, urlStr string, headers map[string]string, body []byte) ([]byte, error) {
+func (c *Client) renderDryRun(method, urlStr string, headers map[string]string, body []byte, suppressSpaceHeader bool) ([]byte, error) {
 	var bodyField any
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &bodyField); err != nil {
@@ -287,7 +293,7 @@ func (c *Client) renderDryRun(method, urlStr string, headers map[string]string, 
 	if c.cred != nil && c.cred.Token != "" {
 		hdr["Authorization"] = "Bearer " + credential.MaskToken(c.cred.Token)
 	}
-	if c.cred != nil && c.cred.SpaceID != "" {
+	if c.cred != nil && c.cred.SpaceID != "" && !suppressSpaceHeader {
 		hdr["X-Space-Id"] = c.cred.SpaceID
 	}
 	for k, v := range headers {

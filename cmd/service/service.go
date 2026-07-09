@@ -113,9 +113,10 @@ func rejectUnknownSubcommand(cmd *cobra.Command, args []string) error {
 // Flag registration is delegated to flags.go; execution to run.go.
 func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb string) *cobra.Command {
 	rt := &operationRuntime{
-		detail:     d,
-		queryFlags: map[string]*queryFlag{},
-		bodyFlags:  map[string]*bodyFlag{},
+		detail:      d,
+		queryFlags:  map[string]*queryFlag{},
+		headerFlags: map[string]*headerFlag{},
+		bodyFlags:   map[string]*bodyFlag{},
 	}
 
 	rt.pathParams = extractPathParams(d.Path)
@@ -133,6 +134,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	}
 
 	registerQueryFlags(cmd, rt, d)
+	registerHeaderFlags(cmd, rt, d)
 	registerBodyFlags(cmd, rt, d)
 
 	if d.Pagination != nil {

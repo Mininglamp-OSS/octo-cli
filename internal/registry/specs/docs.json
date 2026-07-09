@@ -1,0 +1,702 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Docs Bot API",
+    "version": "1.0.0",
+    "description": "Bot-facing document metadata surface under /v1/bot/docs: doc lifecycle, members, sharing, comments, versions, and attachment metadata. Live document body/outline editing is a Yjs websocket path and is NOT part of this REST surface."
+  },
+  "x-octo-service": "docs",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/bot/docs": {
+      "post": {
+        "operationId": "docs.create",
+        "summary": "Create an (empty) document; the caller becomes owner/admin",
+        "description": "Create takes no body content — a new doc starts empty and its body is edited over the Yjs websocket, not REST.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string", "description": "initial title (optional; defaults to empty)" },
+                  "folderId": { "type": "string", "description": "target folder id (optional; defaults to the space default folder)" },
+                  "docType": { "type": "string", "description": "document type (optional; defaults to 'doc')" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created document metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "documentName": { "type": "string" },
+                    "title": { "type": "string" },
+                    "spaceId": { "type": "string" },
+                    "folderId": { "type": "string" },
+                    "ownerId": { "type": "string" },
+                    "role": { "type": "string" },
+                    "createdAt": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "docs.list",
+        "summary": "List documents the bot owns or is a member of (page-based)",
+        "description": "Page-based listing scoped to the bot's server-resolved space. Response is {total, items}; there is no cursor, so --page-all does not apply — walk pages with --page/--pageSize.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "folderId", "in": "query", "schema": { "type": "string" }, "description": "filter to a single folder" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number" },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 }, "description": "items per page (1-100, default 20)" },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["updatedAt:desc", "updatedAt:asc"], "default": "updatedAt:desc" }, "description": "sort order by last update" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": { "type": "integer" },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "docId": { "type": "string" },
+                          "title": { "type": "string" },
+                          "ownerId": { "type": "string" },
+                          "docType": { "type": "string" },
+                          "role": { "type": "string" },
+                          "updatedAt": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}": {
+      "get": {
+        "operationId": "docs.get",
+        "summary": "Fetch one document's metadata (needs reader)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "documentName": { "type": "string" },
+                    "title": { "type": "string" },
+                    "ownerId": { "type": "string" },
+                    "spaceId": { "type": "string" },
+                    "folderId": { "type": "string" },
+                    "docType": { "type": "string" },
+                    "role": { "type": "string" },
+                    "createdAt": { "type": "string" },
+                    "updatedAt": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.rename",
+        "summary": "Rename a document (needs admin)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title"],
+                "properties": {
+                  "title": { "type": "string", "description": "new non-empty title" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Renamed" } }
+      },
+      "delete": {
+        "operationId": "docs.delete",
+        "summary": "Soft-delete a document (needs admin)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/content": {
+      "get": {
+        "operationId": "docs.content.get",
+        "summary": "Read a document's live body + its base version (needs reader)",
+        "description": "Reads the LIVE ProseMirror body of a doc_type 'doc' plus the base-version token that pins the read. Pass that token to `docs content edit` as --base-version so the optimistic-concurrency guard can prove the body did not change between read and write. board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live body + base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "doc": { "type": "object", "description": "the live body as ProseMirror document JSON" },
+                    "schemaVersion": { "type": "integer", "description": "ProseMirror schema version the body was decoded with" },
+                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs content edit --base-version`" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.content.edit",
+        "summary": "Apply an incremental block-op edit to a document body (needs writer)",
+        "description": "Applies a batch of incremental block ops to a doc_type 'doc' body under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs content get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live body moved since that read. The ops batch is a structured array, so pass it as JSON through --data. Only doc_type 'doc' is accepted (board / whiteboard return 409 unsupported_doc_type). Gates: op count over the max → 413 too_many_ops, a single op's content too large → 413 op_content_too_large, block-path too deep → 400 path_too_deep, missing base version or malformed shape → 400 invalid_body, bad anchor / invalid ops → 422.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from 'docs content get' (sent as the If-Match header for optimistic concurrency; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["ops"],
+                "properties": {
+                  "ops": {
+                    "type": "array",
+                    "description": "ordered batch of incremental block edit ops. Each op is one of: insert {\"type\":\"insert\",\"at\":{\"path\":[i,...],\"position\":\"before|after|inside_start|inside_end\"},\"content\":[<ProseMirror block nodes>],\"expect\":{\"type\":\"<nodeType>\"}?}; replace {\"type\":\"replace\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"content\":[...],\"expect\":?}; delete {\"type\":\"delete\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"expect\":?}. `path` is child indices from the doc root; range endpoints must share a parent. Pass via --data.",
+                    "items": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edit applied; carries the new base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "bytes": { "type": "integer", "description": "encoded size of the doc after the edit" },
+                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
+                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/members": {
+      "get": {
+        "operationId": "docs.members.list",
+        "summary": "List a document's members (needs admin)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "uid": { "type": "string" },
+                          "role": { "type": "string" },
+                          "source": { "type": "string" },
+                          "grantedBy": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "docs.members.set",
+        "summary": "Add or change a member's role by uid (upsert; needs admin)",
+        "description": "PUT-upsert: adds the member if absent or changes the role if present. The target uid must be a real Octo user or the backend returns 404 user_not_found.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["uid", "role"],
+                "properties": {
+                  "uid": { "type": "string", "description": "target user uid" },
+                  "role": { "type": "string", "enum": ["reader", "writer", "admin"], "description": "role to grant" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Upserted" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/members/{uid}": {
+      "delete": {
+        "operationId": "docs.members.remove",
+        "summary": "Remove a member (needs admin; the owner cannot be removed)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Removed" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/forward-grant": {
+      "post": {
+        "operationId": "docs.forward-grant",
+        "summary": "Grant (never downgrade) a single uid reader/writer access (needs admin)",
+        "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader or writer is grantable here; admin is not forward-grantable.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["uid", "role"],
+                "properties": {
+                  "uid": { "type": "string", "description": "target user uid" },
+                  "role": { "type": "string", "enum": ["reader", "writer"], "description": "role to grant (grant-only, never downgrades)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Grant result (final role + changed flag)" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments": {
+      "get": {
+        "operationId": "docs.comments.list",
+        "summary": "List comment thread roots with their replies (needs reader)",
+        "description": "Returns {items, nextCursor}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "includeResolved", "in": "query", "schema": { "type": "string" }, "description": "set to 1 to include resolved threads" },
+          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 100 }, "description": "page size (1-100, default 50)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of comment threads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "nextCursor": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "docs.comments.add",
+        "summary": "Add a root comment (anchored) or a reply (needs reader)",
+        "description": "Root comments require anchorStart and anchorEnd (opaque base64 Yjs positions). A reply sets parentId and omits anchors. Anchors are complex/base64 values — pass them via the flags below or --data.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["body"],
+                "properties": {
+                  "body": { "type": "string", "description": "comment text" },
+                  "parentId": { "type": "integer", "description": "thread root id to reply to (omit for a root comment)" },
+                  "anchorStart": { "type": "string", "description": "root only: base64-encoded Yjs start position" },
+                  "anchorEnd": { "type": "string", "description": "root only: base64-encoded Yjs end position" },
+                  "anchorText": { "type": "string", "description": "root only: the anchored text snippet (optional)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created (returns the new comment id)" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments/{id}": {
+      "patch": {
+        "operationId": "docs.comments.edit",
+        "summary": "Edit a comment body (author) or resolve/reopen a thread (writer)",
+        "description": "Pass --body to edit your own comment's text, or --resolved to resolve/reopen a thread root. Provide exactly one.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": { "type": "string", "description": "new comment text (author only)" },
+                  "resolved": { "type": "boolean", "description": "resolve (true) or reopen (false) a thread root (writer only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated" } }
+      },
+      "delete": {
+        "operationId": "docs.comments.delete",
+        "summary": "Soft-delete your own comment, or hard-delete as admin",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "hard", "in": "query", "schema": { "type": "string" }, "description": "set to 1 for an admin hard delete (default is a soft delete by the author)" }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/versions": {
+      "get": {
+        "operationId": "docs.versions.list",
+        "summary": "List saved versions/snapshots (needs reader)",
+        "description": "Returns {items, nextCursor, counts}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "page size" },
+          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["manual", "auto", "all"] }, "description": "filter by snapshot kind" },
+          { "name": "includeAuto", "in": "query", "schema": { "type": "string" }, "description": "back-compat alias honoured only when kind is absent; set to 1 to include auto snapshots" }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "nextCursor": { "type": "integer" },
+                    "counts": { "type": "object" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "docs.versions.create",
+        "summary": "Take a named snapshot of the live document (needs writer)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": { "type": "string", "description": "human label for the snapshot (optional)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created (returns docVersionSeq)" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/versions/{versionId}/state": {
+      "get": {
+        "operationId": "docs.versions.state",
+        "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
+        "description": "Returns the version decoded to ProseMirror JSON ({doc, sheetCells, sheetDims, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decoded snapshot content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "doc": { "type": "object" },
+                    "sheetCells": { "type": "object" },
+                    "sheetDims": { "type": "object" },
+                    "schemaVersion": { "type": "integer" },
+                    "docVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/versions/{versionId}": {
+      "patch": {
+        "operationId": "docs.versions.rename",
+        "summary": "Rename a saved version (needs writer)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["label"],
+                "properties": {
+                  "label": { "type": "string", "description": "new non-empty label" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Renamed" } }
+      },
+      "delete": {
+        "operationId": "docs.versions.delete",
+        "summary": "Delete a saved version (needs admin)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/versions/{versionId}/restore": {
+      "post": {
+        "operationId": "docs.versions.restore",
+        "summary": "Restore the document to a saved version (needs admin)",
+        "description": "Non-destructive forward reconcile of the target version into the live state. A safety snapshot of the pre-restore state is recorded first, so a restore is itself undoable.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Restored (returns restoredFrom + newDocVersionSeq)" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/presign": {
+      "post": {
+        "operationId": "docs.attachments.presign",
+        "summary": "Register an attachment and get a presigned upload URL (needs writer)",
+        "description": "Metadata-only. Returns a presigned PUT URL + headers; the CLI does not upload the bytes. After presign, PUT the file directly to uploadUrl with the returned headers (see the octo-docs skill).",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["fileName", "mime", "sizeBytes"],
+                "properties": {
+                  "fileName": { "type": "string", "description": "original file name" },
+                  "mime": { "type": "string", "description": "MIME type (must pass the backend allow/deny list)" },
+                  "sizeBytes": { "type": "integer", "description": "file size in bytes (must be within the tier cap)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presigned upload target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attachId": { "type": "string" },
+                    "objectKey": { "type": "string" },
+                    "bucket": { "type": "string" },
+                    "mime": { "type": "string" },
+                    "sizeBytes": { "type": "integer" },
+                    "uploadUrl": { "type": "string" },
+                    "headers": { "type": "object" },
+                    "expiresInSec": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/{attachId}": {
+      "get": {
+        "operationId": "docs.attachments.get",
+        "summary": "Get a freshly signed, time-limited download URL for one attachment (needs reader)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "attachId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signed download URL + metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attachId": { "type": "string" },
+                    "objectKey": { "type": "string" },
+                    "mime": { "type": "string" },
+                    "sizeBytes": { "type": "integer" },
+                    "fileName": { "type": "string" },
+                    "url": { "type": "string" },
+                    "expiresInSec": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/resolve": {
+      "post": {
+        "operationId": "docs.attachments.resolve",
+        "summary": "Batch-resolve attachIds to freshly signed download URLs (needs reader)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["attachIds"],
+                "properties": {
+                  "attachIds": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "attachment ids to resolve (non-empty; capped by the backend batch limit)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed URLs + not-found ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "type": "object" } },
+                    "notFound": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

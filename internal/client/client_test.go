@@ -47,6 +47,27 @@ func TestDo_SetsAuthAndSpaceHeaders(t *testing.T) {
 	}
 }
 
+func TestDo_SuppressSpaceHeader(t *testing.T) {
+	var sawSpaceHeader bool
+	var gotSpace string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawSpaceHeader = r.Header["X-Space-Id"]
+		gotSpace = r.Header.Get("X-Space-Id")
+		w.WriteHeader(200)
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	// Credential carries a space, but the request opts out of the header.
+	c := newTestClient(srv)
+	if _, err := c.Do(context.Background(), &Request{Method: "GET", Path: "/test", SuppressSpaceHeader: true}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if sawSpaceHeader {
+		t.Errorf("X-Space-Id must be omitted when SuppressSpaceHeader is set; got %q", gotSpace)
+	}
+}
+
 func TestDo_SetsContentTypeForBody(t *testing.T) {
 	var gotCT string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

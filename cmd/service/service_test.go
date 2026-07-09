@@ -51,6 +51,35 @@ func rootWithService(t *testing.T, handler http.HandlerFunc) (*cobra.Command, *c
 	return root, tf, srv
 }
 
+// rootWithServiceSpaced is rootWithService with a credential that carries a
+// SpaceID, so tests can assert whether X-Space-Id reaches the wire. It is the
+// realistic shape for a platform-scoped bot (space supplied via --space /
+// OCTO_SPACE_ID), which is exactly the case the per-operation space-header
+// gating governs.
+func rootWithServiceSpaced(t *testing.T, spaceID string, handler http.HandlerFunc) (*cobra.Command, *cmdutil.TestFactory, *httptest.Server) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL: srv.URL,
+		BotToken:   "app_test",
+		Format:     "json",
+	}
+	tf.SetConfig(cfg)
+	cred := &credential.BotCredential{Token: "app_test", SpaceID: spaceID, Source: "test"}
+	tf.SetCredential(cred)
+	cli := client.New(cfg, cred, client.Options{ErrOut: io.Discard})
+	tf.SetClient(cli)
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+
+	return root, tf, srv
+}
+
 // --- command-tree assertions ---
 
 func TestRegisterServiceCommands_TreeShape(t *testing.T) {

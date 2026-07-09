@@ -7,7 +7,7 @@
   },
   "x-octo-service": "message",
   "x-octo-base-url": "OCTO_API_BASE_URL",
-  "x-octo-space-header": false,
+  "x-octo-space-header": true,
   "paths": {
     "/v1/bot/sendMessage": {
       "post": {
