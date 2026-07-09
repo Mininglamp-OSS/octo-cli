@@ -12,8 +12,8 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 47 operations
-across 7 domains — is auto-registered at startup from OpenAPI 3.x specs
+octo-cli is **metadata-driven**. The entire command tree — 71 operations
+across 8 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
 
@@ -38,6 +38,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
+| `docs`    | 24  | Documents — lifecycle, body content, members, comments, versions, attachments |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
@@ -115,6 +116,14 @@ octo-cli thread create --chat-id chat-1 --name "design review"
 # Files
 octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
+
+# Docs — create/list, then read and incrementally edit the live body.
+octo-cli docs create --title "Design notes"
+octo-cli docs list --sort updatedAt:desc
+octo-cli docs get doc-123
+octo-cli docs content get doc-123          # returns the body + base version token
+octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
+octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains
@@ -223,6 +232,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
+- [`octo-docs`](./skills/octo-docs/SKILL.md) — documents: lifecycle, live body
+  editing, members/sharing, comments, versions, and attachment metadata.
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 
