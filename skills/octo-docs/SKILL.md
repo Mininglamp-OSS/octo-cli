@@ -78,7 +78,7 @@ Range endpoints must share a parent. Each op may carry `"expect":{"type":"<nodeT
 
 ```bash
 # 1. Read the current body and capture the base version.
-BV=$(octo-cli docs content get d_123 --output json | jq -r '.data.baseVersion')
+BV=$(octo-cli docs content get d_123 --format json | jq -r '.data.baseVersion')
 
 # 2. Append a paragraph at the end of the doc, guarded by that base version.
 octo-cli docs content edit d_123 --base-version "$BV" --data '{
@@ -137,7 +137,7 @@ exceeds ~1MB regardless of `--limit`.
 ```bash
 cursor=""
 while : ; do
-  page=$(octo-cli docs sheet get d_123 --limit 1000 ${cursor:+--cursor "$cursor"} --output json)
+  page=$(octo-cli docs sheet get d_123 --limit 1000 ${cursor:+--cursor "$cursor"} --format json)
   echo "$page" | jq '.data.sheetCells'          # process this page
   more=$(echo "$page" | jq -r '.data.hasMore')
   [ "$more" = "true" ] || break
