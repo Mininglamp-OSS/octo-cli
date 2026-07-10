@@ -247,6 +247,38 @@ func TestQueryParamFlagAliasAvoidsGlobalCollision(t *testing.T) {
 	}
 }
 
+// TestBinaryBodyGatingDistinguishesInlineFromRedirect pins the -o footgun fix:
+// both docs.scene.export and file.download are x-octo-binary-response, but only
+// docs.scene.export delivers a body inline on a 2xx success, so only it should
+// carry BinaryBody (the gate for the --output/-o flag). file.download is a
+// 302-only redirect with no consumable body — offering -o there silently writes
+// nothing.
+func TestBinaryBodyGatingDistinguishesInlineFromRedirect(t *testing.T) {
+	r := MustNew()
+
+	export, ok := r.GetOperation("docs.scene.export")
+	if !ok {
+		t.Fatal("docs.scene.export not found")
+	}
+	if !export.BinaryResponse {
+		t.Error("docs.scene.export: expected BinaryResponse=true")
+	}
+	if !export.BinaryBody {
+		t.Error("docs.scene.export: expected BinaryBody=true (has a 2xx image body, -o must write it)")
+	}
+
+	dl, ok := r.GetOperation("file.download")
+	if !ok {
+		t.Fatal("file.download not found")
+	}
+	if !dl.BinaryResponse {
+		t.Error("file.download: expected BinaryResponse=true (client still surfaces the 302 Location)")
+	}
+	if dl.BinaryBody {
+		t.Error("file.download: expected BinaryBody=false (302-only redirect, -o would silently no-op)")
+	}
+}
+
 func TestResolvesComponentRef(t *testing.T) {
 	// matter.get's 200 response is a $ref to MatterDetail — the resolver
 	// should inline the properties so the schema command can describe it.

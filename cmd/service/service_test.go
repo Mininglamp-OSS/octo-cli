@@ -551,7 +551,59 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 	}
 }
 
-// TestParentCommand_RejectsUnknownSubcommand guards against cobra's default
+// TestFileDownload_NoOutputFlag pins the -o footgun fix: file.download is a
+// 302-only redirect (x-octo-binary-response for Location surfacing, but no
+// consumable body), so the leaf must NOT register --output/-o. Registering it
+// would accept the flag and silently write nothing.
+func TestFileDownload_NoOutputFlag(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	download := findCmd(findCmd(root, "file"), "download")
+	if download == nil {
+		t.Fatal("file download command not registered")
+	}
+	if download.Flags().Lookup("output") != nil {
+		t.Error("file download: --output must NOT be registered (302-only redirect, -o would silently no-op)")
+	}
+	if download.Flags().ShorthandLookup("o") != nil {
+		t.Error("file download: -o must NOT be registered (302-only redirect, -o would silently no-op)")
+	}
+}
+
+// TestDocsSceneExport_OutputFlagWritesFileToDisk confirms the fix does not harm
+// the W3 export main use case: docs.scene.export delivers a 2xx image body, so
+// it keeps --output/-o and the bytes land on disk.
+func TestDocsSceneExport_OutputFlagWritesFileToDisk(t *testing.T) {
+	wantBytes := []byte("\x89PNG\r\n\x1a\nfake-board")
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(wantBytes)
+	})
+
+	export := findCmd(findCmd(root, "docs"), "scene")
+	export = findCmd(export, "export")
+	if export == nil {
+		t.Fatal("docs scene export command not registered")
+	}
+	if export.Flags().Lookup("output") == nil || export.Flags().ShorthandLookup("o") == nil {
+		t.Fatal("docs scene export: expected --output/-o flag (2xx binary body op)")
+	}
+
+	dst := filepath.Join(t.TempDir(), "board.png")
+	root.SetArgs([]string{"docs", "scene", "export", "abc", "--image-format", "png", "-o", dst})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+	if !bytes.Equal(got, wantBytes) {
+		t.Errorf("written bytes = %q, want %q", got, wantBytes)
+	}
+}
+
 // fallback: a parent command with no RunE silently prints help and exits 0
 // when given an unknown token, which can let automation treat a removed or
 // mistyped command as a success. Regression test for the removal of
