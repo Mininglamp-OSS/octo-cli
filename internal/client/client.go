@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -232,6 +233,12 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
+	// The whole response body is buffered here. Every downstream branch needs
+	// it fully in memory anyway — JSON parsing, backend-error parsing, and the
+	// binary describe envelope (which reports size = len(body)) all consume the
+	// complete payload. Board PNG/SVG exports are bounded and small, so a size
+	// cap / streaming-to-temp path would add complexity without a real payoff
+	// today; deferred until an operation returns genuinely large bodies.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
@@ -274,8 +281,14 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 			// (docs.scene.export --output). A write failure is a hard, non-
 			// retryable error — the request succeeded, so retrying would only
 			// re-download; the problem is local (bad path/permissions).
+			//
+			// The write is atomic: bytes go to a temp file in the destination
+			// directory and are renamed into place only after a fully successful
+			// write. A mid-write failure (disk full, I/O error, cancellation)
+			// therefore never leaves a truncated/empty file, and never clobbers
+			// an existing good copy at outputPath — the rename is all-or-nothing.
 			if outputPath != "" {
-				if err := os.WriteFile(outputPath, respBody, 0o644); err != nil {
+				if err := writeFileAtomic(outputPath, respBody, 0o644); err != nil {
 					return nil, output.ErrValidation(
 						fmt.Sprintf("write output %q: %v", outputPath, err),
 						"check the path is writable and the directory exists",
@@ -298,6 +311,44 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 		return nil, re
 	}
 	return nil, ee
+}
+
+// writeFileAtomic writes data to path atomically: it streams the bytes into a
+// temp file in the same directory, then renames it over path. Because rename
+// within a directory is atomic, path is only ever the old file (untouched) or
+// the fully-written new file — never a partial/truncated result, and an
+// existing good copy is never clobbered when the write fails midway. On any
+// error the temp file is removed so no stray temp files accumulate.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file unless the rename below hands it off successfully.
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close() //nolint:errcheck // already returning the write error
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close() //nolint:errcheck // already returning the chmod error
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
 }
 
 // renderDryRun writes a human-readable request description and returns a
