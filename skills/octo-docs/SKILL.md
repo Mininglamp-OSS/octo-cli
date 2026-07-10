@@ -175,9 +175,21 @@ octo-cli docs scene get <docId>
 #   elements          — full elements to upsert (CAS: higher `version` wins)
 #   deletedElementIds — element ids to soft-delete (tombstone)
 #   files             — file refs to upsert
+# Every element MUST carry a valid fractional-index `index` (z-order key); the
+# CLI rejects an index-less or malformed-index element locally before sending.
 octo-cli docs scene edit <docId> --base-version "<token>" \
-  --data '{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}'
+  --data '{"elements":[{"id":"e1","type":"rectangle","version":4,"index":"a0"}],"deletedElementIds":["e2"],"files":{}}'
 ```
+
+> **`index` is mandatory on every upserted element.** It must be a valid
+> fractional-index (z-order) key — the same jitterbug / Excalidraw key format the
+> board uses, generated with the `fractional-indexing` rules (e.g. `a0`, `a1`,
+> `a0V`). Never omit `index`, and never fabricate one as an `r`+digits string, a
+> plain integer, or a timestamp: an index-less element used to slip through to a
+> buggy backend repair path that rewrote it into an invalid key (like
+> `r00000003`) and broke the board. The CLI now rejects such elements with a
+> non-zero exit before the request is sent.
+
 
 The upsert is element-level: only the ids named in `elements` / `deletedElementIds`
 are touched (the rest of the board is left as-is). On a key collision the element

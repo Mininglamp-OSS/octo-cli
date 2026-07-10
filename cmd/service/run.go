@@ -72,6 +72,14 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
+		// Reject index-less / malformed-index whiteboard elements locally, before
+		// sending, for operations that declare it in the spec (docs.scene.edit).
+		if d.ValidateElementsIndex {
+			if verr := validateElementsIndex(body); verr != nil {
+				_ = f.EmitError(verr) //nolint:errcheck // best-effort emit before returning err
+				return verr
+			}
+		}
 		req.Body = body
 	}
 

@@ -212,6 +212,12 @@ type OperationDetail struct {
 	// redirect-style binary ops such as file.download, which return a 302 with
 	// no consumable body — offering -o there is a silent no-op footgun.
 	BinaryBody bool `json:"binary_body,omitempty"`
+	// ValidateElementsIndex captures the x-octo-validate-elements-index
+	// extension. When true, the CLI rejects a request whose body carries any
+	// `elements[]` entry missing a valid fractional-index `index` before it is
+	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
+	// longer reach the backend and corrupt a board.
+	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -319,6 +325,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
+	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
 	if d.BinaryResponse {
 		if resps, ok := op["responses"].(map[string]any); ok {
 			d.BinaryBody = hasSuccessBody(doc, resps)
