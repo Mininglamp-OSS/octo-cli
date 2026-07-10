@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -542,6 +543,75 @@ func TestDo_BinaryResponse_OutputWriteFailurePreservesExistingFile(t *testing.T)
 		if e.Name() != "board.png" {
 			t.Errorf("unexpected leftover file in dir: %q", e.Name())
 		}
+	}
+}
+
+// TestDo_BinaryResponse_OutputWriteFailureIsNonRetryable pins the PR's central
+// invariant: a local write failure is a non-retryable validation error, so a
+// successful server request is never re-downloaded just because the disk write
+// failed. Asserts the error taxonomy and that the server handler is hit exactly
+// once (no retry loop).
+func TestDo_BinaryResponse_OutputWriteFailureIsNonRetryable(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte{1, 2, 3})
+	}))
+	defer srv.Close()
+
+	// Unwritable destination: parent directory does not exist.
+	dest := filepath.Join(t.TempDir(), "no-such-dir", "board.png")
+	c := newBinaryClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	})
+	if err == nil {
+		t.Fatal("expected a write error, got nil")
+	}
+	var ee *output.ExitError
+	if !errors.As(err, &ee) || ee.Type != "validation" {
+		t.Errorf("expected a validation ExitError, got %T: %v", err, err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("server hit %d times; a local write failure must not trigger a retry (want 1)", got)
+	}
+}
+
+// TestDo_BinaryResponse_RedirectWithOutputPathWritesNothing pins the documented
+// promise on the OutputPath field: a 3xx (redirect-to-URL) response is never
+// written to disk even when OutputPath is set — its Location is surfaced in the
+// envelope instead.
+func TestDo_BinaryResponse_RedirectWithOutputPathWritesNothing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://cdn.example.com/board.png")
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(302)
+		_, _ = w.Write([]byte("this body must never reach disk"))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "board.png")
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/dl", BinaryResponse: true, OutputPath: dest,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("a redirect response must not write a file; os.Stat err = %v", statErr)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["url"] != "https://cdn.example.com/board.png" {
+		t.Errorf("url = %v, want the Location header", env["url"])
+	}
+	if _, ok := env["output"]; ok {
+		t.Errorf("redirect envelope must not carry an output key, got %v", env["output"])
 	}
 }
 
