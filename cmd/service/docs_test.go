@@ -806,7 +806,7 @@ func TestDocsSceneEdit_SendsBatchAndIfMatch(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","bytes":256,"baseVersion":"BV_NEXT==","newDocVersionSeq":7}`))
 	})
-	batch := `{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}`
+	batch := `{"elements":[{"id":"e1","type":"rectangle","version":4,"index":"a0"}],"deletedElementIds":["e2"],"files":{}}`
 	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--base-version", "BV_ABC==", "--data", batch})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -849,5 +849,59 @@ func TestDocsSceneEdit_RequiresBaseVersion(t *testing.T) {
 	}
 	if called {
 		t.Error("server must not be called when required --base-version is missing")
+	}
+}
+
+// TestDocsSceneEdit_RejectsIndexlessElement confirms an upsert element with no
+// `index` is rejected locally (non-zero exit) before any request is sent, so
+// index-less whiteboard elements can no longer reach the backend (XIN-792).
+func TestDocsSceneEdit_RejectsIndexlessElement(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	batch := `{"elements":[{"id":"e1","type":"rectangle","version":4}]}`
+	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--base-version", "BV_ABC==", "--data", batch})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error for an element missing `index`")
+	}
+	if called {
+		t.Error("server must not be called when an element is missing `index`")
+	}
+}
+
+// TestDocsSceneEdit_RejectsInvalidIndex confirms the exact repair artifact from
+// XIN-792 (`r00000003`) — a malformed fractional-index — is rejected locally.
+func TestDocsSceneEdit_RejectsInvalidIndex(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	batch := `{"elements":[{"id":"e1","type":"rectangle","version":4,"index":"r00000003"}]}`
+	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--base-version", "BV_ABC==", "--data", batch})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error for an element with an invalid `index`")
+	}
+	if called {
+		t.Error("server must not be called when an element carries an invalid `index`")
+	}
+}
+
+// TestDocsSceneEdit_DeleteOnlyBatchAllowed confirms a batch with no `elements`
+// to upsert (only soft-deletes) still passes — index validation applies only to
+// upserted elements.
+func TestDocsSceneEdit_DeleteOnlyBatchAllowed(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":8,"baseVersion":"BV_NEXT==","newDocVersionSeq":8}`))
+	})
+	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--base-version", "BV_ABC==", "--data", `{"deletedElementIds":["e2"]}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("delete-only batch should pass validation: %v", err)
+	}
+	if !called {
+		t.Error("server should be called for a valid delete-only batch")
 	}
 }

@@ -447,8 +447,9 @@
       "patch": {
         "operationId": "docs.scene.edit",
         "summary": "Apply an element upsert/delete batch to a whiteboard scene (needs writer)",
-        "description": "Applies a batch of element upserts and soft-deletes to a doc_type 'board' scene under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs scene get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live scene moved since that read. `elements` are full elements to upsert (CAS: the higher `version` wins), `deletedElementIds` are soft-delete tombstones, and `files` upserts file refs; the batch is a structured object, so pass it as JSON through --data. Only doc_type 'board' is accepted (doc / sheet return 409 unsupported_doc_type). Gates: element count over the max → 413 too_many_elements, a single element too large → 413 element_too_large, whole scene over the cap → 413 doc_too_large, an element failing the whitelist → 422 board_element_invalid, a file ref with no usable attachId → 422 board_file_invalid, missing base version or malformed shape → 400 invalid_body.",
+        "description": "Applies a batch of element upserts and soft-deletes to a doc_type 'board' scene under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs scene get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live scene moved since that read. `elements` are full elements to upsert (CAS: the higher `version` wins), `deletedElementIds` are soft-delete tombstones, and `files` upserts file refs; the batch is a structured object, so pass it as JSON through --data. Every element in `elements` must carry a valid fractional-index `index` (z-order key); the CLI rejects an index-less or malformed-index element locally before sending. Only doc_type 'board' is accepted (doc / sheet return 409 unsupported_doc_type). Gates: element count over the max → 413 too_many_elements, a single element too large → 413 element_too_large, whole scene over the cap → 413 doc_too_large, an element failing the whitelist → 422 board_element_invalid, a file ref with no usable attachId → 422 board_file_invalid, missing base version or malformed shape → 400 invalid_body.",
         "x-octo-risk": "write",
+        "x-octo-validate-elements-index": true,
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
           {
@@ -470,7 +471,7 @@
                   "elements": {
                     "type": "array",
                     "items": { "type": "object" },
-                    "description": "full Excalidraw elements to upsert; on a key collision the element with the higher `version` (then smaller `versionNonce`) wins the CAS. Pass via --data."
+                    "description": "full Excalidraw elements to upsert; on a key collision the element with the higher `version` (then smaller `versionNonce`) wins the CAS. Each element MUST carry a valid fractional-index `index` (z-order key produced by the fractional-indexing / Excalidraw rules, e.g. `a0`); an index-less or malformed-index element is rejected locally before sending. Pass via --data."
                   },
                   "deletedElementIds": {
                     "type": "array",
