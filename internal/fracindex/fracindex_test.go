@@ -27,6 +27,20 @@ func TestValidateOrderKey(t *testing.T) {
 		{"bad head", "!0", true},
 		{"truncated integer part", "b0", true}, // head 'b' requires a 3-char integer part
 		{"bad fractional digit", "a0-", true},
+
+		// Integer-part charset: every byte of the key must be base62, not just
+		// the fractional part. The frontend (INDEX_RE = /^[A-Za-z0-9]+$/) and
+		// backend (identical regex) reject a non-base62 integer-part byte, so
+		// the CLI must too.
+		{"integer-part non-base62", "a!", true},
+		{"integer-part non-base62 with fraction", "c00!", true},
+
+		// Trailing-zero rule: the fractional part must not end in the first
+		// digit '0' (a non-canonical key). The reference validateOrderKey and
+		// the frontend/backend all reject these.
+		{"trailing zero", "a00", true},
+		{"trailing zero short", "a10", true},
+		{"trailing zero deep", "a0V0", true},
 	}
 
 	for _, tc := range tests {
