@@ -1,14 +1,14 @@
 ---
 name: octo-docs
 version: 0.1.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheet cells (with paged reads for large sheets), members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheet cells (with paged reads for large sheets), read and batch-edit whiteboard scenes, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
-# octo-docs — documents, body content, members, comments, versions, attachments
+# octo-docs — documents, body content, sheet cells, board scenes, members, comments, versions, attachments
 
 > **Live body editing IS available for `doc_type: doc`.** You can read a
 > document's live body with `docs content get` and apply **incremental block-op
@@ -18,11 +18,12 @@ metadata:
 > a base-version token: read to get the token, then edit with that token so the
 > server can prove the body did not change underneath you (a stale token is
 > rejected with `412 base_version_stale`). Only `doc_type: doc` bodies are
-> editable this way; **whiteboard and board bodies are a different Y.Doc shape
-> and are not editable here** (they return `409 unsupported_doc_type`). The
-> document *outline* still lives only in the Yjs session and is not a REST
-> surface. Creating a doc still makes an **empty** document; seed its text with
-> an initial `docs content edit`.
+> editable this way; a **spreadsheet** (`doc_type: sheet`) has its own read/edit
+> surface (§3) and a **whiteboard / board** (`doc_type: board`) has its own scene
+> surface (§4) — both return `409 unsupported_doc_type` from the `content`
+> endpoints. The document *outline* still lives only in the Yjs session and is not
+> a REST surface. Creating a doc still makes an **empty** document; seed its text
+> with an initial `docs content edit`.
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
@@ -157,7 +158,43 @@ Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
 `422 sheet_snapshot_invalid` (a cell violates the `{v,f,s}` contract or the
 `sheetId!row:col` key shape).
 
-## 4. Members & sharing
+## 4. Whiteboard scenes (read + batch edit)
+
+Available for `doc_type: board` only. A whiteboard stores its Excalidraw scene on
+the Y.Doc — an ordered list of `elements` (in fractional-index / z-order) plus a
+`files` map of image/file refs. Same read-token-then-guarded-write discipline as
+the body and sheet surfaces.
+
+```bash
+# Read the LIVE scene + baseVersion (reader). Response:
+#   { docId, elements: [ <element> ], files: { <fileId>: {attachId} }, schemaVersion, baseVersion }
+octo-cli docs scene get <docId>
+
+# Batch-edit the scene (writer). --base-version is REQUIRED and is sent as the
+# If-Match header; the batch goes through --data as a JSON object.
+#   elements          — full elements to upsert (CAS: higher `version` wins)
+#   deletedElementIds — element ids to soft-delete (tombstone)
+#   files             — file refs to upsert
+octo-cli docs scene edit <docId> --base-version "<token>" \
+  --data '{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}'
+```
+
+The upsert is element-level: only the ids named in `elements` / `deletedElementIds`
+are touched (the rest of the board is left as-is). On a key collision the element
+with the higher `version` (then smaller `versionNonce`) wins, and a delete is a
+soft-delete tombstone with a superseding version so it converges under CAS.
+
+**Concurrency / errors.** The base version is optimistic-concurrency: if the scene
+changed since your `docs scene get`, an edit is rejected with
+`412 base_version_stale` — re-read for a fresh token. Other gates:
+`409 unsupported_doc_type` (target is a doc/sheet), `409 board_snapshot_invalid`
+(the live scene decodes to a wrong-kind/corrupt blob, on read),
+`413 too_many_elements` / `413 element_too_large` / `413 doc_too_large` (size
+caps), `400 invalid_body` (missing base version or malformed shape),
+`422 board_element_invalid` (an element fails the whitelist), and
+`422 board_file_invalid` (a file ref carries no usable `attachId`).
+
+## 5. Members & sharing
 
 ```bash
 octo-cli docs members list   <docId>                        # admin
@@ -172,7 +209,7 @@ octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 role if already present. The target uid must be a real Octo user — a miss returns
 `404 user_not_found` and writes no ghost member.
 
-## 5. Comments
+## 6. Comments
 
 Comments are anchored to a text range and live out-of-band from the body.
 
@@ -213,7 +250,7 @@ once the request fails loudly with `422 ambiguous_anchor` (never a silent guess)
 — narrow it with `--blockPath` and/or `--occurrence`. Text that is not found
 returns `422 anchor_text_not_found`.
 
-## 6. Versions (snapshots)
+## 7. Versions (snapshots)
 
 ```bash
 octo-cli docs versions list    <docId> [--kind manual|auto|all] [--cursor <id>] [--limit <n>]
@@ -225,12 +262,14 @@ octo-cli docs versions restore <docId> <versionId>                       # admin
 ```
 
 `versions state` reads *historical* content: it returns a past snapshot decoded
-to ProseMirror JSON (`{doc, sheetCells, sheetDims, ...}`), is a preview of that
+by the doc's kind — a document/sheet as `{kind:"document", doc, sheetCells,
+sheetDims, ...}`, a board as `{kind:"board", scene, ...}` — is a preview of that
 version rather than the live document, and is not writable. To read the **live**
-body instead, use `docs content get` (§2). `restore` is non-destructive and
-records a safety snapshot first, so it is itself undoable.
+body instead, use `docs content get` (§2), `docs sheet get` (§3), or
+`docs scene get` (§4). `restore` is non-destructive and records a safety snapshot
+first, so it is itself undoable.
 
-## 7. Attachments (metadata only)
+## 8. Attachments (metadata only)
 
 The docs backend is **presign-only**: the CLI never streams the binary. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
@@ -275,8 +314,9 @@ so `--page-all` is intentionally not offered on them:
 
 `docs attachments upload` (binary helper), invites, access-requests, and
 link-card are out of scope here. Body editing is limited to `doc_type: doc`
-incremental block ops (§2) — whiteboard/board bodies and the document outline
-are not editable through the CLI.
+incremental block ops (§2), `doc_type: sheet` cell batches (§3), and
+`doc_type: board` scene batches (§4); the document outline is not editable
+through the CLI.
 
 ## Schema lookup
 
@@ -284,6 +324,8 @@ are not editable through the CLI.
 octo-cli schema docs.create
 octo-cli schema docs.content.get
 octo-cli schema docs.content.edit
+octo-cli schema docs.scene.get
+octo-cli schema docs.scene.edit
 octo-cli schema docs.members.set
 octo-cli schema docs.comments.add
 octo-cli schema docs.attachments.presign

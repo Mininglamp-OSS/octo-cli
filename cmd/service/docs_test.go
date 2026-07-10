@@ -36,6 +36,7 @@ func TestDocs_TreeShape(t *testing.T) {
 	groups := map[string][]string{
 		"content":     {"get", "edit"},
 		"sheet":       {"get", "edit"},
+		"scene":       {"get", "edit"},
 		"members":     {"list", "set", "remove"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
@@ -73,6 +74,8 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
 		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
 		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
+		"docs.scene.get":           {"GET", "/v1/bot/docs/{docId}/scene"},
+		"docs.scene.edit":          {"PATCH", "/v1/bot/docs/{docId}/scene"},
 		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
 		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
 		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
@@ -700,6 +703,100 @@ func TestDocsSheetEdit_RequiresBaseVersion(t *testing.T) {
 		called = true
 	})
 	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--data", `{"cells":{}}`})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected error when --base-version is omitted")
+	}
+	if called {
+		t.Error("server must not be called when required --base-version is missing")
+	}
+}
+
+// TestDocsSceneGet_ReadsSceneAndBaseVersion checks docs.scene.get hits
+// GET /v1/bot/docs/{docId}/scene (reader), sends no body, and surfaces the
+// backend's {elements, files, baseVersion, schemaVersion} response through the
+// success envelope so the caller can capture the base-version token for a
+// follow-up edit.
+func TestDocsSceneGet_ReadsSceneAndBaseVersion(t *testing.T) {
+	var gotMethod, gotPath string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","elements":[{"id":"e1","type":"rectangle","version":3}],"files":{},"schemaVersion":1,"baseVersion":"BV_ABC=="}`))
+	})
+	root.SetArgs([]string{"docs", "scene", "get", "d1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/scene" {
+		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/scene", gotMethod, gotPath)
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			BaseVersion string `json:"baseVersion"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.BaseVersion != "BV_ABC==" {
+		t.Errorf("expected baseVersion BV_ABC== in envelope, got %+v", env)
+	}
+}
+
+// TestDocsSceneEdit_SendsBatchAndIfMatch checks docs.scene.edit hits
+// PATCH /v1/bot/docs/{docId}/scene, carries the element upsert/delete batch
+// (passed via the generic --data escape hatch) in the body, and sends the
+// base-version token as the If-Match header — the spec-declared header
+// capability wiring --base-version to If-Match, not a body/query field.
+func TestDocsSceneEdit_SendsBatchAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":256,"baseVersion":"BV_NEXT==","newDocVersionSeq":7}`))
+	})
+	batch := `{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}`
+	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--base-version", "BV_ABC==", "--data", batch})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/scene" {
+		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/scene", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
+	}
+	elems, ok := gotBody["elements"].([]any)
+	if !ok || len(elems) != 1 {
+		t.Fatalf("elements = %v, want a 1-element array", gotBody["elements"])
+	}
+	e0, ok := elems[0].(map[string]any)
+	if !ok || e0["id"] != "e1" {
+		t.Errorf("elements[0] = %v, want the e1 upsert", elems[0])
+	}
+	del, ok := gotBody["deletedElementIds"].([]any)
+	if !ok || len(del) != 1 || del[0] != "e2" {
+		t.Errorf("deletedElementIds = %v, want [e2]", gotBody["deletedElementIds"])
+	}
+	// The base version travels in the header, not the JSON body.
+	if _, present := gotBody["baseVersion"]; present {
+		t.Errorf("baseVersion must not be duplicated into the JSON body; got %v", gotBody["baseVersion"])
+	}
+}
+
+// TestDocsSceneEdit_RequiresBaseVersion confirms --base-version is required:
+// the command fails before any request when the base-version token is missing,
+// mirroring the backend's mandatory optimistic-concurrency guard.
+func TestDocsSceneEdit_RequiresBaseVersion(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	root.SetArgs([]string{"docs", "scene", "edit", "d1", "--data", `{"elements":[]}`})
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error when --base-version is omitted")
 	}

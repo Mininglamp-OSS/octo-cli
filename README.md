@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 73 operations
+octo-cli is **metadata-driven**. The entire command tree — 75 operations
 across 8 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
@@ -38,7 +38,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 26  | Documents & spreadsheets — lifecycle, body content, sheet cells (paged read), members, comments, versions, attachments |
+| `docs`    | 28  | Documents, spreadsheets & whiteboards — lifecycle, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
@@ -130,6 +130,11 @@ octo-cli docs sheet get sheet-9                      # whole sheet + base versio
 octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follow --cursor <nextCursor>
 octo-cli docs sheet edit sheet-9 --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+
+# Whiteboards — read the live scene + base version, then upsert/delete elements under If-Match.
+octo-cli docs scene get board-7                       # elements (z-order) + files + base version token
+octo-cli docs scene edit board-7 --base-version "<token>" \
+  --data '{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains
