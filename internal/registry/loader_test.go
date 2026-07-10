@@ -219,6 +219,34 @@ func TestHeaderParamWithFlagAlias(t *testing.T) {
 	}
 }
 
+// TestQueryParamFlagAliasAvoidsGlobalCollision pins the docs.scene.export fix:
+// its `format` query param carries x-octo-flag "image-format" so the generated
+// CLI flag is --image-format (which does not shadow the global persistent
+// --format output flag), while the wire query parameter name stays `format`.
+func TestQueryParamFlagAliasAvoidsGlobalCollision(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("docs.scene.export")
+	if !ok {
+		t.Fatal("docs.scene.export not found")
+	}
+	var found *ParamInfo
+	for i := range op.Parameters {
+		if op.Parameters[i].In == "query" && op.Parameters[i].Name == "format" {
+			found = &op.Parameters[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("docs.scene.export: expected a `format` query parameter")
+	}
+	if found.FlagName != "image-format" {
+		t.Errorf("format query param flag alias = %q, want image-format (from x-octo-flag)", found.FlagName)
+	}
+	if found.Name != "format" {
+		t.Errorf("wire query param name = %q, want format (must be preserved)", found.Name)
+	}
+}
+
 func TestResolvesComponentRef(t *testing.T) {
 	// matter.get's 200 response is a $ref to MatterDetail — the resolver
 	// should inline the properties so the schema command can describe it.

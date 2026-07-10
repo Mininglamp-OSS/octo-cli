@@ -165,12 +165,12 @@
       "get": {
         "operationId": "docs.scene.export",
         "summary": "Export a whiteboard's live scene as a PNG or SVG image (needs reader)",
-        "description": "Renders the LIVE Excalidraw scene of a doc_type 'board' to an image on the server: `--format png` (default) returns a PNG, `--format svg` returns an SVG. The body is binary, so pass --output/-o to save it to a file (e.g. `docs scene export <docId> --format png -o board.png`); without --output the command only reports the response status, content-type and size. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
+        "description": "Renders the LIVE Excalidraw scene of a doc_type 'board' to an image on the server: `--image-format png` (default) returns a PNG, `--image-format svg` returns an SVG. The body is binary, so pass --output/-o to save it to a file (e.g. `docs scene export <docId> --image-format png -o board.png`); without --output the command only reports the response status, content-type and size. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
         "x-octo-risk": "read",
         "x-octo-binary-response": true,
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "format", "in": "query", "schema": { "type": "string", "enum": ["png", "svg"], "default": "png" }, "description": "image format (one of: png, svg); default png" }
+          { "name": "format", "in": "query", "x-octo-flag": "image-format", "schema": { "type": "string", "enum": ["png", "svg"], "default": "png" }, "description": "image format (one of: png, svg); default png. Exposed as --image-format so it does not shadow the global --format output flag." }
         ],
         "responses": {
           "200": {

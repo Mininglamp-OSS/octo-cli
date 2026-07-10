@@ -308,15 +308,18 @@ The response body is binary, so pass `--output`/`-o` to save it to a file; witho
 
 ```bash
 # PNG (default). -o writes the bytes to disk and the envelope echoes the saved path.
-octo-cli docs scene export <docId> --format png -o board.png
+octo-cli docs scene export <docId> --image-format png -o board.png
 
 # SVG (vector).
-octo-cli docs scene export <docId> --format svg -o board.svg
+octo-cli docs scene export <docId> --image-format svg -o board.svg
 ```
 
-> `--format` is `png` (default) or `svg`; any other value returns 400
-> `invalid_format`. The export reflects the scene as it is live right now
-> (shapes, text, and embedded images), not a persisted snapshot.
+> `--image-format` is `png` (default) or `svg`; any other value returns 400
+> `invalid_format`. (The flag is named `--image-format`, not `--format`, so it
+> does not collide with the global `--format` output-envelope flag; the wire
+> query parameter is still `format`.) The export reflects the scene as it is live
+> right now (shapes, text, and embedded images), not a persisted snapshot.
+> `-o` overwrites an existing destination file.
 
 
 ## Pagination note

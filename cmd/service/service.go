@@ -147,7 +147,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	}
 
 	// Binary-response operations accept --output/-o to WRITE a 2xx binary body
-	// to disk (e.g. docs.scene.export --format png -o board.png). Without it the
+	// to disk (e.g. docs.scene.export --image-format png -o board.png). Without it the
 	// command only describes the body (status/content_type/size), preserving the
 	// historical behaviour of redirect-style binary ops such as file.download.
 	if d.BinaryResponse {
