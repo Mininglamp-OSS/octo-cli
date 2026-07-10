@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +60,12 @@ type Request struct {
 	// BinaryResponse asks the client to treat 3xx/non-JSON responses as
 	// structured metadata envelopes rather than parsing JSON. See file.download.
 	BinaryResponse bool
+	// OutputPath, when set together with BinaryResponse, makes the client WRITE
+	// a 2xx binary body to that file path (instead of only describing it) and
+	// return an envelope carrying the saved path + size. Empty preserves the
+	// historical describe-only behaviour. A 3xx (redirect-to-URL) response is
+	// never written — its URL is surfaced in the envelope as before.
+	OutputPath string
 	// SuppressSpaceHeader omits the X-Space-Id header even when the active
 	// credential carries a SpaceID. It is set for operations whose spec declares
 	// x-octo-space-header:false (e.g. the docs bot mount resolves the space
@@ -143,11 +151,11 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes, req.SuppressSpaceHeader)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.SuppressSpaceHeader)
+	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.OutputPath, req.SuppressSpaceHeader)
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -171,7 +179,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, suppressSpaceHeader)
+		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, outputPath, suppressSpaceHeader)
 		if err == nil {
 			return body, nil
 		}
@@ -185,7 +193,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -225,6 +233,12 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
+	// The whole response body is buffered here. Every downstream branch needs
+	// it fully in memory anyway — JSON parsing, backend-error parsing, and the
+	// binary describe envelope (which reports size = len(body)) all consume the
+	// complete payload. Board PNG/SVG exports are bounded and small, so a size
+	// cap / streaming-to-temp path would add complexity without a real payoff
+	// today; deferred until an operation returns genuinely large bodies.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
@@ -263,6 +277,25 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 				"content_type": resp.Header.Get("Content-Type"),
 				"size":         len(respBody),
 			}
+			// When the caller asked for a destination, WRITE the bytes to disk
+			// (docs.scene.export --output). A write failure is a hard, non-
+			// retryable error — the request succeeded, so retrying would only
+			// re-download; the problem is local (bad path/permissions).
+			//
+			// The write is atomic: bytes go to a temp file in the destination
+			// directory and are renamed into place only after a fully successful
+			// write. A mid-write failure (disk full, I/O error, cancellation)
+			// therefore never leaves a truncated/empty file, and never clobbers
+			// an existing good copy at outputPath — the rename is all-or-nothing.
+			if outputPath != "" {
+				if err := writeFileAtomic(outputPath, respBody, 0o644); err != nil {
+					return nil, output.ErrValidation(
+						fmt.Sprintf("write output %q: %v", outputPath, err),
+						"check the path is writable and the directory exists",
+					)
+				}
+				env["output"] = outputPath
+			}
 			return json.Marshal(env)
 		}
 		return respBody, nil
@@ -278,6 +311,44 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 		return nil, re
 	}
 	return nil, ee
+}
+
+// writeFileAtomic writes data to path atomically: it streams the bytes into a
+// temp file in the same directory, then renames it over path. Because rename
+// within a directory is atomic, path is only ever the old file (untouched) or
+// the fully-written new file — never a partial/truncated result, and an
+// existing good copy is never clobbered when the write fails midway. On any
+// error the temp file is removed so no stray temp files accumulate.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file unless the rename below hands it off successfully.
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close() //nolint:errcheck // already returning the write error
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close() //nolint:errcheck // already returning the chmod error
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	renamed = true
+	return nil
 }
 
 // renderDryRun writes a human-readable request description and returns a

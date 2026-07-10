@@ -299,6 +299,29 @@ octo-cli docs attachments resolve <docId> --attachIds a1 --attachIds a2
 > presigned object-store URL. Do the PUT with `curl` (or any HTTP client) as
 > shown above.
 
+## 8. Whiteboard image export
+
+Render a whiteboard's **live** Excalidraw scene to an image on the server. Works
+only on a `doc_type: board` (a non-board target returns 409 `unsupported_doc_type`).
+The response body is binary, so pass `--output`/`-o` to save it to a file; without
+`-o` the command only reports the response `{status, content_type, size}`.
+
+```bash
+# PNG (default). -o writes the bytes to disk and the envelope echoes the saved path.
+octo-cli docs scene export <docId> --image-format png -o board.png
+
+# SVG (vector).
+octo-cli docs scene export <docId> --image-format svg -o board.svg
+```
+
+> `--image-format` is `png` (default) or `svg`; any other value returns 400
+> `invalid_format`. (The flag is named `--image-format`, not `--format`, so it
+> does not collide with the global `--format` output-envelope flag; the wire
+> query parameter is still `format`.) The export reflects the scene as it is live
+> right now (shapes, text, and embedded images), not a persisted snapshot.
+> `-o` overwrites an existing destination file.
+
+
 ## Pagination note
 
 The docs list endpoints do **not** use the shared `{data, pagination}` envelope,

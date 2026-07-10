@@ -22,6 +22,7 @@ type operationRuntime struct {
 	pageAll     *bool                  // --page-all (nil when no pagination)
 	pageLimit   *int                   // --page-limit
 	filePath    *string                // --file (multipart operations only)
+	outputPath  *string                // --output/-o (binary-response operations only)
 }
 
 type queryFlag struct {

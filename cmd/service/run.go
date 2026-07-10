@@ -53,6 +53,11 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// behaviour of sending the header when the credential has a space.
 		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
 	}
+	// Binary-response ops may carry an --output/-o destination; when set, the
+	// client writes the 2xx body to that path instead of only describing it.
+	if rt.outputPath != nil {
+		req.OutputPath = *rt.outputPath
+	}
 	if d.Multipart {
 		raw, ct, err := buildMultipartBody(cobraCmd, rt)
 		if err != nil {
@@ -185,6 +190,23 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, req *client.Request) erro
 // items — the caller gets a single envelope with no _pagination block
 // (architecture §4.4).
 func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, firstReq *client.Request) error {
+	// Pagination and binary output-to-disk are mutually exclusive. The loop
+	// reuses OutputPath for every page, so an operation that was both paginated
+	// AND declared an inline binary body would write each page to the same file,
+	// leaving only the last page's bytes. No spec op declares both today, so this
+	// never fires in practice; it is a fail-loud guard against a future spec that
+	// wires the two together and would otherwise silently corrupt --output.
+	if firstReq.OutputPath != "" {
+		err := output.ErrWithHint(
+			"internal",
+			"PAGINATION_OUTPUT_CONFLICT",
+			"operation is paginated and also writes a binary body to --output; these are mutually exclusive",
+			"operation-spec bug: an op with x-octo-pagination must not also declare an inline 2xx binary body",
+		)
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+		return err
+	}
+
 	cli, err := f.Client()
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -217,21 +239,17 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		if !hasMore || nextCursor == "" {
 			break
 		}
-		// Prepare next request. Clone Query so we don't mutate the previous.
+		// Prepare next request. Copy the whole struct so no field is silently
+		// dropped (RawBody/ContentType/BinaryResponse/OutputPath), then clone
+		// Query and set the next cursor so we don't mutate the previous page's.
 		nextQ := url.Values{}
 		for k, vs := range req.Query {
 			nextQ[k] = append([]string(nil), vs...)
 		}
 		nextQ.Set(cursorParam, nextCursor)
-		req = client.Request{
-			Service:             req.Service,
-			Method:              req.Method,
-			Path:                req.Path,
-			Query:               nextQ,
-			Body:                req.Body,
-			Headers:             req.Headers,
-			SuppressSpaceHeader: req.SuppressSpaceHeader,
-		}
+		next := req
+		next.Query = nextQ
+		req = next
 	}
 
 	out, err := json.Marshal(merged)

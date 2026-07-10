@@ -146,6 +146,19 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 		rt.pageLimit = &pageLimit
 	}
 
+	// Operations that return a binary body inline on a 2xx success accept
+	// --output/-o to WRITE those bytes to disk (e.g. docs.scene.export
+	// --image-format png -o board.png). Without it the command only describes
+	// the body (status/content_type/size). Redirect-style binary ops such as
+	// file.download (302-only, no consumable body) are deliberately excluded:
+	// registering -o there accepts the flag but never writes a file, a silent
+	// footgun. See registry.OperationDetail.BinaryBody.
+	if d.BinaryBody {
+		var outputPath string
+		cmd.Flags().StringVarP(&outputPath, "output", "o", "", "write the binary response body to this file path")
+		rt.outputPath = &outputPath
+	}
+
 	cmd.RunE = func(cobraCmd *cobra.Command, args []string) error {
 		return runOperation(cobraCmd, f, rt, args)
 	}

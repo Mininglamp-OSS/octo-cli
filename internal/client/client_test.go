@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -386,6 +389,229 @@ func TestDo_BinaryResponse_InlineBodyReturnsMetadata(t *testing.T) {
 	}
 	if n, _ := env["size"].(float64); int(n) != len(payload) {
 		t.Errorf("size = %v, want %d", env["size"], len(payload))
+	}
+}
+
+func TestDo_BinaryResponse_OutputPathWritesFile(t *testing.T) {
+	payload := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, 32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "board.png")
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	// The bytes are written verbatim to the destination.
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("written bytes differ: got %d bytes, want %d", len(got), len(payload))
+	}
+	// The envelope reports the saved path + size.
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["output"] != dest {
+		t.Errorf("output = %v, want %s", env["output"], dest)
+	}
+	if n, _ := env["size"].(float64); int(n) != len(payload) {
+		t.Errorf("size = %v, want %d", env["size"], len(payload))
+	}
+}
+
+func TestDo_BinaryResponse_OutputPathUnwritableIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte{1, 2, 3})
+	}))
+	defer srv.Close()
+
+	// A path under a non-existent directory cannot be created → validation error.
+	dest := filepath.Join(t.TempDir(), "no-such-dir", "board.png")
+	c := newBinaryClient(srv)
+	if _, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	}); err == nil {
+		t.Fatalf("expected an error writing to an unwritable path")
+	}
+}
+
+// TestDo_BinaryResponse_OutputPathWritesSVG covers the SVG branch of
+// docs.scene.export end-to-end: an image/svg+xml body lands on disk verbatim
+// and the envelope echoes the saved path. Only the PNG path was exercised
+// before, so the SVG content-type was covered only indirectly.
+func TestDo_BinaryResponse_OutputPathWritesSVG(t *testing.T) {
+	payload := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.WriteHeader(200)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "board.svg")
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("written bytes differ: got %q, want %q", got, payload)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["output"] != dest {
+		t.Errorf("output = %v, want %s", env["output"], dest)
+	}
+	if env["content_type"] != "image/svg+xml" {
+		t.Errorf("content_type = %v, want image/svg+xml", env["content_type"])
+	}
+}
+
+// TestDo_BinaryResponse_OutputWriteFailurePreservesExistingFile pins the
+// atomicity fix: a mid-write failure (here, the destination directory is not
+// writable so the atomic temp file cannot be created) must leave an existing
+// good copy at the destination untouched rather than clobbering/truncating it,
+// and must not leave a stray temp file behind.
+func TestDo_BinaryResponse_OutputWriteFailurePreservesExistingFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory write permissions are not enforced")
+	}
+	newBytes := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, 16) // the download that must NOT land
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write(newBytes)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "board.png")
+	existing := []byte("previous good copy")
+	if err := os.WriteFile(dest, existing, 0o644); err != nil {
+		t.Fatalf("seed existing file: %v", err)
+	}
+	// Read-only directory: the atomic write cannot create its temp file, so the
+	// write fails after the good copy already exists.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	defer func() { _ = os.Chmod(dir, 0o700) }() // restore so t.TempDir cleanup works
+
+	c := newBinaryClient(srv)
+	if _, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	}); err == nil {
+		t.Fatalf("expected a write error, got nil")
+	}
+
+	// The pre-existing good copy must survive the failed write verbatim.
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read existing file after failed write: %v", err)
+	}
+	if !bytes.Equal(got, existing) {
+		t.Errorf("existing file was clobbered: got %q, want %q", got, existing)
+	}
+
+	// No stray temp file should be left in the directory.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() != "board.png" {
+			t.Errorf("unexpected leftover file in dir: %q", e.Name())
+		}
+	}
+}
+
+// TestDo_BinaryResponse_OutputWriteFailureIsNonRetryable pins the PR's central
+// invariant: a local write failure is a non-retryable validation error, so a
+// successful server request is never re-downloaded just because the disk write
+// failed. Asserts the error taxonomy and that the server handler is hit exactly
+// once (no retry loop).
+func TestDo_BinaryResponse_OutputWriteFailureIsNonRetryable(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte{1, 2, 3})
+	}))
+	defer srv.Close()
+
+	// Unwritable destination: parent directory does not exist.
+	dest := filepath.Join(t.TempDir(), "no-such-dir", "board.png")
+	c := newBinaryClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	})
+	if err == nil {
+		t.Fatal("expected a write error, got nil")
+	}
+	var ee *output.ExitError
+	if !errors.As(err, &ee) || ee.Type != "validation" {
+		t.Errorf("expected a validation ExitError, got %T: %v", err, err)
+	}
+	if got := atomic.LoadInt32(&hits); got != 1 {
+		t.Errorf("server hit %d times; a local write failure must not trigger a retry (want 1)", got)
+	}
+}
+
+// TestDo_BinaryResponse_RedirectWithOutputPathWritesNothing pins the documented
+// promise on the OutputPath field: a 3xx (redirect-to-URL) response is never
+// written to disk even when OutputPath is set — its Location is surfaced in the
+// envelope instead.
+func TestDo_BinaryResponse_RedirectWithOutputPathWritesNothing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://cdn.example.com/board.png")
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(302)
+		_, _ = w.Write([]byte("this body must never reach disk"))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "board.png")
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/dl", BinaryResponse: true, OutputPath: dest,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Errorf("a redirect response must not write a file; os.Stat err = %v", statErr)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["url"] != "https://cdn.example.com/board.png" {
+		t.Errorf("url = %v, want the Location header", env["url"])
+	}
+	if _, ok := env["output"]; ok {
+		t.Errorf("redirect envelope must not carry an output key, got %v", env["output"])
 	}
 }
 

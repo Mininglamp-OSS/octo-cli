@@ -36,7 +36,7 @@ func TestDocs_TreeShape(t *testing.T) {
 	groups := map[string][]string{
 		"content":     {"get", "edit"},
 		"sheet":       {"get", "edit"},
-		"scene":       {"get", "edit"},
+		"scene":       {"get", "edit", "export"},
 		"members":     {"list", "set", "remove"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
@@ -93,6 +93,7 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.attachments.presign": {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
 		"docs.attachments.get":     {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
 		"docs.attachments.resolve": {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
+		"docs.scene.export":        {"GET", "/v1/bot/docs/{docId}/export"},
 	}
 
 	got := reg.ListOperations("docs")
@@ -113,6 +114,52 @@ func TestDocs_RegistryShape(t *testing.T) {
 		if segs[0] != "docs" {
 			t.Errorf("%s: first segment must be the service; got %q", id, segs[0])
 		}
+	}
+}
+
+// TestDocsSceneExport_ImageFormatFlagNoGlobalShadow pins the fix for the
+// `--format` collision: docs.scene.export's `format` query param carries
+// x-octo-flag "image-format", so its CLI flag is --image-format (leaving the
+// global persistent output --format reachable) while the wire param stays
+// ?format=. The leaf must NOT declare a local --format flag.
+func TestDocsSceneExport_ImageFormatFlagNoGlobalShadow(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+
+	docs := findCmd(root, "docs")
+	scene := findCmd(docs, "scene")
+	if scene == nil {
+		t.Fatal("missing docs scene resource group")
+	}
+	export := findCmd(scene, "export")
+	if export == nil {
+		t.Fatal("missing docs scene export leaf")
+	}
+	if export.LocalFlags().Lookup("image-format") == nil {
+		t.Error("docs scene export: expected local --image-format flag")
+	}
+	if export.LocalFlags().Lookup("format") != nil {
+		t.Error("docs scene export: --format must NOT be a local flag (it would shadow the global output --format)")
+	}
+}
+
+// TestDocsSceneExport_ImageFormatMapsToWireFormat drives the command and asserts
+// --image-format lands on the wire as ?format= (the api name is preserved).
+func TestDocsSceneExport_ImageFormatMapsToWireFormat(t *testing.T) {
+	var gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write([]byte("<svg/>"))
+	})
+	root.SetArgs([]string{"docs", "scene", "export", "abc", "--image-format", "svg"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotPath != "/v1/bot/docs/abc/export" {
+		t.Errorf("path = %s, want /v1/bot/docs/abc/export", gotPath)
+	}
+	if !strings.Contains(gotQuery, "format=svg") {
+		t.Errorf("query %q missing format=svg", gotQuery)
 	}
 }
 

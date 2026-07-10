@@ -41,7 +41,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":    4,
 		"bot":     6,
 		"event":   2,
-		"docs":    28,
+		"docs":    29,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -216,6 +216,128 @@ func TestHeaderParamWithFlagAlias(t *testing.T) {
 	}
 	if !found.Required {
 		t.Error("If-Match header must be required (mandatory base-version guard)")
+	}
+}
+
+// TestQueryParamFlagAliasAvoidsGlobalCollision pins the docs.scene.export fix:
+// its `format` query param carries x-octo-flag "image-format" so the generated
+// CLI flag is --image-format (which does not shadow the global persistent
+// --format output flag), while the wire query parameter name stays `format`.
+func TestQueryParamFlagAliasAvoidsGlobalCollision(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("docs.scene.export")
+	if !ok {
+		t.Fatal("docs.scene.export not found")
+	}
+	var found *ParamInfo
+	for i := range op.Parameters {
+		if op.Parameters[i].In == "query" && op.Parameters[i].Name == "format" {
+			found = &op.Parameters[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("docs.scene.export: expected a `format` query parameter")
+	}
+	if found.FlagName != "image-format" {
+		t.Errorf("format query param flag alias = %q, want image-format (from x-octo-flag)", found.FlagName)
+	}
+	if found.Name != "format" {
+		t.Errorf("wire query param name = %q, want format (must be preserved)", found.Name)
+	}
+}
+
+// TestBinaryBodyGatingDistinguishesInlineFromRedirect pins the -o footgun fix:
+// both docs.scene.export and file.download are x-octo-binary-response, but only
+// docs.scene.export delivers a body inline on a 2xx success, so only it should
+// carry BinaryBody (the gate for the --output/-o flag). file.download is a
+// 302-only redirect with no consumable body — offering -o there silently writes
+// nothing.
+func TestBinaryBodyGatingDistinguishesInlineFromRedirect(t *testing.T) {
+	r := MustNew()
+
+	export, ok := r.GetOperation("docs.scene.export")
+	if !ok {
+		t.Fatal("docs.scene.export not found")
+	}
+	if !export.BinaryResponse {
+		t.Error("docs.scene.export: expected BinaryResponse=true")
+	}
+	if !export.BinaryBody {
+		t.Error("docs.scene.export: expected BinaryBody=true (has a 2xx image body, -o must write it)")
+	}
+
+	dl, ok := r.GetOperation("file.download")
+	if !ok {
+		t.Fatal("file.download not found")
+	}
+	if !dl.BinaryResponse {
+		t.Error("file.download: expected BinaryResponse=true (client still surfaces the 302 Location)")
+	}
+	if dl.BinaryBody {
+		t.Error("file.download: expected BinaryBody=false (302-only redirect, -o would silently no-op)")
+	}
+}
+
+// TestHasSuccessBodyResolvesResponseRef pins the item-3 fix: a 2xx response may
+// be expressed inline OR via {"$ref":"#/components/responses/..."}. hasSuccessBody
+// must resolve the ref before checking for a content body, otherwise a spec that
+// factors its success response into components.responses would fail-closed and
+// silently drop the --output/-o flag (BinaryBody=false) for a real binary body.
+func TestHasSuccessBodyResolvesResponseRef(t *testing.T) {
+	doc := map[string]any{
+		"components": map[string]any{
+			"responses": map[string]any{
+				"BoardImage": map[string]any{
+					"description": "shared image response",
+					"content": map[string]any{
+						"image/png": map[string]any{},
+					},
+				},
+				"NoBody": map[string]any{
+					"description": "bodyless shared response",
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		resps map[string]any
+		want  bool
+	}{
+		{
+			name:  "inline 2xx content body",
+			resps: map[string]any{"200": map[string]any{"content": map[string]any{"image/png": map[string]any{}}}},
+			want:  true,
+		},
+		{
+			name:  "2xx response via components.responses $ref with body",
+			resps: map[string]any{"200": map[string]any{"$ref": "#/components/responses/BoardImage"}},
+			want:  true,
+		},
+		{
+			name:  "2xx response via $ref to a bodyless response",
+			resps: map[string]any{"204": map[string]any{"$ref": "#/components/responses/NoBody"}},
+			want:  false,
+		},
+		{
+			name:  "unresolvable $ref is treated as no body",
+			resps: map[string]any{"200": map[string]any{"$ref": "#/components/responses/Missing"}},
+			want:  false,
+		},
+		{
+			name:  "non-2xx content body is ignored",
+			resps: map[string]any{"400": map[string]any{"content": map[string]any{"application/json": map[string]any{}}}},
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasSuccessBody(doc, tc.resps); got != tc.want {
+				t.Errorf("hasSuccessBody = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

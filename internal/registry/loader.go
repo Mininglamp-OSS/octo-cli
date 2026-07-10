@@ -206,6 +206,12 @@ type OperationDetail struct {
 	SpaceHeaderSet bool `json:"space_header_set,omitempty"`
 	Multipart      bool `json:"multipart,omitempty"`
 	BinaryResponse bool `json:"binary_response,omitempty"`
+	// BinaryBody is true only when the operation delivers a binary body inline
+	// on a 2xx success (declared via a 2xx response with a content body), so
+	// the CLI can write those bytes to disk with --output/-o. It is false for
+	// redirect-style binary ops such as file.download, which return a 302 with
+	// no consumable body — offering -o there is a silent no-op footgun.
+	BinaryBody bool `json:"binary_body,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -313,6 +319,11 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
+	if d.BinaryResponse {
+		if resps, ok := op["responses"].(map[string]any); ok {
+			d.BinaryBody = hasSuccessBody(doc, resps)
+		}
+	}
 
 	if params, ok := op["parameters"].([]any); ok {
 		for _, p := range params {
@@ -382,6 +393,60 @@ func extractJSONSchema(body map[string]any) map[string]any {
 		}
 	}
 	return nil
+}
+
+// hasSuccessBody reports whether any 2xx response declares a content body,
+// i.e. the operation returns bytes inline on success (docs.scene.export) rather
+// than a bodyless redirect (file.download's 302-only). It gates the --output/-o
+// flag so -o is offered only where it can actually write something.
+//
+// A 2xx entry may either inline the response object or factor it out via
+// {"$ref": "#/components/responses/..."}. Both are handled: a response-level
+// $ref is resolved through components.responses before the content check, so a
+// spec that shares its success response does not fail-closed and silently drop
+// -o. Only one hop is followed (OpenAPI response objects do not chain refs); an
+// unresolvable ref is treated as "no body".
+func hasSuccessBody(doc, resps map[string]any) bool {
+	for code, r := range resps {
+		if !strings.HasPrefix(code, "2") {
+			continue
+		}
+		rm, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ref, ok := rm["$ref"].(string); ok && ref != "" {
+			resolved := followResponseRef(doc, ref)
+			if resolved == nil {
+				continue
+			}
+			rm = resolved
+		}
+		if content, ok := rm["content"].(map[string]any); ok && len(content) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// followResponseRef resolves a `#/components/responses/<name>` pointer to its
+// response object. It returns nil for any other ref shape or an unknown name.
+func followResponseRef(doc map[string]any, ref string) map[string]any {
+	const prefix = "#/components/responses/"
+	if !strings.HasPrefix(ref, prefix) {
+		return nil
+	}
+	name := strings.TrimPrefix(ref, prefix)
+	comps, ok := doc["components"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	responses, ok := comps["responses"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	s, _ := responses[name].(map[string]any)
+	return s
 }
 
 func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
