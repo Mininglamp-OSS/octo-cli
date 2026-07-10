@@ -279,6 +279,68 @@ func TestBinaryBodyGatingDistinguishesInlineFromRedirect(t *testing.T) {
 	}
 }
 
+// TestHasSuccessBodyResolvesResponseRef pins the item-3 fix: a 2xx response may
+// be expressed inline OR via {"$ref":"#/components/responses/..."}. hasSuccessBody
+// must resolve the ref before checking for a content body, otherwise a spec that
+// factors its success response into components.responses would fail-closed and
+// silently drop the --output/-o flag (BinaryBody=false) for a real binary body.
+func TestHasSuccessBodyResolvesResponseRef(t *testing.T) {
+	doc := map[string]any{
+		"components": map[string]any{
+			"responses": map[string]any{
+				"BoardImage": map[string]any{
+					"description": "shared image response",
+					"content": map[string]any{
+						"image/png": map[string]any{},
+					},
+				},
+				"NoBody": map[string]any{
+					"description": "bodyless shared response",
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		resps map[string]any
+		want  bool
+	}{
+		{
+			name:  "inline 2xx content body",
+			resps: map[string]any{"200": map[string]any{"content": map[string]any{"image/png": map[string]any{}}}},
+			want:  true,
+		},
+		{
+			name:  "2xx response via components.responses $ref with body",
+			resps: map[string]any{"200": map[string]any{"$ref": "#/components/responses/BoardImage"}},
+			want:  true,
+		},
+		{
+			name:  "2xx response via $ref to a bodyless response",
+			resps: map[string]any{"204": map[string]any{"$ref": "#/components/responses/NoBody"}},
+			want:  false,
+		},
+		{
+			name:  "unresolvable $ref is treated as no body",
+			resps: map[string]any{"200": map[string]any{"$ref": "#/components/responses/Missing"}},
+			want:  false,
+		},
+		{
+			name:  "non-2xx content body is ignored",
+			resps: map[string]any{"400": map[string]any{"content": map[string]any{"application/json": map[string]any{}}}},
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasSuccessBody(doc, tc.resps); got != tc.want {
+				t.Errorf("hasSuccessBody = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolvesComponentRef(t *testing.T) {
 	// matter.get's 200 response is a $ref to MatterDetail — the resolver
 	// should inline the properties so the schema command can describe it.
