@@ -190,6 +190,23 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, req *client.Request) erro
 // items — the caller gets a single envelope with no _pagination block
 // (architecture §4.4).
 func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, firstReq *client.Request) error {
+	// Pagination and binary output-to-disk are mutually exclusive. The loop
+	// reuses OutputPath for every page, so an operation that was both paginated
+	// AND declared an inline binary body would write each page to the same file,
+	// leaving only the last page's bytes. No spec op declares both today, so this
+	// never fires in practice; it is a fail-loud guard against a future spec that
+	// wires the two together and would otherwise silently corrupt --output.
+	if firstReq.OutputPath != "" {
+		err := output.ErrWithHint(
+			"internal",
+			"PAGINATION_OUTPUT_CONFLICT",
+			"operation is paginated and also writes a binary body to --output; these are mutually exclusive",
+			"operation-spec bug: an op with x-octo-pagination must not also declare an inline 2xx binary body",
+		)
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+		return err
+	}
+
 	cli, err := f.Client()
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err

@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime"
@@ -340,6 +341,76 @@ func TestPagination_PageLimitStops(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("expected 2 calls bounded by --page-limit, got %d", calls)
+	}
+}
+
+// TestRunPaginated_RejectsOutputPathConflict pins the item-2 guard: pagination
+// and binary output-to-disk are mutually exclusive (the page loop reuses the
+// single OutputPath, so it would write every page over the same file). No spec
+// op declares both today, so this cannot be reached through the command tree —
+// it is a fail-loud guard called directly here to prove a future spec wiring
+// the two together is rejected up front rather than silently corrupting output.
+func TestRunPaginated_RejectsOutputPathConflict(t *testing.T) {
+	tf := cmdutil.NewTestFactory()
+	tf.SetConfig(&config.Config{APIBaseURL: "http://example.invalid", Format: "json"})
+
+	dst := filepath.Join(t.TempDir(), "must-not-write.bin")
+	err := runPaginated(context.Background(), tf.Factory, &operationRuntime{}, &client.Request{
+		Method: "GET", Path: "/x", OutputPath: dst,
+	})
+	if err == nil {
+		t.Fatal("expected an error for a paginated op carrying OutputPath, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error should explain the conflict, got %q", err.Error())
+	}
+	if _, statErr := os.Stat(dst); statErr == nil {
+		t.Error("guard must reject before any write; output file must not exist")
+	}
+}
+
+// TestDocsSceneExport_DescribeOnlyEnvelope covers the no-`-o` path: without a
+// destination, docs.scene.export must not write anything and the envelope
+// reports the binary body's status / content_type / size (describe-only). This
+// path was only covered indirectly before.
+func TestDocsSceneExport_DescribeOnlyEnvelope(t *testing.T) {
+	payload := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>`)
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write(payload)
+	})
+
+	root.SetArgs([]string{"docs", "scene", "export", "abc", "--image-format", "svg"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Status      int    `json:"status"`
+			ContentType string `json:"content_type"`
+			Size        int    `json:"size"`
+			Output      string `json:"output"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if !env.OK {
+		t.Fatalf("expected ok envelope, got %s", tf.Out.String())
+	}
+	if env.Data.Status != 200 {
+		t.Errorf("status = %d, want 200", env.Data.Status)
+	}
+	if env.Data.ContentType != "image/svg+xml" {
+		t.Errorf("content_type = %q, want image/svg+xml", env.Data.ContentType)
+	}
+	if env.Data.Size != len(payload) {
+		t.Errorf("size = %d, want %d", env.Data.Size, len(payload))
+	}
+	if env.Data.Output != "" {
+		t.Errorf("describe-only envelope must not carry an output path, got %q", env.Data.Output)
 	}
 }
 
