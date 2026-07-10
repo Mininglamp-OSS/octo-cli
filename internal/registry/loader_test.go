@@ -41,7 +41,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":    4,
 		"bot":     6,
 		"event":   2,
-		"docs":    26,
+		"docs":    28,
 	}
 	totalWant := 0
 	for svc, want := range expected {

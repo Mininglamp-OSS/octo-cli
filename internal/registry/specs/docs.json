@@ -390,6 +390,97 @@
         }
       }
     },
+    "/v1/bot/docs/{docId}/scene": {
+      "get": {
+        "operationId": "docs.scene.get",
+        "summary": "Read a whiteboard's live scene + its base version (needs reader)",
+        "description": "Reads the LIVE Excalidraw scene of a doc_type 'board' — its `elements` in fractional-index (z-order), the `files` map of image/file refs, and the base-version token that pins the read. Pass that token to `docs scene edit` as --base-version so the optimistic-concurrency guard can prove the scene did not change between read and write. doc / sheet bodies are a different Y.Doc shape and return 409 unsupported_doc_type here; a live scene that decodes to a wrong-kind / corrupt blob returns 409 board_snapshot_invalid.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live scene + base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "elements": { "type": "array", "items": { "type": "object" }, "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node" },
+                    "files": { "type": "object", "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene" },
+                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`" },
+                    "schemaVersion": { "type": "integer", "description": "whiteboard schema version the scene was decoded with" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.scene.edit",
+        "summary": "Apply an element upsert/delete batch to a whiteboard scene (needs writer)",
+        "description": "Applies a batch of element upserts and soft-deletes to a doc_type 'board' scene under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs scene get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live scene moved since that read. `elements` are full elements to upsert (CAS: the higher `version` wins), `deletedElementIds` are soft-delete tombstones, and `files` upserts file refs; the batch is a structured object, so pass it as JSON through --data. Only doc_type 'board' is accepted (doc / sheet return 409 unsupported_doc_type). Gates: element count over the max → 413 too_many_elements, a single element too large → 413 element_too_large, whole scene over the cap → 413 doc_too_large, an element failing the whitelist → 422 board_element_invalid, a file ref with no usable attachId → 422 board_file_invalid, missing base version or malformed shape → 400 invalid_body.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from 'docs scene get' (sent as the If-Match header for optimistic concurrency; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "elements": {
+                    "type": "array",
+                    "items": { "type": "object" },
+                    "description": "full Excalidraw elements to upsert; on a key collision the element with the higher `version` (then smaller `versionNonce`) wins the CAS. Pass via --data."
+                  },
+                  "deletedElementIds": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "element ids to soft-delete; each becomes a tombstone with a superseding version so it converges under CAS. Pass via --data."
+                  },
+                  "files": {
+                    "type": "object",
+                    "description": "map of fileId -> file ref (e.g. {\"attachId\":\"…\"}) to upsert for images/files referenced by the scene. Pass via --data."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edit applied; carries the new base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "bytes": { "type": "integer", "description": "encoded size of the scene after the edit" },
+                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
+                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/members": {
       "get": {
         "operationId": "docs.members.list",
@@ -646,7 +737,7 @@
       "get": {
         "operationId": "docs.versions.state",
         "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
-        "description": "Returns the version decoded to ProseMirror JSON ({doc, sheetCells, sheetDims, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
+        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON ({kind:'document', doc, sheetCells, sheetDims, schemaVersion, docVersionSeq}); a board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
         "x-octo-risk": "read",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -654,15 +745,17 @@
         ],
         "responses": {
           "200": {
-            "description": "Decoded snapshot content",
+            "description": "Decoded snapshot content (document/sheet or board scene, selected by kind)",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "doc": { "type": "object" },
-                    "sheetCells": { "type": "object" },
-                    "sheetDims": { "type": "object" },
+                    "kind": { "type": "string", "enum": ["document", "board"], "description": "which content line was decoded: 'document' (doc/sheet -> doc + sheet maps) or 'board' (whiteboard -> scene)" },
+                    "doc": { "type": "object", "description": "document/sheet only: the snapshot body as ProseMirror document JSON" },
+                    "sheetCells": { "type": "object", "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)" },
+                    "sheetDims": { "type": "object", "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)" },
+                    "scene": { "type": "object", "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})" },
                     "schemaVersion": { "type": "integer" },
                     "docVersionSeq": { "type": "integer" }
                   }
