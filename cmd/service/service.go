@@ -146,6 +146,16 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 		rt.pageLimit = &pageLimit
 	}
 
+	// Binary-response operations accept --output/-o to WRITE a 2xx binary body
+	// to disk (e.g. docs.scene.export --format png -o board.png). Without it the
+	// command only describes the body (status/content_type/size), preserving the
+	// historical behaviour of redirect-style binary ops such as file.download.
+	if d.BinaryResponse {
+		var outputPath string
+		cmd.Flags().StringVarP(&outputPath, "output", "o", "", "write the binary response body to this file path")
+		rt.outputPath = &outputPath
+	}
+
 	cmd.RunE = func(cobraCmd *cobra.Command, args []string) error {
 		return runOperation(cobraCmd, f, rt, args)
 	}

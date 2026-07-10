@@ -53,6 +53,11 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// behaviour of sending the header when the credential has a space.
 		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
 	}
+	// Binary-response ops may carry an --output/-o destination; when set, the
+	// client writes the 2xx body to that path instead of only describing it.
+	if rt.outputPath != nil {
+		req.OutputPath = *rt.outputPath
+	}
 	if d.Multipart {
 		raw, ct, err := buildMultipartBody(cobraCmd, rt)
 		if err != nil {

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,12 @@ type Request struct {
 	// BinaryResponse asks the client to treat 3xx/non-JSON responses as
 	// structured metadata envelopes rather than parsing JSON. See file.download.
 	BinaryResponse bool
+	// OutputPath, when set together with BinaryResponse, makes the client WRITE
+	// a 2xx binary body to that file path (instead of only describing it) and
+	// return an envelope carrying the saved path + size. Empty preserves the
+	// historical describe-only behaviour. A 3xx (redirect-to-URL) response is
+	// never written — its URL is surfaced in the envelope as before.
+	OutputPath string
 	// SuppressSpaceHeader omits the X-Space-Id header even when the active
 	// credential carries a SpaceID. It is set for operations whose spec declares
 	// x-octo-space-header:false (e.g. the docs bot mount resolves the space
@@ -143,11 +150,11 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes, req.SuppressSpaceHeader)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.SuppressSpaceHeader)
+	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.OutputPath, req.SuppressSpaceHeader)
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -171,7 +178,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, suppressSpaceHeader)
+		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, outputPath, suppressSpaceHeader)
 		if err == nil {
 			return body, nil
 		}
@@ -185,7 +192,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -262,6 +269,19 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 				"status":       resp.StatusCode,
 				"content_type": resp.Header.Get("Content-Type"),
 				"size":         len(respBody),
+			}
+			// When the caller asked for a destination, WRITE the bytes to disk
+			// (docs.scene.export --output). A write failure is a hard, non-
+			// retryable error — the request succeeded, so retrying would only
+			// re-download; the problem is local (bad path/permissions).
+			if outputPath != "" {
+				if err := os.WriteFile(outputPath, respBody, 0o644); err != nil {
+					return nil, output.ErrValidation(
+						fmt.Sprintf("write output %q: %v", outputPath, err),
+						"check the path is writable and the directory exists",
+					)
+				}
+				env["output"] = outputPath
 			}
 			return json.Marshal(env)
 		}

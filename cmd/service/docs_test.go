@@ -93,6 +93,7 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.attachments.presign": {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
 		"docs.attachments.get":     {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
 		"docs.attachments.resolve": {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
+		"docs.scene.export":        {"GET", "/v1/bot/docs/{docId}/export"},
 	}
 
 	got := reg.ListOperations("docs")

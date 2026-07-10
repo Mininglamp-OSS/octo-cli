@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -386,6 +388,62 @@ func TestDo_BinaryResponse_InlineBodyReturnsMetadata(t *testing.T) {
 	}
 	if n, _ := env["size"].(float64); int(n) != len(payload) {
 		t.Errorf("size = %v, want %d", env["size"], len(payload))
+	}
+}
+
+func TestDo_BinaryResponse_OutputPathWritesFile(t *testing.T) {
+	payload := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, 32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write(payload)
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "board.png")
+	c := newBinaryClient(srv)
+	body, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	// The bytes are written verbatim to the destination.
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("written bytes differ: got %d bytes, want %d", len(got), len(payload))
+	}
+	// The envelope reports the saved path + size.
+	var env map[string]any
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal: %v -- %s", err, body)
+	}
+	if env["output"] != dest {
+		t.Errorf("output = %v, want %s", env["output"], dest)
+	}
+	if n, _ := env["size"].(float64); int(n) != len(payload) {
+		t.Errorf("size = %v, want %d", env["size"], len(payload))
+	}
+}
+
+func TestDo_BinaryResponse_OutputPathUnwritableIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte{1, 2, 3})
+	}))
+	defer srv.Close()
+
+	// A path under a non-existent directory cannot be created → validation error.
+	dest := filepath.Join(t.TempDir(), "no-such-dir", "board.png")
+	c := newBinaryClient(srv)
+	if _, err := c.Do(context.Background(), &Request{
+		Method: "GET", Path: "/export", BinaryResponse: true, OutputPath: dest,
+	}); err == nil {
+		t.Fatalf("expected an error writing to an unwritable path")
 	}
 }
 
