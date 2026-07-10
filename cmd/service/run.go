@@ -222,21 +222,17 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		if !hasMore || nextCursor == "" {
 			break
 		}
-		// Prepare next request. Clone Query so we don't mutate the previous.
+		// Prepare next request. Copy the whole struct so no field is silently
+		// dropped (RawBody/ContentType/BinaryResponse/OutputPath), then clone
+		// Query and set the next cursor so we don't mutate the previous page's.
 		nextQ := url.Values{}
 		for k, vs := range req.Query {
 			nextQ[k] = append([]string(nil), vs...)
 		}
 		nextQ.Set(cursorParam, nextCursor)
-		req = client.Request{
-			Service:             req.Service,
-			Method:              req.Method,
-			Path:                req.Path,
-			Query:               nextQ,
-			Body:                req.Body,
-			Headers:             req.Headers,
-			SuppressSpaceHeader: req.SuppressSpaceHeader,
-		}
+		next := req
+		next.Query = nextQ
+		req = next
 	}
 
 	out, err := json.Marshal(merged)
