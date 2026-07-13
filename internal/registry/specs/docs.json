@@ -342,8 +342,8 @@
       },
       "patch": {
         "operationId": "docs.sheet.edit",
-        "summary": "Apply a batch cell edit to a spreadsheet (needs writer)",
-        "description": "Applies a batch of cell set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell), so pass it as JSON through --data. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version or malformed shape → 400 invalid_body, a cell violating the {v,f,s} contract or key shape → 422 sheet_snapshot_invalid.",
+        "summary": "Apply a batch sheet edit — cells / dims / drawings (needs writer)",
+        "description": "Applies a batch of cell, dimension, and/or drawing set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell). The optional dims batch sets column widths / row heights: a JSON object `{ \"c<idx>\"|\"r<idx>\": <px> | null }` (e.g. `{\"c0\":200,\"r3\":40}`; a null value deletes that dim). The optional drawings batch inserts/removes floating images: a JSON object `{ \"sheetId!drawingId\": <ISheetImage> | null }` (image bytes ride inline as a base64 data URL in `source`). Provide `cells`, `dims`, or `drawings` via --data; at least one must be non-empty. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell/dim/drawing count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version / malformed shape / all batches empty → 400 invalid_body, a cell/dim/drawing violating its contract or key shape → 422 sheet_cell_invalid.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -371,13 +371,18 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "cells"
-                ],
                 "properties": {
                   "cells": {
                     "type": "object",
                     "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?} to set the cell, or null to delete it. At least one of v/f/s must be present on a set. Pass via --data."
+                  },
+                  "dims": {
+                    "type": "object",
+                    "description": "batch of column-width / row-height ops keyed `c<idx>` (column) or `r<idx>` (row), e.g. `{\"c0\":200,\"r3\":40}`. Each value is a positive pixel number to set, or null to delete that dim. Optional; provide cells, dims, or drawings (at least one non-empty). Pass via --data."
+                  },
+                  "drawings": {
+                    "type": "object",
+                    "description": "batch of floating-image ops keyed `${sheetId}!${drawingId}` (e.g. `default!img1`). Each value is a serialized Univer ISheetImage — {drawingId (== the key's id), drawingType:0, imageSourceType:\"BASE64\", source:\"data:image/png;base64,…\", transform:{left,top,width,height,angle,flipX,flipY,skewX,skewY}, sheetTransform:{from:{column,row,columnOffset,rowOffset},to:{…}}, axisAlignSheetTransform} — or null to delete it. The image bytes ride inline in `source`. Optional. Pass via --data."
                   }
                 }
               }
@@ -639,7 +644,7 @@
       "post": {
         "operationId": "docs.comments.add",
         "summary": "Add a root comment (anchored) or a reply (needs reader)",
-        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor: either the opaque base64 Yjs positions anchorStart/anchorEnd (from a live editor selection), or anchorText — the selected text — which the backend resolves against the document. When anchorText matches more than one place the request fails with 422 ambiguous_anchor; narrow it with blockPath (the block's child-index path, e.g. 0,2) and/or occurrence (1-based match index).",
+        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor: either the opaque base64 Yjs positions anchorStart/anchorEnd (from a live editor selection), or anchorText — the selected text — which the backend resolves against the document. When anchorText matches more than one place the request fails with 422 ambiguous_anchor; narrow it with blockPath (the block's child-index path, e.g. 0,2) and/or occurrence (1-based match index). For a doc_type 'sheet' anchorText is rejected with 409 unsupported_doc_type (a sheet has no text fragment): anchor to a cell instead by passing the base64 of the cell key `${sheetId}!${row}:${col}` (row/col 0-based, e.g. base64 of `default!0:0`) as BOTH anchorStart and anchorEnd, with the A1 label in anchorText (display only).",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -767,7 +772,7 @@
         "x-octo-risk": "read",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
         ],
         "responses": {
           "200": {
@@ -799,7 +804,7 @@
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
         ],
         "requestBody": {
           "required": true,
@@ -823,7 +828,7 @@
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
         ],
         "responses": { "200": { "description": "Deleted" } }
       }
@@ -836,7 +841,7 @@
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
         ],
         "responses": { "200": { "description": "Restored (returns restoredFrom + newDocVersionSeq)" } }
       }
