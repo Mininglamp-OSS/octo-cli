@@ -124,6 +124,29 @@ octo-cli docs sheet get <docId>
 # A cell value of null DELETES that cell.
 octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+
+# Set column widths / row heights via the optional `dims` batch, keyed
+# `c<idx>` (column) or `r<idx>` (row) -> pixels; a null value deletes a dim.
+# Provide cells, dims, or both (at least one non-empty). These are the same
+# `sheetDims` values `docs sheet get` returns.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"dims":{"c0":200,"r3":40,"c5":null}}'
+
+# Insert / remove a FLOATING IMAGE via the optional `drawings` batch, keyed
+# `${sheetId}!${drawingId}`. The value is a serialized Univer ISheetImage with
+# the bytes inline as a base64 data URL in `source`; `drawingId` MUST equal the
+# key's id. A null value deletes that image. `transform` is the pixel box;
+# `sheetTransform` anchors it to a cell range (from/to). NOT returned by
+# `docs sheet get` (the read surface is cells+dims only).
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "drawings": { "default!img1": {
+    "drawingId": "img1", "drawingType": 0, "imageSourceType": "BASE64",
+    "source": "data:image/png;base64,iVBORw0KGgo...",
+    "transform": {"left":100,"top":100,"width":80,"height":80,"angle":0,"flipX":false,"flipY":false,"skewX":0,"skewY":0},
+    "sheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0}},
+    "axisAlignSheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0},"angle":0,"flipX":false,"flipY":false,"skewX":0,"skewY":0}
+  } }
+}'
 ```
 
 ### Reading a large sheet in pages
@@ -155,8 +178,21 @@ Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
 `413 too_many_cells` / `413 cell_too_large` (write size caps),
 `400 invalid_body` (missing base version or malformed shape),
 `400 invalid_limit` / `400 invalid_cursor` (bad pagination params), and
-`422 sheet_snapshot_invalid` (a cell violates the `{v,f,s}` contract or the
+`422 sheet_cell_invalid` (a cell violates the `{v,f,s}` contract or the
 `sheetId!row:col` key shape).
+
+### Exporting a sheet to Excel (.xlsx)
+
+There is no server-side sheet export endpoint. A bot exports by **reading the
+sheet and serializing it locally**: `docs sheet get` returns everything needed —
+`sheetCells` (`{v,f,s}` per cell) and `sheetDims` (column widths / row heights) —
+so feed those into whatever spreadsheet library the bot's runtime has (e.g.
+`xlsx-js-style` in Node, `openpyxl` in Python): map `default!r:c` → row r / col c,
+write `v` (or `f` as a formula), apply `s` as the cell style, and set widths from
+`c<idx>` / heights from `r<idx>`. For a large grid, page the read with
+`--limit`/`--cursor` and stream rows into the workbook. (Note: merged-cell ranges
+and floating images are not exposed through the bot read surface yet, so an
+exported workbook carries values + styles + dimensions but not merges/images.)
 
 ## 4. Whiteboard scenes (read + batch edit)
 
@@ -261,6 +297,28 @@ in the stored document and computes the anchor. When the text occurs more than
 once the request fails loudly with `422 ambiguous_anchor` (never a silent guess)
 — narrow it with `--blockPath` and/or `--occurrence`. Text that is not found
 returns `422 anchor_text_not_found`.
+
+### Commenting on a spreadsheet cell (doc_type 'sheet')
+
+A `sheet` has no rich-text body, so `--anchorText` does NOT work on it (the
+backend returns `409 unsupported_doc_type` — anchor-text resolution needs a
+ProseMirror fragment). Instead a sheet comment anchors to a **cell**: pass the
+base64 of the cell key `${sheetId}!${row}:${col}` as BOTH `--anchorStart` and
+`--anchorEnd`, and put the human-readable A1 label in `--anchorText` (display
+only, not resolved). `row`/`col` are 0-based; `sheetId` is the logical sheet id
+(`default` for a single-sheet doc — the same prefix cell keys use in
+`docs sheet get`).
+
+```bash
+# Comment on cell A1 (row 0, col 0) of the default sheet.
+CELL=$(printf 'default!0:0' | base64)          # -> ZGVmYXVsdCEwOjA=
+octo-cli docs comments add <sheetDocId> \
+  --body "This total looks off" \
+  --anchorStart "$CELL" --anchorEnd "$CELL" --anchorText "A1"
+```
+
+List / reply / resolve / delete work identically to document comments (§6); the
+badge a reader sees on the cell is driven by this anchor.
 
 ## 7. Versions (snapshots)
 
