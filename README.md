@@ -243,15 +243,18 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
-- [`octo-docs`](./skills/octo-docs/SKILL.md) — documents: lifecycle, live body
-  editing, members/sharing, comments, versions, and attachment metadata.
+- [`octo-docs`](./skills/octo-docs/SKILL.md) — documents: lifecycle plus
+  progressive-disclosure references. `SKILL.md` is a slim router; task detail
+  lives in sibling files loaded on demand: `sheet.md` (spreadsheets), `doc.md`
+  (rich-text body), `board.md` (whiteboard), and `common.md` (comments,
+  versions, members/sharing, attachments).
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 
 ```bash
 octo-cli skills                       # list embedded skills
-octo-cli skills octo-messaging        # print one skill (name, description, content)
-octo-cli skills --install ~/.config/octo/skills   # write all SKILL.md to a dir
+octo-cli skills octo-docs             # print one skill (SKILL.md + its references)
+octo-cli skills --install ~/.config/octo/skills   # write every skill (SKILL.md + references) to a dir
 ```
 
 ## Shell Completion

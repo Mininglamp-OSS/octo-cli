@@ -127,6 +127,35 @@ func TestCmd_SkillsShow(t *testing.T) {
 	}
 }
 
+// A split skill (octo-docs) must reprint its whole set through `skills <name>`:
+// SKILL.md in `content` plus every progressive-disclosure reference under
+// `references`. This guards the bug where only SKILL.md was returned, dropping
+// most of the skill's command docs after the split.
+func TestCmd_SkillsShowIncludesReferences(t *testing.T) {
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{Format: "json"})
+
+	out, _, err := execRoot(t, f, "skills", "octo-docs")
+	if err != nil {
+		t.Fatalf("skills octo-docs: %v", err)
+	}
+	var env map[string]any
+	if jerr := json.Unmarshal([]byte(out), &env); jerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", jerr, out)
+	}
+	data, _ := env["data"].(map[string]any)
+	refs, ok := data["references"].(map[string]any)
+	if !ok || len(refs) == 0 {
+		t.Fatalf("expected non-empty references for split skill octo-docs, got %v", data["references"])
+	}
+	for _, want := range []string{"sheet.md", "doc.md", "board.md", "common.md"} {
+		body, present := refs[want].(string)
+		if !present || strings.TrimSpace(body) == "" {
+			t.Errorf("reference %q missing or empty in skills octo-docs output", want)
+		}
+	}
+}
+
 func TestCmd_SkillsUnknown(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{Format: "json"})
@@ -171,6 +200,12 @@ func TestCmd_SkillsInstall(t *testing.T) {
 	// Verify the expected on-disk layout.
 	if _, statErr := os.Stat(filepath.Join(dir, "octo-shared", "SKILL.md")); statErr != nil {
 		t.Errorf("expected octo-shared/SKILL.md under install dir: %v", statErr)
+	}
+	// A split skill must lay down its reference files too, not just SKILL.md.
+	for _, ref := range []string{"SKILL.md", "sheet.md", "doc.md", "board.md", "common.md"} {
+		if _, statErr := os.Stat(filepath.Join(dir, "octo-docs", ref)); statErr != nil {
+			t.Errorf("expected octo-docs/%s under install dir: %v", ref, statErr)
+		}
 	}
 }
 

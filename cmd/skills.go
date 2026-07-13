@@ -98,7 +98,8 @@ func skillDisabled(b []byte) bool {
 
 // newSkillsCmd returns `octo-cli skills`. Three mutually exclusive modes:
 //   - `octo-cli skills`: list embedded skills (name + description).
-//   - `octo-cli skills <name>`: print one skill's name, description, and content.
+//   - `octo-cli skills <name>`: print one skill's name, description, content
+//     (SKILL.md), and any progressive-disclosure reference files.
 //   - `octo-cli skills --install <dir>`: write every skill to <dir>/<name>/SKILL.md.
 func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 	var install string
@@ -109,8 +110,8 @@ func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 		Long: `Agent-facing SKILL.md docs are embedded in this binary.
 
   octo-cli skills                    list available skills
-  octo-cli skills <name>             print one skill (name, description, content)
-  octo-cli skills --install <dir>    write every skill to <dir>/<name>/SKILL.md`,
+  octo-cli skills <name>             print one skill (name, description, content + references)
+  octo-cli skills --install <dir>    write every skill (SKILL.md + references) to <dir>/<name>/`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("install") && install == "" {
@@ -159,22 +160,60 @@ func runSkillsList(f *cmdutil.Factory, entries []skillEntry) error {
 	return f.EmitSuccess(buf)
 }
 
-// runSkillsShow emits one skill's full content, or a validation error naming
-// the available skills when name doesn't match.
+// loadSkillReferences returns a skill's progressive-disclosure reference files
+// — every sibling *.md next to SKILL.md, excluding SKILL.md itself — keyed by
+// base filename (e.g. "sheet.md"). A monolithic skill (only SKILL.md) yields an
+// empty map. This is what lets `skills <name>` reprint the whole skill set, not
+// just SKILL.md, after a skill is split into references.
+func loadSkillReferences(skillPath string) (map[string]string, error) {
+	skillDir := strings.TrimSuffix(skillPath, "/SKILL.md")
+	paths, err := fs.Glob(skills.FS, skillDir+"/*.md")
+	if err != nil {
+		return nil, err
+	}
+	refs := make(map[string]string)
+	for _, p := range paths {
+		if filepath.Base(p) == "SKILL.md" {
+			continue
+		}
+		b, rerr := skills.FS.ReadFile(p)
+		if rerr != nil {
+			return nil, rerr
+		}
+		refs[filepath.Base(p)] = string(b)
+	}
+	return refs, nil
+}
+
+// runSkillsShow emits one skill's full content — SKILL.md plus any
+// progressive-disclosure reference files — or a validation error naming the
+// available skills when name doesn't match. `content` holds SKILL.md;
+// `references` maps each sibling reference filename to its content so the whole
+// skill set is reprinted, not just the router.
 func runSkillsShow(f *cmdutil.Factory, entries []skillEntry, name string) error {
 	for _, s := range entries {
-		if s.Name == name {
-			buf, err := json.Marshal(map[string]any{
-				"name":        s.Name,
-				"description": s.Description,
-				"content":     string(s.content),
-			})
-			if err != nil {
-				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
-				return err
-			}
-			return f.EmitSuccess(buf)
+		if s.Name != name {
+			continue
 		}
+		refs, rerr := loadSkillReferences(s.path)
+		if rerr != nil {
+			_ = f.EmitError(rerr) //nolint:errcheck // best-effort emit before returning err
+			return rerr
+		}
+		payload := map[string]any{
+			"name":        s.Name,
+			"description": s.Description,
+			"content":     string(s.content),
+		}
+		if len(refs) > 0 {
+			payload["references"] = refs
+		}
+		buf, err := json.Marshal(payload)
+		if err != nil {
+			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+			return err
+		}
+		return f.EmitSuccess(buf)
 	}
 	names := make([]string, len(entries))
 	for i, s := range entries {
@@ -188,21 +227,42 @@ func runSkillsShow(f *cmdutil.Factory, entries []skillEntry, name string) error 
 	return ee
 }
 
-// runSkillsInstall writes every skill to <dir>/<name>/SKILL.md and reports the
-// files written.
+// runSkillsInstall writes every enabled skill's whole markdown set to
+// <dir>/<name>/ — SKILL.md plus any sibling progressive-disclosure reference
+// files (e.g. octo-docs/sheet.md) — and reports the files written.
 func runSkillsInstall(f *cmdutil.Factory, entries []skillEntry, dir string) error {
 	written := make([]string, 0, len(entries))
+	seen := make(map[string]bool)
 	for _, s := range entries {
-		dst := filepath.Join(dir, s.path)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		// The skill's directory is the SKILL.md path minus the filename; glob it
+		// for every markdown doc so reference files ride along with SKILL.md.
+		skillDir := strings.TrimSuffix(s.path, "/SKILL.md")
+		refs, err := fs.Glob(skills.FS, skillDir+"/*.md")
+		if err != nil {
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
-		if err := os.WriteFile(dst, s.content, 0o644); err != nil {
-			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
-			return err
+		for _, p := range refs {
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			b, err := skills.FS.ReadFile(p)
+			if err != nil {
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+				return err
+			}
+			dst := filepath.Join(dir, p)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+				return err
+			}
+			if err := os.WriteFile(dst, b, 0o644); err != nil {
+				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+				return err
+			}
+			written = append(written, dst)
 		}
-		written = append(written, dst)
 	}
 	buf, err := json.Marshal(map[string]any{"dir": dir, "installed": written})
 	if err != nil {
