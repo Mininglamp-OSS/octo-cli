@@ -4,8 +4,10 @@ package skills
 
 import "embed"
 
-// FS holds every <skill-name>/SKILL.md under this directory, keyed by its
-// relative path (e.g. "octo-messaging/SKILL.md").
+// FS holds every markdown doc under each <skill-name>/ directory: the skill's
+// own SKILL.md plus any progressive-disclosure reference files (e.g.
+// "octo-docs/sheet.md"), keyed by relative path. Listing still keys off
+// */SKILL.md; the sibling .md files are reference docs loaded on demand.
 //
-//go:embed */SKILL.md
+//go:embed */*.md
 var FS embed.FS
