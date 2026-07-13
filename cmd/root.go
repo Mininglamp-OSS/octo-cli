@@ -2,7 +2,7 @@
 // container and holds root-level persistent flags. Service-domain commands are
 // auto-registered from the embedded OpenAPI registry via cmd/service — the
 // hand-written leaves are `schema`, `version`, `api` (generic passthrough),
-// `config`, and `skills`.
+// `config`, `skills`, `auth`, and `sheet-cell` (offline value→cell helper).
 package cmd
 
 import (
@@ -53,6 +53,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newConfigCmd(f))
 	root.AddCommand(newSkillsCmd(f))
 	root.AddCommand(newAuthCmd(f))
+	root.AddCommand(newSheetCellCmd(f))
 	service.RegisterServiceCommands(root, f)
 	withholdDisabledServices(root, f)
 
@@ -97,7 +98,7 @@ func skipValidation(cmd *cobra.Command) bool {
 	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "skills", "auth", "":
+		case "version", "help", "schema", "config", "completion", "skills", "auth", "sheet-cell", "":
 			return true
 		}
 	}

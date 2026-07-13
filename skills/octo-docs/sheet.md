@@ -46,6 +46,64 @@ octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
 }'
 ```
 
+## Value types & number formats — use `sheet-cell`
+
+Plain values are easy: a JSON number stays a number (`{"v":82}`, NOT the quoted
+`{"v":"82"}` — a quoted numeric lands as text with the green "number stored as
+text" warning); `true`/`false` a boolean; a string a string; a formula goes in
+`f`, not `v`.
+
+**Formatted values are the trap.** Dates, times, percentages, currency, thousands
+separators are all stored the same non-obvious way: a plain **number** in `v`
+plus a **number-format pattern** in `s.n.pattern`, with `t:2`. Two things bite
+every time you hand-assemble this:
+
+- a date is NOT the string `"2025-01-10"` — it's the serial **number** `45667`
+  (days since 1899-12-30). Writing the ISO string stores TEXT, not a date.
+- it's easy to set `v` right but forget `s.n.pattern`/`t`, so the value shows
+  unformatted or as text.
+
+So **do not hand-build the cell object — use the offline `octo-cli sheet-cell`
+helper.** You give a natural value, it returns the exact `{v, s:{n:{pattern}}, t:2}`
+object (serial computed, percentage converted, pattern attached). No token/network.
+
+```bash
+octo-cli sheet-cell --date 2025-01-10          # -> {"v":45667,"s":{"n":{"pattern":"yyyy-mm-dd"}},"t":2}
+octo-cli sheet-cell --datetime "2025-01-10 12:00"   # -> v 45667.5, pattern yyyy-mm-dd hh:mm
+octo-cli sheet-cell --percent 25               # -> v 0.25, pattern 0%   (stores the FRACTION)
+octo-cli sheet-cell --currency 1200            # -> pattern ¥#,##0.00  (--symbol '$' to change)
+octo-cli sheet-cell --thousands 1234567        # -> pattern #,##0
+octo-cli sheet-cell --number 3.14 --pattern "0.00"   # long tail: any Excel format code
+octo-cli sheet-cell --date 2025-01-10 --pattern "yyyy/m/d"   # --pattern overrides the default
+
+# Take .data and drop it under a cell key in a sheet edit (bash embeds the output):
+octo-cli docs sheet edit d_123 --base-version "$BV" \
+  --data '{"cells":{"default!1:0": '"$(octo-cli sheet-cell --date 2025-01-10 --format json | jq -c .data)"'}}'
+```
+
+Pass exactly one value source. `sheet-cell` emits the standard success envelope —
+take `.data` for the raw cell object. Dates are exact for any date from 1900-03-01
+on (every real-world date).
+
+### What it produces (for reference / the long tail)
+
+`pattern` is a standard **Excel number-format code** — the backend stores it
+verbatim and Univer's numfmt engine renders it, so anything Excel supports works
+via `--number ... --pattern ...`. Common cases (all round-trip verified):
+
+| Kind | `sheet-cell` flag | `v` stores | `pattern` | Displays |
+|------|-------------------|-----------|-----------|----------|
+| Date | `--date` | serial | `yyyy-mm-dd` | `2025-01-10` |
+| Date-time | `--datetime` | serial + frac. day | `yyyy-mm-dd hh:mm` | `2025-01-10 12:00` |
+| Percent | `--percent` | the fraction (0.25) | `0%` | `25%` |
+| Currency | `--currency` | the amount | `¥#,##0.00` | `¥1,200.00` |
+| Thousands | `--thousands` | the amount | `#,##0` | `1,234,567` |
+| Fixed decimals | `--number --pattern "0.00"` | the number | `0.00` | `3.14` |
+| Scientific | `--number --pattern "0.00E+00"` | the number | `0.00E+00` | `1.23E-04` |
+| Fraction | `--number --pattern "# ?/?"` | the number | `# ?/?` | `3 1/4` |
+| Negative red | `--number --pattern "#,##0;[Red](#,##0)"` | the number | … | `(1,200)` |
+| Force text | (write `{"v":"…","t":4}` directly) | any | `@` | as-is |
+
 ## Reading a large sheet in pages
 
 A whole-sheet `docs sheet get` of a grid over the server's ~1MB read cap returns
