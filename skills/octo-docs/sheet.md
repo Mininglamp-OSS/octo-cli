@@ -12,8 +12,9 @@ may also carry Univer's `p` rich-text snapshot and `t` cell-type; both round-tri
 untouched.) Same read-token-then-guarded-write discipline as the body surface.
 
 ```bash
-# Read the LIVE cells + dims + baseVersion (reader). Response:
-#   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px }, baseVersion }
+# Read the LIVE cells + dims + hyperlinks + baseVersion (reader). Response:
+#   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px },
+#     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} }, baseVersion }
 octo-cli docs sheet get <docId>
 
 # Batch-edit cells (writer). --base-version is REQUIRED and is sent as the
@@ -42,6 +43,50 @@ octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
     "transform": {"left":100,"top":100,"width":80,"height":80,"angle":0,"flipX":false,"flipY":false,"skewX":0,"skewY":0},
     "sheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0}},
     "axisAlignSheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0},"angle":0,"flipX":false,"flipY":false,"skewX":0,"skewY":0}
+  } }
+}'
+```
+
+### Math formulas — a float-DOM drawing in the same `drawings` batch
+
+A math formula is stored as a drawing too (same `sheetDrawings` map), but as a
+**float-DOM** drawing (`drawingType: 8`), NOT an image: it has no `source` —
+instead `componentKey: "octo-math-formula"` and the LaTeX in `data.latex`.
+`sheetTransform.from` anchors it to a cell (`row`/`column`, 0-based). Backslashes
+in LaTeX must be JSON-escaped (`\\frac`, `\\sqrt`). `data.id` must equal the
+`drawingId`. Like all drawings it is **write-only** — `docs sheet get` does NOT
+return it, so you can't read a formula back to verify.
+
+```bash
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "drawings": { "default!formula-1": {
+    "drawingId": "formula-1", "drawingType": 8, "componentKey": "octo-math-formula",
+    "data": { "latex": "\\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}", "id": "formula-1", "fontSize": 20 },
+    "transform": {"left":100,"top":80,"width":120,"height":40},
+    "sheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":2,"columnOffset":0,"rowOffset":0}}
+  } }
+}'
+```
+
+### Cell hyperlinks — the `hyperlinks` batch
+
+A cell hyperlink is its OWN edit surface (a fourth batch alongside cells/dims/
+drawings), NOT a cell field: a link lives in the `sheetHyperLinks` map and points
+back at a cell by `row`/`column`. Put the visible text in the cell's `v`
+separately. Each entry is keyed `${sheetId}!${linkId}` (linkId alnum/`-`/`_`) and
+is `{ id, row, column, payload, display? }` where `id` MUST equal the key's linkId,
+`payload` is the URL (only `http`/`https`/`mailto`, or an internal `#…` jump — other
+schemes are rejected), and `display` is an optional label. A null value deletes a
+link. Unlike drawings, hyperlinks ARE returned by `docs sheet get` (as
+`sheetHyperLinks`), so you can read them back.
+
+```bash
+# Cell A1 shows the text "官网" and links to a URL (two surfaces in one edit).
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells": { "default!0:0": { "v": "官网" } },
+  "hyperlinks": { "default!lnk1": {
+    "id": "lnk1", "row": 0, "column": 0,
+    "payload": "https://example.com", "display": "官网"
   } }
 }'
 ```
