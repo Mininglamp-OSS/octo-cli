@@ -116,11 +116,29 @@ octo-cli docs members remove <docId> <uid>                       # admin; owner 
 
 # Grant-only forward access (never downgrades). Only reader|writer are grantable.
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
+
+# Space-level share scope — read/set who in the space can reach the doc.
+octo-cli docs share get <docId>                                       # reader; {docId, shareScope, shareRole}
+octo-cli docs share set <docId> --scope restricted                    # admin; only owner/members can access
+octo-cli docs share set <docId> --scope anyone_in_space --role read   # admin; every space member gets read
+octo-cli docs share set <docId> --scope anyone_in_space --role edit   # admin; every space member gets edit
 ```
 
 `docs members set` is a PUT-upsert: it adds the member if absent or changes the
 role if already present. The target uid must be a real Octo user — a miss returns
 `404 user_not_found` and writes no ghost member. Schema: `octo-cli schema docs.members.set`.
+
+`docs share set` changes the space-level share scope. Two scopes: `restricted`
+(only the owner and explicit members reach the doc — the default) and
+`anyone_in_space` (every member of the doc's own space is granted the share
+role). The `--role` (`read` | `edit`) is **required** with `--scope
+anyone_in_space` and is **ignored** with `--scope restricted` (the backend
+normalizes it to `read`), so omit `--role` when restricting. Sharing only ever
+*raises* access — an owner or member is never downgraded by a share setting.
+Error codes: `400 invalid_scope` (unknown scope), `400 invalid_role`
+(anyone_in_space with a missing/invalid role), `403` (caller not admin/owner),
+`404` (missing or cross-space doc), `409` (archived doc). Schema:
+`octo-cli schema docs.share.set`.
 
 ---
 
