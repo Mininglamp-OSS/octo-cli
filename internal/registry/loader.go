@@ -172,6 +172,13 @@ type SchemaInfo struct {
 	MaxLength   int                   `json:"max_length,omitempty"`
 	MaxItems    int                   `json:"max_items,omitempty"`
 	Ref         string                `json:"$ref,omitempty"`
+	// FlagName is the optional CLI flag override from the x-octo-flag extension
+	// on a request-body property, mirroring ParamInfo.FlagName for query/header
+	// params. It lets a promoted body field expose a clean flag name (e.g.
+	// --scope) while the wire body key stays the property name (e.g. shareScope),
+	// so the CLI can honour a caller-facing flag without diverging from the
+	// byte-exact backend contract. Empty means "derive from the property name".
+	FlagName string `json:"flag_name,omitempty"`
 }
 
 // PaginationInfo captures the `x-octo-pagination` extension. It tells the
@@ -506,6 +513,7 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nol
 		Type:        stringOf(s["type"]),
 		Format:      stringOf(s["format"]),
 		Description: stringOf(s["description"]),
+		FlagName:    stringOf(s["x-octo-flag"]),
 	}
 	if req, ok := s["required"].([]any); ok {
 		for _, x := range req {

@@ -187,7 +187,14 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		if !ok {
 			continue
 		}
-		flagName := strings.ReplaceAll(name, "_", "-")
+		// Flag name: an explicit x-octo-flag override on the property wins (so a
+		// clean --scope can front a shareScope wire key); otherwise derive it from
+		// the property name with underscores turned into dashes. The wire body key
+		// (bf.apiName) always stays the property name regardless of the flag alias.
+		flagName := prop.FlagName
+		if flagName == "" {
+			flagName = strings.ReplaceAll(name, "_", "-")
+		}
 		// Avoid collisions with --data, --file, a query param, or a spec-declared
 		// header flag of the same name (e.g. an If-Match header exposed as
 		// --base-version takes precedence over a body baseVersion mirror).

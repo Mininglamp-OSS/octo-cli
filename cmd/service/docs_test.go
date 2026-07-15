@@ -38,6 +38,7 @@ func TestDocs_TreeShape(t *testing.T) {
 		"sheet":       {"get", "edit"},
 		"scene":       {"get", "edit", "export"},
 		"members":     {"list", "set", "remove"},
+		"share":       {"get", "set"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
 		"attachments": {"presign", "get", "resolve"},
@@ -79,6 +80,8 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
 		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
 		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
+		"docs.share.get":           {"GET", "/v1/bot/docs/{docId}/share"},
+		"docs.share.set":           {"PUT", "/v1/bot/docs/{docId}/share"},
 		"docs.forward-grant":       {"POST", "/v1/bot/docs/{docId}/forward-grant"},
 		"docs.comments.list":       {"GET", "/v1/bot/docs/{docId}/comments"},
 		"docs.comments.add":        {"POST", "/v1/bot/docs/{docId}/comments"},
@@ -370,6 +373,103 @@ func TestDocsMembersRemove_TwoPathArgs(t *testing.T) {
 	}
 	if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/members/u9" {
 		t.Errorf("got %s %s, want DELETE /v1/bot/docs/d1/members/u9", gotMethod, gotPath)
+	}
+}
+
+// TestDocsShareGet_ReadPath checks docs.share.get is a plain GET on the
+// /share sub-resource with the docId in the path and no body.
+func TestDocsShareGet_ReadPath(t *testing.T) {
+	var gotMethod, gotPath string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"restricted","shareRole":"read"}`))
+	})
+	root.SetArgs([]string{"docs", "share", "get", "d1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/share" {
+		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/share", gotMethod, gotPath)
+	}
+}
+
+// TestDocsShareSet_RestrictedBody checks --scope restricted maps to a PUT on
+// /share with the byte-exact {shareScope} wire key and no shareRole (a
+// restricted doc ignores the role; the backend normalizes it to read).
+func TestDocsShareSet_RestrictedBody(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"restricted","shareRole":"read"}`))
+	})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "restricted"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "PUT" || gotPath != "/v1/bot/docs/d1/share" {
+		t.Errorf("got %s %s, want PUT /v1/bot/docs/d1/share", gotMethod, gotPath)
+	}
+	if gotBody["shareScope"] != "restricted" {
+		t.Errorf("body shareScope = %v, want restricted", gotBody["shareScope"])
+	}
+	if _, present := gotBody["shareRole"]; present {
+		t.Errorf("body must omit shareRole when --role is not passed; got %v", gotBody)
+	}
+}
+
+// TestDocsShareSet_AnyoneEditBody checks --scope anyone_in_space --role edit
+// maps both flags to their wire keys (shareScope / shareRole), proving the
+// x-octo-flag aliases (--scope, --role) do not leak into the body.
+func TestDocsShareSet_AnyoneEditBody(t *testing.T) {
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"anyone_in_space","shareRole":"edit"}`))
+	})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "anyone_in_space", "--role", "edit"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotBody["shareScope"] != "anyone_in_space" || gotBody["shareRole"] != "edit" {
+		t.Errorf("body = %v, want {shareScope:anyone_in_space, shareRole:edit}", gotBody)
+	}
+	// The flag aliases must never appear as body keys.
+	if _, bad := gotBody["scope"]; bad {
+		t.Errorf("body leaked the --scope flag alias as a wire key: %v", gotBody)
+	}
+	if _, bad := gotBody["role"]; bad {
+		t.Errorf("body leaked the --role flag alias as a wire key: %v", gotBody)
+	}
+}
+
+// TestDocsShareSet_FlagAliases confirms the leaf exposes --scope / --role (from
+// x-octo-flag) and NOT the camelCase property names, while --data stays
+// available for the raw-body escape hatch.
+func TestDocsShareSet_FlagAliases(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+	docs := findCmd(root, "docs")
+	share := findCmd(docs, "share")
+	if share == nil {
+		t.Fatal("missing docs share resource group")
+	}
+	set := findCmd(share, "set")
+	if set == nil {
+		t.Fatal("missing docs share set leaf")
+	}
+	for _, want := range []string{"scope", "role", "data"} {
+		if set.Flags().Lookup(want) == nil {
+			t.Errorf("docs share set: expected --%s flag", want)
+		}
+	}
+	for _, bad := range []string{"shareScope", "shareRole", "share-scope", "share-role"} {
+		if set.Flags().Lookup(bad) != nil {
+			t.Errorf("docs share set: --%s must NOT exist (aliased to --scope/--role)", bad)
+		}
 	}
 }
 

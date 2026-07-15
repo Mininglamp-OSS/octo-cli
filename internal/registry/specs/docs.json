@@ -593,6 +593,79 @@
         "responses": { "200": { "description": "Removed" } }
       }
     },
+    "/v1/bot/docs/{docId}/share": {
+      "get": {
+        "operationId": "docs.share.get",
+        "summary": "Read a document's space-level share scope (needs reader)",
+        "description": "Returns the current share settings any viewer can see: {docId, shareScope, shareRole}. shareScope is 'restricted' (only owner/members) or 'anyone_in_space' (every member of the doc's space gets the share role). shareRole is meaningful only when shareScope is anyone_in_space; a restricted doc always reports shareRole 'read'.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current share settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
+                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "docs.share.set",
+        "summary": "Set a document's space-level share scope (needs admin)",
+        "description": "Change the share scope so either only owner/members can access (--scope restricted) or every member of the doc's space gets a share role (--scope anyone_in_space --role read|edit). Normalization matches the backend: with --scope anyone_in_space a valid --role is required (a missing/invalid role is 400 invalid_role); with --scope restricted the role is ignored and stored as read, so --role may be omitted. An unknown scope is 400 invalid_scope; a non-admin caller is 403; a missing/cross-space doc is 404; an archived doc is 409. Share only ever RAISES access (owner/members are never downgraded).",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["shareScope"],
+                "properties": {
+                  "shareScope": { "type": "string", "x-octo-flag": "scope", "enum": ["restricted", "anyone_in_space"], "description": "share scope to set" },
+                  "shareRole": { "type": "string", "x-octo-flag": "role", "enum": ["read", "edit"], "description": "share role for anyone_in_space (required when scope=anyone_in_space; ignored and stored as read when scope=restricted)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated share settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
+                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "invalid_scope / invalid_role" },
+          "403": { "description": "forbidden (not admin/owner)" },
+          "404": { "description": "not_found (missing or cross-space doc)" },
+          "409": { "description": "conflict (archived doc)" }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/forward-grant": {
       "post": {
         "operationId": "docs.forward-grant",

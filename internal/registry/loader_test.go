@@ -41,7 +41,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":    4,
 		"bot":     6,
 		"event":   2,
-		"docs":    29,
+		"docs":    31,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -244,6 +244,33 @@ func TestQueryParamFlagAliasAvoidsGlobalCollision(t *testing.T) {
 	}
 	if found.Name != "format" {
 		t.Errorf("wire query param name = %q, want format (must be preserved)", found.Name)
+	}
+}
+
+// TestBodyPropertyFlagAlias pins docs.share.set: its shareScope/shareRole body
+// properties carry x-octo-flag scope/role so the CLI exposes clean --scope /
+// --role flags while the wire body keys stay the byte-exact backend contract
+// (shareScope / shareRole). The property name is never renamed — only the flag
+// alias is added.
+func TestBodyPropertyFlagAlias(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("docs.share.set")
+	if !ok {
+		t.Fatal("docs.share.set not found")
+	}
+	if op.RequestBody == nil || op.RequestBody.Properties == nil {
+		t.Fatal("docs.share.set: expected a request body with properties")
+	}
+	cases := map[string]string{"shareScope": "scope", "shareRole": "role"}
+	for prop, wantFlag := range cases {
+		p, ok := op.RequestBody.Properties[prop]
+		if !ok {
+			t.Errorf("docs.share.set: missing body property %q", prop)
+			continue
+		}
+		if p.FlagName != wantFlag {
+			t.Errorf("%s flag alias = %q, want %q (from x-octo-flag)", prop, p.FlagName, wantFlag)
+		}
 	}
 }
 
