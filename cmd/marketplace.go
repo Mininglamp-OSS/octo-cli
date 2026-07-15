@@ -47,7 +47,12 @@ func newMarketplaceSkillCmd(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return emitMarketplaceError(f, err)
 			}
-			client := marketplace.NewClient(api, &http.Client{Timeout: 30 * time.Second})
+			client := marketplace.NewClient(api, &http.Client{
+				Timeout: 30 * time.Second,
+				CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			})
 			skill, err := client.GetSkill(cmd.Context(), args[0])
 			if err != nil {
 				return emitMarketplaceError(f, err)
