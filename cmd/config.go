@@ -72,14 +72,15 @@ func newConfigShowCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 
 			payload := map[string]any{
-				"api_base_url":     cfg.APIBaseURL,
-				"space_id":         nullableString(space),
-				"format":           cfg.Format,
-				"bot_token":        maskToken(token),
-				"bot_token_source": nullableString(source),
-				"bot_kind":         botKind(token),
-				"profile":          nullableString(profileName),
-				"robot_id":         nullableString(robotID),
+				"api_base_url":           cfg.APIBaseURL,
+				"marketplace_api_prefix": cfg.MarketplaceAPIPrefix,
+				"space_id":               nullableString(space),
+				"format":                 cfg.Format,
+				"bot_token":              maskToken(token),
+				"bot_token_source":       nullableString(source),
+				"bot_kind":               botKind(token),
+				"profile":                nullableString(profileName),
+				"robot_id":               nullableString(robotID),
 			}
 			raw, err := json.Marshal(payload)
 			if err != nil {
