@@ -203,10 +203,10 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 	return s, nil
 }
 
-// overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
-// but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
+// overlayProfileBaseURL fills the unified API URL from the active profile's
+// metadata. An explicit environment variable wins over the profile value.
 func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
-	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
+	if profile == "" {
 		return
 	}
 	store, err := f.AuthStore()
@@ -217,8 +217,10 @@ func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
 	if err != nil {
 		return
 	}
-	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
-		cfg.APIBaseURL = m.APIBaseURL
+	if m, ok := profiles[profile]; ok {
+		if os.Getenv(config.EnvAPIBaseURL) == "" && m.APIBaseURL != "" {
+			cfg.APIBaseURL = m.APIBaseURL
+		}
 	}
 }
 

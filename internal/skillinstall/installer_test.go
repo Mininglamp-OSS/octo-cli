@@ -1,0 +1,105 @@
+package skillinstall
+
+import (
+	"archive/zip"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+type archiveEntry struct {
+	name string
+	body string
+	mode os.FileMode
+}
+
+func makeArchive(t *testing.T, entries ...archiveEntry) ([]byte, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, entry := range entries {
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		h := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
+		h.SetMode(mode)
+		w, err := zw.CreateHeader(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	return buf.Bytes(), hex.EncodeToString(sum[:])
+}
+
+func TestInstallSuccessReplacesOnlyTarget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "keep"), []byte("yes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "demo", "old"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archive, digest := makeArchive(t,
+		archiveEntry{name: "SKILL.md", body: "# demo"},
+		archiveEntry{name: "references/readme.md", body: "reference"},
+	)
+	result, err := Install(root, "demo", archive, digest)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if result.InstalledTo != filepath.Join(root, "demo") || len(result.Files) != 2 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(root, "demo", "old")); !os.IsNotExist(err) {
+		t.Fatalf("old file was not replaced: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "other", "keep")); err != nil {
+		t.Fatalf("unrelated skill changed: %v", err)
+	}
+}
+
+func TestInstallRejectsUnsafeArchive(t *testing.T) {
+	tests := []struct {
+		name    string
+		entries []archiveEntry
+		want    string
+	}{
+		{"path traversal", []archiveEntry{{name: "../escape", body: "x"}, {name: "SKILL.md", body: "x"}}, "unsafe path"},
+		{"symlink", []archiveEntry{{name: "SKILL.md", body: "x"}, {name: "link", body: "SKILL.md", mode: os.ModeSymlink | 0o777}}, "unsupported"},
+		{"missing skill", []archiveEntry{{name: "README.md", body: "x"}}, "missing SKILL.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			archive, digest := makeArchive(t, tt.entries...)
+			_, err := Install(t.TempDir(), "demo", archive, digest)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestInstallRejectsChecksumMismatch(t *testing.T) {
+	archive, _ := makeArchive(t, archiveEntry{name: "SKILL.md", body: "x"})
+	if _, err := Install(t.TempDir(), "demo", archive, strings.Repeat("0", 64)); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("error = %v", err)
+	}
+}

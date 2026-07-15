@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 )
 
@@ -21,12 +22,19 @@ func TestValidate_OK(t *testing.T) {
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv(EnvBotToken, "")
 	t.Setenv(EnvAPIBaseURL, "")
+	t.Setenv(EnvMarketplaceAPIPrefix, "temporary")
+	if err := os.Unsetenv(EnvMarketplaceAPIPrefix); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv(EnvFormat, "")
 	t.Setenv(EnvSpaceID, "")
 
 	cfg := Load()
 	if cfg.APIBaseURL != "http://127.0.0.1:8080" {
 		t.Errorf("APIBaseURL = %q, want default", cfg.APIBaseURL)
+	}
+	if cfg.MarketplaceAPIPrefix != "/market/api/v1" {
+		t.Errorf("MarketplaceAPIPrefix = %q, want /market/api/v1", cfg.MarketplaceAPIPrefix)
 	}
 	if cfg.Format != "json" {
 		t.Errorf("Format = %q, want json", cfg.Format)
@@ -35,6 +43,7 @@ func TestLoad_Defaults(t *testing.T) {
 
 func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvAPIBaseURL, "http://api.example")
+	t.Setenv(EnvMarketplaceAPIPrefix, "/marketplace/")
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
@@ -42,6 +51,9 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	cfg := Load()
 	if cfg.APIBaseURL != "http://api.example" {
 		t.Errorf("APIBaseURL = %q", cfg.APIBaseURL)
+	}
+	if cfg.MarketplaceAPIPrefix != "/marketplace/api/v1" {
+		t.Errorf("MarketplaceAPIPrefix = %q", cfg.MarketplaceAPIPrefix)
 	}
 	if cfg.BotToken != "app_xxx" {
 		t.Errorf("BotToken = %q", cfg.BotToken)
@@ -54,12 +66,22 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	}
 }
 
+func TestLoad_EmptyMarketplacePrefixUsesNativeAPIRoot(t *testing.T) {
+	t.Setenv(EnvMarketplaceAPIPrefix, "")
+	if got := Load().MarketplaceAPIPrefix; got != "/api/v1" {
+		t.Fatalf("MarketplaceAPIPrefix = %q", got)
+	}
+}
+
 func TestServiceURL_Unified(t *testing.T) {
-	cfg := &Config{APIBaseURL: "http://api.example"}
+	cfg := &Config{APIBaseURL: "http://api.example/api", MarketplaceAPIPrefix: "/market/api/v1"}
 	// All services should return the same API base URL.
 	for _, svc := range []string{"matters", "dmworkim", "unknown", ""} {
-		if got := cfg.ServiceURL(svc); got != "http://api.example" {
+		if got := cfg.ServiceURL(svc); got != "http://api.example/api" {
 			t.Errorf("ServiceURL(%q) = %q, want API base URL", svc, got)
 		}
+	}
+	if got := cfg.ServiceURL("marketplace"); got != "http://api.example/market/api/v1" {
+		t.Errorf("ServiceURL(marketplace) = %q", got)
 	}
 }
