@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -377,11 +378,14 @@ func TestDocsMembersRemove_TwoPathArgs(t *testing.T) {
 }
 
 // TestDocsShareGet_ReadPath checks docs.share.get is a plain GET on the
-// /share sub-resource with the docId in the path and no body.
+// /share sub-resource with the docId in the path and no request body — a read
+// must not ship a payload, so the handler asserts the received body is empty.
 func TestDocsShareGet_ReadPath(t *testing.T) {
 	var gotMethod, gotPath string
+	var gotBody []byte
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"restricted","shareRole":"read"}`))
 	})
@@ -391,6 +395,9 @@ func TestDocsShareGet_ReadPath(t *testing.T) {
 	}
 	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/share" {
 		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/share", gotMethod, gotPath)
+	}
+	if len(gotBody) != 0 {
+		t.Errorf("GET must send an empty request body; got %q", gotBody)
 	}
 }
 
