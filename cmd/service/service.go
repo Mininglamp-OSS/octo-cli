@@ -29,9 +29,6 @@ func RegisterServiceCommands(parent *cobra.Command, f *cmdutil.Factory) {
 		return
 	}
 	for _, svc := range reg.ListServices() {
-		if reg.ServiceManualCommand(svc) {
-			continue
-		}
 		svcCmd := ensureServiceCmd(parent, svc)
 		for _, info := range reg.ListOperations(svc) {
 			detail, ok := reg.GetOperation(info.ID)

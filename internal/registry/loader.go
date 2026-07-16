@@ -94,15 +94,6 @@ func (r *Registry) ServiceDisabled(service string) bool {
 	return truthy(r.specs[service]["x-octo-disabled"])
 }
 
-// ServiceManualCommand reports whether a service keeps a hand-written command
-// subtree while still using its embedded OpenAPI document as the HTTP contract.
-// This is useful for workflows such as Marketplace Skill installation, where
-// downloading, checksum verification, and atomic filesystem activation cannot
-// be represented by OpenAPI alone.
-func (r *Registry) ServiceManualCommand(service string) bool {
-	return truthy(r.specs[service]["x-octo-manual-command"])
-}
-
 // EnabledServices is ListServices minus any service whose spec sets
 // x-octo-disabled. This is the single source of truth for "what callers
 // should see" — command registration and global discovery both use it so the

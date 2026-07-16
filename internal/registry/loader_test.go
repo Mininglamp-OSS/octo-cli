@@ -60,8 +60,8 @@ func TestAllDomainOperationCounts(t *testing.T) {
 
 func TestMarketplaceOpenAPIContract(t *testing.T) {
 	r := MustNew()
-	if !r.ServiceManualCommand("marketplace") {
-		t.Fatal("marketplace must retain its custom install workflow")
+	if !r.ServiceDisabled("marketplace") {
+		t.Fatal("marketplace API commands must remain hidden; skills install uses its operations internally")
 	}
 
 	get, ok := r.GetOperation("skill.get")

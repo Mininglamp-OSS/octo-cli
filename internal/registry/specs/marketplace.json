@@ -17,7 +17,7 @@
   "x-octo-service": "marketplace",
   "x-octo-base-url": "OCTO_MARKETPLACE_API_PREFIX",
   "x-octo-space-header": true,
-  "x-octo-manual-command": true,
+  "x-octo-disabled": true,
   "paths": {
     "/skills/{skill_id}": {
       "get": {
