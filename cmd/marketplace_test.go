@@ -39,7 +39,7 @@ func marketplaceArchive(t *testing.T) ([]byte, string) {
 	return buf.Bytes(), hex.EncodeToString(sum[:])
 }
 
-func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
+func TestMarketplaceSkillInstall(t *testing.T) {
 	archive, digest := marketplaceArchive(t)
 	var gotAuth string
 	var srv *httptest.Server
@@ -47,10 +47,13 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 		switch r.URL.Path {
 		case "/gateway/api/v1/skills/skill-1":
 			gotAuth = r.Header.Get("Authorization")
-			_, _ = w.Write([]byte(`{"data":{"skill_id":"skill-1","name":"demo","file_sha256":"` + digest + `"}}`))
+			_, _ = w.Write([]byte(`{"data":{"skill_id":"skill-1","name":"demo"}}`))
 		case "/gateway/api/v1/skills/skill-1/download":
 			gotAuth = r.Header.Get("Authorization")
-			http.Redirect(w, r, "https://93.184.216.34/artifact/demo.zip", http.StatusFound)
+			if r.URL.Query().Get("format") != "json" {
+				t.Fatalf("format = %q, want json", r.URL.Query().Get("format"))
+			}
+			_, _ = w.Write([]byte(`{"data":{"download_url":"https://93.184.216.34/artifact/demo.zip","file_sha256":"` + digest + `"}}`))
 		case "/artifact/demo.zip":
 			_, _ = w.Write(archive)
 		default:
@@ -79,7 +82,7 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 	f.SetCredential(cred)
 	f.SetClient(apiClient.New(cfg, cred, apiClient.Options{NoRetry: true, ErrOut: f.ErrOut}))
 	root := t.TempDir()
-	out, errOut, err := execRoot(t, f, "market", "skills", "skill-1", "--install", root)
+	out, errOut, err := execRoot(t, f, "skills", "install", "skill-1", "--from", "marketplace", "--dir", root)
 	if err != nil {
 		t.Fatalf("install: %v\n%s", err, errOut)
 	}
@@ -94,12 +97,12 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 	}
 }
 
-func TestMarketplaceSkillRequiresInstall(t *testing.T) {
+func TestMarketplaceSkillRequiresDir(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{BotToken: "bf_test", Format: "json"})
 	f.SetCredential(&credential.BotCredential{Token: "bf_test"})
-	_, errOut, err := execRoot(t, f, "marketplace", "skills", "demo")
-	if err == nil || !strings.Contains(errOut, "--install is required") {
+	_, errOut, err := execRoot(t, f, "skills", "install", "demo", "--from", "marketplace")
+	if err == nil || !strings.Contains(errOut, "--dir is required") {
 		t.Fatalf("error = %v, stderr = %s", err, errOut)
 	}
 }
@@ -108,34 +111,18 @@ func TestMarketplaceSkillRejectsAppBot(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{BotToken: "app_test", Format: "json"})
 	f.SetCredential(&credential.BotCredential{Token: "app_test"})
-	_, errOut, err := execRoot(t, f, "marketplace", "skills", "demo", "--install", t.TempDir())
+	_, errOut, err := execRoot(t, f, "skills", "install", "demo", "--from", "marketplace", "--dir", t.TempDir())
 	if err == nil || !strings.Contains(errOut, "bf_*") {
 		t.Fatalf("error = %v, stderr = %s", err, errOut)
 	}
 }
 
-func TestMarketplaceCommandAlias(t *testing.T) {
+func TestMarketplaceHasNoTopLevelCommand(t *testing.T) {
 	f := newTestFactoryWithReg()
 	root := NewRootCmd(f.Factory)
-	marketplaceCmd, _, err := root.Find([]string{"market", "skills"})
-	if err != nil {
-		t.Fatalf("find alias: %v", err)
-	}
-	if marketplaceCmd.Name() != "skills" {
-		t.Fatalf("alias resolved to %q, want skills", marketplaceCmd.Name())
-	}
-}
-
-func TestMarketplaceRejectsSingularSkillCommand(t *testing.T) {
-	f := newTestFactoryWithReg()
-	root := NewRootCmd(f.Factory)
-	marketplaceCmd, _, err := root.Find([]string{"marketplace"})
-	if err != nil {
-		t.Fatalf("find marketplace: %v", err)
-	}
-	for _, command := range marketplaceCmd.Commands() {
-		if command.Name() == "skill" || command.HasAlias("skill") {
-			t.Fatal("singular skill command must not be registered")
+	for _, command := range root.Commands() {
+		if command.Name() == "marketplace" || command.HasAlias("marketplace") || command.HasAlias("market") {
+			t.Fatal("Marketplace must be a Skill source, not a top-level command")
 		}
 	}
 }

@@ -20,7 +20,7 @@ type downloadAPI struct {
 }
 
 func (a downloadAPI) Do(context.Context, *apiClient.Request) ([]byte, error) {
-	return []byte(fmt.Sprintf(`{"url":%q}`, a.url)), nil
+	return []byte(fmt.Sprintf(`{"data":{"download_url":%q,"file_sha256":"abc123"}}`, a.url)), nil
 }
 
 func newIPv4TLSServer(t *testing.T, handler http.Handler) *httptest.Server {
@@ -43,6 +43,23 @@ func TestDownloadSkillRejectsHTTP(t *testing.T) {
 	_, err := client.DownloadSkill(context.Background(), "skill-1")
 	if err == nil || !strings.Contains(err.Error(), "must use https") {
 		t.Fatalf("error = %v, want https rejection", err)
+	}
+}
+
+func TestDownloadSkillAllowsLocalHTTPWhenExplicit(t *testing.T) {
+	want := []byte("local skill archive")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(want)
+	}))
+	defer server.Close()
+
+	client := NewClient(downloadAPI{url: server.URL}, server.Client(), Options{AllowInsecureLocalhost: true})
+	got, err := client.DownloadSkill(context.Background(), "skill-1")
+	if err != nil {
+		t.Fatalf("DownloadSkill: %v", err)
+	}
+	if string(got.Body) != string(want) || got.SHA256 != "abc123" {
+		t.Fatalf("archive = %#v, want body %q and digest", got, want)
 	}
 }
 

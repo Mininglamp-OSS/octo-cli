@@ -12,11 +12,12 @@ import (
 
 // Environment variable names. Centralised for testability and discoverability.
 const (
-	EnvAPIBaseURL           = "OCTO_API_BASE_URL"
-	EnvMarketplaceAPIPrefix = "OCTO_MARKETPLACE_API_PREFIX"
-	EnvBotToken             = "OCTO_BOT_TOKEN"
-	EnvSpaceID              = "OCTO_SPACE_ID"
-	EnvFormat               = "OCTO_FORMAT"
+	EnvAPIBaseURL                        = "OCTO_API_BASE_URL"
+	EnvMarketplaceAPIPrefix              = "OCTO_MARKETPLACE_API_PREFIX"
+	EnvMarketplaceAllowInsecureLocalhost = "OCTO_MARKETPLACE_ALLOW_INSECURE_LOCALHOST"
+	EnvBotToken                          = "OCTO_BOT_TOKEN"
+	EnvSpaceID                           = "OCTO_SPACE_ID"
+	EnvFormat                            = "OCTO_FORMAT"
 	// EnvBotID is the env form of --bot-id: a robot id that selects a stored
 	// credential profile. It is a selector, not a secret (cf. EnvBotToken).
 	EnvBotID = "OCTO_BOT_ID"
@@ -32,6 +33,9 @@ type Config struct {
 	APIBaseURL string
 	// MarketplaceAPIPrefix is inserted before Marketplace API paths.
 	MarketplaceAPIPrefix string
+	// MarketplaceAllowInsecureLocalhost permits HTTP artifact downloads only
+	// from loopback hosts for explicit local development. It is false by default.
+	MarketplaceAllowInsecureLocalhost bool
 	// BotToken is the App Bot token (OCTO_BOT_TOKEN).
 	BotToken string
 	// SpaceID is the platform-bot space context (OCTO_SPACE_ID). Optional for space-scoped bots.
@@ -43,11 +47,21 @@ type Config struct {
 // Load reads configuration from the environment.
 func Load() *Config {
 	return &Config{
-		APIBaseURL:           envOrDefault(EnvAPIBaseURL, "http://127.0.0.1:8080"),
-		MarketplaceAPIPrefix: marketplaceAPIRoot(),
-		BotToken:             os.Getenv(EnvBotToken),
-		SpaceID:              os.Getenv(EnvSpaceID),
-		Format:               envOrDefault(EnvFormat, "json"),
+		APIBaseURL:                        envOrDefault(EnvAPIBaseURL, "http://127.0.0.1:8080"),
+		MarketplaceAPIPrefix:              marketplaceAPIRoot(),
+		MarketplaceAllowInsecureLocalhost: envBool(EnvMarketplaceAllowInsecureLocalhost),
+		BotToken:                          os.Getenv(EnvBotToken),
+		SpaceID:                           os.Getenv(EnvSpaceID),
+		Format:                            envOrDefault(EnvFormat, "json"),
+	}
+}
+
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 

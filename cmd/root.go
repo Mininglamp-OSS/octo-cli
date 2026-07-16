@@ -52,7 +52,6 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newAPICmd(f))
 	root.AddCommand(newConfigCmd(f))
 	root.AddCommand(newSkillsCmd(f))
-	root.AddCommand(newMarketplaceCmd(f))
 	root.AddCommand(newAuthCmd(f))
 	root.AddCommand(newSheetCellCmd(f))
 	service.RegisterServiceCommands(root, f)

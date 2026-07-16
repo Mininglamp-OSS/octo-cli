@@ -24,7 +24,7 @@
 
 ## Command Structure (8 domains, 77 operations / 80 commands incl. 3 matter transition aliases)
 
-Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, `marketplace`, and the cobra-generated `completion`.
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, `skills`, and the cobra-generated `completion`.
 
 > **`matter` is temporarily withheld** (backend API not yet stable). The spec
 > stays embedded — `octo-cli schema matter.*` still introspects it — but the command
@@ -57,7 +57,7 @@ octo-cli docs      create | list | get | rename | delete | forward-grant
                attachments presign|get|resolve
 
 octo-cli auth      login | status | logout | list
-octo-cli marketplace skills <skill-id> --install <skills-root>  (top-level alias: market)
+octo-cli skills install <skill-id> --from marketplace --dir <skills-root>
 octo-cli schema [--list [domain] | <operation-id>]
 octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
 octo-cli config show

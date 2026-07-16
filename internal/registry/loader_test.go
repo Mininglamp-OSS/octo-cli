@@ -10,7 +10,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "matter", "message", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "marketplace", "matter", "message", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -34,14 +34,15 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	// matter.transition) — the spec tracks actual routes, not CLI surface.
 	r := MustNew()
 	expected := map[string]int{
-		"matter":  14,
-		"message": 4,
-		"group":   9,
-		"thread":  8,
-		"file":    4,
-		"bot":     6,
-		"event":   2,
-		"docs":    31,
+		"matter":      14,
+		"message":     4,
+		"group":       9,
+		"thread":      8,
+		"file":        4,
+		"bot":         6,
+		"event":       2,
+		"docs":        31,
+		"marketplace": 2,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -54,6 +55,29 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestMarketplaceOpenAPIContract(t *testing.T) {
+	r := MustNew()
+	if !r.ServiceManualCommand("marketplace") {
+		t.Fatal("marketplace must retain its custom install workflow")
+	}
+
+	get, ok := r.GetOperation("skill.get")
+	if !ok {
+		t.Fatal("skill.get operation missing")
+	}
+	if get.Service != "marketplace" || get.Method != "GET" || get.Path != "/skills/{skill_id}" {
+		t.Fatalf("skill.get = %#v", get.OperationInfo)
+	}
+
+	download, ok := r.GetOperation("skill.download")
+	if !ok {
+		t.Fatal("skill.download operation missing")
+	}
+	if download.Path != "/skills/{skill_id}/download" || download.BinaryResponse {
+		t.Fatalf("skill.download = %#v, binary=%v", download.OperationInfo, download.BinaryResponse)
 	}
 }
 

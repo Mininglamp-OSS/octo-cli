@@ -76,6 +76,24 @@ func TestInstallSuccessReplacesOnlyTarget(t *testing.T) {
 	}
 }
 
+func TestInstallStripsSinglePackagingDirectory(t *testing.T) {
+	archive, digest := makeArchive(t,
+		archiveEntry{name: "DeepMiner-skills/SKILL.md", body: "# demo"},
+		archiveEntry{name: "DeepMiner-skills/references/readme.md", body: "reference"},
+	)
+	root := t.TempDir()
+	result, err := Install(root, "DM-skills", archive, digest)
+	if err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.InstalledTo, "SKILL.md")); err != nil {
+		t.Fatalf("root SKILL.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(result.InstalledTo, "DeepMiner-skills")); !os.IsNotExist(err) {
+		t.Fatalf("packaging directory was not stripped: %v", err)
+	}
+}
+
 func TestInstallRejectsUnsafeArchive(t *testing.T) {
 	tests := []struct {
 		name    string

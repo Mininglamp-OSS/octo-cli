@@ -20,7 +20,7 @@ const (
 	maxFileSize  = int64(16 << 20)
 )
 
-var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
+var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
 type Result struct {
 	InstalledTo string
@@ -94,9 +94,14 @@ func extract(dst string, archive []byte) ([]string, error) {
 	}
 	files := make([]string, 0)
 	var total int64
+	rootPrefix := archiveRootPrefix(zr.File)
 	for _, entry := range zr.File {
-		clean := filepath.Clean(filepath.FromSlash(entry.Name))
-		if entry.Name == "" || filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		entryName := strings.TrimPrefix(entry.Name, rootPrefix)
+		if entryName == "" {
+			continue
+		}
+		clean := filepath.Clean(filepath.FromSlash(entryName))
+		if filepath.IsAbs(clean) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("unsafe path in skill archive: %q", entry.Name)
 		}
 		path := filepath.Join(dst, clean)
@@ -147,4 +152,31 @@ func extract(dst string, archive []byte) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// archiveRootPrefix returns a single packaging directory to strip when every
+// entry lives below it and that directory contains SKILL.md. Marketplace ZIPs
+// commonly use this shape (for example DeepMiner-skills/SKILL.md), while the
+// installed Skill contract requires SKILL.md at the target root.
+func archiveRootPrefix(files []*zip.File) string {
+	root := ""
+	hasSkill := false
+	for _, file := range files {
+		parts := strings.Split(file.Name, "/")
+		if len(parts) < 2 || parts[0] == "" || parts[0] == "." || parts[0] == ".." {
+			return ""
+		}
+		if root == "" {
+			root = parts[0]
+		} else if parts[0] != root {
+			return ""
+		}
+		if strings.Join(parts[1:], "/") == "SKILL.md" {
+			hasSkill = true
+		}
+	}
+	if !hasSkill {
+		return ""
+	}
+	return root + "/"
 }

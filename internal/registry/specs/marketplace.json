@@ -1,0 +1,1331 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "contact": {
+      "name": "OCTO API Team",
+      "url": "https://github.com/Mininglamp-OSS/octo-marketplace"
+    },
+    "description": "Skill and MCP marketplace API for OCTO.",
+    "title": "Octo Marketplace API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/v1"
+    }
+  ],
+  "x-octo-service": "marketplace",
+  "x-octo-base-url": "OCTO_MARKETPLACE_API_PREFIX",
+  "x-octo-space-header": true,
+  "x-octo-manual-command": true,
+  "paths": {
+    "/skills/{skill_id}": {
+      "get": {
+        "description": "Return one skill visible to the authenticated caller.",
+        "operationId": "skill.get",
+        "parameters": [
+          {
+            "description": "Skill ID",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-internal_api_handler_skill_SkillResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get skill",
+        "tags": [
+          "skill"
+        ]
+      }
+    },
+    "/skills/{skill_id}/download": {
+      "get": {
+        "description": "Authorize access and redirect to the artifact URL, or return it when format=json.",
+        "operationId": "skill.download",
+        "parameters": [
+          {
+            "description": "Skill ID",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Use json to return the download URL",
+            "in": "query",
+            "name": "format",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-internal_api_handler_upload_DownloadResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "302": {
+            "description": "Redirect to artifact"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error"
+                }
+              }
+            },
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Download Skill archive",
+        "tags": [
+          "skill"
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.CursorList-internal_api_handler_skill_SkillResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/internal_api_handler_skill.SkillResponse"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.CursorPagination"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.CursorPagination": {
+        "properties": {
+          "has_more": {
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-array_github_com_Mininglamp-OSS_octo-marketplace_internal_model_CategoryFilter": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.CategoryFilter"
+            },
+            "type": "array",
+            "uniqueItems": false
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-array_github_com_Mininglamp-OSS_octo-marketplace_internal_service_category_CategoryItem": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_category.CategoryItem"
+            },
+            "type": "array",
+            "uniqueItems": false
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_api_response_EmptyResp": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.EmptyResp"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_model_Detail": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Detail"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_IconResult": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service.IconResult"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_ProbeResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeResponse"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_category_AdminItem": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_category.AdminItem"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse_IconUploadResult": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.IconUploadResult"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse_InitResult": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.InitResult"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse_PollResult": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.PollResult"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-internal_api_handler_skill_SkillResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/internal_api_handler_skill.SkillResponse"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-internal_api_handler_skill_SkillVersionList": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/internal_api_handler_skill.SkillVersionList"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-internal_api_handler_upload_DownloadResponse": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/internal_api_handler_upload.DownloadResponse"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-map_string_string": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/map_string_string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.EmptyResp": {
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Error": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.ErrorBody"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "hint": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.OffsetList-github_com_Mininglamp-OSS_octo-marketplace_internal_model_ListItem": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.ListItem"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.OffsetPagination"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.OffsetPagination": {
+        "properties": {
+          "page": {
+            "type": "integer"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.CategoryFilter": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.CreateRequest": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "faqs": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "slogan": {
+            "type": "string"
+          },
+          "slug": {
+            "description": "Slug is the ASCII identifier used as the JSON key in the generated\nmcpServers snippet (mcp-v1.md §3, \"服务标识\"). Optional on the wire —\nwhen omitted or empty the server auto-slugifies Name. Must match\n^[a-z0-9-]{1,64}$ after normalization. Unique per Space among live rows.",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Tool"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "transport": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Transport"
+          },
+          "url": {
+            "type": "string"
+          },
+          "usage_examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.Detail": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "creator_name": {
+            "type": "string"
+          },
+          "faqs": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "icon": {
+            "type": "string"
+          },
+          "mcp_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "quick_start": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.QuickStart"
+          },
+          "slogan": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "tool_count": {
+            "type": "integer"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Tool"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "usage_examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ": {
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.ListItem": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "creator_name": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "mcp_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slogan": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "tool_count": {
+            "type": "integer"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.PatchRequest": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "faqs": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "slogan": {
+            "type": "string"
+          },
+          "slug": {
+            "description": "Slug — same rules as CreateRequest.Slug. Nil pointer leaves the\nexisting slug untouched; a non-nil empty string is rejected as\nslug_invalid (empty is not a valid identifier).",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Tool"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "transport": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Transport"
+          },
+          "url": {
+            "type": "string"
+          },
+          "usage_examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.QuickStart": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "auth_type": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "server_name": {
+            "type": "string"
+          },
+          "slug": {
+            "description": "Slug is the ASCII identifier used as the JSON key in the mcpServers\nsnippet. Frontend template prefers this over ServerName when generating\nthe config; always present in responses for records created after\nmigration 03.",
+            "type": "string"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Transport"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.SkillVersion": {
+        "properties": {
+          "changed_by": {
+            "type": "string"
+          },
+          "changelog": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "skill_id": {
+            "type": "string"
+          },
+          "skill_version_id": {
+            "type": "string"
+          },
+          "storage": {
+            "description": "JSON: {\"type\":\"s3\",\"object_key\":\"...\",\"readme_key\":\"...\"}",
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.Tool": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.Transport": {
+        "enum": [
+          "stdio",
+          "streamable-http",
+          "sse"
+        ],
+        "type": "string",
+        "x-enum-varnames": [
+          "TransportStdio",
+          "TransportStreamableHTTP",
+          "TransportSSE"
+        ]
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility": {
+        "enum": [
+          "public",
+          "private",
+          "system",
+          "space"
+        ],
+        "type": "string",
+        "x-enum-varnames": [
+          "VisibilityPublic",
+          "VisibilityPrivate",
+          "VisibilitySystem",
+          "VisibilitySpace"
+        ]
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.IconResult": {
+        "properties": {
+          "icon_url": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeError": {
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeErrorCode"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeErrorCode": {
+        "enum": [
+          "command_not_found",
+          "timeout",
+          "init_failed",
+          "no_tools_capability"
+        ],
+        "type": "string",
+        "x-enum-varnames": [
+          "ProbeErrCommandNotFound",
+          "ProbeErrTimeout",
+          "ProbeErrInitFailed",
+          "ProbeErrNoToolsCapability"
+        ]
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeRequest": {
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "command": {
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Transport"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeResponse": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeError"
+          },
+          "is_ok": {
+            "type": "boolean"
+          },
+          "server_info": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeServerInfo"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Tool"
+            },
+            "type": "array",
+            "uniqueItems": false
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service.ProbeServerInfo": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_category.AdminItem": {
+        "properties": {
+          "icon_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "skill_category_id": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_category.CategoryItem": {
+        "properties": {
+          "icon_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "skill_category_id": {
+            "type": "string"
+          },
+          "skill_count": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.IconUploadResult": {
+        "properties": {
+          "download_url": {
+            "description": "DownloadURL is the persistent (non-signed) URL where the icon will be\nreachable once the PUT completes. Callers store this on the record so\nthat later reads never touch a signed URL. Filled by InitMcpIconUpload;\nlegacy skill InitIconUpload leaves it empty for backwards compatibility.",
+            "type": "string"
+          },
+          "expires_in": {
+            "type": "integer"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "method": {
+            "type": "string"
+          },
+          "object_key": {
+            "type": "string"
+          },
+          "presigned_url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.InitResult": {
+        "properties": {
+          "expires_in": {
+            "type": "integer"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "method": {
+            "type": "string"
+          },
+          "presigned_url": {
+            "type": "string"
+          },
+          "skill_upload_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.ParseData": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "file_sha256": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "readme_content": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.ParseError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.PollResult": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.ParseError"
+          },
+          "result": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_service_parse.ParseData"
+          },
+          "skill_parse_task_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "internal_api_handler.MCPIconUploadRequest": {
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "file_size"
+        ],
+        "type": "object"
+      },
+      "internal_api_handler_category.AdminCategoryRequest": {
+        "properties": {
+          "icon_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "internal_api_handler_skill.CreateRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parse_task_id": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "parse_task_id"
+        ],
+        "type": "object"
+      },
+      "internal_api_handler_skill.SkillResponse": {
+        "properties": {
+          "category_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "file_name": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "owner_name": {
+            "type": "string"
+          },
+          "readme_content": {
+            "type": "string"
+          },
+          "skill_id": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.Visibility"
+          }
+        },
+        "type": "object"
+      },
+      "internal_api_handler_skill.SkillVersionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.SkillVersion"
+            },
+            "type": "array",
+            "uniqueItems": false
+          }
+        },
+        "type": "object"
+      },
+      "internal_api_handler_skill.UpdateRequest": {
+        "properties": {
+          "category_id": {
+            "type": "string"
+          },
+          "changelog": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "icon_url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parse_task_id": {
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
+          "version": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "internal_api_handler_upload.DownloadResponse": {
+        "properties": {
+          "download_url": {
+            "type": "string"
+          },
+          "file_sha256": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "internal_api_handler_upload.IconUploadRequest": {
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "file_size"
+        ],
+        "type": "object"
+      },
+      "internal_api_handler_upload.InitUploadRequest": {
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "file_size"
+        ],
+        "type": "object"
+      },
+      "internal_api_handler_upload.ReuploadRequest": {
+        "properties": {
+          "file_name": {
+            "type": "string"
+          },
+          "file_size": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "file_name",
+          "file_size"
+        ],
+        "type": "object"
+      },
+      "map_string_string": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "in": "header",
+        "name": "Authorization",
+        "type": "apiKey"
+      }
+    }
+  }
+}

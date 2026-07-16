@@ -4,15 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/marketplace"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/skillinstall"
 	"github.com/Mininglamp-OSS/octo-cli/skills"
 )
 
@@ -147,7 +152,79 @@ func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&install, "install", "", "write all skills to this directory (<dir>/<name>/SKILL.md)")
+	cmd.AddCommand(newMarketplaceSkillInstallCmd(f))
 	return cmd
+}
+
+func newMarketplaceSkillInstallCmd(f *cmdutil.Factory) *cobra.Command {
+	var source string
+	var installRoot string
+	cmd := &cobra.Command{
+		Use:   "install <skill-id>",
+		Short: "Install one Skill from a remote source",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if source != "marketplace" {
+				return emitSkillInstallError(f, output.ErrValidation("--from must be marketplace", "pass --from marketplace"))
+			}
+			if strings.TrimSpace(installRoot) == "" {
+				return emitSkillInstallError(f, output.ErrValidation("--dir is required", "pass the agent skills root, for example --dir ~/.codex/skills"))
+			}
+			cred, err := f.Credential()
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			if credential.TokenKind(cred.Token) != "user_bot" {
+				return emitSkillInstallError(f, output.ErrAuth("Marketplace Skill installation requires a bf_* User Bot token", "select a User Bot profile or set OCTO_BOT_TOKEN to a bf_* token"))
+			}
+			api, err := f.Client()
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			cfg, err := f.Config()
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			client := marketplace.NewClient(api, &http.Client{
+				Timeout: 30 * time.Second,
+				CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}, marketplace.Options{AllowInsecureLocalhost: cfg.MarketplaceAllowInsecureLocalhost})
+			skill, err := client.GetSkill(cmd.Context(), args[0])
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			archive, err := client.DownloadSkill(cmd.Context(), args[0])
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			installed, err := skillinstall.Install(installRoot, skill.Name, archive.Body, archive.SHA256)
+			if err != nil {
+				return emitSkillInstallError(f, output.ErrValidation(fmt.Sprintf("install Skill: %v", err), "verify the Marketplace archive and target directory"))
+			}
+			payload, err := json.Marshal(map[string]any{
+				"source":       "marketplace",
+				"skill_id":     skill.ID,
+				"name":         skill.Name,
+				"installed_to": installed.InstalledTo,
+				"sha256":       archive.SHA256,
+				"files":        installed.Files,
+			})
+			if err != nil {
+				return emitSkillInstallError(f, err)
+			}
+			return f.EmitSuccess(payload)
+		},
+	}
+	cmd.Flags().StringVar(&source, "from", "", "remote Skill source (marketplace)")
+	cmd.Flags().StringVar(&installRoot, "dir", "", "install into this agent skills root")
+	return cmd
+}
+
+func emitSkillInstallError(f *cmdutil.Factory, err error) error {
+	_ = f.EmitError(err)
+	return err
 }
 
 // runSkillsList emits every skill as {name, description}.
