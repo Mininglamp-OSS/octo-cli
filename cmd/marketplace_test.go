@@ -3,10 +3,13 @@ package cmd
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,14 +43,14 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 	archive, digest := marketplaceArchive(t)
 	var gotAuth string
 	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/gateway/api/v1/skill/skill-1":
+		case "/gateway/api/v1/skills/skill-1":
 			gotAuth = r.Header.Get("Authorization")
-			_, _ = w.Write([]byte(`{"code":0,"data":{"id":"skill-1","name":"demo","file_sha256":"` + digest + `"}}`))
-		case "/gateway/api/v1/skill/skill-1/download":
+			_, _ = w.Write([]byte(`{"data":{"skill_id":"skill-1","name":"demo","file_sha256":"` + digest + `"}}`))
+		case "/gateway/api/v1/skills/skill-1/download":
 			gotAuth = r.Header.Get("Authorization")
-			http.Redirect(w, r, srv.URL+"/artifact/demo.zip", http.StatusFound)
+			http.Redirect(w, r, "https://93.184.216.34/artifact/demo.zip", http.StatusFound)
 		case "/artifact/demo.zip":
 			_, _ = w.Write(archive)
 		default:
@@ -55,6 +58,19 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
+
+	serverURL, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := srv.Client().Transport.(*http.Transport).Clone()
+	transport.TLSClientConfig.ServerName = "127.0.0.1"
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, serverURL.Host)
+	}
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = transport
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
 
 	f := newTestFactoryWithReg()
 	cfg := &config.Config{APIBaseURL: srv.URL + "/normal-api", MarketplaceAPIPrefix: "/gateway/api/v1", BotToken: "bf_test", Format: "json"}
@@ -70,7 +86,7 @@ func TestMarketplaceSkillInstallAndAlias(t *testing.T) {
 	if gotAuth != "Bearer bf_test" {
 		t.Fatalf("Authorization = %q", gotAuth)
 	}
-	if !strings.Contains(out, `"source": "marketplace"`) {
+	if !strings.Contains(out, `"source": "marketplace"`) || !strings.Contains(out, `"skill_id": "skill-1"`) {
 		t.Fatalf("unexpected output: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(root, "demo", "SKILL.md")); err != nil {
