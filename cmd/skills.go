@@ -17,7 +17,6 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/marketplace"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
-	"github.com/Mininglamp-OSS/octo-cli/internal/skillinstall"
 	"github.com/Mininglamp-OSS/octo-cli/skills"
 )
 
@@ -199,7 +198,7 @@ func newMarketplaceSkillInstallCmd(f *cmdutil.Factory) *cobra.Command {
 			if err != nil {
 				return emitSkillInstallError(f, err)
 			}
-			installed, err := skillinstall.Install(installRoot, skill.Name, archive.Body, archive.SHA256)
+			installed, err := marketplace.Install(installRoot, skill.Name, archive.Body, archive.SHA256)
 			if err != nil {
 				return emitSkillInstallError(f, output.ErrValidation(fmt.Sprintf("install Skill: %v", err), "verify the Marketplace archive and target directory"))
 			}

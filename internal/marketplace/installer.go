@@ -1,4 +1,4 @@
-package skillinstall
+package marketplace
 
 import (
 	"archive/zip"
