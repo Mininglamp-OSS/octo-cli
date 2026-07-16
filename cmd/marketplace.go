@@ -67,7 +67,7 @@ func newMarketplaceSkillCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 			payload, err := json.Marshal(map[string]any{
 				"source":       "marketplace",
-				"id":           skill.ID,
+				"skill_id":     skill.ID,
 				"name":         skill.Name,
 				"installed_to": installed.InstalledTo,
 				"sha256":       skill.FileSHA256,

@@ -21,7 +21,7 @@ type APIClient interface {
 }
 
 type Skill struct {
-	ID         string `json:"id"`
+	ID         string `json:"skill_id"`
 	Name       string `json:"name"`
 	FileSHA256 string `json:"file_sha256"`
 }
@@ -42,7 +42,7 @@ func (c *Client) GetSkill(ctx context.Context, id string) (Skill, error) {
 	body, err := c.api.Do(ctx, &apiClient.Request{
 		Service: "marketplace",
 		Method:  http.MethodGet,
-		Path:    "/skill/" + url.PathEscape(id),
+		Path:    "/skills/" + url.PathEscape(id),
 	})
 	if err != nil {
 		return Skill{}, err
@@ -60,7 +60,7 @@ func (c *Client) DownloadSkill(ctx context.Context, id string) ([]byte, error) {
 	body, err := c.api.Do(ctx, &apiClient.Request{
 		Service:        "marketplace",
 		Method:         http.MethodGet,
-		Path:           "/skill/" + url.PathEscape(id) + "/download",
+		Path:           "/skills/" + url.PathEscape(id) + "/download",
 		BinaryResponse: true,
 	})
 	if err != nil {
