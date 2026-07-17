@@ -61,17 +61,27 @@ func ensureServiceCmd(parent *cobra.Command, svc string) *cobra.Command {
 }
 
 // attachOperation inserts one operation as a leaf command, creating
-// intermediate "resource" commands (matter assignee, matter timeline, …) on
-// the way down. operationId segments after the first are treated as the path
-// to the leaf.
+// intermediate "resource" commands (matter assignee, marketplace skill, …)
+// on the way down. When operationId starts with the registry service name that
+// segment is omitted; otherwise it is preserved as a domain below the service.
 func attachOperation(svcCmd *cobra.Command, f *cmdutil.Factory, d *registry.OperationDetail) {
 	segs := strings.Split(d.ID, ".")
 	if len(segs) < 2 {
 		return
 	}
+	// Most specs use an operationId whose first segment matches the registry
+	// service (docs.create under service docs). A multi-domain backend may expose
+	// several resource families from one service, for example skill.list and
+	// mcp.list under service marketplace. Preserve that first segment as a
+	// resource group when it differs from the service name so both operations
+	// become addressable instead of colliding as marketplace list.
+	start := 1
+	if segs[0] != d.Service {
+		start = 0
+	}
 	cur := svcCmd
-	for i := 1; i < len(segs)-1; i++ {
-		name := segs[i]
+	for i := start; i < len(segs)-1; i++ {
+		name := strings.ReplaceAll(segs[i], "_", "-")
 		sub := findChild(cur, name)
 		if sub == nil {
 			sub = &cobra.Command{
@@ -84,7 +94,7 @@ func attachOperation(svcCmd *cobra.Command, f *cmdutil.Factory, d *registry.Oper
 		}
 		cur = sub
 	}
-	leaf := buildOperationCmd(f, d, segs[len(segs)-1])
+	leaf := buildOperationCmd(f, d, strings.ReplaceAll(segs[len(segs)-1], "_", "-"))
 	cur.AddCommand(leaf)
 }
 

@@ -1,5 +1,5 @@
 // Package registry loads the embedded OpenAPI 3.x specs for each Octo service
-// domain (matter, message, group, thread, file, bot, event). Consumers read
+// domain (matter, message, group, thread, file, bot, event, marketplace). Consumers read
 // operation metadata — parameters, request body shape, response shape, risk,
 // pagination — to drive flag generation, request building, and `octo-cli schema`.
 //

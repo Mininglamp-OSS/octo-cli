@@ -1,0 +1,545 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Marketplace API",
+    "description": "Skill and MCP Marketplace operations used by agent runtimes.",
+    "version": "1.0.0"
+  },
+  "x-octo-service": "marketplace",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": true,
+  "paths": {
+    "/market/api/v1/skill_categories": {
+      "get": {
+        "operationId": "skill_category.list",
+        "summary": "List Skill categories",
+        "description": "Return Skill category IDs, names, icons, and visible Skill counts.",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/mcp_categories": {
+      "get": {
+        "operationId": "mcp_category.list",
+        "summary": "List MCP categories",
+        "description": "Return MCP category keys and visible record counts in the current Space.",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skills": {
+      "get": {
+        "operationId": "skill.list",
+        "summary": "Search Skills",
+        "description": "List Skills visible in the current Space using cursor pagination.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "limitParam": "page_size",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "parameters": [
+          { "name": "q", "in": "query", "description": "Search query", "schema": { "type": "string" } },
+          { "name": "category_id", "in": "query", "description": "Category ID", "schema": { "type": "string" } },
+          { "name": "cursor", "in": "query", "description": "Cursor for next page", "schema": { "type": "string" } },
+          { "name": "page_size", "in": "query", "description": "Page size, default 20, max 50", "schema": { "type": "integer", "default": 20, "maximum": 50 } }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      },
+      "post": {
+        "operationId": "skill.create",
+        "summary": "Publish a Skill",
+        "description": "Publish a successfully parsed Skill archive in the current Space.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SkillCreateRequest" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skills/{skill_id}": {
+      "get": {
+        "operationId": "skill.get",
+        "summary": "Get Skill metadata",
+        "description": "Return one Skill visible to the authenticated caller.",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SkillEnvelope" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/AuthRequired" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        },
+        "security": [{ "Bearer": [] }]
+      },
+      "patch": {
+        "operationId": "skill.update",
+        "summary": "Update a Skill",
+        "description": "Update owned Skill metadata or apply a parsed ZIP as a new immutable version.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SkillUpdateRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skills/{skill_id}/download": {
+      "get": {
+        "operationId": "skill.download",
+        "summary": "Get a Skill archive download URL",
+        "description": "Authorize access and return the artifact URL and SHA-256 digest when format=json.",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill ID",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Use json to return the download URL instead of redirecting",
+            "schema": {
+              "type": "string",
+              "enum": ["json"]
+            },
+            "x-octo-flag": "response-format"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DownloadEnvelope" }
+              }
+            }
+          },
+          "302": { "description": "Redirect to the Skill artifact" },
+          "401": { "$ref": "#/components/responses/AuthRequired" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skills/{skill_id}/reuploads": {
+      "post": {
+        "operationId": "skill.reupload.create",
+        "summary": "Initialize a Skill version upload",
+        "description": "Create an upload target for a new immutable version of an owned Skill.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArchiveUploadRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skills/{skill_id}/versions": {
+      "get": {
+        "operationId": "skill.version.list",
+        "summary": "List Skill versions",
+        "description": "List immutable releases for one visible Skill.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skill_uploads": {
+      "post": {
+        "operationId": "skill_upload.create",
+        "summary": "Initialize a Skill ZIP upload",
+        "description": "Create a bounded presigned upload target without publishing the Skill.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArchiveUploadRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skill_uploads/{skill_upload_id}/parse": {
+      "post": {
+        "operationId": "skill_upload.parse",
+        "summary": "Parse a Skill ZIP upload",
+        "description": "Start parsing an archive previously uploaded to its presigned target.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "skill_upload_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill upload ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/skill_parse_tasks/{skill_parse_task_id}": {
+      "get": {
+        "operationId": "skill_parse_task.get",
+        "summary": "Get a Skill parse task",
+        "description": "Return the current parse state and parsed Skill metadata.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "skill_parse_task_id",
+            "in": "path",
+            "required": true,
+            "description": "Skill parse task ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/mcps": {
+      "get": {
+        "operationId": "mcp.list",
+        "summary": "Search MCP servers",
+        "description": "List MCP servers visible in the current Space using offset pagination.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "keyword", "in": "query", "description": "Search keyword", "schema": { "type": "string" } },
+          { "name": "category", "in": "query", "description": "Category key", "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "description": "Page number, default 1", "schema": { "type": "integer", "default": 1 } },
+          { "name": "page_size", "in": "query", "description": "Page size, default 20, max 100", "schema": { "type": "integer", "default": 20, "maximum": 100 } }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      },
+      "post": {
+        "operationId": "mcp.create",
+        "summary": "Create an MCP server listing",
+        "description": "Create an MCP server owned by the caller in the current Space.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MCPCreateRequest" }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/mcps/_probe": {
+      "post": {
+        "operationId": "mcp.probe",
+        "summary": "Probe an MCP server",
+        "description": "Validate an MCP connection without persisting it.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MCPProbeRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    },
+    "/market/api/v1/mcps/{mcp_id}": {
+      "get": {
+        "operationId": "mcp.get",
+        "summary": "Get MCP server details",
+        "description": "Return visible MCP metadata and its secret-redacted quick-start configuration.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "description": "MCP ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      },
+      "patch": {
+        "operationId": "mcp.update",
+        "summary": "Update an MCP server listing",
+        "description": "Partially update an owned MCP server. MCP listings have no release versions.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "mcp_id",
+            "in": "path",
+            "required": true,
+            "description": "MCP ID",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MCPUpdateRequest" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } },
+        "security": [{ "Bearer": [] }]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ArchiveUploadRequest": {
+        "type": "object",
+        "required": ["file_name", "file_size"],
+        "properties": {
+          "file_name": { "type": "string", "description": "ZIP file name" },
+          "file_size": { "type": "integer", "format": "int64", "description": "ZIP size in bytes" }
+        }
+      },
+      "SkillCreateRequest": {
+        "type": "object",
+        "required": ["parse_task_id"],
+        "properties": {
+          "parse_task_id": { "type": "string", "description": "Successful parse task ID" },
+          "name": { "type": "string" },
+          "display_name": { "type": "string" },
+          "icon_url": { "type": "string" },
+          "description": { "type": "string" },
+          "category_id": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Free-form Skill tags" },
+          "visibility": { "type": "string", "enum": ["public", "private", "space"] },
+          "version": { "type": "string", "description": "Version parsed from the ZIP may be overridden when publishing" }
+        }
+      },
+      "SkillUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "display_name": { "type": "string" },
+          "icon_url": { "type": "string" },
+          "description": { "type": "string" },
+          "category_id": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "Free-form Skill tags" },
+          "visibility": { "type": "string", "enum": ["public", "private", "space"] },
+          "version": { "type": "string", "description": "New release version when applying a parsed ZIP" },
+          "parse_task_id": { "type": "string", "description": "Successful reupload parse task ID" },
+          "changelog": { "type": "string", "description": "Release notes for the new ZIP version" }
+        }
+      },
+      "MCPCreateRequest": {
+        "type": "object",
+        "required": ["name", "transport"],
+        "properties": {
+          "name": { "type": "string" },
+          "slug": { "type": "string", "description": "Identifier used as the mcpServers config key" },
+          "slogan": { "type": "string" },
+          "category": { "type": "string" },
+          "icon": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "transport": { "$ref": "#/components/schemas/MCPTransport" },
+          "url": { "type": "string" },
+          "command": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "auth_type": { "type": "string" },
+          "tools": { "type": "array", "items": { "$ref": "#/components/schemas/MCPTool" } },
+          "usage_examples": { "type": "array", "items": { "type": "string" } },
+          "faqs": { "type": "array", "items": { "$ref": "#/components/schemas/MCPFAQ" } },
+          "notes": { "type": "array", "items": { "type": "string" } },
+          "visibility": { "type": "string", "enum": ["public", "private"] }
+        }
+      },
+      "MCPUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "slug": { "type": "string" },
+          "slogan": { "type": "string" },
+          "category": { "type": "string" },
+          "icon": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "transport": { "$ref": "#/components/schemas/MCPTransport" },
+          "url": { "type": "string" },
+          "command": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+          "auth_type": { "type": "string" },
+          "tools": { "type": "array", "items": { "$ref": "#/components/schemas/MCPTool" } },
+          "usage_examples": { "type": "array", "items": { "type": "string" } },
+          "faqs": { "type": "array", "items": { "$ref": "#/components/schemas/MCPFAQ" } },
+          "notes": { "type": "array", "items": { "type": "string" } },
+          "visibility": { "type": "string", "enum": ["public", "private"] }
+        }
+      },
+      "MCPProbeRequest": {
+        "type": "object",
+        "required": ["transport"],
+        "properties": {
+          "transport": { "$ref": "#/components/schemas/MCPTransport" },
+          "url": { "type": "string" },
+          "command": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "MCPTransport": {
+        "type": "string",
+        "enum": ["stdio", "streamable-http", "sse"]
+      },
+      "MCPTool": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "MCPFAQ": {
+        "type": "object",
+        "properties": {
+          "question": { "type": "string" },
+          "answer": { "type": "string" }
+        }
+      },
+      "SkillEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/Skill" }
+        }
+      },
+      "Skill": {
+        "type": "object",
+        "properties": {
+          "skill_id": { "type": "string" },
+          "name": { "type": "string" },
+          "display_name": { "type": "string" },
+          "description": { "type": "string" },
+          "version": { "type": "string" },
+          "file_name": { "type": "string" },
+          "file_size": { "type": "integer", "format": "int64" },
+          "readme_content": { "type": "string" }
+        }
+      },
+      "DownloadEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": { "$ref": "#/components/schemas/Download" }
+        }
+      },
+      "Download": {
+        "type": "object",
+        "properties": {
+          "download_url": { "type": "string" },
+          "file_sha256": { "type": "string" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" },
+              "details": { "type": "object", "additionalProperties": true },
+              "hint": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AuthRequired": {
+        "description": "AUTH_REQUIRED",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "FORBIDDEN",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "NOT_FOUND",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+    "securitySchemes": {
+      "Bearer": { "type": "http", "scheme": "bearer" }
+    }
+  }
+}

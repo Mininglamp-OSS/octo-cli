@@ -66,3 +66,25 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("octo-marketplace/SKILL.md not embedded: %v", err)
+	}
+	content := string(b)
+	for _, ref := range []string{"skills.md", "mcp.md"} {
+		if !strings.Contains(content, ref) {
+			t.Errorf("octo-marketplace/SKILL.md must route to %q", ref)
+		}
+		path := "octo-marketplace/" + ref
+		rb, readErr := FS.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("reference %q not embedded: %v", path, readErr)
+			continue
+		}
+		if len(rb) == 0 {
+			t.Errorf("reference %q is empty", path)
+		}
+	}
+}

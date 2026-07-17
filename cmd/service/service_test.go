@@ -116,6 +116,19 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	}
 }
 
+func TestRegisterServiceCommands_PreservesForeignOperationDomain(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+	marketplace := findCmd(root, "marketplace")
+	if marketplace == nil {
+		t.Fatal("missing marketplace service command")
+	}
+	for _, domain := range []string{"skill", "mcp"} {
+		if findCmd(marketplace, domain) == nil {
+			t.Errorf("marketplace must preserve %q from the operationId", domain)
+		}
+	}
+}
+
 // --- operation execution (matter.list) ---
 
 func TestMatterList_QueryParamsFromFlags(t *testing.T) {

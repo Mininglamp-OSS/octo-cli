@@ -1,0 +1,87 @@
+# octo-marketplace — MCP workflows
+
+Read `SKILL.md` first for authentication, payload normalization, and confirmation
+rules. MCP listings have no downloadable archive or release version.
+
+## Search and inspect
+
+```bash
+octo-cli marketplace mcp-category list
+octo-cli marketplace mcp list --keyword "<keywords>" --page 1 --page-size 20
+octo-cli marketplace mcp get <mcp-id>
+```
+
+Search is paginated: read results from CLI `.data[]`.
+The category command is non-paginated; normalize it and use a returned `key` as
+the MCP `category` value or list filter. MCP tags are free-form strings; there
+is no tag dictionary endpoint.
+
+`key: "all"` is the list-filter sentinel and `key: ""` means uncategorized;
+do not store either as a new listing's category. Category keys are derived from
+visible MCP records rather than managed as a separate administrator dictionary.
+
+## Install into an Agent Runtime
+
+Installation means adding the detail response's `quick_start` connection to the
+runtime's MCP configuration.
+
+Before writing configuration, show:
+
+- MCP name and transport;
+- target runtime and config file;
+- command or URL;
+- required environment-variable and header names, without secret values.
+
+After confirmation, preserve existing entries unless replacement was approved.
+Use `quick_start.slug` as the `mcpServers` key. Map stdio to
+`command`/`args`/`env`, and HTTP/SSE to `url`/`headers`. Ask for required
+secrets; never invent, echo, or persist them outside the runtime's approved
+secret mechanism. Reload the runtime and verify the server connects.
+
+## Validate a connection
+
+For `streamable-http` and `sse`, probe without persisting:
+
+```bash
+octo-cli marketplace mcp probe --data @connection.json
+```
+
+Normalize the response and continue only when `is_ok=true`.
+
+Do not call the Marketplace probe endpoint for `stdio`: the server deliberately
+does not spawn user commands. The Agent Runtime must start the proposed command
+locally, complete MCP `initialize` and `tools/list`, then stop the test process.
+
+## Create
+
+Create only after the applicable remote or local validation succeeds and the
+user reviews tools and visibility:
+
+```bash
+octo-cli marketplace mcp create --data @mcp.json
+```
+
+The body is flat: catalog metadata plus `transport`, and either
+`command`/`args`/`env` for stdio or `url`/`headers` for HTTP/SSE. Never submit
+real secret values; use `__OCTO_SECRET_PLACEHOLDER__` where the Marketplace
+contract requires a secret placeholder. `category` must be a key returned by
+`mcp-category list`; `tags` is a free-form string array.
+
+## Update
+
+Updates are partial and do not create versions. Validate changed connection
+fields first, then update only after confirmation:
+
+```bash
+# HTTP/SSE validation when connection fields changed
+octo-cli marketplace mcp probe --data @connection.json
+
+octo-cli marketplace mcp update <mcp-id> --data @changes.json
+```
+
+Category and tag changes use the same `category` key and free-form `tags`
+string array as create.
+
+For stdio connection changes, use the local handshake instead of backend probe.
+Re-read with `marketplace mcp get <mcp-id>` and verify the quick-start remains
+secret-redacted and contains no `version` field.
