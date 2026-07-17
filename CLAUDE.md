@@ -22,7 +22,7 @@
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure (8 domains, 77 operations / 80 commands incl. 3 matter transition aliases)
+## Command Structure (9 domains, 98 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -55,6 +55,14 @@ octo-cli docs      create | list | get | rename | delete | forward-grant
                comments list|add|edit|delete
                versions list|create|state|rename|delete|restore
                attachments presign|get|resolve
+octo-cli html      list | get | publish | versions | rm     (octo-doc HTML docs; distinct backend from `docs`)
+               draft    save|promote
+               share | unshare
+               grant    add|list|rm
+               asset    add|ls|rm
+               comment  list|add
+               element  get|replace
+               reply
 
 octo-cli auth      login | status | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
@@ -66,7 +74,7 @@ octo-cli version
 
 `octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
-Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-messaging`, `octo-files`, `octo-docs`) — keep those in sync when command shapes change.
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-messaging`, `octo-files`, `octo-docs`, `octo-html`) — keep those in sync when command shapes change.
 
 ## Environment
 

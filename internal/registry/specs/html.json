@@ -1,0 +1,573 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo HTML Docs API",
+    "version": "1.0.0",
+    "description": "Agent-facing surface for octo-doc — the self-hosted, prompt-native interactive HTML document service (distinct from the CRDT docs-backend behind the `docs` domain). Covers the document lifecycle (publish/list/get/versions/delete), author drafts, per-doc share codes, media assets, inline comments, and the agent element read/replace + reply paths. All paths are under the `/v1` prefix and return the `{data}/{error}` envelope."
+  },
+  "x-octo-service": "html",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/v1/docs": {
+      "get": {
+        "operationId": "html.list",
+        "summary": "List documents (owner-scoped index)",
+        "description": "Owner-scoped document index. The owner check is enforced server-side; a non-owner session is rejected 403.",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "A list of documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "slug": { "type": "string" },
+                      "title": { "type": "string" },
+                      "latest": { "type": "integer" },
+                      "updated": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "html.publish",
+        "summary": "Publish an HTML document (creates or bumps a version)",
+        "description": "Publish a self-contained HTML document under a slug. Requires the write token (Bearer). A new slug creates the document; an existing slug appends a new immutable version. The server stamps commentable artifacts and reconciles existing comment anchors.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "html"],
+                "properties": {
+                  "slug": { "type": "string", "description": "stable document slug" },
+                  "html": { "type": "string", "description": "the full self-contained HTML document body" },
+                  "version": { "type": "integer", "description": "optional explicit version; omit to auto-increment" },
+                  "meta": {
+                    "type": "object",
+                    "description": "optional metadata (e.g. {\"title\":\"...\"})",
+                    "properties": {
+                      "title": { "type": "string" }
+                    }
+                  },
+                  "mount_type": {
+                    "type": "string",
+                    "enum": ["group", "space", "thread"],
+                    "description": "where this doc is mounted; forwarded to docs-backend so the HTML doc is registered into the file sidebar. Omit to skip registration (default). 'group'/'space' register; 'thread' is accepted but not registered (thread mounts are intentionally skipped by the backend)."
+                  },
+                  "group_no": { "type": "string", "description": "group number; supply when mount_type=group" },
+                  "thread_id": { "type": "string", "description": "thread id when mount_type=thread (mount context only; thread mounts are not registered)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publish result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "version": { "type": "integer" },
+                    "url": { "type": "string" },
+                    "size": { "type": "integer" },
+                    "aids": { "type": "integer" },
+                    "merged_comments": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/docs/{slug}": {
+      "get": {
+        "operationId": "html.get",
+        "summary": "Fetch one document's metadata (needs reader)",
+        "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /v1/docs/{slug} — added to octo-doc to back this command.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "title": { "type": "string" },
+                    "latest": { "type": "integer" },
+                    "created": { "type": "string" },
+                    "updated": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "html.rm",
+        "summary": "Delete a document (author-only, soft delete)",
+        "description": "Soft-delete a document. Requires the write token / doc author credential.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted" }
+        }
+      }
+    },
+    "/v1/docs/{slug}/versions": {
+      "get": {
+        "operationId": "html.versions",
+        "summary": "List a document's versions (needs reader)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "n": { "type": "integer" },
+                      "created": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/docs/{slug}/draft": {
+      "put": {
+        "operationId": "html.draft.save",
+        "summary": "Save the author draft (author-only)",
+        "description": "Write the author-only draft slot for a slug. Does not mint an immutable version until promoted.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["html"],
+                "properties": {
+                  "html": { "type": "string", "description": "the draft HTML body" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Draft saved" }
+        }
+      }
+    },
+    "/v1/docs/{slug}/draft/promote": {
+      "post": {
+        "operationId": "html.draft.promote",
+        "summary": "Promote the author draft to an immutable version (author-only)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Promoted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "version": { "type": "integer" },
+                    "url": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/docs/{slug}/share": {
+      "post": {
+        "operationId": "html.share",
+        "summary": "Mint / rotate a per-doc read+comment share code (author-only)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Share code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "string" },
+                    "url": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "html.unshare",
+        "summary": "Revoke the per-doc share code (author-only)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Revoked" }
+        }
+      }
+    },
+    "/v1/docs/{slug}/grants": {
+      "get": {
+        "operationId": "html.grant.list",
+        "summary": "List a document's per-uid access grants (author-only)",
+        "description": "List the uids granted access to this document and their role. Author-only (only the doc creator can view grants).",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "uid": { "type": "string" },
+                      "role": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "html.grant.add",
+        "summary": "Grant a uid access to a document (author-only)",
+        "description": "Grant a specific uid access to this document (upsert by uid). role defaults to 'reader' (read published versions + comment/react). Only the doc creator (author) can grant. The granted uid resolves to a reader capability on subsequent requests — no share code needed.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["uid"],
+                "properties": {
+                  "uid": { "type": "string", "description": "the uid to grant access to" },
+                  "role": { "type": "string", "enum": ["reader"], "description": "capability to grant; defaults to 'reader' when omitted" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Grant added" }
+        }
+      }
+    },
+    "/v1/docs/{slug}/grants/{uid}": {
+      "delete": {
+        "operationId": "html.grant.rm",
+        "summary": "Revoke a uid's access grant (author-only)",
+        "description": "Revoke a uid's grant on this document. Author-only. The doc creator cannot be removed (they own the doc) — attempting to returns a conflict.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Grant revoked" }
+        }
+      }
+    },
+    "/v1/docs/{slug}/assets": {
+      "get": {
+        "operationId": "html.asset.ls",
+        "summary": "List a document's media assets (needs reader)",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Asset list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sha256": { "type": "string" },
+                      "name": { "type": "string" },
+                      "size": { "type": "integer" },
+                      "mime": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "html.asset.add",
+        "summary": "Upload a media asset to a document (author-only)",
+        "description": "Upload a media asset for a document via multipart/form-data (form field \"file\"). The asset is content-addressed (sha256); requires the write token / doc author credential.",
+        "x-octo-risk": "write",
+        "x-octo-multipart": true,
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asset registered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": { "type": "string" },
+                    "url": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/docs/{slug}/assets/{sha256}": {
+      "delete": {
+        "operationId": "html.asset.rm",
+        "summary": "Delete a media asset (author-only)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "sha256", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted" }
+        }
+      }
+    },
+    "/v1/comments": {
+      "get": {
+        "operationId": "html.comment.list",
+        "summary": "List a document's comments (needs reader)",
+        "description": "List comments for a document. The slug is passed as a query parameter.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "slug", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" }
+        ],
+        "responses": {
+          "200": { "description": "Comment list" }
+        }
+      },
+      "post": {
+        "operationId": "html.comment.add",
+        "summary": "Create a comment on a document (needs reader capability)",
+        "description": "Create a comment anchored to text or an artifact aid. Requires at least a reader capability (the doc's share code) or the write token.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "text"],
+                "properties": {
+                  "slug": { "type": "string" },
+                  "text": { "type": "string", "description": "comment body" },
+                  "anchor": {
+                    "type": "object",
+                    "description": "optional anchor (text or element by aid); omit for an unanchored comment"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Comment created" }
+        }
+      }
+    },
+    "/v1/agent/replies": {
+      "post": {
+        "operationId": "html.reply",
+        "summary": "Post an agent reply + verdict to a comment (write-token gated)",
+        "description": "Reply to a comment thread as the agent (identity odoc-agent) with an optional verdict: applied / partial / question. Requires the write token.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "parent_id", "text"],
+                "properties": {
+                  "slug": { "type": "string" },
+                  "parent_id": { "type": "string", "description": "the comment thread root id being replied to" },
+                  "text": { "type": "string", "description": "reply body" },
+                  "status": { "type": "string", "enum": ["applied", "partial", "question"], "description": "optional verdict rendered on the parent" },
+                  "applied_in": { "type": "integer", "description": "optional version the change was applied in" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Reply posted" }
+        }
+      }
+    },
+    "/v1/agent/element/get": {
+      "post": {
+        "operationId": "html.element.get",
+        "summary": "Read one artifact's outer HTML by aid (write-token gated)",
+        "description": "Return the outer HTML of a single artifact located by its stamped data-odoc-aid in a document version (version 0 = latest). Requires the write token.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "aid"],
+                "properties": {
+                  "slug": { "type": "string" },
+                  "version": { "type": "integer", "description": "version to read; 0 or omitted = latest" },
+                  "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Element outer HTML",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "aid": { "type": "string" },
+                    "tag": { "type": "string" },
+                    "html": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent/element/replace": {
+      "post": {
+        "operationId": "html.element.replace",
+        "summary": "Replace one artifact's outer HTML by aid and republish (write-token gated)",
+        "description": "Swap one artifact's outer HTML (located by aid in base_version, 0 = latest) with new_html and republish a new version. new_html must be exactly one top-level element and free of scripts / inline event handlers / javascript: URLs. Requires the write token.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["slug", "aid", "new_html"],
+                "properties": {
+                  "slug": { "type": "string" },
+                  "base_version": { "type": "integer", "description": "version whose aid to locate; 0 or omitted = latest" },
+                  "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" },
+                  "new_html": { "type": "string", "description": "replacement single top-level element" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced + republished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "slug": { "type": "string" },
+                    "version": { "type": "integer" },
+                    "url": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

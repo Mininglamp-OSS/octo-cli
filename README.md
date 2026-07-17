@@ -12,8 +12,8 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 75 operations
-across 8 domains — is auto-registered at startup from OpenAPI 3.x specs
+octo-cli is **metadata-driven**. The entire command tree — 98 operations
+across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
 
@@ -38,7 +38,8 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 28  | Documents, spreadsheets & whiteboards — lifecycle, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
+| `docs`    | 31  | Documents, spreadsheets & whiteboards — lifecycle, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
+| `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
@@ -135,6 +136,18 @@ octo-cli docs sheet edit sheet-9 --base-version "<token>" \
 octo-cli docs scene get board-7                       # elements (z-order) + files + base version token
 octo-cli docs scene edit board-7 --base-version "<token>" \
   --data '{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}'
+
+# HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
+# interactive HTML as immutable versions, then edit a single stamped artifact.
+octo-cli html publish --slug launch --html '<h1>hi</h1>' --mount-type group --group-no <group_no> \
+  --data '{"meta":{"title":"Launch page"}}'   # title lives in meta.title; slug+html required
+octo-cli html list
+octo-cli html versions my-slug
+octo-cli html draft save my-slug --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote my-slug
+octo-cli html share my-slug                                        # mint a reader share code
+octo-cli html grant add my-slug --data '{"uid":"u-1"}'             # per-uid authorization
+octo-cli html element get --slug my-slug --aid <content-hash>      # read one stamped artifact (slug is a flag)
+octo-cli html element replace --slug my-slug --aid <content-hash> --new-html '<p>new</p>'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains

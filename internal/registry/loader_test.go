@@ -10,7 +10,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "matter", "message", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "html", "matter", "message", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -42,6 +42,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"bot":     6,
 		"event":   2,
 		"docs":    31,
+		"html":    20,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -164,6 +165,7 @@ func TestServiceSpaceHeaderContract(t *testing.T) {
 		{"group", "group.create", false},
 		{"file", "file.upload", false},
 		{"event", "event.list", false},
+		{"html", "html.publish", false},
 	}
 	for _, c := range cases {
 		op, ok := r.GetOperation(c.opID)
