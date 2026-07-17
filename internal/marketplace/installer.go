@@ -28,6 +28,10 @@ type Result struct {
 }
 
 func Install(root, name string, archive []byte, expectedSHA string) (result Result, err error) {
+	return installWithRename(root, name, archive, expectedSHA, os.Rename)
+}
+
+func installWithRename(root, name string, archive []byte, expectedSHA string, rename func(string, string) error) (result Result, err error) {
 	if !namePattern.MatchString(name) {
 		return Result{}, fmt.Errorf("invalid skill name %q", name)
 	}
@@ -65,19 +69,20 @@ func Install(root, name string, archive []byte, expectedSHA string) (result Resu
 	if err := os.Remove(backup); err != nil {
 		return Result{}, fmt.Errorf("prepare backup path: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(backup) }()
 	hadTarget := false
 	if _, statErr := os.Stat(target); statErr == nil {
-		if err := os.Rename(target, backup); err != nil {
+		if err := rename(target, backup); err != nil {
 			return Result{}, fmt.Errorf("backup existing skill: %w", err)
 		}
 		hadTarget = true
 	} else if !os.IsNotExist(statErr) {
 		return Result{}, fmt.Errorf("inspect existing skill: %w", statErr)
 	}
-	if err := os.Rename(tmp, target); err != nil {
+	if err := rename(tmp, target); err != nil {
 		if hadTarget {
-			_ = os.Rename(backup, target)
+			if restoreErr := rename(backup, target); restoreErr != nil {
+				return Result{}, fmt.Errorf("activate installed skill: %v; rollback failed, previous Skill preserved at %s: %w", err, backup, restoreErr)
+			}
 		}
 		return Result{}, fmt.Errorf("activate installed skill: %w", err)
 	}

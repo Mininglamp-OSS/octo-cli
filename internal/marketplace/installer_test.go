@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,5 +120,43 @@ func TestInstallRejectsChecksumMismatch(t *testing.T) {
 	archive, _ := makeArchive(t, archiveEntry{name: "SKILL.md", body: "x"})
 	if _, err := Install(t.TempDir(), "demo", archive, strings.Repeat("0", 64)); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestInstallPreservesBackupWhenActivationAndRollbackFail(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "demo")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "old"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	archive, digest := makeArchive(t, archiveEntry{name: "SKILL.md", body: "new"})
+
+	renameCalls := 0
+	rename := func(oldPath, newPath string) error {
+		renameCalls++
+		switch renameCalls {
+		case 1:
+			return os.Rename(oldPath, newPath)
+		case 2:
+			return errors.New("activation failure")
+		default:
+			return errors.New("rollback failure")
+		}
+	}
+
+	_, err := installWithRename(root, "demo", archive, digest, rename)
+	if err == nil || !strings.Contains(err.Error(), "previous Skill preserved at") {
+		t.Fatalf("error = %v", err)
+	}
+	backups, globErr := filepath.Glob(filepath.Join(root, ".demo-backup-*"))
+	if globErr != nil || len(backups) != 1 {
+		t.Fatalf("backups = %v, err = %v", backups, globErr)
+	}
+	old, readErr := os.ReadFile(filepath.Join(backups[0], "old"))
+	if readErr != nil || string(old) != "old" {
+		t.Fatalf("preserved old Skill = %q, err = %v", old, readErr)
 	}
 }
