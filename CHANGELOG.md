@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli html` domain** (20 operations) — an agent-facing CLI for the
+  octo-doc interactive-HTML document service, a **separate backend** from
+  `docs`. Covers the full lifecycle: `publish` immutable versions, `list` /
+  `get` / `versions` / `rm`, author `draft save|promote`, `share` / `unshare`
+  reader codes, per-uid `grant add|list|rm`, media `asset add|ls|rm`, inline
+  `comment list|add`, agent `element get|replace`, and `reply`. Generated from
+  the embedded `internal/registry/specs/html.json` OpenAPI spec; ships with the
+  `octo-html` skill and CLAUDE.md command-tree docs.
 - **`octo-cli docs share get|set`** — program the space-level share scope of a
   document. `docs share get <docId>` reads the current `{docId, shareScope,
   shareRole}` (needs reader); `docs share set <docId> --scope
