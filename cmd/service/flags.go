@@ -68,7 +68,7 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 			continue
 		}
 		flagName := paramFlagName(p)
-		qf := &queryFlag{apiName: p.Name, kind: schemaTypeKind(p.Type)}
+		qf := &queryFlag{apiName: p.Name, kind: queryParamKind(p)}
 		desc := p.Description
 		if len(p.Enum) > 0 {
 			desc = fmt.Sprintf("%s (one of: %s)", desc, formatEnum(p.Enum))
@@ -246,12 +246,16 @@ func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 	return 0, false
 }
 
-func schemaTypeKind(t string) valueKind {
-	switch t {
+func queryParamKind(p *registry.ParamInfo) valueKind {
+	switch p.Type {
 	case "integer", "number":
 		return kindInt
 	case "boolean":
 		return kindBool
+	case "array":
+		if p.Items != nil && p.Items.Type == "string" {
+			return kindStringSlice
+		}
 	}
 	return kindString
 }

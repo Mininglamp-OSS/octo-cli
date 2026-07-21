@@ -91,21 +91,27 @@ func TestMarketplaceSkillSearchRequest(t *testing.T) {
 }
 
 func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
-	var gotQuery string
+	var gotQuery map[string][]string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
+		gotQuery = r.URL.Query()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "mcp", "list", "--transport", "stdio", "--visibility", "public", "--source", "space", "--created-by-type", "bot", "--tag", "cli", "--sort", "relevance"})
+	root.SetArgs([]string{"marketplace", "mcp", "list", "--transport", "stdio", "--visibility", "public", "--source", "space", "--created-by-type", "bot", "--tag", "cli", "--tag", "devops", "--sort", "relevance"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	for _, want := range []string{"transport=stdio", "visibility=public", "source=space", "created_by_type=bot", "tag=cli", "sort=relevance"} {
-		if !strings.Contains(gotQuery, want) {
-			t.Errorf("query = %q, want %q", gotQuery, want)
-		}
+	want := map[string][]string{
+		"transport":       {"stdio"},
+		"visibility":      {"public"},
+		"source":          {"space"},
+		"created_by_type": {"bot"},
+		"tag":             {"cli", "devops"},
+		"sort":            {"relevance"},
+	}
+	if !reflect.DeepEqual(gotQuery, want) {
+		t.Errorf("query = %#v, want %#v", gotQuery, want)
 	}
 }
 

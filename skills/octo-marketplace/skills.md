@@ -32,6 +32,8 @@ After confirmation:
 1. Run `marketplace skill get <skill-id>` and verify name, version, file name,
    and file size.
 2. Run `marketplace skill download <skill-id> --response-format json`.
+   `--response-format json` is mandatory for this workflow; without it the
+   backend returns an artifact redirect that octo-cli intentionally does not follow.
 3. Normalize the result, then read `download_url` and `file_sha256`. Never infer
    an artifact URL from metadata or log the short-lived URL.
 4. Download into a new temporary directory and require an exact SHA-256 match.
