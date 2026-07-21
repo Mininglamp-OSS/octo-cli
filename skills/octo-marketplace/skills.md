@@ -7,17 +7,20 @@ rules.
 
 ```bash
 octo-cli marketplace skill-category list
-octo-cli marketplace skill list --q "<keywords>" --page-size 20
+octo-cli marketplace skill tag list --q "<tag>"
+octo-cli marketplace skill list --q "<keywords>" --sort latest --page-size 20
 octo-cli marketplace skill get <skill-id>
 ```
 
-Search is paginated: read results from CLI `.data[]`. Use the immutable
-`skill_id`, not a name. Follow `--page-all` only when all results are needed.
+Search uses cursor pagination: read results from CLI `.data[]` and use
+`--page-all` when all matches are required. Use the immutable `skill_id`, not a
+name. Sort may be `latest`, `comprehensive`, `downloads`, or `views`.
 The category command is non-paginated; normalize it and use each returned
 `skill_category_id` for create, update, or search filters.
 
-Skill tags are free-form strings, normally parsed from `SKILL.md` frontmatter.
-There is no separate tag dictionary endpoint.
+Skill tags are strings normally parsed from `SKILL.md` frontmatter. Use
+`skill tag list` for current-Space and global suggestions; new valid tag values
+may still be submitted when publishing or updating.
 
 ## Install
 
@@ -42,29 +45,55 @@ After confirmation:
 
 Never execute archive scripts during installation.
 
-## Publish
+## Publish as a Bot
 
-The ZIP's `SKILL.md` supplies the Skill version. Do not call `skill create`
-before parsing succeeds.
+The user must first provide a `.zip` / `.skill` package, or an accessible Skill
+directory. Do not search the machine or guess a path.
 
-1. Inspect the ZIP and obtain its byte size.
-2. Initialize with `marketplace skill-upload create --file-name skill.zip
-   --file-size <bytes>`.
-3. Normalize the response, then upload the ZIP to `presigned_url` with the
-   returned HTTP `method` and `headers`.
-4. Run `marketplace skill-upload parse <skill-upload-id>`.
-5. Poll `marketplace skill-parse-task get <skill-parse-task-id>`. Continue only
-   when normalized `payload.status` is `success`. Parsed ZIP metadata is in
-   `payload.result`. On `failed`, return `payload.error` and stop.
-6. Show parsed name, version, description, tags, file size, SHA-256, intended
-   visibility, and selected category. Obtain `category_id` from
-   `marketplace skill-category list`; do not send the display name as the ID.
-   Request confirmation.
-7. Publish with `marketplace skill create`, passing `parse_task_id` and
-   `visibility`.
+1. For a directory, copy it into a fresh `mktemp -d` staging directory and
+   package the copy. Never modify the source directory or use a fixed temporary
+   path. Exclude `.git`, `.github`, caches, dependencies, and build output; keep
+   `SKILL.md`, referenced files, README, and LICENSE. If `version` is absent,
+   use an unambiguous package manifest version or ask once; write it only to the
+   staged `SKILL.md`.
+2. Inspect the package without executing it. Read the root `SKILL.md` and obtain
+   its `name`, `version`, optional `id`, byte size, and SHA-256. Reject an unsafe
+   archive using the same path, link, and size checks required for installation.
+3. Run `marketplace skill mine list --q <name> --page-all`, then compare exact
+   names. This owned-Space lookup is authoritative for the backend uniqueness
+   scope; do not use the public search result for duplicate detection.
+4. Choose exactly one flow:
+   - No exact owned name: continue with the create flow below. An existing
+     package `id` represents its source and the server will publish a new Skill
+     with a new ID and `forked_from` metadata.
+   - Exact owned name and package `id` equals that Skill's `skill_id`: stop the
+     create flow and follow **Update ZIP version** below.
+   - Exact owned name but the package has no `id`, or its `id` differs: report a
+     name conflict and ask the user to rename the package or stop. Never guess
+     that this is an update and never overwrite the existing Skill.
+5. Run `marketplace skill-category list`, resolve the intended category, then
+   show one final plan containing the package path, name, version, size,
+   SHA-256, create/update decision, visibility, and category. Ask for one final
+   confirmation; do not initialize or upload before it.
+6. Initialize with `marketplace skill-upload create --file-name <file>
+   --file-size <bytes>`, then upload to its `presigned_url` using the returned
+   HTTP `method` and `headers`.
+7. Publish once with `marketplace skill publish --skill-upload-id <id>
+   --visibility <visibility>` plus reviewed optional metadata. This endpoint
+   synchronously parses and creates the Skill; do not call `skill-upload parse`,
+   poll `skill-parse-task`, or call `skill create` in the normal Bot flow.
+8. Read the returned `skill_id`, then run `marketplace skill get <skill-id>` to
+   verify the name, version, creator, visibility, and current version.
 
 Optional metadata may override parsed values, including `category_id` and a
-JSON string array `tags`, but do not silently replace the ZIP version.
+JSON string array `tags`, but do not silently replace the package version.
+
+`skill-upload parse`, `skill-parse-task get`, and `skill create` remain exposed
+for Web/legacy compatibility and diagnosis. They are not an alternative Agent
+workflow and must not be used unless the Bot publish endpoint is unavailable.
+If parsing returns `RATE_LIMITED`, wait and retry within the user's timeout. If
+Bot publish returns a gateway timeout, query `skill mine list` before retrying
+so an already-created Skill is never duplicated.
 
 ## Update metadata
 
@@ -80,14 +109,36 @@ strings and need no dictionary lookup.
 
 ## Update ZIP version
 
-1. Initialize with `marketplace skill reupload create <skill-id>` plus the new
+Only enter this flow after exact-name lookup identifies an owned Skill and the
+package `id` equals its `skill_id`. A missing or different package ID is not
+enough evidence to update an existing record.
+
+1. Require the parsed package version to differ from the current version.
+2. Initialize with `marketplace skill reupload create <skill-id>` plus the new
    ZIP's `file_name` and `file_size`.
-2. Upload to the returned presigned target.
-3. Trigger and poll parsing with `skill-upload parse` and
+3. Upload to the returned presigned target.
+4. Trigger and poll parsing with `skill-upload parse` and
    `skill-parse-task get`.
-4. Require the parsed version to differ from the current version. Show the new
-   version and changelog and request confirmation.
-5. Apply the release with `marketplace skill update <skill-id>` using
+5. Show the new version, changelog, file size, and SHA-256 and request
+   confirmation.
+6. Apply the release with `marketplace skill update <skill-id>` using
    `parse_task_id`, `version`, and `changelog`.
-6. Run `marketplace skill version list <skill-id>`, normalize the response, and
+7. Run `marketplace skill version list <skill-id>`, normalize the response, and
    read releases from `payload.items`.
+
+If create returns `DUPLICATE_NAME` after exact owned-name lookup found no live
+record, report that a soft-deleted Skill may still reserve the name. Do not
+retry, auto-rename, or switch to update without user direction.
+
+## Manage owned Skills
+
+Use `marketplace skill mine list` to resolve owned records before update or
+delete. Deletion is a confirmed destructive action:
+
+```bash
+octo-cli marketplace skill delete <skill-id>
+```
+
+Use `marketplace skill skillmd get <skill-id>` when the current raw `SKILL.md`
+is needed without downloading the full package. Skill icon upload is a
+presigned flow initialized by `marketplace skill-icon-upload create`.

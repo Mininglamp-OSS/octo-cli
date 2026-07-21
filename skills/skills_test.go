@@ -88,3 +88,31 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/skills.md")
+	if err != nil {
+		t.Fatalf("read marketplace skills reference: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"or an accessible Skill",
+		"mktemp -d",
+		"Never modify the source directory",
+		"skill mine list --q <name> --page-all",
+		"package `id` equals that Skill's `skill_id`",
+		"name conflict",
+		"soft-deleted Skill may still reserve the name",
+		"do not initialize or upload before it",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("publish workflow must contain %q", want)
+		}
+	}
+	if strings.Index(content, "skill mine list --q <name> --page-all") > strings.Index(content, "skill-upload create --file-name") {
+		t.Error("owned-name lookup must happen before upload initialization")
+	}
+	if strings.Index(content, "skill-category list") > strings.Index(content, "one final plan") {
+		t.Error("category lookup must happen before the final confirmation plan")
+	}
+}

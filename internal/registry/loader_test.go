@@ -34,16 +34,16 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	// matter.transition) — the spec tracks actual routes, not CLI surface.
 	r := MustNew()
 	expected := map[string]int{
-		"matter":  14,
-		"message": 4,
-		"group":   9,
-		"thread":  8,
-		"file":    4,
-		"bot":     6,
-		"event":   2,
-		"docs":    31,
-		"html":    20,
-		"marketplace": 17,
+		"matter":      14,
+		"message":     4,
+		"group":       9,
+		"thread":      8,
+		"file":        4,
+		"bot":         6,
+		"event":       2,
+		"docs":        31,
+		"html":        20,
+		"marketplace": 26,
 	}
 	totalWant := 0
 	for svc, want := range expected {

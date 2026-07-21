@@ -6,8 +6,9 @@ rules. MCP listings have no downloadable archive or release version.
 ## Search and inspect
 
 ```bash
-octo-cli marketplace mcp-category list
-octo-cli marketplace mcp list --keyword "<keywords>" --page 1 --page-size 20
+octo-cli marketplace mcp-category list --mode all
+octo-cli marketplace mcp list --keyword "<keywords>" --sort relevance --page 1 --page-size 20
+octo-cli marketplace mcp mine list --page 1 --page-size 20
 octo-cli marketplace mcp get <mcp-id>
 ```
 
@@ -15,6 +16,10 @@ Search is paginated: read results from CLI `.data[]`.
 The category command is non-paginated; normalize it and use a returned `key` as
 the MCP `category` value or list filter. MCP tags are free-form strings; there
 is no tag dictionary endpoint.
+
+Search filters include repeatable/comma-separated `transport`, `visibility`,
+`source`, `created-by-type`, and `tag`. `mcp-category list --mode mine` returns
+counts for owned records; `--created-by-type` narrows provenance.
 
 `key: "all"` is the list-filter sentinel and `key: ""` means uncategorized;
 do not store either as a new listing's category. Category keys are derived from
@@ -85,3 +90,8 @@ string array as create.
 For stdio connection changes, use the local handshake instead of backend probe.
 Re-read with `marketplace mcp get <mcp-id>` and verify the quick-start remains
 secret-redacted and contains no `version` field.
+
+Use `marketplace mcp delete <mcp-id>` only after showing the selected owned
+record and obtaining explicit confirmation. MCP icon uploads use the presigned
+target from `marketplace mcp-icon-upload create`; after uploading, pass the
+returned persistent icon URL through `mcp create` or `mcp update`.
