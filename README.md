@@ -261,6 +261,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   lives in sibling files loaded on demand: `sheet.md` (spreadsheets), `doc.md`
   (rich-text body), `board.md` (whiteboard), and `common.md` (comments,
   versions, members/sharing, attachments).
+- [`octo-marketplace`](./skills/octo-marketplace/SKILL.md) — search, install,
+  publish, and update Marketplace Skills and MCP server listings.
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 

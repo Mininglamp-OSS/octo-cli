@@ -66,3 +66,53 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("octo-marketplace/SKILL.md not embedded: %v", err)
+	}
+	content := string(b)
+	for _, ref := range []string{"skills.md", "mcp.md"} {
+		if !strings.Contains(content, ref) {
+			t.Errorf("octo-marketplace/SKILL.md must route to %q", ref)
+		}
+		path := "octo-marketplace/" + ref
+		rb, readErr := FS.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("reference %q not embedded: %v", path, readErr)
+			continue
+		}
+		if len(rb) == 0 {
+			t.Errorf("reference %q is empty", path)
+		}
+	}
+}
+
+func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/skills.md")
+	if err != nil {
+		t.Fatalf("read marketplace skills reference: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"or an accessible Skill",
+		"mktemp -d",
+		"Never modify the source directory",
+		"skill mine list --q <name> --page-all",
+		"package `id` equals that Skill's `skill_id`",
+		"name conflict",
+		"soft-deleted Skill may still reserve the name",
+		"do not initialize or upload before it",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("publish workflow must contain %q", want)
+		}
+	}
+	if strings.Index(content, "skill mine list --q <name> --page-all") > strings.Index(content, "skill-upload create --file-name") {
+		t.Error("owned-name lookup must happen before upload initialization")
+	}
+	if strings.Index(content, "skill-category list") > strings.Index(content, "one final plan") {
+		t.Error("category lookup must happen before the final confirmation plan")
+	}
+}

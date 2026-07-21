@@ -10,7 +10,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "matter", "message", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "html", "marketplace", "matter", "message", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -34,15 +34,16 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	// matter.transition) — the spec tracks actual routes, not CLI surface.
 	r := MustNew()
 	expected := map[string]int{
-		"matter":  14,
-		"message": 4,
-		"group":   9,
-		"thread":  8,
-		"file":    4,
-		"bot":     6,
-		"event":   2,
-		"docs":    31,
-		"html":    20,
+		"matter":      14,
+		"message":     4,
+		"group":       9,
+		"thread":      8,
+		"file":        4,
+		"bot":         6,
+		"event":       2,
+		"docs":        31,
+		"html":        20,
+		"marketplace": 26,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -146,8 +147,9 @@ func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
 // X-Space-Id only when a spec explicitly declares x-octo-space-header:false
 // (SpaceHeaderSet && !SpaceHeader); the values below are the intended,
 // server-verified per-service behaviour:
-//   - message / matter: true  — the server reads X-Space-Id (DM multi-space
-//     hint / space-scoped matters), so the client must keep sending it.
+//   - message / matter / marketplace: true — the server reads X-Space-Id
+//     (DM multi-space hint / space-scoped resources), so the client must keep
+//     sending it.
 //   - docs and the rest: false — those bot mounts server-resolve the space and
 //     ignore the header, so the client honestly suppresses it.
 func TestServiceSpaceHeaderContract(t *testing.T) {
@@ -159,6 +161,7 @@ func TestServiceSpaceHeaderContract(t *testing.T) {
 	}{
 		{"message", "message.send", true},
 		{"matter", "matter.create", true},
+		{"marketplace", "skill.get", true},
 		{"docs", "docs.create", false},
 		{"bot", "bot.register", false},
 		{"thread", "thread.create", false},

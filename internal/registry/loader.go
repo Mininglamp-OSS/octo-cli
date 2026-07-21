@@ -1,5 +1,5 @@
 // Package registry loads the embedded OpenAPI 3.x specs for each Octo service
-// domain (matter, message, group, thread, file, bot, event). Consumers read
+// domain (matter, message, group, thread, file, bot, event, marketplace). Consumers read
 // operation metadata — parameters, request body shape, response shape, risk,
 // pagination — to drive flag generation, request building, and `octo-cli schema`.
 //
@@ -140,13 +140,14 @@ type OperationInfo struct {
 // the `In` field records which. Type/Default/Enum come from the nested
 // schema when present.
 type ParamInfo struct {
-	Name        string `json:"name"`
-	In          string `json:"in"`
-	Required    bool   `json:"required,omitempty"`
-	Type        string `json:"type,omitempty"`
-	Description string `json:"description,omitempty"`
-	Default     any    `json:"default,omitempty"`
-	Enum        []any  `json:"enum,omitempty"`
+	Name        string      `json:"name"`
+	In          string      `json:"in"`
+	Required    bool        `json:"required,omitempty"`
+	Type        string      `json:"type,omitempty"`
+	Items       *SchemaInfo `json:"items,omitempty"`
+	Description string      `json:"description,omitempty"`
+	Default     any         `json:"default,omitempty"`
+	Enum        []any       `json:"enum,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag
 	// extension on the parameter. It lets a spec expose a header/query param
 	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
@@ -355,6 +356,10 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			if sch, ok := pm["schema"].(map[string]any); ok {
 				pi.Type = stringOf(sch["type"])
 				pi.Default = sch["default"]
+				if items, ok := sch["items"].(map[string]any); ok {
+					resolved := resolveSchema(doc, items)
+					pi.Items = &resolved
+				}
 				if enum, ok := sch["enum"].([]any); ok {
 					pi.Enum = enum
 				}
