@@ -57,6 +57,16 @@ octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet
 octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
 
 octo-cli docs get    <docId>                 # metadata + doc_type + your role
+
+# Import a local file into an existing target. .md/.markdown/.docx require a doc;
+# .xlsx requires a sheet and imports its first visible worksheet.
+octo-cli docs import <docId> --file ./input.md
+
+# Export to a local file. -o is required and its extension must match.
+# --export-format is distinct from global --format (the envelope renderer).
+octo-cli docs export <docId> --export-format pdf -o ./output.pdf
+# Other accepted matching pairs: md/.md, docx/.docx, xlsx/.xlsx, png/.png, svg/.svg
+
 octo-cli docs rename <docId> --title "New title"
 octo-cli docs delete <docId>                 # soft delete (admin)
 ```

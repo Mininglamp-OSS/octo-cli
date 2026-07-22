@@ -17,6 +17,11 @@ octo-cli docs content get <docId>
 # Apply an incremental edit (writer). --base-version is REQUIRED and is sent as
 # the If-Match header; the ops batch goes through --data as a JSON array.
 octo-cli docs content edit <docId> --base-version "<token>" --data '<ops JSON>'
+
+# Export the rendered document. The output extension must match the format.
+octo-cli docs export <docId> --export-format md -o document.md
+octo-cli docs export <docId> --export-format docx -o document.docx
+octo-cli docs export <docId> --export-format pdf -o document.pdf
 ```
 
 Ops are addressed by **block path** (child indices from the doc root) and come

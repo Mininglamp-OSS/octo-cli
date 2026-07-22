@@ -55,6 +55,8 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newAuthCmd(f))
 	root.AddCommand(newSheetCellCmd(f))
 	service.RegisterServiceCommands(root, f)
+	registerDocsImportCmd(root, f)
+	registerDocsExportCmd(root, f)
 	withholdDisabledServices(root, f)
 
 	return root
