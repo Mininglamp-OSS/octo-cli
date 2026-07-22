@@ -9,13 +9,13 @@ metadata:
 
 # octo-shared — CLI fundamentals for AI Agents
 
-`octo-cli` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
+`octo-cli` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events, docs, html) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
 
 > **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo-cli matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
 
 ## 1. Authentication
 
-Bots authenticate with a bearer token. There is no user login. Two ways to supply it:
+Bots authenticate with a bearer token. There is no interactive user login — but besides the two bot tokens (`app_*`, `bf_*`) there is a third kind, a **user API key** (`uk_*`), which carries a real person's identity and is used mainly for `message search`. Two ways to supply any of them:
 
 **Stored profile (recommended).** A human (or provisioning step) logs the token in once; it is encrypted at rest under `~/.octo-cli`, and the raw token never appears in any command line, shell history, or transcript afterward:
 
@@ -23,6 +23,10 @@ Bots authenticate with a bearer token. There is no user login. Two ways to suppl
 # Operator setup (token read from a hidden prompt, or --with-token < file):
 octo-cli auth login --bot-id cli_xxxxxxxx          # robot id you got when creating the bot
 echo "$TOKEN" | octo-cli auth login --bot-id cli_xxxxxxxx --with-token   # non-interactive
+
+# A user API key (uk_) is stored the same way — encrypted profile, bot_kind shows
+# user_key. Use a friendly --profile name since it has no robot id:
+echo "$UK_TOKEN" | octo-cli auth login --profile alice-search --with-token
 ```
 
 Then, at runtime, select which bot to act as — the agent passes its own **robot id**, which it knows:
@@ -39,16 +43,20 @@ With exactly one stored profile, the selector is optional. With **two or more, y
 ```bash
 export OCTO_BOT_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
 export OCTO_BOT_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
+export OCTO_BOT_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
 ```
 
 > `OCTO_BOT_ID` is a selector (a robot id), not a secret; `OCTO_BOT_TOKEN` is the secret. If `OCTO_BOT_ID` names no stored profile the command fails — it never falls back to silently using `OCTO_BOT_TOKEN` under that id.
 
-Token prefix determines capability — the CLI does NOT enforce this locally; the backend rejects unsupported operations with `FORBIDDEN`.
+Token prefix determines capability — the CLI does NOT enforce this locally (the backend rejects unsupported operations with `FORBIDDEN`), with **one exception**: an `app_*` token running `message search` is rejected locally with a `validation` error before any request.
 
-| Prefix  | Type     | DM msg | Group read | Group write | Thread | Voice |
-|---------|----------|--------|------------|-------------|--------|-------|
-| `app_*` | App Bot  | yes    | yes        | **no**      | **no** | **no**|
-| `bf_*`  | User Bot | yes    | yes        | yes         | yes    | yes   |
+| Prefix  | Type         | DM msg | Group read | Group write | Thread | Voice | Search |
+|---------|--------------|--------|------------|-------------|--------|-------|--------|
+| `app_*` | App Bot      | yes    | yes        | **no**      | **no** | **no**| **no** |
+| `bf_*`  | User Bot     | yes    | yes        | yes         | yes    | yes   | yes    |
+| `uk_*`  | User API key | —      | —          | —           | —      | —     | yes    |
+
+`uk_*` carries a real person's identity and is meaningful mainly for `message search` (routed to `/v1/user/*`); for other domains use a bot token. `bf_*` can also search on behalf of a person with `--on-behalf-of <uid>`. `identity.bot_kind` reflects the kind: `app_bot`, `user_bot`, or `user_key`.
 
 Before acting, inspect `octo-cli auth status` (or `octo-cli config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
 
@@ -149,8 +157,8 @@ The `hint` field is a one-line next action meant for an agent: follow it literal
 Simple top-level body fields auto-promote to typed flags (strings, integers, booleans, `[]string`). For objects, arrays-of-objects, or when sending a large payload, use `--data`:
 
 ```bash
-octo-cli thread create --chat-id chat-1 --name "design review"
-octo-cli message send --data '{"chat_id":"chat-1","text":"hi"}'
+octo-cli thread create group-abc --name "design review"
+octo-cli message send --data '{"channel_id":"chat-1","channel_type":1,"payload":{"type":1,"content":"hi"}}'
 octo-cli message send --data @body.json
 octo-cli some-cmd --data @-            # read JSON from stdin
 ```
@@ -174,7 +182,7 @@ octo-cli group list --page-all --page-limit 20
 ### Dry-run for agent self-verification
 
 ```bash
-octo-cli message send --data '{"chat_id":"chat-1","text":"foo"}' --dry-run
+octo-cli message send --data '{"channel_id":"chat-1","channel_type":1,"payload":{"type":1,"content":"foo"}}' --dry-run
 ```
 
 Prints the exact HTTP request body and URL, emits no side effect.
@@ -206,3 +214,5 @@ Once these fundamentals are understood, load the skill for the domain you need:
 - `octo-matter` — matters (todos/tasks), assignees, channels, timeline, AI extract — **temporarily withheld** (backend API stabilizing; not currently loadable)
 - `octo-messaging` — message send/edit/sync/read-receipt, groups, threads, events
 - `octo-files` — file upload/download, presigned credentials, bot housekeeping
+- `octo-docs` — docs domain (CRDT/Yjs): documents, spreadsheets, whiteboard scenes, members/sharing, comments, versions, attachments
+- `octo-html` — HTML docs domain (octo-doc, a DIFFERENT backend from octo-docs): self-contained interactive HTML documents, share codes, media assets, comments, agent element read/replace

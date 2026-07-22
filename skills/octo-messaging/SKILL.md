@@ -1,7 +1,7 @@
 ---
 name: octo-messaging
 version: 0.4.1
-description: Messaging domain — send/edit/sync messages, read receipts, groups and threads (User Bot), and event polling. Covers App Bot DM-only constraints. Load after octo-shared.
+description: Messaging domain — send/edit/sync messages, read receipts, message search (search/all/files/media/around/groups, in-channel or cross-channel), groups and threads (User Bot), and event polling. Covers App Bot DM-only constraints. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -10,7 +10,7 @@ metadata:
 
 # octo-messaging — messages, groups, threads, events
 
-Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*`.
+Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*` — except the `message search` family under a `uk_` (user API key) token, which the CLI routes to `/v1/user/*` (real-person mount; see the `message search` section).
 
 | Domain    | App Bot           | User Bot |
 |-----------|-------------------|----------|
@@ -19,9 +19,17 @@ Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*`.
 | `thread`  | **blocked**       | full     |
 | `event`   | yes               | yes      |
 
+Search capability (the `message search` family) is a separate axis by token kind:
+
+| Token   | Can search? | Notes                                                  |
+|---------|-------------|--------------------------------------------------------|
+| `app_*` | **no**      | CLI rejects locally with a `validation` error (not a server `FORBIDDEN`). |
+| `bf_*`  | yes         | Searches as the bot; add `--on-behalf-of <uid>` for a real-person (OBO) view. |
+| `uk_*`  | yes         | Real-person identity; routed to `/v1/user/*`.          |
+
 Before attempting a write, confirm the token type with `octo-cli config show` — App Bot writes outside DM get `FORBIDDEN` from the server ("app bot does not support group operations").
 
-## 1. `message` — 4 commands
+## 1. `message` — 4 core commands (+ 6 search subcommands, see below)
 
 ```bash
 # Send a message. payload is a JSON object (not a flag) — pass it inside --data.
@@ -82,21 +90,70 @@ Chat content types:
 
 `--on-behalf-of <uid>` makes `send`/`typing` act as a user persona (OBO) — requires an active OBO grant + channel scope, else the server returns `OBO not authorized`.
 
-## 2. `group` — 9 commands (5 read + 4 write)
+## message search — 6 subcommands
 
-Read operations (both bot types):
+Full-text search over messages and files. Registered as `message search`, `message search all|files|media|around|groups`.
 
 ```bash
-octo-cli group list    [--space-id <sid>]                 # groups the bot is a member of
-octo-cli group get     <group_no>
-octo-cli group members <group_no>                          # paginated
-octo-cli group md-get  <group_no>                          # group markdown description
+# In-channel message search (payload.type in [1,11,14]).
+octo-cli message search --chat-id <cid> --keyword "quarterly report" [--sort time_desc]
+
+# Cross-channel message search (omit --chat-id). NOTE: without --chat-id the CLI
+# routes to the cross-channel _search_global_messages endpoint, which is a MIXED
+# feed (messages + files), so results may include file hits.
+octo-cli message search --keyword "quarterly report"
+
+# Messages + files (mixed feed) — in-channel or (no --chat-id) cross-channel.
+octo-cli message search all --chat-id <cid> --keyword invoice
+
+# Files only (payload.type=8), by filename / caption.
+octo-cli message search files --chat-id <cid> --keyword "*.pdf"
+
+# Images + videos (payload.type in [2,5]) — IN-CHANNEL ONLY, keyword NOT allowed.
+octo-cli message search media --chat-id <cid> [--sort time_desc]
+
+# Context window around an anchor message — IN-CHANNEL ONLY.
+octo-cli message search around --chat-id <cid> --anchor-message-id <mid>
+
+# Cross-channel aggregated overview (which channels matched) — CROSS-CHANNEL ONLY.
+# Use it as level 1 of a two-step search: find matching channels, then pull
+# messages per channel with `message search` / `message search all`.
+octo-cli message search groups --keyword "quarterly report"
 ```
 
-Write operations (**User Bot only**):
+### `--chat-id` decides in-channel vs cross-channel
+
+- **With `--chat-id`** → scoped to that channel.
+- **Without `--chat-id`** → `search` / `search all` / `search files` route to their cross-channel `_search_global_*` endpoints (CLI-side, in `internal/client/search_route.go` — not backend dispatch). Plain `search` cross-channel degrades to the **mixed messages+files** feed.
+- `media` and `around` **require `--chat-id`** (no cross-channel endpoint; the backend rejects a request without a channel_id). `around` also requires `--anchor-message-id`; `media` does **not** accept `--keyword`.
+- `groups` is **cross-channel only** and does **not** accept `--chat-id`.
+
+### Token subjects
+
+- **`bf_` (User Bot)** — searches as the bot.
+- **`bf_` + `--on-behalf-of <uid>`** — OBO: searches with that real person's visibility; requires an active OBO grant.
+- **`uk_` (user API key)** — real-person identity; the CLI rewrites the path to `/v1/user/*`.
+- **`app_` (App Bot)** — **cannot search.** The CLI rejects this locally (`validation`), before any request — distinct from a server-side `FORBIDDEN`.
+
+### Filters and pagination
+
+Rich filters (`sender_ids`, `member_uids`, `content_types`, `sent_at_from`/`sent_at_to`, `file_exts`, …) go through `--data '{"filters":{…}}'`. All families except `around` and `groups` paginate; the cursor travels in the request **body** (`--page-all` handles this).
+
+## 2. `group` — 9 commands (both 5 / User Bot only 4)
+
+Available to both bot types (5):
 
 ```bash
-octo-cli group md-update     <group_no> --content "# Updated description"
+octo-cli group list      [--space-id <sid>]               # groups the bot is a member of
+octo-cli group get       <group_no>
+octo-cli group members   <group_no>                        # paginated
+octo-cli group md-get    <group_no>                        # group markdown description
+octo-cli group md-update <group_no> --content "# Updated description"  # write, but bot_admin gate — not App-Bot-blocked
+```
+
+User Bot only (4):
+
+```bash
 octo-cli group create        --members u1 --members u2 --name "eng" --creator u0
 octo-cli group update        <group_no> --data '{"name":"new name"}'
 octo-cli group member-add    <group_no> --members u3 --members u4
@@ -162,11 +219,17 @@ done
 | `sync` rejected with `channel-type=2`                  | App Bot cannot sync groups — use User Bot.                     |
 | `VALIDATION_ERROR` on `send`                           | `payload` must be an object, not a string.                     |
 | `event list` returns `data.results: []`                | No events since the cursor; keep the cursor and poll again.    |
+| `validation` on any `message search` with an `app_*` token | App Bots cannot search — use `bf_*` or `uk_*`. (CLI-side reject, before the request.) |
+| `media` search rejected with a non-empty keyword       | `search media` does not accept `--keyword`; drop it.          |
+| `sort=relevance` rejected                              | `relevance` requires a non-empty `--keyword`.                 |
+| `OBO not authorized` on `search --on-behalf-of`        | No active OBO grant for that uid; grant it or drop `--on-behalf-of`. |
 
 ## 6. Schema lookup
 
 ```bash
 octo-cli schema message.send
+octo-cli schema message.search
+octo-cli schema message.search.all
 octo-cli schema group.members
 octo-cli schema thread.create
 octo-cli schema event.list
