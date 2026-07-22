@@ -248,15 +248,22 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 			break
 		}
 		// Prepare next request. Copy the whole struct so no field is silently
-		// dropped (RawBody/ContentType/BinaryResponse/OutputPath), then clone
-		// Query and set the next cursor so we don't mutate the previous page's.
-		nextQ := url.Values{}
-		for k, vs := range req.Query {
-			nextQ[k] = append([]string(nil), vs...)
-		}
-		nextQ.Set(cursorParam, nextCursor)
+		// dropped (RawBody/ContentType/BinaryResponse/OutputPath). The cursor
+		// goes wherever the spec declares it: a query parameter (GET endpoints
+		// like matter.list) or a JSON body field (POST endpoints like the
+		// message.search family). Either way we clone the container before
+		// setting so the previous page's request is never mutated.
 		next := req
-		next.Query = nextQ
+		if cursorIsQueryParam(rt, cursorParam) {
+			nextQ := url.Values{}
+			for k, vs := range req.Query {
+				nextQ[k] = append([]string(nil), vs...)
+			}
+			nextQ.Set(cursorParam, nextCursor)
+			next.Query = nextQ
+		} else {
+			next.Body = withCursorBody(req.Body, cursorParam, nextCursor)
+		}
 		req = next
 	}
 
@@ -265,6 +272,35 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		return err
 	}
 	return f.EmitSuccess(out)
+}
+
+// cursorIsQueryParam reports whether this operation declares its pagination
+// cursor as a URL query parameter (GET endpoints, e.g. matter.list) rather than
+// a JSON body field (POST endpoints, e.g. the message.search family). The spec
+// binds a query-declared cursor to a queryFlag whose apiName is the cursor
+// param; a body-declared cursor has no such binding.
+func cursorIsQueryParam(rt *operationRuntime, cursorParam string) bool {
+	for _, qf := range rt.queryFlags {
+		if qf.apiName == cursorParam {
+			return true
+		}
+	}
+	return false
+}
+
+// withCursorBody returns a shallow clone of the JSON body map with the cursor
+// key set to nextCursor, so paging never mutates the previous page's body. A nil
+// or non-map body yields a fresh single-key map (search bodies are always
+// map[string]any from resolveBody).
+func withCursorBody(body any, cursorParam, nextCursor string) map[string]any {
+	next := map[string]any{}
+	if m, ok := body.(map[string]any); ok {
+		for k, v := range m {
+			next[k] = v
+		}
+	}
+	next[cursorParam] = nextCursor
+	return next
 }
 
 // parsePage extracts {data:[], pagination:{has_more, next_cursor}} from a

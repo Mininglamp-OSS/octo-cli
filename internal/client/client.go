@@ -121,6 +121,16 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	if req.Service == "" {
 		req.Service = "default"
 	}
+
+	// Route the message-search family by chat-id scope and token kind
+	// (no channel_id → cross-session global; uk_ → /v1/user; app_ → error).
+	// Non-search paths pass through unchanged.
+	routedPath, err := routeSearchPath(c.cred, req.Path, req.Body)
+	if err != nil {
+		return nil, err
+	}
+	req.Path = routedPath
+
 	base := c.cfg.ServiceURL(req.Service)
 	if base == "" {
 		return nil, output.ErrValidation(

@@ -15,14 +15,15 @@
 
 ## Identity Model
 
-- The CLI is **bot-only** — no user login. A bot token is an `app_*` (App Bot) or `bf_*` (User Bot) token.
+- The CLI is **bot-only** — no interactive user login. A bot token is an `app_*` (App Bot) or `bf_*` (User Bot) token. A third kind, `uk_*` (**user API key**), carries a real person's identity and is used mainly for `message search` (routed to `/v1/user/*` rather than `/v1/bot/*`); `credential.TokenKind` reports it as `user_key`.
 - **Credential resolution** (see `internal/credential`, `internal/authstore`): a token comes from a stored encrypted profile or, as a fallback, `OCTO_BOT_TOKEN`. Stored profiles live in `~/.octo-cli` (override `OCTO_CONFIG_DIR`): metadata in plaintext `config.json`, tokens in AES-256-GCM `credentials.enc`. Manage them with `octo-cli auth`.
 - **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: selector > sole/implicit profile > `OCTO_BOT_TOKEN`. The success envelope's `identity` echoes the active `{profile, robot_id, bot_kind, source}` so misuse is visible.
 - **Isolation boundary = OS user**: the encryption key is machine-derived, so the store resists off-machine leakage (commit/backup/sync) but not a same-user process. Isolate mutually-distrusting bots with separate OS users or `OCTO_CONFIG_DIR` values.
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
+- **Search subjects** (`message search` family): a `bf_` token searches as the bot, or as a real person with `--on-behalf-of <uid>` (OBO — requires an active grant); a `uk_` token searches as the real person it belongs to. An `app_` token cannot search — the CLI rejects it locally (`validation`, in `internal/client/search_route.go`) before any request, distinct from a server-side `FORBIDDEN`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure (9 domains, 98 operations)
+## Command Structure (9 domains, 104 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -39,6 +40,7 @@ octo-cli matter    create | list | get | update | delete        (withheld)
                channel  link|unlink
                timeline add|list|delete
 octo-cli message   send | edit | sync | read-receipt
+               search  (default) | all | files | media | around | groups
 octo-cli group     list | get | members | md-get | md-update
                create | update | member-add | member-remove       (User Bot only)
 octo-cli thread    create | list | get | members
@@ -49,7 +51,7 @@ octo-cli event     list | ack
 octo-cli docs      create | list | get | rename | delete | forward-grant
                content  get|edit
                sheet    get|edit
-               scene    get|edit
+               scene    get|edit|export
                members  list|set|remove
                share    get|set
                comments list|add|edit|delete
@@ -80,7 +82,7 @@ Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agen
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Fallback when no stored profile is selected. |
+| `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Fallback when no stored profile is selected. |
 | `OCTO_BOT_ID`       | Robot id selecting a stored profile (env form of `--bot-id`). Selector, not a secret. |
 | `OCTO_CONFIG_DIR`   | Override the credential dir (default `~/.octo-cli`).     |
 | `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |

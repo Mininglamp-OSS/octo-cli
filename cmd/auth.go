@@ -76,7 +76,7 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 			if token == "" {
 				return failErr(f, output.ErrValidation(
-					"empty token", "provide a non-empty app_* or bf_* bot token"))
+					"empty token", "provide a non-empty app_*, bf_*, or uk_* bot token"))
 			}
 
 			store, err := f.AuthStore()
