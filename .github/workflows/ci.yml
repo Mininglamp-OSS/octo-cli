@@ -3,10 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      - '**'
+      - '!**/*.md'
+      - 'skills/**/*.md'
+      - '!docs/**'
+      - '!.github/ISSUE_TEMPLATE/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches: [main]
