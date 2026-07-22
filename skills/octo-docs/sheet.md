@@ -2,7 +2,7 @@
 
 Read this when the target is a **spreadsheet** (`doc_type: sheet`) and you need to
 read or edit its cells, column widths / row heights, floating images, or export it.
-All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
+All commands call `$OCTO_API_BASE_URL/docs/v1/bot/*`. Auth & space rules are in
 `SKILL.md`.
 
 A spreadsheet stores a flat cell map on the Y.Doc, keyed `sheetId!row:col` (e.g.

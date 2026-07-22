@@ -67,37 +67,37 @@ func TestDocs_RegistryShape(t *testing.T) {
 
 	type want struct{ method, path string }
 	cases := map[string]want{
-		"docs.create":              {"POST", "/v1/bot/docs"},
-		"docs.list":                {"GET", "/v1/bot/docs"},
-		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
-		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
-		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
-		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
-		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
-		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
-		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
-		"docs.scene.get":           {"GET", "/v1/bot/docs/{docId}/scene"},
-		"docs.scene.edit":          {"PATCH", "/v1/bot/docs/{docId}/scene"},
-		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
-		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
-		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
-		"docs.share.get":           {"GET", "/v1/bot/docs/{docId}/share"},
-		"docs.share.set":           {"PUT", "/v1/bot/docs/{docId}/share"},
-		"docs.forward-grant":       {"POST", "/v1/bot/docs/{docId}/forward-grant"},
-		"docs.comments.list":       {"GET", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.add":        {"POST", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.edit":       {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.comments.delete":     {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.versions.list":       {"GET", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.create":     {"POST", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.state":      {"GET", "/v1/bot/docs/{docId}/versions/{versionId}/state"},
-		"docs.versions.rename":     {"PATCH", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.delete":     {"DELETE", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.restore":    {"POST", "/v1/bot/docs/{docId}/versions/{versionId}/restore"},
-		"docs.attachments.presign": {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
-		"docs.attachments.get":     {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
-		"docs.attachments.resolve": {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
-		"docs.scene.export":        {"GET", "/v1/bot/docs/{docId}/export"},
+		"docs.create":              {"POST", "/docs/v1/bot"},
+		"docs.list":                {"GET", "/docs/v1/bot"},
+		"docs.get":                 {"GET", "/docs/v1/bot/{docId}"},
+		"docs.rename":              {"PATCH", "/docs/v1/bot/{docId}"},
+		"docs.delete":              {"DELETE", "/docs/v1/bot/{docId}"},
+		"docs.content.get":         {"GET", "/docs/v1/bot/{docId}/content"},
+		"docs.content.edit":        {"PATCH", "/docs/v1/bot/{docId}/content"},
+		"docs.sheet.get":           {"GET", "/docs/v1/bot/{docId}/sheet"},
+		"docs.sheet.edit":          {"PATCH", "/docs/v1/bot/{docId}/sheet"},
+		"docs.scene.get":           {"GET", "/docs/v1/bot/{docId}/scene"},
+		"docs.scene.edit":          {"PATCH", "/docs/v1/bot/{docId}/scene"},
+		"docs.members.list":        {"GET", "/docs/v1/bot/{docId}/members"},
+		"docs.members.set":         {"PUT", "/docs/v1/bot/{docId}/members"},
+		"docs.members.remove":      {"DELETE", "/docs/v1/bot/{docId}/members/{uid}"},
+		"docs.share.get":           {"GET", "/docs/v1/bot/{docId}/share"},
+		"docs.share.set":           {"PUT", "/docs/v1/bot/{docId}/share"},
+		"docs.forward-grant":       {"POST", "/docs/v1/bot/{docId}/forward-grant"},
+		"docs.comments.list":       {"GET", "/docs/v1/bot/{docId}/comments"},
+		"docs.comments.add":        {"POST", "/docs/v1/bot/{docId}/comments"},
+		"docs.comments.edit":       {"PATCH", "/docs/v1/bot/{docId}/comments/{id}"},
+		"docs.comments.delete":     {"DELETE", "/docs/v1/bot/{docId}/comments/{id}"},
+		"docs.versions.list":       {"GET", "/docs/v1/bot/{docId}/versions"},
+		"docs.versions.create":     {"POST", "/docs/v1/bot/{docId}/versions"},
+		"docs.versions.state":      {"GET", "/docs/v1/bot/{docId}/versions/{versionId}/state"},
+		"docs.versions.rename":     {"PATCH", "/docs/v1/bot/{docId}/versions/{versionId}"},
+		"docs.versions.delete":     {"DELETE", "/docs/v1/bot/{docId}/versions/{versionId}"},
+		"docs.versions.restore":    {"POST", "/docs/v1/bot/{docId}/versions/{versionId}/restore"},
+		"docs.attachments.presign": {"POST", "/docs/v1/bot/{docId}/attachments/presign"},
+		"docs.attachments.get":     {"GET", "/docs/v1/bot/{docId}/attachments/{attachId}"},
+		"docs.attachments.resolve": {"POST", "/docs/v1/bot/{docId}/attachments/resolve"},
+		"docs.scene.export":        {"GET", "/docs/v1/bot/{docId}/export"},
 	}
 
 	got := reg.ListOperations("docs")
@@ -159,8 +159,8 @@ func TestDocsSceneExport_ImageFormatMapsToWireFormat(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotPath != "/v1/bot/docs/abc/export" {
-		t.Errorf("path = %s, want /v1/bot/docs/abc/export", gotPath)
+	if gotPath != "/docs/v1/bot/abc/export" {
+		t.Errorf("path = %s, want /docs/v1/bot/abc/export", gotPath)
 	}
 	if !strings.Contains(gotQuery, "format=svg") {
 		t.Errorf("query %q missing format=svg", gotQuery)
@@ -210,7 +210,7 @@ func TestDocs_NoPagination(t *testing.T) {
 
 // --- operation execution ---
 
-// TestDocsCreate_PostsBodyNoSpaceHeader checks docs.create hits POST /v1/bot/docs
+// TestDocsCreate_PostsBodyNoSpaceHeader checks docs.create hits POST /docs/v1/bot
 // with the promoted body field, carries the bearer token, and sends no
 // X-Space-Id even when the active credential carries a SpaceID — the docs bot
 // mount resolves the space server-side (x-octo-space-header:false), so the
@@ -233,8 +233,8 @@ func TestDocsCreate_PostsBodyNoSpaceHeader(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "POST" || gotPath != "/v1/bot/docs" {
-		t.Errorf("got %s %s, want POST /v1/bot/docs", gotMethod, gotPath)
+	if gotMethod != "POST" || gotPath != "/docs/v1/bot" {
+		t.Errorf("got %s %s, want POST /docs/v1/bot", gotMethod, gotPath)
 	}
 	if gotBody["title"] != "Runbook" || gotBody["folderId"] != "f_1" {
 		t.Errorf("body = %v", gotBody)
@@ -310,7 +310,7 @@ func TestDocsList_QueryParamsFromFlags(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotPath != "/v1/bot/docs" {
+	if gotPath != "/docs/v1/bot" {
 		t.Errorf("path = %s", gotPath)
 	}
 	for _, want := range []string{"page=2", "pageSize=50", "sort=updatedAt%3Aasc"} {
@@ -332,8 +332,8 @@ func TestDocsGet_PathArgInURL(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "GET" || gotPath != "/v1/bot/docs/abc" {
-		t.Errorf("got %s %s, want GET /v1/bot/docs/abc", gotMethod, gotPath)
+	if gotMethod != "GET" || gotPath != "/docs/v1/bot/abc" {
+		t.Errorf("got %s %s, want GET /docs/v1/bot/abc", gotMethod, gotPath)
 	}
 }
 
@@ -352,8 +352,8 @@ func TestDocsMembersSet_PutUpsertBody(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "PUT" || gotPath != "/v1/bot/docs/d1/members" {
-		t.Errorf("got %s %s, want PUT /v1/bot/docs/d1/members", gotMethod, gotPath)
+	if gotMethod != "PUT" || gotPath != "/docs/v1/bot/d1/members" {
+		t.Errorf("got %s %s, want PUT /docs/v1/bot/d1/members", gotMethod, gotPath)
 	}
 	if gotBody["uid"] != "u9" || gotBody["role"] != "writer" {
 		t.Errorf("body = %v", gotBody)
@@ -372,8 +372,8 @@ func TestDocsMembersRemove_TwoPathArgs(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/members/u9" {
-		t.Errorf("got %s %s, want DELETE /v1/bot/docs/d1/members/u9", gotMethod, gotPath)
+	if gotMethod != "DELETE" || gotPath != "/docs/v1/bot/d1/members/u9" {
+		t.Errorf("got %s %s, want DELETE /docs/v1/bot/d1/members/u9", gotMethod, gotPath)
 	}
 }
 
@@ -393,8 +393,8 @@ func TestDocsShareGet_ReadPath(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/share" {
-		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/share", gotMethod, gotPath)
+	if gotMethod != "GET" || gotPath != "/docs/v1/bot/d1/share" {
+		t.Errorf("got %s %s, want GET /docs/v1/bot/d1/share", gotMethod, gotPath)
 	}
 	if len(gotBody) != 0 {
 		t.Errorf("GET must send an empty request body; got %q", gotBody)
@@ -417,8 +417,8 @@ func TestDocsShareSet_RestrictedBody(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "PUT" || gotPath != "/v1/bot/docs/d1/share" {
-		t.Errorf("got %s %s, want PUT /v1/bot/docs/d1/share", gotMethod, gotPath)
+	if gotMethod != "PUT" || gotPath != "/docs/v1/bot/d1/share" {
+		t.Errorf("got %s %s, want PUT /docs/v1/bot/d1/share", gotMethod, gotPath)
 	}
 	if gotBody["shareScope"] != "restricted" {
 		t.Errorf("body shareScope = %v, want restricted", gotBody["shareScope"])
@@ -494,7 +494,7 @@ func TestDocsCommentsAdd_ReplyBody(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotPath != "/v1/bot/docs/d1/comments" {
+	if gotPath != "/docs/v1/bot/d1/comments" {
 		t.Errorf("path = %s", gotPath)
 	}
 	if gotBody["body"] != "Agreed" {
@@ -528,8 +528,8 @@ func TestDocsCommentsAdd_RootAnchorText(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "POST" || gotPath != "/v1/bot/docs/d1/comments" {
-		t.Errorf("got %s %s, want POST /v1/bot/docs/d1/comments", gotMethod, gotPath)
+	if gotMethod != "POST" || gotPath != "/docs/v1/bot/d1/comments" {
+		t.Errorf("got %s %s, want POST /docs/v1/bot/d1/comments", gotMethod, gotPath)
 	}
 	if gotBody["body"] != "please clarify" {
 		t.Errorf("body = %v", gotBody["body"])
@@ -586,7 +586,7 @@ func TestDocsCommentsDelete_HardQuery(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/comments/5" {
+	if gotMethod != "DELETE" || gotPath != "/docs/v1/bot/d1/comments/5" {
 		t.Errorf("got %s %s", gotMethod, gotPath)
 	}
 	if !strings.Contains(gotQuery, "hard=1") {
@@ -606,8 +606,8 @@ func TestDocsVersionsRestore_PostNestedPath(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "POST" || gotPath != "/v1/bot/docs/d1/versions/3/restore" {
-		t.Errorf("got %s %s, want POST /v1/bot/docs/d1/versions/3/restore", gotMethod, gotPath)
+	if gotMethod != "POST" || gotPath != "/docs/v1/bot/d1/versions/3/restore" {
+		t.Errorf("got %s %s, want POST /docs/v1/bot/d1/versions/3/restore", gotMethod, gotPath)
 	}
 }
 
@@ -626,7 +626,7 @@ func TestDocsAttachmentsResolve_ArrayBody(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotPath != "/v1/bot/docs/d1/attachments/resolve" {
+	if gotPath != "/docs/v1/bot/d1/attachments/resolve" {
 		t.Errorf("path = %s", gotPath)
 	}
 	arr, ok := gotBody["attachIds"].([]any)
@@ -660,7 +660,7 @@ func TestDocsAttachmentsPresign_BodyTypes(t *testing.T) {
 }
 
 // TestDocsContentGet_ReadsBodyAndBaseVersion checks docs.content.get hits
-// GET /v1/bot/docs/{docId}/content (reader), sends no body, and surfaces the
+// GET /docs/v1/bot/{docId}/content (reader), sends no body, and surfaces the
 // backend's {doc, baseVersion} response through the success envelope so the
 // caller can capture the base-version token for a follow-up edit.
 func TestDocsContentGet_ReadsBodyAndBaseVersion(t *testing.T) {
@@ -674,8 +674,8 @@ func TestDocsContentGet_ReadsBodyAndBaseVersion(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/content" {
-		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/content", gotMethod, gotPath)
+	if gotMethod != "GET" || gotPath != "/docs/v1/bot/d1/content" {
+		t.Errorf("got %s %s, want GET /docs/v1/bot/d1/content", gotMethod, gotPath)
 	}
 	var env struct {
 		OK   bool `json:"ok"`
@@ -692,7 +692,7 @@ func TestDocsContentGet_ReadsBodyAndBaseVersion(t *testing.T) {
 }
 
 // TestDocsContentEdit_SendsOpsBatchAndIfMatch checks docs.content.edit hits
-// PATCH /v1/bot/docs/{docId}/content, carries the ops batch (passed via the
+// PATCH /docs/v1/bot/{docId}/content, carries the ops batch (passed via the
 // generic --data escape hatch) as a JSON array in the body, and sends the
 // base-version token as the If-Match header — the spec-declared header
 // capability wiring --base-version to If-Match, not a body/query field.
@@ -711,8 +711,8 @@ func TestDocsContentEdit_SendsOpsBatchAndIfMatch(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/content" {
-		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/content", gotMethod, gotPath)
+	if gotMethod != "PATCH" || gotPath != "/docs/v1/bot/d1/content" {
+		t.Errorf("got %s %s, want PATCH /docs/v1/bot/d1/content", gotMethod, gotPath)
 	}
 	if gotIfMatch != "BV_ABC==" {
 		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
@@ -749,7 +749,7 @@ func TestDocsContentEdit_RequiresBaseVersion(t *testing.T) {
 }
 
 // TestDocsSheetGet_WholeSheet checks docs.sheet.get hits
-// GET /v1/bot/docs/{docId}/sheet (reader), sends no body and no pagination
+// GET /docs/v1/bot/{docId}/sheet (reader), sends no body and no pagination
 // query when neither flag is set, and surfaces {sheetCells, sheetDims,
 // baseVersion} through the success envelope.
 func TestDocsSheetGet_WholeSheet(t *testing.T) {
@@ -763,8 +763,8 @@ func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/sheet" {
-		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	if gotMethod != "GET" || gotPath != "/docs/v1/bot/d1/sheet" {
+		t.Errorf("got %s %s, want GET /docs/v1/bot/d1/sheet", gotMethod, gotPath)
 	}
 	// No pagination flags set -> no limit/cursor on the wire (whole-sheet read).
 	if strings.Contains(gotQuery, "limit") || strings.Contains(gotQuery, "cursor") {
@@ -807,7 +807,7 @@ func TestDocsSheetGet_Paginated(t *testing.T) {
 }
 
 // TestDocsSheetEdit_SendsCellsBatchAndIfMatch checks docs.sheet.edit hits
-// PATCH /v1/bot/docs/{docId}/sheet, carries the cells batch (via --data) as a
+// PATCH /docs/v1/bot/{docId}/sheet, carries the cells batch (via --data) as a
 // JSON object in the body, and sends the base-version token as the If-Match
 // header (the --base-version flag wired to If-Match, not a body/query field).
 func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
@@ -825,8 +825,8 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/sheet" {
-		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	if gotMethod != "PATCH" || gotPath != "/docs/v1/bot/d1/sheet" {
+		t.Errorf("got %s %s, want PATCH /docs/v1/bot/d1/sheet", gotMethod, gotPath)
 	}
 	if gotIfMatch != "BV_ABC==" {
 		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
@@ -866,7 +866,7 @@ func TestDocsSheetEdit_RequiresBaseVersion(t *testing.T) {
 }
 
 // TestDocsSceneGet_ReadsSceneAndBaseVersion checks docs.scene.get hits
-// GET /v1/bot/docs/{docId}/scene (reader), sends no body, and surfaces the
+// GET /docs/v1/bot/{docId}/scene (reader), sends no body, and surfaces the
 // backend's {elements, files, baseVersion, schemaVersion} response through the
 // success envelope so the caller can capture the base-version token for a
 // follow-up edit.
@@ -881,8 +881,8 @@ func TestDocsSceneGet_ReadsSceneAndBaseVersion(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/scene" {
-		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/scene", gotMethod, gotPath)
+	if gotMethod != "GET" || gotPath != "/docs/v1/bot/d1/scene" {
+		t.Errorf("got %s %s, want GET /docs/v1/bot/d1/scene", gotMethod, gotPath)
 	}
 	var env struct {
 		OK   bool `json:"ok"`
@@ -899,7 +899,7 @@ func TestDocsSceneGet_ReadsSceneAndBaseVersion(t *testing.T) {
 }
 
 // TestDocsSceneEdit_SendsBatchAndIfMatch checks docs.scene.edit hits
-// PATCH /v1/bot/docs/{docId}/scene, carries the element upsert/delete batch
+// PATCH /docs/v1/bot/{docId}/scene, carries the element upsert/delete batch
 // (passed via the generic --data escape hatch) in the body, and sends the
 // base-version token as the If-Match header — the spec-declared header
 // capability wiring --base-version to If-Match, not a body/query field.
@@ -918,8 +918,8 @@ func TestDocsSceneEdit_SendsBatchAndIfMatch(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != "PATCH" || gotPath != "/v1/bot/docs/d1/scene" {
-		t.Errorf("got %s %s, want PATCH /v1/bot/docs/d1/scene", gotMethod, gotPath)
+	if gotMethod != "PATCH" || gotPath != "/docs/v1/bot/d1/scene" {
+		t.Errorf("got %s %s, want PATCH /docs/v1/bot/d1/scene", gotMethod, gotPath)
 	}
 	if gotIfMatch != "BV_ABC==" {
 		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)

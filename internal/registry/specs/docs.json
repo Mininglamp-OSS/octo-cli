@@ -3,13 +3,13 @@
   "info": {
     "title": "Octo Docs Bot API",
     "version": "1.0.0",
-    "description": "Bot-facing document metadata surface under /v1/bot/docs: doc lifecycle, members, sharing, comments, versions, and attachment metadata. Live document body/outline editing is a Yjs websocket path and is NOT part of this REST surface."
+    "description": "Bot-facing document metadata surface under /docs/v1/bot: doc lifecycle, members, sharing, comments, versions, and attachment metadata. Live document body/outline editing is a Yjs websocket path and is NOT part of this REST surface."
   },
   "x-octo-service": "docs",
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
-    "/v1/bot/docs": {
+    "/docs/v1/bot": {
       "post": {
         "operationId": "docs.create",
         "summary": "Create an (empty) document; the caller becomes owner/admin",
@@ -95,7 +95,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}": {
+    "/docs/v1/bot/{docId}": {
       "get": {
         "operationId": "docs.get",
         "summary": "Fetch one document's metadata (needs reader)",
@@ -161,7 +161,7 @@
         "responses": { "200": { "description": "Deleted" } }
       }
     },
-    "/v1/bot/docs/{docId}/export": {
+    "/docs/v1/bot/{docId}/export": {
       "get": {
         "operationId": "docs.scene.export",
         "summary": "Export a whiteboard's live scene as a PNG or SVG image (needs reader)",
@@ -186,7 +186,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/content": {
+    "/docs/v1/bot/{docId}/content": {
       "get": {
         "operationId": "docs.content.get",
         "summary": "Read a document's live body + its base version (needs reader)",
@@ -268,7 +268,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/sheet": {
+    "/docs/v1/bot/{docId}/sheet": {
       "get": {
         "operationId": "docs.sheet.get",
         "summary": "Read a spreadsheet's live cells + dims + base version (needs reader)",
@@ -428,7 +428,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/scene": {
+    "/docs/v1/bot/{docId}/scene": {
       "get": {
         "operationId": "docs.scene.get",
         "summary": "Read a whiteboard's live scene + its base version (needs reader)",
@@ -520,7 +520,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/members": {
+    "/docs/v1/bot/{docId}/members": {
       "get": {
         "operationId": "docs.members.list",
         "summary": "List a document's members (needs admin)",
@@ -581,7 +581,7 @@
         "responses": { "200": { "description": "Upserted" } }
       }
     },
-    "/v1/bot/docs/{docId}/members/{uid}": {
+    "/docs/v1/bot/{docId}/members/{uid}": {
       "delete": {
         "operationId": "docs.members.remove",
         "summary": "Remove a member (needs admin; the owner cannot be removed)",
@@ -593,7 +593,7 @@
         "responses": { "200": { "description": "Removed" } }
       }
     },
-    "/v1/bot/docs/{docId}/share": {
+    "/docs/v1/bot/{docId}/share": {
       "get": {
         "operationId": "docs.share.get",
         "summary": "Read a document's space-level share scope (needs reader)",
@@ -666,7 +666,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/forward-grant": {
+    "/docs/v1/bot/{docId}/forward-grant": {
       "post": {
         "operationId": "docs.forward-grant",
         "summary": "Grant (never downgrade) a single uid reader/writer access (needs admin)",
@@ -693,7 +693,7 @@
         "responses": { "200": { "description": "Grant result (final role + changed flag)" } }
       }
     },
-    "/v1/bot/docs/{docId}/comments": {
+    "/docs/v1/bot/{docId}/comments": {
       "get": {
         "operationId": "docs.comments.list",
         "summary": "List comment thread roots with their replies (needs reader)",
@@ -753,7 +753,7 @@
         "responses": { "201": { "description": "Created (returns the new comment id)" } }
       }
     },
-    "/v1/bot/docs/{docId}/comments/{id}": {
+    "/docs/v1/bot/{docId}/comments/{id}": {
       "patch": {
         "operationId": "docs.comments.edit",
         "summary": "Edit a comment body (author) or resolve/reopen a thread (writer)",
@@ -791,7 +791,7 @@
         "responses": { "200": { "description": "Deleted" } }
       }
     },
-    "/v1/bot/docs/{docId}/versions": {
+    "/docs/v1/bot/{docId}/versions": {
       "get": {
         "operationId": "docs.versions.list",
         "summary": "List saved versions/snapshots (needs reader)",
@@ -845,7 +845,7 @@
         "responses": { "201": { "description": "Created (returns docVersionSeq)" } }
       }
     },
-    "/v1/bot/docs/{docId}/versions/{versionId}/state": {
+    "/docs/v1/bot/{docId}/versions/{versionId}/state": {
       "get": {
         "operationId": "docs.versions.state",
         "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
@@ -878,7 +878,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/versions/{versionId}": {
+    "/docs/v1/bot/{docId}/versions/{versionId}": {
       "patch": {
         "operationId": "docs.versions.rename",
         "summary": "Rename a saved version (needs writer)",
@@ -914,7 +914,7 @@
         "responses": { "200": { "description": "Deleted" } }
       }
     },
-    "/v1/bot/docs/{docId}/versions/{versionId}/restore": {
+    "/docs/v1/bot/{docId}/versions/{versionId}/restore": {
       "post": {
         "operationId": "docs.versions.restore",
         "summary": "Restore the document to a saved version (needs admin)",
@@ -927,7 +927,7 @@
         "responses": { "200": { "description": "Restored (returns restoredFrom + newDocVersionSeq)" } }
       }
     },
-    "/v1/bot/docs/{docId}/attachments/presign": {
+    "/docs/v1/bot/{docId}/attachments/presign": {
       "post": {
         "operationId": "docs.attachments.presign",
         "summary": "Register an attachment and get a presigned upload URL (needs writer)",
@@ -976,7 +976,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/attachments/{attachId}": {
+    "/docs/v1/bot/{docId}/attachments/{attachId}": {
       "get": {
         "operationId": "docs.attachments.get",
         "summary": "Get a freshly signed, time-limited download URL for one attachment (needs reader)",
@@ -1008,7 +1008,7 @@
         }
       }
     },
-    "/v1/bot/docs/{docId}/attachments/resolve": {
+    "/docs/v1/bot/{docId}/attachments/resolve": {
       "post": {
         "operationId": "docs.attachments.resolve",
         "summary": "Batch-resolve attachIds to freshly signed download URLs (needs reader)",

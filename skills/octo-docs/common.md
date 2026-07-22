@@ -8,7 +8,7 @@ you need:
 - [Members & sharing](#members--sharing) — roles, forward-grant
 - [Attachments](#attachments) — presign + upload file/image bytes
 
-All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
+All commands call `$OCTO_API_BASE_URL/docs/v1/bot/*`. Auth & space rules are in
 `SKILL.md`.
 
 ---

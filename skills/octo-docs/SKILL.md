@@ -15,7 +15,7 @@ document lifecycle) and routes you to a focused reference file for each surface.
 **Load the one reference that matches your task — don't read them all.** The
 reference files sit next to this file in the skill directory.
 
-All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
+All commands call `$OCTO_API_BASE_URL/docs/v1/bot/*`.
 
 ## When to read which reference
 

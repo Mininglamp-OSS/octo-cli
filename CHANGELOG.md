@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scope enum is `restricted` / `anyone_in_space` and the role enum is `read` /
   `edit`; a valid `--role` is required with `--scope anyone_in_space` and is
   ignored (stored as `read`) with `--scope restricted`. This targets the
-  planned `/v1/bot/docs/{docId}/share` endpoint (backend lands in
+  planned `/docs/v1/bot/{docId}/share` endpoint (backend lands in
   octo-docs-backend#68); merge this after that endpoint ships. Backed by a
   new `x-octo-flag` alias on request-body properties, so the clean `--scope` /
   `--role` flags front the `shareScope` / `shareRole` wire keys.
