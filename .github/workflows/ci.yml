@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**/*.md'
+      # Root-level Markdown and docs are documentation-only. Markdown under
+      # skills/ is intentionally NOT ignored: skills are embedded in the CLI
+      # binary, so changing them must produce CI evidence for release gates.
+      - '*.md'
       - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
@@ -32,12 +35,14 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # code=true when at least one changed file matches the code filter.
+      # code=true when at least one changed file is runtime code or an embedded
+      # Skill Markdown file. Push events always run once the workflow-level
+      # path filter admits them.
       # predicate-quantifier:every + negation patterns (no bare '**'):
       # a file matches 'code' iff ALL negation patterns are satisfied
-      # (file is not a doc/template). code=false only when all changed files
-      # are docs/templates. Push events default to 'true'.
-      code: ${{ github.event_name == 'pull_request' && steps.filter.outputs.code || 'true' }}
+      # (file is not a doc/template). The separate embedded_skills filter
+      # re-includes skills/**/*.md because those files ship in the binary.
+      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.embedded_skills == 'true' }}
     steps:
       # No checkout: on pull_request events dorny/paths-filter lists changed
       # files via the GitHub API (needs only pull-requests: read, granted
@@ -70,6 +75,8 @@ jobs:
               - '!**/*.md'
               - '!docs/**'
               - '!.github/ISSUE_TEMPLATE/**'
+            embedded_skills:
+              - 'skills/**/*.md'
 
   build:
     name: build & test
