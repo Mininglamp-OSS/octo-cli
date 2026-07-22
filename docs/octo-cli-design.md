@@ -2,7 +2,7 @@
 
 > Source: dmworkim develop + matters main, handler-level verification
 > Reviewer: 齐静春（架构师）
-> Date: 2026-05-10
+> Date: 2026-07-21
 
 ---
 
@@ -10,14 +10,19 @@
 
 | Token Prefix | Type | Capabilities |
 |-------------|------|-------------|
-| `app_*` | App Bot | DM only, no group/thread write, no voice |
-| `bf_*` | User Bot | Full access (DM + group + thread + voice) |
+| `app_*` | App Bot | DM only, no group/thread write, no voice; **cannot search** (CLI rejects locally) |
+| `bf_*` | User Bot | Full access (DM + group + thread + voice); can search (as bot, or as a person via `--on-behalf-of`) |
+| `uk_*` | User API key | Real-person identity, used mainly for `message search`; routed to `/v1/user/*`. `bot_kind` shows `user_key` |
 
-> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind. An App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with one exception: an `app_*` token running `message search` is rejected locally (`validation`) before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
 
 ---
 
 ## Domain 1: matter (matters service, 17 commands)
+
+> Note: "17 commands" counts the CLI command surface, which includes convenience
+> aliases (e.g. `close`/`reopen`/`archive` over the `transition` op). The backend
+> operationId count is 14 (as in README / CLAUDE.md / the spec registry).
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
@@ -57,7 +62,7 @@ Notes:
 
 ---
 
-## Domain 2: message (dmworkim bot_api, 4 commands)
+## Domain 2: message (dmworkim bot_api, 10 commands)
 
 | # | Command | Method | Path | App Bot | User Bot |
 |---|---------|--------|------|---------|----------|
@@ -65,18 +70,29 @@ Notes:
 | 19 | `octo-cli message edit` | POST | /v1/bot/message/edit | Y | Y |
 | 20 | `octo-cli message sync` | POST | /v1/bot/messages/sync | Y (DM only) | Y (DM+group) |
 | 21 | `octo-cli message read-receipt` | POST | /v1/bot/readReceipt | Y | Y |
+| 21a | `octo-cli message search` | POST | /v1/bot/messages/_search | **N** | Y |
+| 21b | `octo-cli message search all` | POST | /v1/bot/messages/_search_all | **N** | Y |
+| 21c | `octo-cli message search files` | POST | /v1/bot/messages/_search_files | **N** | Y |
+| 21d | `octo-cli message search media` | POST | /v1/bot/messages/_search_media | **N** | Y |
+| 21e | `octo-cli message search around` | POST | /v1/bot/messages/_search_around | **N** | Y |
+| 21f | `octo-cli message search groups` | POST | /v1/bot/messages/_search_global_groups | **N** | Y |
 
 Flags:
 - send: --channel-id*, --channel-type*(uint8), --stream-no, --on-behalf-of; payload (object) via --data
 - edit: --message-id*, --message-seq, --channel-id*, --channel-type*, --content-edit*
 - sync: --data (JSON body with channel_id, channel_type, etc.)
 - read-receipt: --channel-id*, --channel-type(default:1), --message-ids*(str[])
+- search / search all / search files: --chat-id (optional; omit → cross-channel `_search_global_*`), --channel-type, --keyword, --sort(time_desc|time_asc|relevance), --page-size, --on-behalf-of; extra `filters` via --data. Paginated (cursor in body; `--page-all`).
+- search media: --chat-id* (required; in-channel only), --channel-type, --sort, --page-size, --on-behalf-of; **no** --keyword. Paginated.
+- search around: --chat-id* (required), --channel-type, --anchor-message-id*, --on-behalf-of; extra `filters` via --data. Not paginated.
+- search groups: --keyword, --on-behalf-of; extra `filters` via --data. **--chat-id not supported** (cross-channel only). Not paginated.
 
 Notes:
 - App Bot sendMessage: checkSendPermission enforces channelType=1 (DM only), requires friend relationship.
 - User Bot sendMessage: DM + group (membership check) + thread (parent group membership check).
 - payload is map[string]interface{} — object fields aren't promoted to flags, so it goes inside --data JSON. payload.type is an integer code (1=Text…; see common.ContentType / octo-messaging skill).
 - sync: App Bot explicitly blocked for group channel type.
+- search: `--chat-id` decides in-channel vs cross-channel. Without it, `search`/`all`/`files` route (CLI-side, `internal/client/search_route.go`) to `_search_global_messages` / `_search_global_files`; plain `search` cross-channel becomes a **mixed messages+files** feed. `media`/`around` require `--chat-id`; `groups` forbids it. `app_` tokens are rejected locally; `uk_` tokens are rewritten to `/v1/user/messages/*`.
 
 ---
 
@@ -195,14 +211,14 @@ Notes:
 | Domain | Commands | App Bot (Y) | App Bot (N) | User Bot (Y) | User Bot (N) |
 |--------|----------|-------------|-------------|---------------|--------------|
 | matter | 17 | 17 | 0 | 17 | 0 |
-| message | 4 | 4 (DM only) | 0 | 4 | 0 |
+| message | 10 | 4 (DM only) | 6 (search) | 10 | 0 |
 | group | 9 | 5 | 4 | 9 | 0 |
 | thread | 8 | 0 | 8 | 8 | 0 |
 | file | 4 | 4 | 0 | 4 | 0 |
 | bot | 6 | 6 | 0 | 6 | 0 |
 | event | 2 | 2 | 0 | 2 | 0 |
-| **Total** | **50** | **38** | **12** | **50** | **0** |
+| **Total** | **56** | **38** | **18** | **56** | **0** |
 
-- **App Bot**: 38/50 commands available (76%)
-- **User Bot**: 50/50 commands available (100%)
-- **App Bot blocked**: group write (4) + thread all (8) = 12 commands
+- **App Bot**: 38/56 commands available (68%)
+- **User Bot**: 56/56 commands available (100%)
+- **App Bot blocked**: group write (4) + thread all (8) + message search (6) = 18 commands

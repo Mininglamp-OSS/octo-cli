@@ -79,16 +79,16 @@ client 侧(`internal/client/client.go`):
 
 ## 4 · 8 个端点(三主体共用,path 只换前缀)
 
-| operationId(建议) | path 后缀 | 用途 | risk |
+> **⚠️ 订正:** 下表把 global messages/files 建模为独立 operationId(`search.global.*`),**与最终实现不符**。实际 operationId 前缀是 `message.search.*`(挂在 message 域下,非顶层 search 域),且 **global messages / global files 不是独立命令**——它们由 `message.search` / `message.search.all` / `message.search.files` 在**无 --chat-id** 时,由 CLI client(`search_route.go` 的 `searchGlobalFallback`)改写落到 `_search_global_messages` / `_search_global_files`。真正独立成命令的 global 端点只有 **groups**(`message.search.groups`)。即:6 个命令 + chat-id→global 回退,而非 8 个独立命令。
+
+| operationId(实际) | path 后缀 | 用途 | risk |
 |---|---|---|---|
-| `search.messages` | `_search` | 频道内消息 | read |
-| `search.all` | `_search_all` | 消息+文件混排 | read |
-| `search.around` | `_search_around` | 锚点上下文 | read |
-| `search.files` | `_search_files` | 频道内文件(硬锁 type=8) | read |
-| `search.media` | `_search_media` | 图片/视频按月(keyword 必空) | read |
-| `search.global.messages` | `_search_global_messages` | 跨频道消息 | read |
-| `search.global.files` | `_search_global_files` | 跨频道文件(+file_exts/size) | read |
-| `search.global.groups` | `_search_global_groups` | 按群聚合(带 sequence 回显) | read |
+| `message.search` | `_search`(无 chat-id → `_search_global_messages`) | 频道内消息 / 跨频道混合 | read |
+| `message.search.all` | `_search_all`(无 chat-id → `_search_global_messages`) | 消息+文件混排 | read |
+| `message.search.around` | `_search_around` | 锚点上下文(仅会话内) | read |
+| `message.search.files` | `_search_files`(无 chat-id → `_search_global_files`) | 文件(硬锁 type=8) | read |
+| `message.search.media` | `_search_media` | 图片/视频(仅会话内,keyword 必空) | read |
+| `message.search.groups` | `_search_global_groups` | 按群聚合(仅跨会话,带 sequence 回显) | read |
 
 - `channel_type`:1=DM(peer uid) / 2=群(group_no) / 5=Thread(`{group_no}____{short_id}`)
 - 单频道端点空 keyword+无 filter → 400;全局端点允许(浏览模式)
@@ -146,7 +146,7 @@ fail-close 语义:越权一律折叠为空结果(防枚举),基础设施出错�
 
 ## 7 · 风险 / 待确认
 
-1. **base 前缀切换的实现位置**:spec 声明 vs client 重写,需定一个约定(建议 client 按 cred.kind 重写前缀,spec 保持单一 path)。这是唯一需要碰 loader/client 泛化逻辑的点。
+1. **base 前缀切换 + chat-id→global 回退的实现位置**:最终由 **client 侧 `search_route.go` 的 `routeSearchPath` 处理两处逻辑**——(a) 按 cred.kind 切换路由前缀(`uk_` → `/v1/user/messages`),(b) `search`/`all`/`files` 在无 chat-id 时把 suffix 改写为 `_search_global_*`。spec 保持每个 operationId 单一固定 path。(原以为「前缀切换是唯一需碰 client 的点」,实际还多了 chat-id→global 回退这一处。)
 2. **App Bot 拦截**:服务端已 403,客户端建议在发请求前就按 `app_` 前缀拦掉,省一次往返。
 3. **uk 获取路径**:文档说 `uk_` 由 botfather onboarding 签发(`getOrCreateUserAPIKey`),octo-cli 是否要集成签发,还是仅消费已有 key —— 建议 P1 只消费,P6 再考虑签发。
 4. 服务端 PR #608 已合入 upstream main(octo-server 现 HEAD `ef4e1854` 含全部 6 个 commit),契约稳定,可直接对接。

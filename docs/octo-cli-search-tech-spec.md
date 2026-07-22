@@ -69,6 +69,8 @@ authBot → botActorUID → SharedUIDRateLimiter → resolveSearchPrincipal → 
 
 ## 四、解决方案:后端新增 unified 端点(主人拍板)
 
+> **⚠️ 已废弃(历史方案,最终未采用):** 本节描述的「后端新增 unified 门面端点、由后端按 body 有无 channel_id 分发」方案最终**未采纳**。实际实现为**方案B:CLI 侧** `internal/client/search_route.go` 的 `routeSearchPath` 按 **token 前缀 + chat-id 有无**分流;server 保持原 8 端点不变,无任何 `_search_unified` / `MountUnified`。下文 4.1–4.3、5.1(spec path 部分)、第八节实施顺序均为该废弃方案的记录,仅作历史保留。仍然有效的部分见第二节(server 现状)、5.2/5.3(credential 加 uk_ + 按 kind 选前缀)、5.4(OBO)、第六节(命令树)、第七节(混合语义)。
+
 不在 CLI 做条件路由,而是给需要切换的命令各加一个后端 unified 门面端点,由后端按 body 有无 channel_id 分发。CLI 侧每命令绑一个固定 path,**零改 loader**。
 
 ### 4.1 新增 3 个端点
@@ -107,10 +109,13 @@ messages_search.Handler 加 `MountUnified(r, prefix, mws...)`,把 3 个 unified 
 ## 五、CLI 侧改动
 
 ### 5.1 新增 search.json spec
+
+> **⚠️ 订正:** 下方 path 曾写成 `*_unified`(废弃方案)。实际 spec 每个 operationId 绑真实固定 path(`_search` / `_search_all` / `_search_files`),chat-id→global 的改写由 CLI 侧 `search_route.go` 完成,不存在 unified 端点。已订正如下:
+
 ```
-message.search        → /v1/bot/messages/_search_unified        (--chat-id 可选)
-message.search.all    → /v1/bot/messages/_search_all_unified     (--chat-id 可选)
-message.search.files  → /v1/bot/messages/_search_files_unified   (--chat-id 可选)
+message.search        → /v1/bot/messages/_search        (--chat-id 可选;无则 CLI 改写为 _search_global_messages)
+message.search.all    → /v1/bot/messages/_search_all     (--chat-id 可选;无则 CLI 改写为 _search_global_messages)
+message.search.files  → /v1/bot/messages/_search_files   (--chat-id 可选;无则 CLI 改写为 _search_global_files)
 message.search.media  → /v1/bot/messages/_search_media           (--chat-id 必填)
 message.search.around → /v1/bot/messages/_search_around          (--chat-id 必填)
 message.search.groups → /v1/bot/messages/_search_global_groups   (--chat-id 禁用)
@@ -159,6 +164,8 @@ octo search groups     --keyword <kw>                         # 跨会话聚合�
 ---
 
 ## 八、实施顺序与改动面
+
+> **⚠️ 已废弃:** 本节阶段 1–3(后端 MountUnified + 门面 handler + unified 端点)对应废弃的 unified 方案,**最终未实施**。实际只做了 CLI 侧改动(阶段 4–6:search.json 绑真实 path + `search_route.go` 分流 + credential 加 uk_ + OBO/App Bot 本地拒绝),server 端零改动。下文保留作历史。
 
 阶段(建议):
 1. 后端:messages_search 加 MountUnified + 3 门面 handler(纯分发)。

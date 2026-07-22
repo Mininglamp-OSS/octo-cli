@@ -11,14 +11,15 @@ octo-cli
 │
 ├─【service 域 · spec 自动注册】
 │
-├─ docs (29) ─ 文档 / 表格 / 白板
+├─ docs (31) ─ 文档 / 表格 / 白板
 │    ├─ 直接        create · list · get · rename · delete · forward-grant
 │    ├─ content     get · edit
 │    ├─ sheet       get · edit
 │    ├─ scene       get · edit · export
 │    ├─ members     list · set · remove
+│    ├─ share       get · set
 │    ├─ comments    list · add · edit · delete
-│    ├─ versions    list · create · state · rename · restore · delete
+│    ├─ versions    list · create · state · rename · delete · restore
 │    └─ attachments presign · get · resolve
 │
 ├─ message (4 → 10) ─ 消息
@@ -61,11 +62,15 @@ octo-cli
 | CLI 命令              | operationId          | 会话内(带 --chat-id) | 跨会话(不带 --chat-id)            | --chat-id |
 |-----------------------|----------------------|----------------------|-----------------------------------|-----------|
 | 🆕 message search      | message.search       | POST /_search        | POST /_search_global_messages ※   | 可选      |
-| 🆕 message search all  | message.search-all   | POST /_search_all    | POST /_search_global_messages     | 可选      |
-| 🆕 message search files| message.search-files | POST /_search_files  | POST /_search_global_files        | 可选      |
-| 🆕 message search media| message.search-media | POST /_search_media  | ✗（无 global media 端点）         | 必填      |
-| 🆕 message search around | message.search-around | POST /_search_around | ✗（定位需单会话锚点）           | 必填      |
-| 🆕 message search groups | message.search-groups | ✗（groups 仅跨会话）  | POST /_search_global_groups       | 禁用      |
+| 🆕 message search all  | message.search.all   | POST /_search_all    | POST /_search_global_messages     | 可选      |
+| 🆕 message search files| message.search.files | POST /_search_files  | POST /_search_global_files        | 可选      |
+| 🆕 message search media| message.search.media | POST /_search_media  | ✗（无 global media 端点）         | 必填      |
+| 🆕 message search around | message.search.around | POST /_search_around | ✗（定位需单会话锚点）           | 必填      |
+| 🆕 message search groups | message.search.groups | ✗（groups 仅跨会话）  | POST /_search_global_groups       | 禁用      |
+
+> operationId 用**点号**分段（`message.search.all` → `message search all` 三级命令）；loader 按 `.` split 建命令树，连字符会错误生成两级命令。
+> 「会话内 → 跨会话」的 path 改写由 **CLI client**(`internal/client/search_route.go` 的 `routeSearchPath`)按 token 前缀 + chat-id 有无完成,**非后端分发**;spec 里每个 operationId 仍绑一个真实固定 path。
+
 
 后端有 3 个 global 端点：_search_global_messages（消息+文件混合）、_search_global_files（文件）、_search_global_groups（按群聚合概览 L1）。
 media/around 没有跨会话端点 → --chat-id 必填；groups 只有跨会话端点 → --chat-id 禁用。
@@ -159,9 +164,9 @@ octo-cli message search files --data '{"filters":{"file_exts":["pdf"],"file_size
 # 浏览模式（keyword 与 filter 全空，列所有会话近期消息）
 octo-cli message search all
 
-# ✗ media / around 无跨会话端点，不带 --chat-id 会报 VALIDATION（chat-id 必填）
-octo-cli message search media          # 报错：--chat-id required
-octo-cli message search around         # 报错：--chat-id required
+# ✗ media / around 无跨会话端点，不带 --chat-id 由后端拒绝（channel_id 必填；CLI 不做本地强制，请求会发到后端返回校验错误）
+octo-cli message search media          # 后端拒：channel_id required
+octo-cli message search around         # 后端拒：channel_id required
 
 # groups 仅跨会话（聚合概览，看哪些会话命中）；带 --chat-id 应报错
 octo-cli message search groups --keyword "发布"

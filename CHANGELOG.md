@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli message search` family** (6 subcommands) — full-text message and
+  file search: `message search` (messages), `search all` (messages + files),
+  `search files`, `search media` (images/videos, in-channel only, no keyword),
+  `search around` (context window around an anchor message, in-channel only),
+  and `search groups` (cross-channel aggregated overview of which channels
+  matched). `--chat-id` decides scope: with it, in-channel; without it,
+  `search`/`all`/`files` route to their cross-channel `_search_global_*`
+  endpoints (plain `search` cross-channel degrades to a mixed messages+files
+  feed). Three token subjects: `bf_` (User Bot, searches as the bot),
+  `bf_ --on-behalf-of <uid>` (OBO — searches as that real person, requires an
+  active grant), and `uk_` (user API key — real-person identity, routed to
+  `/v1/user/*`). `app_` (App Bot) tokens are **rejected locally** with a
+  `validation` error before any request. Path routing (chat-id → global,
+  `uk_` → `/v1/user`) is done CLI-side in `internal/client/search_route.go`;
+  the `uk_` prefix is now a recognized credential kind (`user_key`).
 - **`octo-cli html` domain** (20 operations) — an agent-facing CLI for the
   octo-doc interactive-HTML document service, a **separate backend** from
   `docs`. Covers the full lifecycle: `publish` immutable versions, `list` /

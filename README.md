@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 98 operations
+octo-cli is **metadata-driven**. The entire command tree — 104 operations
 across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
@@ -44,7 +44,7 @@ Key properties:
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
 | `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
-| `message` | 4   | Messaging — send, edit, sync, read-receipt                     |
+| `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
 
@@ -105,14 +105,21 @@ export OCTO_API_BASE_URL="https://api.example.com"
 # NOTE: the `matter` domain is temporarily withheld (backend API stabilizing).
 
 # Messaging
-octo-cli message send --data '{"chat_id":"chat-1","text":"hi"}'
-octo-cli message edit --data '{"msg_id":"m-1","text":"updated"}'
+octo-cli message send --data '{"channel_id":"chat-1","channel_type":1,"payload":{"type":1,"content":"hi"}}'
+octo-cli message edit --data '{"message_id":"m-1","channel_id":"chat-1","channel_type":1,"content_edit":"{\"type\":1,\"content\":\"updated\"}"}'
+
+# Message search (User Bot bf_ or user API key uk_ token; App Bot app_ is rejected locally).
+octo-cli message search --chat-id chat-1 --keyword "quarterly report"   # in-channel
+octo-cli message search --keyword "quarterly report"                    # cross-channel (mixed feed)
+octo-cli message search files --chat-id chat-1 --keyword "*.pdf"        # files in a channel
+octo-cli message search groups --keyword "quarterly report"            # which channels matched (L1)
+octo-cli message search all --keyword "budget" --on-behalf-of u-alice  # OBO: as a real person
 
 # Groups and threads
 octo-cli group list
 octo-cli group members group-abc
-octo-cli thread list --chat-id chat-1
-octo-cli thread create --chat-id chat-1 --name "design review"
+octo-cli thread list group-abc
+octo-cli thread create group-abc --name "design review"
 
 # Files
 octo-cli file upload --file ./report.pdf
@@ -162,16 +169,21 @@ octo-cli api POST /v1/messages --data @body.json
 
 ## Authentication
 
-`octo-cli` is bot-only — there is no user login. `OCTO_BOT_TOKEN` carries either
-an **App Bot** (`app_*`) or **User Bot** (`bf_*`) token:
+`octo-cli` is bot-only — there is no interactive user login. `OCTO_BOT_TOKEN`
+carries an **App Bot** (`app_*`), a **User Bot** (`bf_*`), or a **user API key**
+(`uk_*`, a real-person identity used mainly for message search):
 
-| Prefix  | Type     | DM | Group read | Group write | Thread | Voice |
-|---------|----------|----|------------|-------------|--------|-------|
-| `app_*` | App Bot  | yes | yes       | **no**      | **no** | **no**|
-| `bf_*`  | User Bot | yes | yes       | yes         | yes    | yes   |
+| Prefix  | Type         | DM  | Group read | Group write | Thread | Voice | Search |
+|---------|--------------|-----|------------|-------------|--------|-------|--------|
+| `app_*` | App Bot      | yes | yes        | **no**      | **no** | **no**| **no** |
+| `bf_*`  | User Bot     | yes | yes        | yes         | yes    | yes   | yes    |
+| `uk_*`  | User API key | —   | —          | —           | —      | —     | yes    |
 
-The CLI does not enforce capability locally; the backend rejects
-unsupported operations with `FORBIDDEN`.
+The CLI does not enforce capability locally; the backend rejects unsupported
+operations with `FORBIDDEN`. The one local exception: an `app_*` token running
+`message search` is rejected with a `validation` error before any request.
+`uk_*` tokens are routed to `/v1/user/*`; a `bf_*` token can search as a real
+person with `--on-behalf-of <uid>` (OBO, requires an active grant).
 
 ### API Base URL
 
@@ -179,8 +191,10 @@ All backend services are accessed through a single API base URL.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*` or `bf_*`). Required.                 |
+| `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Required.       |
 | `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
+| `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
+| `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 
@@ -233,7 +247,7 @@ Exit codes: `3` auth, `2` validation/config, `1` everything else.
 
 ```bash
 # Dry-run to inspect the resolved request — no side effects.
-octo-cli message send --data '{"chat_id":"chat-1","text":"Hello"}' --dry-run
+octo-cli message send --data '{"channel_id":"chat-1","channel_type":1,"payload":{"type":1,"content":"Hello"}}' --dry-run
 
 # Extract a single field with jq.
 octo-cli group list --jq '.data[0].id'
@@ -263,6 +277,10 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   versions, members/sharing, attachments).
 - [`octo-marketplace`](./skills/octo-marketplace/SKILL.md) — search, install,
   publish, and update Marketplace Skills and MCP server listings.
+- [`octo-html`](./skills/octo-html/SKILL.md) — HTML docs (octo-doc, a
+  **separate backend** from `octo-docs`): publish immutable versions, drafts,
+  share codes & per-uid grants, media assets, inline comments, agent element
+  read/replace.
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 
