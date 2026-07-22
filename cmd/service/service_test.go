@@ -341,6 +341,63 @@ func TestPagination_PageAllMergesAllPages(t *testing.T) {
 	}
 }
 
+// TestPagination_BodyCursorEndpoint pins S1: for POST-body search endpoints the
+// spec declares `cursor` as a body field (not a query param), so paging must
+// inject the next cursor into the request BODY, never the URL query. A body
+// clone per page must not mutate the previous page's body.
+func TestPagination_BodyCursorEndpoint(t *testing.T) {
+	pages := []string{
+		`{"data":[{"id":"1"}],"pagination":{"has_more":true,"next_cursor":"c2"}}`,
+		`{"data":[{"id":"2"}],"pagination":{"has_more":true,"next_cursor":"c3"}}`,
+		`{"data":[{"id":"3"}],"pagination":{"has_more":false,"next_cursor":""}}`,
+	}
+	var bodyCursors []string
+	var queryCursors []string
+	idx := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queryCursors = append(queryCursors, r.URL.Query().Get("cursor"))
+		var body map[string]any
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &body)
+		c, _ := body["cursor"].(string)
+		bodyCursors = append(bodyCursors, c)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(pages[idx]))
+		idx++
+	}))
+	t.Cleanup(srv.Close)
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "bf_test", Format: "json"}
+	tf.SetConfig(cfg)
+	cred := &credential.BotCredential{Token: "bf_test", Source: "test"}
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{ErrOut: io.Discard}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	// message.search is a POST-body endpoint; --chat-id keeps it in-scope.
+	root.SetArgs([]string{"message", "search", "--chat-id", "c1", "--keyword", "hi", "--page-all"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if len(bodyCursors) != 3 {
+		t.Fatalf("wanted 3 requests, got %d (body cursors=%v)", len(bodyCursors), bodyCursors)
+	}
+	// Cursor progresses in the BODY, first page has none.
+	if bodyCursors[0] != "" || bodyCursors[1] != "c2" || bodyCursors[2] != "c3" {
+		t.Errorf("body cursor progression = %v, want ['' c2 c3]", bodyCursors)
+	}
+	// Cursor never leaks into the query string.
+	for i, qc := range queryCursors {
+		if qc != "" {
+			t.Errorf("page %d: cursor leaked into query (%q); it must stay in the body", i, qc)
+		}
+	}
+}
+
 func TestPagination_PageLimitStops(t *testing.T) {
 	page := `{"data":[{"id":"x"}],"pagination":{"has_more":true,"next_cursor":"c"}}`
 	calls := 0

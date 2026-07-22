@@ -135,6 +135,223 @@
         },
         "responses": { "200": { "description": "Read receipts recorded" } }
       }
+    },
+    "/v1/bot/messages/_search": {
+      "post": {
+        "operationId": "message.search",
+        "summary": "Search messages (in-channel or cross-channel)",
+        "description": "Full-text message search. With --chat-id: pure messages within that channel (payload.type in [1,11,14]). Without --chat-id: the CLI routes to cross-channel _search_global_messages, which is a MIXED feed (messages + files), so cross-channel results may include file hits. --on-behalf-of searches as that user (User Bot only, requires an active OBO grant). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search across all reachable channels (cross-channel mixed feed)" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "keyword": { "type": "string", "description": "full-text keyword" },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
+                  "page_size": { "type": "integer", "description": "page size" },
+                  "cursor": { "type": "string", "description": "opaque pagination cursor" },
+                  "filters": { "type": "object", "description": "extra filters (sender_ids, member_uids, channel_ids, channel_types, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/_search_all": {
+      "post": {
+        "operationId": "message.search.all",
+        "summary": "Search messages + files (mixed feed)",
+        "description": "Mixed message+file search (payload.type in [1,8,11,14]; empty keyword also matches media). With --chat-id: within that channel. Without --chat-id: the CLI routes to cross-channel _search_global_messages. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search across all reachable channels" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "keyword": { "type": "string", "description": "full-text keyword" },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
+                  "page_size": { "type": "integer", "description": "page size" },
+                  "cursor": { "type": "string", "description": "opaque pagination cursor" },
+                  "filters": { "type": "object", "description": "extra filters (sender_ids, member_uids, channel_ids, channel_types, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/_search_files": {
+      "post": {
+        "operationId": "message.search.files",
+        "summary": "Search files (by filename / caption)",
+        "description": "File search (payload.type=8). With --chat-id: within that channel. Without --chat-id: the CLI routes to cross-channel _search_global_files. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search files across all reachable channels" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "keyword": { "type": "string", "description": "filename / caption keyword" },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
+                  "page_size": { "type": "integer", "description": "page size" },
+                  "cursor": { "type": "string", "description": "opaque pagination cursor" },
+                  "filters": { "type": "object", "description": "extra filters (file_exts, file_size_min, file_size_max, sender_ids, ...). Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/_search_media": {
+      "post": {
+        "operationId": "message.search.media",
+        "summary": "Search images + videos (in-channel only)",
+        "description": "Media search (payload.type in [2,5]). --chat-id is REQUIRED (no cross-channel media endpoint); the backend rejects requests without a channel_id. keyword must be empty (the backend rejects a non-empty keyword). --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "cursorField": "pagination.next_cursor",
+          "hasMoreField": "pagination.has_more"
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id"],
+                "properties": {
+                  "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "REQUIRED. channel id to search media in (no cross-channel media endpoint)" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc"], "description": "sort order" },
+                  "page_size": { "type": "integer", "description": "page size" },
+                  "cursor": { "type": "string", "description": "opaque pagination cursor" },
+                  "filters": { "type": "object", "description": "extra filters (sender_ids, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/_search_around": {
+      "post": {
+        "operationId": "message.search.around",
+        "summary": "Fetch the context window around an anchor message (in-channel only)",
+        "description": "Locates the context window (messages before/after) around an anchor message. --chat-id is REQUIRED (a locate needs a single-channel anchor); the backend rejects requests without a channel_id. No pagination. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["channel_id", "anchor_message_id"],
+                "properties": {
+                  "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "REQUIRED. channel id containing the anchor message" },
+                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "anchor_message_id": { "type": "string", "x-octo-flag": "anchor-message-id", "description": "REQUIRED. the message id to center the context window on" },
+                  "filters": { "type": "object", "description": "extra filters. Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Context window",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/_search_global_groups": {
+      "post": {
+        "operationId": "message.search.groups",
+        "summary": "Cross-channel aggregated overview (which channels matched)",
+        "description": "Cross-channel-only aggregated overview (L1): returns which groups/threads/DMs matched a keyword, not individual messages. Use it as the first level of a two-step search (find matching channels, then pull messages per channel with `message search`/`message search all`). --chat-id is not supported (cross-channel only). --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "keyword": { "type": "string", "description": "full-text keyword" },
+                  "filters": { "type": "object", "description": "extra filters (channel_types, member_uids, sent_at_from, sent_at_to, ...). Pass via --data." },
+                  "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aggregated group overview",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
     }
   }
 }

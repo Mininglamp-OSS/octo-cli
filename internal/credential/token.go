@@ -1,15 +1,17 @@
 package credential
 
 // Token prefixes route a bot token to its kind. app_* is an App Bot; bf_* is a
-// User Bot. The prefix is the only thing the CLI inspects — routing is otherwise
+// User Bot; uk_* is a user API key (real-person identity, used for message
+// search). The prefix is the only thing the CLI inspects — routing is otherwise
 // server-side.
 const (
-	prefixApp  = "app_"
-	prefixUser = "bf_"
+	prefixApp     = "app_"
+	prefixUser    = "bf_"
+	prefixUserKey = "uk_"
 )
 
-// TokenKind classifies a token by its prefix: "app_bot", "user_bot", or
-// "unknown". An empty token returns "".
+// TokenKind classifies a token by its prefix: "app_bot", "user_bot",
+// "user_key", or "unknown". An empty token returns "".
 func TokenKind(tok string) string {
 	switch {
 	case tok == "":
@@ -18,6 +20,8 @@ func TokenKind(tok string) string {
 		return "app_bot"
 	case hasPrefix(tok, prefixUser):
 		return "user_bot"
+	case hasPrefix(tok, prefixUserKey):
+		return "user_key"
 	}
 	return "unknown"
 }
@@ -47,6 +51,8 @@ func MaskToken(tok string) string {
 		prefix = prefixApp
 	case hasPrefix(tok, prefixUser):
 		prefix = prefixUser
+	case hasPrefix(tok, prefixUserKey):
+		prefix = prefixUserKey
 	default:
 		// Unknown kind: reveal nothing. Without a recognized prefix there is no
 		// way to say what the revealed head/tail belong to, so don't leak it.

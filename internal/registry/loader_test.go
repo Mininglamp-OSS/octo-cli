@@ -35,7 +35,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
-		"message":     4,
+		"message":     10,
 		"group":       9,
 		"thread":      8,
 		"file":        4,
