@@ -50,14 +50,14 @@ Never execute archive scripts during installation.
 ## Publish as a Bot
 
 The user must first provide a `.zip` / `.skill` package, or an accessible Skill
-directory. Do not search the machine or guess a path.
+directory. Do not search the machine, guess a path, explain Skill loading,
+repeat the prompt, or narrate checks step by step.
 
 1. For a directory, copy it into a fresh `mktemp -d` staging directory and
    package the copy. Never modify the source directory or use a fixed temporary
    path. Exclude `.git`, `.github`, caches, dependencies, and build output; keep
    `SKILL.md`, referenced files, README, and LICENSE. If `version` is absent,
-   use an unambiguous package manifest version or ask once; write it only to the
-   staged `SKILL.md`.
+   use `1.0.0` and write it only to the staged `SKILL.md`.
 2. Inspect the package without executing it. Read the root `SKILL.md` and obtain
    its `name`, `version`, optional `id`, byte size, and SHA-256. Reject an unsafe
    archive using the same path, link, and size checks required for installation.
@@ -88,7 +88,8 @@ directory. Do not search the machine or guess a path.
    verify the name, version, creator, visibility, and current version.
 
 Optional metadata may override parsed values, including `category_id` and a
-JSON string array `tags`, but do not silently replace the package version.
+JSON string array `tags`, but do not silently replace a package version. Only
+default a missing version to `1.0.0`.
 
 `skill-upload parse`, `skill-parse-task get`, and `skill create` remain exposed
 for Web/legacy compatibility and diagnosis. They are not an alternative Agent
