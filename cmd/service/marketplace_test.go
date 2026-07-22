@@ -115,6 +115,24 @@ func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
 	}
 }
 
+func TestMarketplaceLocalPrefixOverride(t *testing.T) {
+	t.Setenv("OCTO_MARKETPLACE_API_PREFIX", "")
+	var gotPath string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "mcp", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotPath != "/api/v1/mcps" {
+		t.Fatalf("path = %q, want /api/v1/mcps", gotPath)
+	}
+}
+
 func TestMarketplaceMCPCategoryFiltersRequest(t *testing.T) {
 	var gotQuery string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {

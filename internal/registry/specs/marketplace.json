@@ -2981,6 +2981,14 @@
             },
             "type": "object"
           },
+          "env_user_supplied": {
+            "description": "EnvUserSupplied lists env keys whose value must be filled locally by each consumer. Values are owner-visible and blanked to non-owners.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
           "faqs": {
             "items": {
               "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ"
@@ -2993,6 +3001,14 @@
               "type": "string"
             },
             "type": "object"
+          },
+          "headers_user_supplied": {
+            "description": "HeadersUserSupplied has the same semantics as env_user_supplied for headers.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
           },
           "icon": {
             "type": "string"
@@ -3249,6 +3265,14 @@
             },
             "type": "object"
           },
+          "env_user_supplied": {
+            "description": "A supplied array replaces the persisted env user-supplied key list; omission leaves it unchanged.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
           "faqs": {
             "items": {
               "$ref": "#/components/schemas/github_com_Mininglamp-OSS_octo-marketplace_internal_model.FAQ"
@@ -3261,6 +3285,13 @@
               "type": "string"
             },
             "type": "object"
+          },
+          "headers_user_supplied": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
           },
           "icon": {
             "type": "string"
@@ -3340,11 +3371,27 @@
             },
             "type": "object"
           },
+          "env_user_supplied": {
+            "description": "Environment keys each consumer must fill locally.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
+          },
           "headers": {
             "additionalProperties": {
               "type": "string"
             },
             "type": "object"
+          },
+          "headers_user_supplied": {
+            "description": "Header keys each consumer must fill locally.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": false
           },
           "server_name": {
             "type": "string"
