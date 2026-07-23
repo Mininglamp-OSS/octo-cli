@@ -39,9 +39,11 @@ Before writing configuration, show:
 
 After confirmation, preserve existing entries unless replacement was approved.
 Use `quick_start.slug` as the `mcpServers` key. Map stdio to
-`command`/`args`/`env`, and HTTP/SSE to `url`/`headers`. Ask for required
-secrets; never invent, echo, or persist them outside the runtime's approved
-secret mechanism. Reload the runtime and verify the server connects.
+`command`/`args`/`env`, and HTTP/SSE to `url`/`headers`. Treat keys listed in
+`quick_start.env_user_supplied` and `quick_start.headers_user_supplied` as
+consumer-provided secrets: ask for them locally, never invent or echo them, and
+persist them only through the runtime's approved secret mechanism. Reload the
+runtime and verify the server connects.
 
 ## Validate a connection
 
@@ -50,6 +52,12 @@ For `streamable-http` and `sse`, probe without persisting:
 ```bash
 octo-cli marketplace mcp probe --data @connection.json
 ```
+
+Build `connection.json` with only the probe fields: `transport`, `url`,
+`command`, `args`, `env`, and `headers`. The probe endpoint rejects catalog
+fields and `env_user_supplied` / `headers_user_supplied` as unknown fields.
+Use empty values for consumer-supplied secrets; do not send real secrets just
+to validate a public connection.
 
 Normalize the response and continue only when `is_ok=true`.
 
@@ -67,10 +75,12 @@ octo-cli marketplace mcp create --data @mcp.json
 ```
 
 The body is flat: catalog metadata plus `transport`, and either
-`command`/`args`/`env` for stdio or `url`/`headers` for HTTP/SSE. Never submit
-real secret values; use `__OCTO_SECRET_PLACEHOLDER__` where the Marketplace
-contract requires a secret placeholder. `category` must be a key returned by
-`mcp-category list`; `tags` is a free-form string array.
+`command`/`args`/`env` for stdio or `url`/`headers` for HTTP/SSE. Put every key
+that each consumer must fill locally in `env_user_supplied` or
+`headers_user_supplied`; submit an empty value for those keys instead of a real
+secret. The owner can round-trip submitted values, while non-owner detail reads
+blank them. `category` must be a key returned by `mcp-category list`; `tags` is
+a free-form string array.
 
 ## Update
 
@@ -88,8 +98,10 @@ Category and tag changes use the same `category` key and free-form `tags`
 string array as create.
 
 For stdio connection changes, use the local handshake instead of backend probe.
-Re-read with `marketplace mcp get <mcp-id>` and verify the quick-start remains
-secret-redacted and contains no `version` field.
+When changing `env` or `headers`, update the matching `*_user_supplied` list in
+the same request. Re-read with `marketplace mcp get <mcp-id>` and verify those
+lists round-trip and `quick_start` contains no `version` field. Do not print
+owner-visible secret values.
 
 Use `marketplace mcp delete <mcp-id>` only after showing the selected owned
 record and obtaining explicit confirmation. MCP icon uploads use the presigned

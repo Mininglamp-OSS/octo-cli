@@ -237,6 +237,9 @@ func (r *Registry) ListOperations(service string) []OperationInfo {
 	}
 	out := []OperationInfo{}
 	walkOperations(doc, func(pathStr, method string, op map[string]any) {
+		if truthy(op["x-octo-cli-hidden"]) {
+			return
+		}
 		id, _ := op["operationId"].(string)
 		if id == "" {
 			return
@@ -271,6 +274,9 @@ func (r *Registry) GetOperation(operationID string) (*OperationDetail, bool) {
 		var found *OperationDetail
 		walkOperations(doc, func(pathStr, method string, op map[string]any) {
 			if found != nil {
+				return
+			}
+			if truthy(op["x-octo-cli-hidden"]) {
 				return
 			}
 			id, _ := op["operationId"].(string)

@@ -22,7 +22,6 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"skill.mine.list":          {http.MethodGet, "/market/api/v1/skills/mine"},
 		"skill.tag.list":           {http.MethodGet, "/market/api/v1/skills/tags"},
 		"skill.publish":            {http.MethodPost, "/market/api/v1/bot/skills/publish"},
-		"skill.create":             {http.MethodPost, "/market/api/v1/skills"},
 		"skill.get":                {http.MethodGet, "/market/api/v1/skills/{skill_id}"},
 		"skill.update":             {http.MethodPatch, "/market/api/v1/skills/{skill_id}"},
 		"skill.delete":             {http.MethodDelete, "/market/api/v1/skills/{skill_id}"},
@@ -115,6 +114,24 @@ func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
 	}
 }
 
+func TestMarketplaceLocalPrefixOverride(t *testing.T) {
+	t.Setenv("OCTO_MARKETPLACE_API_PREFIX", "")
+	var gotPath string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "mcp", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotPath != "/api/v1/mcps" {
+		t.Fatalf("path = %q, want /api/v1/mcps", gotPath)
+	}
+}
+
 func TestMarketplaceMCPCategoryFiltersRequest(t *testing.T) {
 	var gotQuery string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -131,30 +148,6 @@ func TestMarketplaceMCPCategoryFiltersRequest(t *testing.T) {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query = %q, want %q", gotQuery, want)
 		}
-	}
-}
-
-func TestMarketplaceSkillPublishRequest(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"skill_id":"skill-1"}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "skill", "create", "--parse-task-id", "task-1", "--visibility", "space"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if gotPath != "/market/api/v1/skills" {
-		t.Errorf("path = %q", gotPath)
-	}
-	if gotBody["parse_task_id"] != "task-1" || gotBody["visibility"] != "space" {
-		t.Errorf("body = %#v", gotBody)
 	}
 }
 
@@ -179,6 +172,22 @@ func TestMarketplaceBotSkillPublishRequest(t *testing.T) {
 	}
 	if gotBody["skill_upload_id"] != "upload-1" || gotBody["visibility"] != "space" || gotBody["changelog"] != "Initial release" {
 		t.Errorf("body = %#v", gotBody)
+	}
+}
+
+func TestMarketplaceHumanSkillCreateIsHidden(t *testing.T) {
+	r := registry.MustNew()
+	if _, ok := r.GetOperation("skill.create"); ok {
+		t.Fatal("skill.create must not be exposed by the Bot-only CLI")
+	}
+
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
+	skill := findCmd(findCmd(root, "marketplace"), "skill")
+	if skill == nil {
+		t.Fatal("missing marketplace skill command group")
+	}
+	if findCmd(skill, "create") != nil {
+		t.Fatal("marketplace skill create must be hidden; Bots must use skill publish")
 	}
 }
 
@@ -215,7 +224,7 @@ func TestMarketplaceCommandTree(t *testing.T) {
 	domains := map[string][]string{
 		"skill-category":    {"list"},
 		"mcp-category":      {"list"},
-		"skill":             {"list", "mine", "tag", "publish", "create", "get", "update", "delete", "download", "reupload", "version", "skillmd"},
+		"skill":             {"list", "mine", "tag", "publish", "get", "update", "delete", "download", "reupload", "version", "skillmd"},
 		"skill-upload":      {"create", "parse"},
 		"skill-parse-task":  {"get"},
 		"skill-icon-upload": {"create"},
@@ -241,7 +250,7 @@ func TestMarketplaceCommandTree(t *testing.T) {
 
 func TestMarketplaceSkillTagsAreStrings(t *testing.T) {
 	r := registry.MustNew()
-	for _, id := range []string{"skill.publish", "skill.create", "skill.update"} {
+	for _, id := range []string{"skill.publish", "skill.update"} {
 		op, ok := r.GetOperation(id)
 		if !ok || op.RequestBody == nil {
 			t.Fatalf("%s request body not found", id)
@@ -259,7 +268,6 @@ func TestMarketplaceVisibilityEnumsMatchBackend(t *testing.T) {
 		id   string
 		want []string
 	}{
-		{"skill.create", []string{"public", "private", "space"}},
 		{"skill.update", []string{"public", "private", "space"}},
 		{"skill.publish", []string{"public", "private", "space"}},
 		{"mcp.create", []string{"public", "private"}},
