@@ -1,7 +1,8 @@
 # octo-docs — Spreadsheet cells, dims & images (`doc_type: sheet`)
 
 Read this when the target is a **spreadsheet** (`doc_type: sheet`) and you need to
-read or edit its cells, column widths / row heights, floating images, or export it.
+read or edit its cells, column widths / row heights, floating images, hyperlinks,
+merged ranges, sheet tabs, or export it.
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
 
@@ -12,9 +13,12 @@ may also carry Univer's `p` rich-text snapshot and `t` cell-type; both round-tri
 untouched.) Same read-token-then-guarded-write discipline as the body surface.
 
 ```bash
-# Read the LIVE cells + dims + hyperlinks + baseVersion (reader). Response:
+# Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + baseVersion
+# (reader). Response:
 #   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px },
-#     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} }, baseVersion }
+#     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} },
+#     sheetMerges: { "logicalId:sr:sc:er:ec": true },
+#     sheetList: { "logicalId": {name,order} }, baseVersion }
 octo-cli docs sheet get <docId>
 
 # Batch-edit cells (writer). --base-version is REQUIRED and is sent as the
@@ -88,6 +92,59 @@ octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
     "id": "lnk1", "row": 0, "column": 0,
     "payload": "https://example.com", "display": "官网"
   } }
+}'
+```
+
+### Merged cells — the `merges` batch
+
+A merged range is its own edit surface (the `sheetMerges` map), keyed
+`${logicalId}:sr:sc:er:ec` — 0-based `startRow:startCol:endRow:endCol`. The value
+is `true` to merge that block, or `null` to un-merge it. `logicalId` is the sheet's
+id (`default` for the first tab). Merging keeps only the top-left cell's value; write
+that cell's `v` in the same edit if you want text in the block. Merges ARE returned
+by `docs sheet get` (as `sheetMerges`), so you can read them back and an xlsx export
+can carry them.
+
+```bash
+# Merge A1:C2 (rows 0-1, cols 0-2) and put a title in the top-left cell.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells": { "default!0:0": { "v": "2025 年度报表" } },
+  "merges": { "default:0:0:1:2": true }
+}'
+
+# Un-merge that block.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"merges":{"default:0:0:1:2":null}}'
+```
+
+### Multiple sheet tabs — the `sheets` batch
+
+A workbook's tabs live in the `sheetList` map, keyed by `logicalId` with value
+`{name, order}` (order sorts the tabs left→right). The first/default tab has
+logicalId `default`. This is its own edit surface (the `sheets` batch) and IS
+returned by `docs sheet get` (as `sheetList`), so **read the current tabs first** to
+learn their logicalIds before renaming, reordering, or adding one.
+
+- **Rename / reorder** an existing tab: set its logicalId to new `{name, order}`.
+- **Add a NEW sheet**: pick a fresh logicalId, set it in `sheets` AND write that
+  sheet's cells with keys `${logicalId}!row:col` in the SAME edit — a tab with no
+  cells is an empty sheet, and cells whose logicalId has no tab are orphaned (the
+  frontend won't render them). logicalId must not contain `:` or `!`.
+- **Delete** a tab: set its logicalId to `null` (also delete its cells if you want
+  them gone).
+
+```bash
+# 1) read the existing tabs
+octo-cli docs sheet get <docId> --format json | jq '.data.sheetList'
+#   e.g. { "default": { "name": "Sheet1", "order": 0 } }
+
+# 2) rename the default tab AND add a second sheet "明细" with one cell in it
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "sheets": {
+    "default": { "name": "汇总", "order": 0 },
+    "detail-1": { "name": "明细", "order": 1 }
+  },
+  "cells": { "detail-1!0:0": { "v": "明细表" } }
 }'
 ```
 
@@ -178,7 +235,8 @@ Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
 `413 too_many_cells` / `413 cell_too_large` (write size caps),
 `400 invalid_body` (missing base version or malformed shape),
 `400 invalid_limit` / `400 invalid_cursor` (bad pagination params), and
-`422 sheet_cell_invalid` (a cell/dim/drawing violates its contract or key shape).
+`422 sheet_cell_invalid` (a cell/dim/drawing/hyperlink/merge/tab violates its
+contract or key shape).
 
 ## Exporting a sheet to Excel (.xlsx)
 
@@ -189,10 +247,10 @@ so feed those into whatever spreadsheet library the bot's runtime has (e.g.
 `xlsx-js-style` in Node, `openpyxl` in Python): map `default!r:c` → row r / col c,
 write `v` (or `f` as a formula), apply `s` as the cell style, and set widths from
 `c<idx>` / heights from `r<idx>`. For a large grid, page the read with
-`--limit`/`--cursor` and stream rows into the workbook. (Note: merged-cell ranges
-are not exposed through the bot read surface yet, and floating images are
-write-only, so an exported workbook carries values + styles + dimensions but not
-merges/images.)
+`--limit`/`--cursor` and stream rows into the workbook. Merged ranges come back in
+`sheetMerges` (`logicalId:sr:sc:er:ec`) and the tabs in `sheetList`, so an export can
+carry values + styles + dimensions + merges across every sheet; only floating images
+/ formulas stay write-only (not in the read surface).
 
 ## Commenting on a cell
 
