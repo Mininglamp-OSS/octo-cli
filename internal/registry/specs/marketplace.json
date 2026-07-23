@@ -1736,6 +1736,7 @@
       "post": {
         "description": "Publish a parsed Skill archive for the authenticated user and current Space.",
         "operationId": "skill.create",
+        "x-octo-cli-hidden": true,
         "requestBody": {
           "content": {
             "application/json": {
