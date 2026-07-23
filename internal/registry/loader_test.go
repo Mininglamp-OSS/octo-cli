@@ -29,9 +29,9 @@ func TestGetSpecReturnsNilForUnknown(t *testing.T) {
 }
 
 func TestAllDomainOperationCounts(t *testing.T) {
-	// Backend route counts per service. The user-facing CLI has more commands
-	// than backend ops for matter (close/reopen/archive are aliases over
-	// matter.transition) — the spec tracks actual routes, not CLI surface.
+	// Caller-facing operation counts per service. Operations marked
+	// x-octo-cli-hidden remain in the embedded backend spec but are excluded
+	// here; marketplace skill.create is one such Web-only operation.
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
@@ -43,7 +43,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"event":       2,
 		"docs":        31,
 		"html":        20,
-		"marketplace": 26,
+		"marketplace": 25,
 	}
 	totalWant := 0
 	for svc, want := range expected {

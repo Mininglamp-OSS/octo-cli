@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -23,7 +24,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	d := rt.detail
 
 	// Path substitution. cobra.ExactArgs already ensured count.
-	urlPath := d.Path
+	urlPath := marketplacePath(d.Service, d.Path)
 	for i, pname := range rt.pathParams {
 		placeholder := "{" + pname + "}"
 		urlPath = strings.ReplaceAll(urlPath, placeholder, url.PathEscape(args[i]))
@@ -89,6 +90,25 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, &req)
+}
+
+// marketplacePath lets local development bypass the production /market
+// gateway mount. When OCTO_MARKETPLACE_API_PREFIX is present, its value
+// replaces the leading /market segment; setting it to an empty string maps
+// /market/api/v1/... to the standalone service's /api/v1/... routes.
+func marketplacePath(service, path string) string {
+	if service != "marketplace" || !strings.HasPrefix(path, "/market/") {
+		return path
+	}
+	prefix, ok := os.LookupEnv("OCTO_MARKETPLACE_API_PREFIX")
+	if !ok {
+		return path
+	}
+	prefix = strings.TrimSpace(prefix)
+	if prefix != "" && !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
+	}
+	return strings.TrimSuffix(prefix, "/") + strings.TrimPrefix(path, "/market")
 }
 
 // buildQuery assembles the URL query from flags the user explicitly set, so

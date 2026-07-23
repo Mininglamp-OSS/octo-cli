@@ -91,9 +91,10 @@ Optional metadata may override parsed values, including `category_id` and a
 JSON string array `tags`, but do not silently replace a package version. Only
 default a missing version to `1.0.0`.
 
-`skill-upload parse`, `skill-parse-task get`, and `skill create` remain exposed
-for Web/legacy compatibility and diagnosis. They are not an alternative Agent
-workflow and must not be used unless the Bot publish endpoint is unavailable.
+`skill create` is intentionally hidden from octo-cli because it records a human
+publisher and is reserved for the Web workflow. `skill-upload parse` and
+`skill-parse-task get` remain available for diagnosis, but they are not an
+alternative Agent workflow. Bots must publish with `skill publish`.
 If parsing returns `RATE_LIMITED`, wait and retry within the user's timeout. If
 Bot publish returns a gateway timeout, query `skill mine list` before retrying
 so an already-created Skill is never duplicated.
