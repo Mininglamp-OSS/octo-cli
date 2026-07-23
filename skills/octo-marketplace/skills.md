@@ -20,7 +20,8 @@ The category command is non-paginated; normalize it and use each returned
 
 Skill tags are strings normally parsed from `SKILL.md` frontmatter. Use
 `skill tag list` for current-Space and global suggestions; new valid tag values
-may still be submitted when publishing or updating.
+may still be submitted when publishing or updating. A Skill may have at most
+10 tags, and each tag may contain at most 10 characters.
 
 ## Install
 
