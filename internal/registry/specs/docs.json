@@ -272,7 +272,7 @@
       "get": {
         "operationId": "docs.sheet.get",
         "summary": "Read a spreadsheet's live cells + dims + base version (needs reader)",
-        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s}), its column-width / row-height overrides (sheetDims), its cell hyperlinks (sheetHyperLinks), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read of a grid over the 1MB cap returns 413 sheet_too_large; pass --limit (and follow nextCursor via --cursor) to read it in pages instead. In paged mode each page is bounded by both --limit and the byte cap, sheetDims and sheetHyperLinks are returned on the first page only, and the response carries hasMore + nextCursor. A --cursor whose snapshot moved returns 409 sheet_changed (restart from the first page); a bad --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s}), its column-width / row-height overrides (sheetDims), its cell hyperlinks (sheetHyperLinks), its merged cell ranges (sheetMerges), its sheet tabs / pages (sheetList, logicalId -> {name,order}), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read of a grid over the 1MB cap returns 413 sheet_too_large; pass --limit (and follow nextCursor via --cursor) to read it in pages instead. In paged mode each page is bounded by both --limit and the byte cap, sheetDims, sheetHyperLinks, sheetMerges and sheetList are returned on the first page only, and the response carries hasMore + nextCursor. A --cursor whose snapshot moved returns 409 sheet_changed (restart from the first page); a bad --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -325,6 +325,14 @@
                       "type": "object",
                       "description": "cell hyperlinks keyed `${sheetId}!${linkId}`; each value is {id,row,column,payload,display?}. Returned on the first page only in paged mode."
                     },
+                    "sheetMerges": {
+                      "type": "object",
+                      "description": "merged cell ranges keyed `${logicalId}:sr:sc:er:ec` (0-based startRow:startCol:endRow:endCol); each value is true. Returned on the first page only in paged mode."
+                    },
+                    "sheetList": {
+                      "type": "object",
+                      "description": "sheet tabs / pages keyed by logicalId; each value is {name,order}. The first tab's logicalId is 'default'. Returned on the first page only in paged mode."
+                    },
                     "baseVersion": {
                       "type": "string",
                       "description": "opaque base64 base-version token; pass to `docs sheet edit --base-version`"
@@ -346,8 +354,8 @@
       },
       "patch": {
         "operationId": "docs.sheet.edit",
-        "summary": "Apply a batch sheet edit — cells / dims / drawings / hyperlinks (needs writer)",
-        "description": "Applies a batch of cell, dimension, and/or drawing set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell). The optional dims batch sets column widths / row heights: a JSON object `{ \"c<idx>\"|\"r<idx>\": <px> | null }` (e.g. `{\"c0\":200,\"r3\":40}`; a null value deletes that dim). The optional drawings batch inserts/removes floating images: a JSON object `{ \"sheetId!drawingId\": <ISheetImage> | null }` (image bytes ride inline as a base64 data URL in `source`; a math formula rides here too as a float-DOM drawing with `drawingType:8`, `componentKey:\"octo-math-formula\"`, and the LaTeX in `data.latex`). The optional hyperlinks batch sets cell links: a JSON object `{ \"sheetId!linkId\": {id,row,column,payload,display?} | null }` (payload is the URL — http/https/mailto or an internal #jump — and the link points at a cell by row/column; put the visible text in that cell's `v`). Provide `cells`, `dims`, `drawings`, or `hyperlinks` via --data; at least one must be non-empty. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell/dim/drawing count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version / malformed shape / all batches empty → 400 invalid_body, a cell/dim/drawing violating its contract or key shape → 422 sheet_cell_invalid.",
+        "summary": "Apply a batch sheet edit — cells / dims / drawings / hyperlinks / merges / sheet tabs (needs writer)",
+        "description": "Applies a batch of cell, dimension, and/or drawing set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell). The optional dims batch sets column widths / row heights: a JSON object `{ \"c<idx>\"|\"r<idx>\": <px> | null }` (e.g. `{\"c0\":200,\"r3\":40}`; a null value deletes that dim). The optional drawings batch inserts/removes floating images: a JSON object `{ \"sheetId!drawingId\": <ISheetImage> | null }` (image bytes ride inline as a base64 data URL in `source`; a math formula rides here too as a float-DOM drawing with `drawingType:8`, `componentKey:\"octo-math-formula\"`, and the LaTeX in `data.latex`). The optional hyperlinks batch sets cell links: a JSON object `{ \"sheetId!linkId\": {id,row,column,payload,display?} | null }` (payload is the URL — http/https/mailto or an internal #jump — and the link points at a cell by row/column; put the visible text in that cell's `v`). The optional merges batch merges cell ranges: a JSON object `{ \"logicalId:sr:sc:er:ec\": true | null }` (0-based startRow:startCol:endRow:endCol; e.g. `{\"default:0:0:1:2\":true}` merges the A1:C2 block; a null value un-merges that range). The optional sheets batch manages sheet TABS / pages: a JSON object `{ \"logicalId\": {\"name\":\"<tab name>\",\"order\":<n>} | null }` (set to create / rename / reorder a tab, or null to delete it; read the current tabs from `docs sheet get`'s sheetList — the first tab's logicalId is 'default'; to ADD a sheet, set a NEW logicalId here AND write that sheet's cells with keys `logicalId!row:col`). Provide `cells`, `dims`, `drawings`, `hyperlinks`, `merges`, or `sheets` via --data; at least one must be non-empty. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell/dim/drawing count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version / malformed shape / all batches empty → 400 invalid_body, a cell/dim/drawing/merge/tab violating its contract or key shape → 422 sheet_cell_invalid.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -391,6 +399,14 @@
                   "hyperlinks": {
                     "type": "object",
                     "description": "batch of cell-hyperlink ops keyed `${sheetId}!${linkId}` (e.g. `default!lnk1`). Each value is {id (== the key's linkId), row, column (0-based cell anchor), payload:\"<url>\" (http/https/mailto or an internal #jump), display?:\"<label>\"} to set, or null to delete. The link lives outside cell data and points at a cell by row/column; put the cell's visible text in that cell's `v`. Optional; provide cells, dims, drawings, or hyperlinks (at least one non-empty). Pass via --data."
+                  },
+                  "merges": {
+                    "type": "object",
+                    "description": "batch of merged-cell-range ops keyed `${logicalId}:sr:sc:er:ec` (0-based startRow:startCol:endRow:endCol, e.g. `default:0:0:1:2` merges the A1:C2 block). Value true to merge that range, or null to un-merge it. Optional. Pass via --data."
+                  },
+                  "sheets": {
+                    "type": "object",
+                    "description": "batch of sheet-TAB (page) ops keyed by logicalId. Value {name,order} to create / rename / reorder a tab, or null to delete it. Read the current tabs from `docs sheet get`'s sheetList (logicalId -> {name,order}); the first tab's logicalId is 'default'. To ADD a sheet: set a NEW logicalId here AND write that sheet's cells with keys `${logicalId}!row:col`. Optional; provide any of cells / dims / drawings / hyperlinks / merges / sheets (at least one non-empty). Pass via --data."
                   }
                 }
               }
