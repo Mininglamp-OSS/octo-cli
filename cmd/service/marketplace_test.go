@@ -259,6 +259,9 @@ func TestMarketplaceSkillTagsAreStrings(t *testing.T) {
 		if !ok || tags.Type != "array" || tags.Items == nil || tags.Items.Type != "string" {
 			t.Errorf("%s tags schema = %+v, want string array", id, tags)
 		}
+		if tags.MaxItems != 10 || tags.Items.MaxLength != 10 {
+			t.Errorf("%s tags limits = maxItems %d, item maxLength %d; want 10 and 10", id, tags.MaxItems, tags.Items.MaxLength)
+		}
 	}
 }
 

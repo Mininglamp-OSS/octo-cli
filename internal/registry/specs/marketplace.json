@@ -3891,8 +3891,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           },
@@ -3915,8 +3917,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           },
@@ -3948,8 +3952,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           }
@@ -3984,8 +3990,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           },
@@ -4129,8 +4137,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           },
@@ -4183,8 +4193,10 @@
           },
           "tags": {
             "items": {
+              "maxLength": 10,
               "type": "string"
             },
+            "maxItems": 10,
             "type": "array",
             "uniqueItems": false
           },
