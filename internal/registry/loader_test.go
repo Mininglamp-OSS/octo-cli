@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,15 @@ func TestGetOperationMatterCreate(t *testing.T) {
 	}
 	if !hasRequired {
 		t.Errorf("request body required: want [title], got %v", op.RequestBody.Required)
+	}
+}
+
+func TestHTMLOperationsUseDocsHTMLGatewayPrefix(t *testing.T) {
+	r := MustNew()
+	for _, op := range r.ListOperations("html") {
+		if want := "/docs-html/v1/"; !strings.HasPrefix(op.Path, want) {
+			t.Errorf("%s: path = %q, want prefix %q", op.ID, op.Path, want)
+		}
 	}
 }
 
