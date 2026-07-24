@@ -38,6 +38,26 @@ are touched (the rest of the board is left as-is). On a key collision the elemen
 with the higher `version` (then smaller `versionNonce`) wins, and a delete is a
 soft-delete tombstone with a superseding version so it converges under CAS.
 
+## Excalidraw file import
+
+Import a standard `.excalidraw` JSON envelope (maximum 25 MiB) directly into an
+existing board. The CLI validates `type: "excalidraw"`, a positive integer
+`version`, an `elements` array, and a `files` object before sending the request.
+
+```bash
+# Safe default: merge imported elements while preserving the existing board.
+octo-cli docs import <docId> --file ./diagram.excalidraw
+
+# Explicit overwrite: replace the board with the imported scene.
+octo-cli docs import <docId> --file ./diagram.excalidraw --mode replace
+```
+
+`--mode` is only valid for `.excalidraw` imports and accepts `merge` (default) or
+`replace`. Merge preserves existing board elements. Replace explicitly overwrites
+the board; the backend first creates a safety snapshot and enforces concurrency
+protection. Use `--dry-run` to inspect the mode, endpoint, and these safety
+semantics without applying the import.
+
 **Concurrency / errors.** The base version is optimistic-concurrency: if the scene
 changed since your `docs scene get`, an edit is rejected with
 `412 base_version_stale` — re-read for a fresh token. Other gates:
@@ -51,19 +71,19 @@ caps), `400 invalid_body` (missing base version or malformed shape),
 ## Whiteboard image export
 
 Render a whiteboard's **live** Excalidraw scene to an image on the server. The
-response body is binary, so pass `--output`/`-o` to save it to a file; without
-`-o` the command only reports the response `{status, content_type, size}`.
+response body is binary, so `--output`/`-o` is required and saves it atomically
+to the matching `.png` or `.svg` destination.
 
 ```bash
-# PNG (default). -o writes the bytes to disk and the envelope echoes the saved path.
-octo-cli docs scene export <docId> --image-format png -o board.png
+# PNG. -o writes the bytes to disk and the envelope echoes the saved path.
+octo-cli docs export <docId> --export-format png -o board.png
 
 # SVG (vector).
-octo-cli docs scene export <docId> --image-format svg -o board.svg
+octo-cli docs export <docId> --export-format svg -o board.svg
 ```
 
-> `--image-format` is `png` (default) or `svg`; any other value returns 400
-> `invalid_format`. (The flag is named `--image-format`, not `--format`, so it
+> `--export-format` is `png` or `svg`; any other value is rejected locally.
+> (The flag is named `--export-format`, not `--format`, so it
 > does not collide with the global `--format` output-envelope flag; the wire
 > query parameter is still `format`.) The export reflects the scene as it is live
 > right now (shapes, text, and embedded images), not a persisted snapshot.

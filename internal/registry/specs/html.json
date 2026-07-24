@@ -3,13 +3,13 @@
   "info": {
     "title": "Octo HTML Docs API",
     "version": "1.0.0",
-    "description": "Agent-facing surface for octo-doc — the self-hosted, prompt-native interactive HTML document service (distinct from the CRDT docs-backend behind the `docs` domain). Covers the document lifecycle (publish/list/get/versions/delete), author drafts, per-doc share codes, media assets, inline comments, and the agent element read/replace + reply paths. All paths are under the `/v1` prefix and return the `{data}/{error}` envelope."
+    "description": "Agent-facing surface for octo-doc — the self-hosted, prompt-native interactive HTML document service (distinct from the CRDT docs-backend behind the `docs` domain). Covers the document lifecycle (publish/list/get/versions/delete), author drafts, per-doc share codes, media assets, inline comments, and the agent element read/replace + reply paths. All paths are under the `/docs-html/v1` prefix and return the `{data}/{error}` envelope."
   },
   "x-octo-service": "html",
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
-    "/v1/docs": {
+    "/docs-html/v1/docs": {
       "get": {
         "operationId": "html.list",
         "summary": "List documents (owner-scoped index)",
@@ -94,11 +94,11 @@
         }
       }
     },
-    "/v1/docs/{slug}": {
+    "/docs-html/v1/docs/{slug}": {
       "get": {
         "operationId": "html.get",
         "summary": "Fetch one document's metadata (needs reader)",
-        "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /v1/docs/{slug} — added to octo-doc to back this command.",
+        "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /docs-html/v1/docs/{slug} — added to octo-doc to back this command.",
         "x-octo-risk": "read",
         "parameters": [
           { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -136,7 +136,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/versions": {
+    "/docs-html/v1/docs/{slug}/versions": {
       "get": {
         "operationId": "html.versions",
         "summary": "List a document's versions (needs reader)",
@@ -165,7 +165,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/draft": {
+    "/docs-html/v1/docs/{slug}/draft": {
       "put": {
         "operationId": "html.draft.save",
         "summary": "Save the author draft (author-only)",
@@ -193,7 +193,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/draft/promote": {
+    "/docs-html/v1/docs/{slug}/draft/promote": {
       "post": {
         "operationId": "html.draft.promote",
         "summary": "Promote the author draft to an immutable version (author-only)",
@@ -220,7 +220,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/share": {
+    "/docs-html/v1/docs/{slug}/share": {
       "post": {
         "operationId": "html.share",
         "summary": "Mint / rotate a per-doc read+comment share code (author-only)",
@@ -257,7 +257,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/grants": {
+    "/docs-html/v1/docs/{slug}/grants": {
       "get": {
         "operationId": "html.grant.list",
         "summary": "List a document's per-uid access grants (author-only)",
@@ -314,7 +314,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/grants/{uid}": {
+    "/docs-html/v1/docs/{slug}/grants/{uid}": {
       "delete": {
         "operationId": "html.grant.rm",
         "summary": "Revoke a uid's access grant (author-only)",
@@ -329,7 +329,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/assets": {
+    "/docs-html/v1/docs/{slug}/assets": {
       "get": {
         "operationId": "html.asset.ls",
         "summary": "List a document's media assets (needs reader)",
@@ -400,7 +400,7 @@
         }
       }
     },
-    "/v1/docs/{slug}/assets/{sha256}": {
+    "/docs-html/v1/docs/{slug}/assets/{sha256}": {
       "delete": {
         "operationId": "html.asset.rm",
         "summary": "Delete a media asset (author-only)",
@@ -414,7 +414,7 @@
         }
       }
     },
-    "/v1/comments": {
+    "/docs-html/v1/comments": {
       "get": {
         "operationId": "html.comment.list",
         "summary": "List a document's comments (needs reader)",
@@ -457,7 +457,7 @@
         }
       }
     },
-    "/v1/agent/replies": {
+    "/docs-html/v1/agent/replies": {
       "post": {
         "operationId": "html.reply",
         "summary": "Post an agent reply + verdict to a comment (write-token gated)",
@@ -486,7 +486,7 @@
         }
       }
     },
-    "/v1/agent/element/get": {
+    "/docs-html/v1/agent/element/get": {
       "post": {
         "operationId": "html.element.get",
         "summary": "Read one artifact's outer HTML by aid (write-token gated)",
@@ -527,7 +527,7 @@
         }
       }
     },
-    "/v1/agent/element/replace": {
+    "/docs-html/v1/agent/element/replace": {
       "post": {
         "operationId": "html.element.replace",
         "summary": "Replace one artifact's outer HTML by aid and republish (write-token gated)",

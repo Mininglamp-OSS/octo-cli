@@ -130,11 +130,15 @@ octo-cli docs create --title "Design notes"
 octo-cli docs list --sort updatedAt:desc
 octo-cli docs get doc-123
 octo-cli docs content get doc-123          # returns the body + base version token
+octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
+octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
 octo-cli docs sheet get sheet-9                      # whole sheet + base version token
+octo-cli docs import sheet-9 --file ./report.xlsx    # imports the first visible worksheet
+octo-cli docs export sheet-9 --export-format xlsx -o ./report.xlsx
 octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follow --cursor <nextCursor>
 octo-cli docs sheet edit sheet-9 --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
@@ -143,6 +147,9 @@ octo-cli docs sheet edit sheet-9 --base-version "<token>" \
 octo-cli docs scene get board-7                       # elements (z-order) + files + base version token
 octo-cli docs scene edit board-7 --base-version "<token>" \
   --data '{"elements":[{"id":"e1","type":"rectangle","version":4}],"deletedElementIds":["e2"],"files":{}}'
+octo-cli docs import board-7 --file ./board.excalidraw              # merge (default): preserves existing elements
+octo-cli docs import board-7 --file ./board.excalidraw --mode replace # explicit overwrite; backend safety snapshot + concurrency protection
+octo-cli docs export board-7 --export-format png -o ./board.png
 
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.

@@ -6,6 +6,12 @@ merged ranges, sheet tabs, or export it.
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
 
+Export a sheet to XLSX with a required, matching destination extension:
+
+```bash
+octo-cli docs export <docId> --export-format xlsx -o spreadsheet.xlsx
+```
+
 A spreadsheet stores a flat cell map on the Y.Doc, keyed `sheetId!row:col` (e.g.
 `default!0:0`), with values `{v,f,s}` — `v` a string/number/boolean/null, `f` an
 optional formula, `s` an opaque resolved style object. (Cells authored in the web
