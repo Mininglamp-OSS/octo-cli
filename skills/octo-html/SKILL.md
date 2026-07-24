@@ -19,7 +19,7 @@ metadata:
 > single stamped artifact** (located by its content-hash `aid`) which republishes
 > a new version. Pick the domain that matches the backend you are pointed at.
 
-All commands call `$OCTO_API_BASE_URL/v1/*` and return the `{data}/{error}` envelope.
+All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the `{data}/{error}` envelope.
 
 ## Auth & space
 
