@@ -40,8 +40,11 @@ func TestSummaryTreeShape(t *testing.T) {
 			t.Errorf("summary: missing %q; got %v", leaf, childNames(summary))
 		}
 	}
-	if list := findCmd(summary, "list"); list == nil || list.Flags().Lookup("page-all") != nil {
-		t.Error("summary list must exist without --page-all")
+	list := findCmd(summary, "list")
+	if list == nil {
+		t.Fatal("summary list command must exist")
+	} else if list.Flags().Lookup("page-all") != nil {
+		t.Error("summary list must not expose --page-all (backend returns a {total, items} page, no cursor)")
 	}
 }
 

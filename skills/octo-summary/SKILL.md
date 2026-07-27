@@ -1,5 +1,6 @@
 ---
 name: octo-summary
+disabled: true
 description: Read, find, and cite existing Octo summaries through octo-cli. Use when an agent needs to discover summaries visible to its bot owner, inspect one summary, retrieve its current body, or ground an answer in returned citation metadata. Load after octo-shared.
 ---
 

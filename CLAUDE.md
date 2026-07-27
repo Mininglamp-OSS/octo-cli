@@ -76,7 +76,7 @@ octo-cli version
 
 `octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
-Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-messaging`, `octo-files`, `octo-docs`, `octo-html`, `octo-marketplace`) — keep those in sync when command shapes change.
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — backend pending), `octo-messaging`, `octo-files`, `octo-docs`, `octo-html`, `octo-marketplace`) — keep those in sync when command shapes change.
 
 ## Environment
 

@@ -173,6 +173,7 @@ func TestServiceSpaceHeaderContract(t *testing.T) {
 		{"message", "message.send", true},
 		{"matter", "matter.create", true},
 		{"marketplace", "skill.get", true},
+		{"summary", "summary.list", false},
 		{"docs", "docs.create", false},
 		{"bot", "bot.register", false},
 		{"thread", "thread.create", false},
