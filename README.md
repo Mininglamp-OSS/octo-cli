@@ -289,7 +289,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   share codes & per-uid grants, media assets, inline comments, agent element
   read/replace.
 - [`octo-summary`](./skills/octo-summary/SKILL.md) — discover, read, and cite
-  existing summaries visible to the personal Agent's human owner.
+  existing summaries visible to the personal Agent's human owner. **Temporarily
+  withheld** (backend API pending — octo-smart-summary#172; not currently loadable).
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:
 
