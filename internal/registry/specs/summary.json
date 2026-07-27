@@ -1,0 +1,57 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Summary Bot Read API",
+    "version": "1.0.0",
+    "description": "Read-only access to summaries visible to the bot owner's identity. The backend resolves owner and space from the bot token."
+  },
+  "x-octo-service": "summary",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "paths": {
+    "/summary/api/v1/bot/summaries": {
+      "get": {
+        "operationId": "summary.list",
+        "summary": "List summaries visible to the bot owner",
+        "description": "Returns a page in {total, items}. keyword matches title or topic. Space and effective reader are resolved server-side from the bot token.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 } },
+          { "name": "page_size", "in": "query", "x-octo-flag": "page-size", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 } },
+          { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "title or topic substring" },
+          { "name": "status", "in": "query", "schema": { "type": "integer" } },
+          { "name": "trigger_type", "in": "query", "x-octo-flag": "trigger-type", "schema": { "type": "integer" } },
+          { "name": "origin_channel_id", "in": "query", "x-octo-flag": "origin-channel-id", "schema": { "type": "string" } },
+          { "name": "created_after", "in": "query", "x-octo-flag": "created-after", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "created_before", "in": "query", "x-octo-flag": "created-before", "schema": { "type": "string", "format": "date-time" } },
+          { "name": "sort_by", "in": "query", "x-octo-flag": "sort-by", "schema": { "type": "string", "enum": ["created_at", "updated_at"], "default": "created_at" } },
+          { "name": "sort_order", "in": "query", "x-octo-flag": "sort-order", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" } }
+        ],
+        "responses": { "200": { "description": "Summary page" } }
+      }
+    },
+    "/summary/api/v1/bot/summaries/{id}": {
+      "get": {
+        "operationId": "summary.get",
+        "summary": "Get summary metadata and current visible result",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Summary detail" } }
+      }
+    },
+    "/summary/api/v1/bot/summaries/{id}/result": {
+      "get": {
+        "operationId": "summary.result",
+        "summary": "Get the current summary body and citation metadata",
+        "description": "Citation context_before/context_after is omitted on bot routes.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Current summary result" } }
+      }
+    }
+  }
+}

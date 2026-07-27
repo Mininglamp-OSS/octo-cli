@@ -67,6 +67,19 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	}
 }
 
+func TestOctoSummarySkillEmbedded(t *testing.T) {
+	b, err := FS.ReadFile("octo-summary/SKILL.md")
+	if err != nil {
+		t.Fatalf("octo-summary/SKILL.md not embedded: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{"name: octo-summary", "summary list", "summary get", "summary result", "context_before", "bf_*"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("octo-summary skill missing %q", want)
+		}
+	}
+}
+
 func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
 	if err != nil {

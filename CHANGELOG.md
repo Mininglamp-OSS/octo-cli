@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli summary` read-only domain** — `summary list|get|result` lets a
+  personal Agent discover and cite existing summaries visible to its human
+  owner. The embedded spec targets the gateway's `/summary/api/v1/bot/*`
+  mount, suppresses client space headers, and ships with the `octo-summary`
+  Skill. Listing filters title or topic; result reads include citation metadata
+  while the backend omits surrounding-message context for bot requests.
 - **`octo-cli message search` family** (6 subcommands) — full-text message and
   file search: `message search` (messages), `search all` (messages + files),
   `search files`, `search media` (images/videos, in-channel only, no keyword),
