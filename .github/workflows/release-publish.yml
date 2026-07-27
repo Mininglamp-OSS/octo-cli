@@ -90,6 +90,10 @@ jobs:
           version: "~> v2"
           args: release --clean --skip=publish,announce
         env:
+          # A stable tag may promote the exact commit used by a prerelease tag.
+          # GoReleaser otherwise chooses one of the colocated tags itself and
+          # can embed/archive the prerelease version during a stable release.
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Run-scoped artifact consumed by both release-upload and publish-npm in
