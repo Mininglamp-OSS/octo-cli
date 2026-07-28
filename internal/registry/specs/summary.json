@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Octo Summary Bot Read API",
+    "title": "Octo Summary Bot API",
     "version": "1.0.0",
-    "description": "Read-only access to summaries visible to the bot owner's identity. The backend resolves owner and space from the bot token."
+    "description": "Read summaries and create owner-only summaries through a personal bot. The backend resolves owner and space from the bot token."
   },
   "x-octo-service": "summary",
   "x-octo-base-url": "OCTO_API_BASE_URL",
@@ -12,6 +12,92 @@
   "x-octo-status-values": ["waiting(0)", "waiting_confirm(1)", "processing(2)", "completed(3)", "failed(4)", "cancelled(5)"],
   "paths": {
     "/summary/api/v1/bot/summaries": {
+      "post": {
+        "operationId": "summary.create",
+        "summary": "Create an asynchronous owner-only summary from explicitly authorized sources.",
+        "description": "Requires a stable Idempotency-Key. Owner, bot and space come from the bf_* token. Complex time_range and sources values must be supplied through --data.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "idempotency-key",
+            "schema": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+            "description": "Stable caller-generated key. Retries with the same bot, space and key return the original task."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["time_range", "sources"],
+                "properties": {
+                  "title": { "type": "string", "maxLength": 2300 },
+                  "topic": { "type": "string", "maxLength": 2300 },
+                  "time_range": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["start", "end"],
+                    "properties": {
+                      "start": { "type": "string", "format": "date-time" },
+                      "end": { "type": "string", "format": "date-time" }
+                    }
+                  },
+                  "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["source_type", "source_id"],
+                      "properties": {
+                        "source_type": { "type": "integer", "enum": [1, 2, 3], "description": "1=group, 2=thread, 3=DM" },
+                        "source_id": { "type": "string", "minLength": 1 }
+                      }
+                    }
+                  },
+                  "origin_channel_id": { "type": "string", "description": "Optional; must be one of sources." },
+                  "origin_channel_type": { "type": "integer", "enum": [1, 2, 3] },
+                  "include_archived": { "type": "boolean", "default": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. A replay returns the same envelope with HTTP 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "task_id": { "type": "integer" },
+                        "task_no": { "type": "string" },
+                        "status": { "type": "integer" },
+                        "trigger_type": { "type": "integer", "enum": [4] },
+                        "creator_id": { "type": "string" },
+                        "creator_bot_id": { "type": "string" },
+                        "created_at": { "type": "string", "format": "date-time" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "operationId": "summary.list",
         "summary": "List summaries visible to the bot owner. Returns a page {total, items}; keyword matches title OR topic; space and effective reader are resolved server-side from the bot token.",
@@ -22,7 +108,7 @@
           { "name": "page_size", "in": "query", "x-octo-flag": "page-size", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }, "description": "Items per page (1-100); values >100 are silently reset to 20 server-side." },
           { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "Substring matched against summary title OR topic." },
           { "name": "status", "in": "query", "schema": { "type": "integer", "enum": [0, 1, 2, 3, 4, 5] }, "description": "Task status filter. 0=waiting (caller-specific aggregate: status 0, OR a pending participant/schedule invitation, OR an unsubmitted personal result on a multi-participant task — so status-0 rows may not have status field 0), 1=waiting_confirm, 2=processing, 3=completed, 4=failed, 5=cancelled." },
-          { "name": "trigger_type", "in": "query", "x-octo-flag": "trigger-type", "schema": { "type": "integer", "enum": [1, 2, 3] }, "description": "How the summary was triggered: 1=manual, 2=scheduled, 3=agent." },
+          { "name": "trigger_type", "in": "query", "x-octo-flag": "trigger-type", "schema": { "type": "integer", "enum": [1, 2, 3, 4] }, "description": "How the summary was triggered: 1=manual, 2=scheduled, 3=agent, 4=bot." },
           { "name": "origin_channel_id", "in": "query", "x-octo-flag": "origin-channel-id", "schema": { "type": "string" }, "description": "Filter to summaries whose origin channel matches this id." },
           { "name": "created_after", "in": "query", "x-octo-flag": "created-after", "schema": { "type": "string", "format": "date-time" }, "description": "RFC3339 timestamp, e.g. 2026-07-01T00:00:00Z. Malformed values are silently ignored by the server (filter not applied)." },
           { "name": "created_before", "in": "query", "x-octo-flag": "created-before", "schema": { "type": "string", "format": "date-time" }, "description": "RFC3339 timestamp, e.g. 2026-07-31T23:59:59Z. Malformed values are silently ignored by the server (filter not applied)." },

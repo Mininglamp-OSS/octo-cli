@@ -1,6 +1,7 @@
 package service
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 func TestSummaryRegistryShape(t *testing.T) {
 	reg := registry.MustNew()
 	wants := map[string]string{
+		"summary.create": "/summary/api/v1/bot/summaries",
 		"summary.list":   "/summary/api/v1/bot/summaries",
 		"summary.get":    "/summary/api/v1/bot/summaries/{id}",
 		"summary.result": "/summary/api/v1/bot/summaries/{id}/result",
@@ -20,7 +22,11 @@ func TestSummaryRegistryShape(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing %s", id)
 		}
-		if op.Method != http.MethodGet || op.Path != path || op.SpaceHeader || op.Risk != "read" || op.BaseURLEnv != "OCTO_API_BASE_URL" {
+		wantMethod, wantRisk := http.MethodGet, "read"
+		if id == "summary.create" {
+			wantMethod, wantRisk = http.MethodPost, "write"
+		}
+		if op.Method != wantMethod || op.Path != path || op.SpaceHeader || op.Risk != wantRisk || op.BaseURLEnv != "OCTO_API_BASE_URL" {
 			t.Errorf("%s: got method=%s path=%s space=%v risk=%s base=%s", id, op.Method, op.Path, op.SpaceHeader, op.Risk, op.BaseURLEnv)
 		}
 	}
@@ -35,7 +41,7 @@ func TestSummaryTreeShape(t *testing.T) {
 	if summary == nil {
 		t.Fatal("missing summary service command")
 	}
-	for _, leaf := range []string{"list", "get", "result"} {
+	for _, leaf := range []string{"create", "list", "get", "result"} {
 		if !contains(childNames(summary), leaf) {
 			t.Errorf("summary: missing %q; got %v", leaf, childNames(summary))
 		}
@@ -45,6 +51,26 @@ func TestSummaryTreeShape(t *testing.T) {
 		t.Fatal("summary list command must exist")
 	} else if list.Flags().Lookup("page-all") != nil {
 		t.Error("summary list must not expose --page-all (backend returns a {total, items} page, no cursor)")
+	}
+}
+
+func TestSummaryCreateSendsIdempotencyHeaderAndBody(t *testing.T) {
+	var gotPath, gotKey, gotSpace, gotBody string
+	root, _, _ := rootWithServiceSpaced(t, "spoofed-space", func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotKey, gotSpace = r.URL.Path, r.Header.Get("Idempotency-Key"), r.Header.Get("X-Space-Id")
+		bodyBytes, _ := io.ReadAll(r.Body)
+		gotBody = string(bodyBytes)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok","data":{"task_id":42,"status":0,"trigger_type":4}}`))
+	})
+	body := `{"title":"weekly","time_range":{"start":"2026-07-21T00:00:00Z","end":"2026-07-28T00:00:00Z"},"sources":[{"source_type":1,"source_id":"group-a"}]}`
+	root.SetArgs([]string{"summary", "create", "--idempotency-key", "weekly-2026w31", "--data", body})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotPath != "/summary/api/v1/bot/summaries" || gotKey != "weekly-2026w31" || gotSpace != "" || !strings.Contains(gotBody, `"group-a"`) {
+		t.Fatalf("path=%q key=%q space=%q body=%s", gotPath, gotKey, gotSpace, gotBody)
 	}
 }
 
