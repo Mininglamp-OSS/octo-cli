@@ -475,33 +475,46 @@ func TestDisabledServiceHiddenFromGlobalSchemaList(t *testing.T) {
 		if s == "matter" {
 			t.Error("global schema --list must not list disabled service `matter`")
 		}
+		if s == "summary" {
+			t.Error("global schema --list must not list disabled service `summary`")
+		}
 	}
 	for _, op := range data["operations"].([]any) {
 		m, _ := op.(map[string]any)
 		if m["service"] == "matter" {
 			t.Errorf("global schema --list leaked a matter op: %v", m["id"])
 		}
+		if m["service"] == "summary" {
+			t.Errorf("global schema --list leaked a summary op: %v", m["id"])
+		}
 	}
 }
 
 func TestDisabledServiceStillIntrospectable(t *testing.T) {
-	f := newTestFactoryWithReg()
-	f.SetConfig(&config.Config{Format: "json"})
+	// Both disabled services must remain introspectable — the schema
+	// surface is deliberately independent of the runtime command tree.
+	// Uses a fresh factory per iteration because TestFactory.Out is an
+	// accumulating buffer: reusing one factory would leave iter 2's
+	// unmarshal parsing two concatenated JSON envelopes and error out.
+	for _, svc := range []string{"matter", "summary"} {
+		f := newTestFactoryWithReg()
+		f.SetConfig(&config.Config{Format: "json"})
 
-	// Explicit domain listing still resolves.
-	out, _, err := execRoot(t, f, "schema", "--list", "matter")
-	if err != nil {
-		t.Fatalf("schema --list matter: %v", err)
-	}
-	var env map[string]any
-	_ = json.Unmarshal([]byte(out), &env)
-	data, _ := env["data"].(map[string]any)
-	if ops, _ := data["operations"].([]any); len(ops) == 0 {
-		t.Error("explicit `schema --list matter` must still return operations")
-	}
+		// Explicit domain listing still resolves.
+		out, _, err := execRoot(t, f, "schema", "--list", svc)
+		if err != nil {
+			t.Fatalf("schema --list %s: %v", svc, err)
+		}
+		var env map[string]any
+		_ = json.Unmarshal([]byte(out), &env)
+		data, _ := env["data"].(map[string]any)
+		if ops, _ := data["operations"].([]any); len(ops) == 0 {
+			t.Errorf("explicit `schema --list %s` must still return operations", svc)
+		}
 
-	// Explicit operation lookup still resolves.
-	if _, _, err := execRoot(t, f, "schema", "matter.list"); err != nil {
-		t.Errorf("explicit `schema matter.list` must still resolve: %v", err)
+		// Explicit operation lookup still resolves.
+		if _, _, err := execRoot(t, f, "schema", svc+".list"); err != nil {
+			t.Errorf("explicit `schema %s.list` must still resolve: %v", svc, err)
+		}
 	}
 }

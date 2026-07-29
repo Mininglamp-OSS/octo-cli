@@ -200,14 +200,15 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		}
 	}
 
-	if len(base) == 0 {
-		return nil, nil
-	}
-
 	// Spec-driven required-field validation. Object/array required fields are
 	// not eligible for flag promotion (promotableKind rejects them), so they
-	// can slip through as absent unless we check here. Primitive requireds are
-	// double-covered by cobra's MarkFlagRequired plus this check — harmless.
+	// can slip through as absent unless we check here. This must run BEFORE
+	// the len(base) == 0 return below: a caller who supplies no --data and
+	// no promoted flags on a POST/PUT with required body fields is exactly
+	// the case we need to catch (round-1 review: `octo-cli summary create
+	// --idempotency-key k` with no body used to reach the backend as an
+	// empty write). Primitive requireds are double-covered by cobra's
+	// MarkFlagRequired plus this check — harmless.
 	if rt.detail != nil && rt.detail.RequestBody != nil {
 		var missing []string
 		for _, name := range rt.detail.RequestBody.Required {
@@ -220,6 +221,10 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 				fmt.Sprintf("--data is missing required field(s): %s", strings.Join(missing, ", ")),
 				"pass the missing fields via --data JSON (or a matching flag when the field is a primitive)")
 		}
+	}
+
+	if len(base) == 0 {
+		return nil, nil
 	}
 	return base, nil
 }
