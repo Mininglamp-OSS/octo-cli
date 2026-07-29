@@ -1,7 +1,7 @@
 ---
 name: octo-summary
 description: Read, create, find, and cite Octo summaries through octo-cli. Use when an agent needs to create an owner-only summary from explicit channels, discover summaries visible to its bot owner, inspect one summary, retrieve its current body, or ground an answer in returned citation metadata. Load after octo-shared.
-disabled: true
+disabled: false
 ---
 
 # Octo Summary
