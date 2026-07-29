@@ -63,3 +63,16 @@ func TestServiceURL_Unified(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceURL_LoopOverride(t *testing.T) {
+	cfg := &Config{
+		APIBaseURL:     "http://api.example",
+		LoopAPIBaseURL: "http://fleet.example",
+	}
+	if got := cfg.ServiceURL("loop"); got != "http://fleet.example" {
+		t.Fatalf("ServiceURL(loop) = %q", got)
+	}
+	if got := cfg.ServiceURL("message"); got != "http://api.example" {
+		t.Fatalf("ServiceURL(message) = %q", got)
+	}
+}

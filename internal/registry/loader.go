@@ -352,6 +352,12 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			if !ok {
 				continue
 			}
+			if ref := stringOf(pm["$ref"]); ref != "" {
+				pm = followComponentRef(doc, ref, "parameters")
+				if pm == nil {
+					continue
+				}
+			}
 			pi := ParamInfo{
 				Name:        stringOf(pm["name"]),
 				In:          stringOf(pm["in"]),
@@ -375,6 +381,9 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	if body, ok := op["requestBody"].(map[string]any); ok {
+		if ref := stringOf(body["$ref"]); ref != "" {
+			body = followComponentRef(doc, ref, "requestBodies")
+		}
 		if s := extractJSONSchema(body); s != nil {
 			resolved := resolveSchema(doc, s)
 			d.RequestBody = &resolved
@@ -457,7 +466,11 @@ func hasSuccessBody(doc, resps map[string]any) bool {
 // followResponseRef resolves a `#/components/responses/<name>` pointer to its
 // response object. It returns nil for any other ref shape or an unknown name.
 func followResponseRef(doc map[string]any, ref string) map[string]any {
-	const prefix = "#/components/responses/"
+	return followComponentRef(doc, ref, "responses")
+}
+
+func followComponentRef(doc map[string]any, ref, section string) map[string]any {
+	prefix := "#/components/" + section + "/"
 	if !strings.HasPrefix(ref, prefix) {
 		return nil
 	}
@@ -466,11 +479,11 @@ func followResponseRef(doc map[string]any, ref string) map[string]any {
 	if !ok {
 		return nil
 	}
-	responses, ok := comps["responses"].(map[string]any)
+	entries, ok := comps[section].(map[string]any)
 	if !ok {
 		return nil
 	}
-	s, _ := responses[name].(map[string]any)
+	s, _ := entries[name].(map[string]any)
 	return s
 }
 
@@ -479,6 +492,9 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 	order := []string{"200", "201", "204"}
 	for _, code := range order {
 		if r, ok := resps[code].(map[string]any); ok {
+			if ref := stringOf(r["$ref"]); ref != "" {
+				r = followResponseRef(doc, ref)
+			}
 			if s := extractJSONSchema(r); s != nil {
 				resolved := resolveSchema(doc, s)
 				return &resolved

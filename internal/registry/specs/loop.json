@@ -1,0 +1,3285 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Fleet Public API",
+    "version": "1.0.0",
+    "description": "Stable Fleet API using product vocabulary: task, expert, expert team, and\nexecution. Legacy internal issue, agent, and squad routes remain separate.\n",
+    "contact": {
+      "name": "Octo API Team"
+    }
+  },
+  "tags": [
+    {
+      "name": "tasks",
+      "description": "Task lifecycle, collaboration, and execution operations."
+    },
+    {
+      "name": "executions",
+      "description": "Execution messages and lifecycle operations."
+    },
+    {
+      "name": "experts",
+      "description": "Expert configuration and runtime operations."
+    },
+    {
+      "name": "expert_templates",
+      "description": "Reusable expert templates."
+    },
+    {
+      "name": "expert_teams",
+      "description": "Expert team and membership operations."
+    }
+  ],
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearer_auth": [
+
+      ]
+    },
+    {
+      "octo_session": [
+
+      ]
+    }
+  ],
+  "x-common-errors": {
+    "400": {
+      "$ref": "#/components/responses/ValidationError"
+    },
+    "401": {
+      "$ref": "#/components/responses/Unauthorized"
+    },
+    "403": {
+      "$ref": "#/components/responses/Forbidden"
+    },
+    "404": {
+      "$ref": "#/components/responses/NotFound"
+    },
+    "429": {
+      "$ref": "#/components/responses/RateLimited"
+    },
+    "500": {
+      "$ref": "#/components/responses/InternalError"
+    }
+  },
+  "paths": {
+    "/api/v1/tasks": {
+      "get": {
+        "summary": "List tasks",
+        "description": "Returns one workspace-scoped page of tasks.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create task",
+        "description": "Creates a task in the authenticated workspace.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/TaskCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/_search": {
+      "get": {
+        "summary": "Search tasks",
+        "description": "Searches tasks using public task and assignee vocabulary.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/_grouped": {
+      "get": {
+        "summary": "Group tasks",
+        "description": "Returns task groups using the requested grouping filters.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.group",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/_child_progress": {
+      "get": {
+        "summary": "Get child progress",
+        "description": "Aggregates child-task progress for the requested parents.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.child_progress",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/_children_by_parent": {
+      "get": {
+        "summary": "List children by parent",
+        "description": "Returns one page of child tasks grouped by parent selection.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.children_by_parent",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/_quick_create": {
+      "post": {
+        "summary": "Queue task creation",
+        "description": "Creates and dispatches a task to exactly one expert or expert team.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.quick_create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/TaskQuickCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "202": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "Get task",
+        "description": "Returns the task identified within the current workspace.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.get",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update task",
+        "description": "Applies the supplied mutable task fields.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.update",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/TaskUpdate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete task",
+        "description": "Deletes the task and returns an empty data object.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.delete",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/comments": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task comments",
+        "description": "Returns one page of comments for the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.comment.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create task comment",
+        "description": "Adds a comment to the task as the authenticated principal.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.comment.create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CommentCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/comments/_trigger_preview": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "post": {
+        "summary": "Preview comment triggers",
+        "description": "Resolves mentions and automation triggers without creating a comment.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.comment.preview",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CommentCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/timeline": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task timeline",
+        "description": "Returns one chronological page of task activity.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.timeline.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/subscribers": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task subscribers",
+        "description": "Returns one page of principals subscribed to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.subscriber.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/subscribe": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "post": {
+        "summary": "Subscribe to task",
+        "description": "Subscribes the authenticated principal or supplied actor target.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.subscribe",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ActorTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/unsubscribe": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "post": {
+        "summary": "Unsubscribe from task",
+        "description": "Removes the authenticated principal or supplied actor target.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.unsubscribe",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ActorTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/executions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task executions",
+        "description": "Returns one page of executions created for the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.execution.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/active_executions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List active executions",
+        "description": "Returns one page of non-terminal executions for the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.active_execution.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/rerun": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "post": {
+        "summary": "Rerun task execution",
+        "description": "Queues a replacement execution from the selected prior execution.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.rerun",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExecutionTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "202": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/executions/{execution_id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        },
+        {
+          "$ref": "#/components/parameters/ExecutionID"
+        }
+      ],
+      "post": {
+        "summary": "Cancel task execution",
+        "description": "Requests cancellation of one execution belonging to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.execution.cancel",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/usage": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "Get task usage",
+        "description": "Returns aggregated execution resource usage for the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.usage",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/reactions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "post": {
+        "summary": "Add task reaction",
+        "description": "Adds the authenticated principal reaction to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.reaction.add",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Reaction"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove task reaction",
+        "description": "Removes the authenticated principal reaction from the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.reaction.remove",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Reaction"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/attachments": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task attachments",
+        "description": "Returns one page of files attached to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.attachment.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/children": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List child tasks",
+        "description": "Returns one page of immediate child tasks.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.child.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/labels": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task labels",
+        "description": "Returns one page of labels attached to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.label.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Attach task label",
+        "description": "Attaches one existing workspace label to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.label.add",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/LabelTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/labels/{label_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        },
+        {
+          "$ref": "#/components/parameters/LabelID"
+        }
+      ],
+      "delete": {
+        "summary": "Detach task label",
+        "description": "Removes one label association and returns the remaining labels.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.label.remove",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/metadata": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task metadata",
+        "description": "Returns the task metadata map without rewriting opaque values.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.metadata.list",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/metadata/{metadata_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        },
+        {
+          "$ref": "#/components/parameters/MetadataID"
+        }
+      ],
+      "put": {
+        "summary": "Set task metadata",
+        "description": "Creates or replaces one opaque task metadata value.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.metadata.set",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/MetadataValue"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete task metadata",
+        "description": "Deletes one metadata key and returns the remaining metadata.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.metadata.delete",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}/pull_requests": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskID"
+        }
+      ],
+      "get": {
+        "summary": "List task pull requests",
+        "description": "Returns one page of pull requests linked to the task.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.pull_request.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/executions/{execution_id}/messages": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExecutionID"
+        }
+      ],
+      "get": {
+        "summary": "List execution messages",
+        "description": "Returns one page of messages produced by the execution.",
+        "tags": [
+          "executions"
+        ],
+        "operationId": "execution.message.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/executions/{execution_id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExecutionID"
+        }
+      ],
+      "post": {
+        "summary": "Cancel execution",
+        "description": "Requests cancellation of the selected execution.",
+        "tags": [
+          "executions"
+        ],
+        "operationId": "execution.cancel",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts": {
+      "get": {
+        "summary": "List experts",
+        "description": "Returns one page of experts in the current workspace.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create expert",
+        "description": "Creates an expert using public expert vocabulary.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/_from_template": {
+      "post": {
+        "summary": "Create expert from template",
+        "description": "Instantiates an expert from the selected template.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.create_from_template",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/TemplateTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "get": {
+        "summary": "Get expert",
+        "description": "Returns one expert from the current workspace.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.get",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update expert",
+        "description": "Applies supplied mutable expert configuration fields.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.update",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertUpdate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/archive": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "post": {
+        "summary": "Archive expert",
+        "description": "Marks the expert unavailable for new task assignment.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.archive",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/restore": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "post": {
+        "summary": "Restore expert",
+        "description": "Restores an archived expert for future assignments.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.restore",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/executions/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "post": {
+        "summary": "Cancel expert executions",
+        "description": "Requests cancellation of active executions owned by the expert.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.execution.cancel",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/executions": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "get": {
+        "summary": "List expert executions",
+        "description": "Returns one page of executions assigned to the expert.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.execution.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/skills": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "get": {
+        "summary": "List expert skills",
+        "description": "Returns one page of skills assigned to the expert.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.skill.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace expert skills",
+        "description": "Replaces the complete expert skill assignment set.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.skill.replace",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/SkillTargets"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add expert skills",
+        "description": "Adds skills without removing existing expert assignments.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.skill.add",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/SkillTargets"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/experts/{expert_id}/env": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertID"
+        }
+      ],
+      "get": {
+        "summary": "Get expert environment",
+        "description": "Returns the expert custom runtime environment variables.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.environment.get",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update expert environment",
+        "description": "Replaces the expert custom runtime environment variables.",
+        "tags": [
+          "experts"
+        ],
+        "operationId": "expert.environment.update",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Environment"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_templates": {
+      "get": {
+        "summary": "List expert templates",
+        "description": "Returns one page of templates available to the workspace.",
+        "tags": [
+          "expert_templates"
+        ],
+        "operationId": "expert_template.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_templates/{template_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TemplateID"
+        }
+      ],
+      "get": {
+        "summary": "Get expert template",
+        "description": "Returns one expert template by stable template identifier.",
+        "tags": [
+          "expert_templates"
+        ],
+        "operationId": "expert_template.get",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_teams": {
+      "get": {
+        "summary": "List expert teams",
+        "description": "Returns one page of expert teams in the workspace.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create expert team",
+        "description": "Creates an expert team and assigns its leader.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.create",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertTeamCreate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_teams/{expert_team_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertTeamID"
+        }
+      ],
+      "get": {
+        "summary": "Get expert team",
+        "description": "Returns one expert team from the current workspace.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.get",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update expert team",
+        "description": "Applies supplied mutable expert-team fields.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.update",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertTeamUpdate"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete expert team",
+        "description": "Deletes the expert team and returns an empty data object.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.delete",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_teams/{expert_team_id}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertTeamID"
+        }
+      ],
+      "get": {
+        "summary": "List expert team members",
+        "description": "Returns one page of expert-team members.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.member.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Add expert team member",
+        "description": "Adds one expert or nested expert team as a member.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.member.add",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertTeamMember"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove expert team member",
+        "description": "Removes one supplied member from the expert team.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.member.remove",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertTeamMemberTarget"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Empty"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_teams/{expert_team_id}/members/role": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertTeamID"
+        }
+      ],
+      "patch": {
+        "summary": "Update expert team member role",
+        "description": "Changes one member role without replacing membership.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.member.update",
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ExpertTeamMember"
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/api/v1/expert_teams/{expert_team_id}/member_statuses": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ExpertTeamID"
+        }
+      ],
+      "get": {
+        "summary": "List expert team member statuses",
+        "description": "Returns current workload status for all team members.",
+        "tags": [
+          "expert_teams"
+        ],
+        "operationId": "expert_team.member_status.list",
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer_auth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Loop credential or supported long-lived Octo server credential."
+      },
+      "octo_session": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Token",
+        "description": "Octo session token accepted directly by Fleet."
+      }
+    },
+    "parameters": {
+      "Page": {
+        "name": "page",
+        "in": "query",
+        "description": "One-based page number.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "PageSize": {
+        "name": "page_size",
+        "in": "query",
+        "description": "Number of resources per page.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "TaskID": {
+        "name": "task_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable task identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ExecutionID": {
+        "name": "execution_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable execution identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ExpertID": {
+        "name": "expert_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable expert identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ExpertTeamID": {
+        "name": "expert_team_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable expert-team identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "LabelID": {
+        "name": "label_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable label identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "MetadataID": {
+        "name": "metadata_id",
+        "in": "path",
+        "required": true,
+        "description": "Metadata key encoded as a path identifier.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TemplateID": {
+        "name": "template_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable expert-template slug or identifier.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "requestBodies": {
+      "TaskCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/TaskCreate"
+            }
+          }
+        }
+      },
+      "TaskUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/TaskUpdate"
+            }
+          }
+        }
+      },
+      "TaskQuickCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/TaskQuickCreate"
+            }
+          }
+        }
+      },
+      "CommentCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CommentCreate"
+            }
+          }
+        }
+      },
+      "ActorTarget": {
+        "required": false,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ActorTarget"
+            }
+          }
+        }
+      },
+      "ExecutionTarget": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "execution_id"
+              ],
+              "properties": {
+                "execution_id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Reaction": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "emoji"
+              ],
+              "properties": {
+                "emoji": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "LabelTarget": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "label_id"
+              ],
+              "properties": {
+                "label_id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MetadataValue": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "value"
+              ],
+              "properties": {
+                "value": {
+                }
+              }
+            }
+          }
+        }
+      },
+      "ExpertCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertCreate"
+            }
+          }
+        }
+      },
+      "ExpertUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertUpdate"
+            }
+          }
+        }
+      },
+      "TemplateTarget": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "template_id",
+                "name",
+                "runtime_id"
+              ],
+              "properties": {
+                "template_id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "runtime_id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SkillTargets": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "skill_ids"
+              ],
+              "properties": {
+                "skill_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Environment": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "custom_env"
+              ],
+              "properties": {
+                "custom_env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ExpertTeamCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertTeamCreate"
+            }
+          }
+        }
+      },
+      "ExpertTeamUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertTeamUpdate"
+            }
+          }
+        }
+      },
+      "ExpertTeamMember": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertTeamMember"
+            }
+          }
+        }
+      },
+      "ExpertTeamMemberTarget": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ExpertTeamMemberTarget"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Resource": {
+        "description": "Resource returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ResourceEnvelope"
+            }
+          }
+        }
+      },
+      "Collection": {
+        "description": "Paginated collection returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CollectionEnvelope"
+            }
+          }
+        }
+      },
+      "Empty": {
+        "description": "Operation completed with no resource payload.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/EmptyEnvelope"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "VALIDATION_ERROR — request fields or pagination are invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "AUTH_REQUIRED — credentials are absent or invalid.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "FORBIDDEN — principal lacks the required action.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "NOT_FOUND — requested workspace resource does not exist.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "RATE_LIMITED — request rate exceeded the configured limit.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "INTERNAL_ERROR — Fleet could not complete the operation.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ResourceEnvelope": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "CollectionEnvelope": {
+        "type": "object",
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/OffsetPagination"
+          }
+        }
+      },
+      "EmptyEnvelope": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "maxProperties": 0
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "AUTH_REQUIRED",
+                  "FORBIDDEN",
+                  "NOT_FOUND",
+                  "CONFLICT",
+                  "DUPLICATE",
+                  "VALIDATION_ERROR",
+                  "PAYLOAD_TOO_LARGE",
+                  "UNSUPPORTED_MEDIA_TYPE",
+                  "CLIENT_VERSION_TOO_OLD",
+                  "RATE_LIMITED",
+                  "INTERNAL_ERROR",
+                  "UPSTREAM_UNAVAILABLE"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "hint": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "OffsetPagination": {
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "TaskCreate": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "parent_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team",
+              "member"
+            ]
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "priority": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "parent_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team",
+              "member"
+            ]
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskQuickCreate": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "expert_id"
+            ]
+          },
+          {
+            "required": [
+              "expert_team_id"
+            ]
+          }
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expert_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expert_team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "CommentCreate": {
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attachment_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "ActorTarget": {
+        "type": "object",
+        "properties": {
+          "user_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team",
+              "member"
+            ]
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertCreate": {
+        "type": "object",
+        "required": [
+          "name",
+          "runtime_id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertTeamCreate": {
+        "type": "object",
+        "required": [
+          "name",
+          "leader_expert_id"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "leader_expert_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertTeamUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string"
+          },
+          "leader_expert_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertTeamMemberTarget": {
+        "type": "object",
+        "required": [
+          "member_type",
+          "member_id"
+        ],
+        "properties": {
+          "member_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "member"
+            ]
+          },
+          "member_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ExpertTeamMember": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ExpertTeamMemberTarget"
+          },
+          {
+            "type": "object",
+            "required": [
+              "role"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "x-octo-source": "octo-fleet/openapi/public-v1.yaml",
+  "x-octo-service": "loop",
+  "x-octo-base-url": "OCTO_LOOP_API_BASE_URL",
+  "x-octo-space-header": false
+}

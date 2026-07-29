@@ -1,17 +1,16 @@
 package credential
 
-// Token prefixes route a bot token to its kind. app_* is an App Bot; bf_* is a
-// User Bot; uk_* is a user API key (real-person identity, used for message
-// search). The prefix is the only thing the CLI inspects — routing is otherwise
-// server-side.
+// Token prefixes describe the credential format. They never determine a Loop
+// principal class; Fleet derives human/device/execution identity only after
+// server-side verification.
 const (
 	prefixApp     = "app_"
 	prefixUser    = "bf_"
 	prefixUserKey = "uk_"
+	prefixLoop    = "octo_loop_"
 )
 
-// TokenKind classifies a token by its prefix: "app_bot", "user_bot",
-// "user_key", or "unknown". An empty token returns "".
+// TokenKind classifies only the token format. An empty token returns "".
 func TokenKind(tok string) string {
 	switch {
 	case tok == "":
@@ -22,6 +21,8 @@ func TokenKind(tok string) string {
 		return "user_bot"
 	case hasPrefix(tok, prefixUserKey):
 		return "user_key"
+	case hasPrefix(tok, prefixLoop):
+		return "loop_credential"
 	}
 	return "unknown"
 }
@@ -53,6 +54,8 @@ func MaskToken(tok string) string {
 		prefix = prefixUser
 	case hasPrefix(tok, prefixUserKey):
 		prefix = prefixUserKey
+	case hasPrefix(tok, prefixLoop):
+		prefix = prefixLoop
 	default:
 		// Unknown kind: reveal nothing. Without a recognized prefix there is no
 		// way to say what the revealed head/tail belong to, so don't leak it.

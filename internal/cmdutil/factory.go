@@ -352,7 +352,7 @@ func WrapCLIError(err error) error {
 	case strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
-		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an app_* or bf_* token")
+		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an Octo or Loop bearer credential")
 	case strings.Contains(lower, "unknown flag"),
 		strings.Contains(lower, "unknown command"),
 		strings.Contains(lower, "unknown subcommand"),

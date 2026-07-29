@@ -12,8 +12,8 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 104 operations
-across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
+octo-cli is **metadata-driven**. The command tree is auto-registered at startup
+from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
 
@@ -34,6 +34,14 @@ Key properties:
 - **Agent-first output.** A stable JSON envelope with identity, data,
   pagination, and rate-limit metadata; a small fixed error taxonomy.
 
+### Reusable Go client
+
+The public `github.com/Mininglamp-OSS/octo-cli/client` package is independent
+from Cobra and CLI profile storage. A single client instance can route both
+Octo and Fleet/Loop requests through service-specific endpoints and tokens.
+Loop DTOs and business compatibility aliases deliberately stay outside this
+transport package.
+
 ## Domains
 
 | Domain    | Ops | Purpose                                                        |
@@ -47,6 +55,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
+| `loop`    | 61  | Fleet control plane — tasks, executions, experts, expert templates, and expert teams |
 
 ## Installation
 
@@ -133,6 +142,10 @@ octo-cli docs content get doc-123          # returns the body + base version tok
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
+
+# Fleet/Loop can use the same gateway or an independent local endpoint.
+OCTO_LOOP_API_BASE_URL="http://127.0.0.1:8081" \
+  OCTO_BOT_TOKEN="octo_loop_your_credential" octo-cli loop task list
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
@@ -198,7 +211,8 @@ All backend services are accessed through a single API base URL.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Required.       |
+| `OCTO_BOT_TOKEN`    | Active Octo or Loop bearer credential. Required.         |
+| `OCTO_LOOP_API_BASE_URL` | Optional Fleet/Loop endpoint; defaults to `OCTO_API_BASE_URL`. |
 | `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
 | `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |

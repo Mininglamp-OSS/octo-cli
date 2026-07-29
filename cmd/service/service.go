@@ -210,10 +210,12 @@ func extractPathParams(path string) []string {
 	}
 }
 
-// serviceForBaseURL maps the spec's x-octo-base-url env-var name to the
-// config-level service key used by client.Request.Service. With the unified
-// gateway model all services route to the same URL, so this always returns
-// empty (default service). Retained for interface compatibility.
-func serviceForBaseURL(_ string) string {
+// serviceForBaseURL maps a spec endpoint to the config-level routing key. Loop
+// may use a standalone Fleet endpoint during local integration; all existing
+// Octo services continue to use the unified default URL.
+func serviceForBaseURL(baseURLEnv string) string {
+	if baseURLEnv == "OCTO_LOOP_API_BASE_URL" {
+		return "loop"
+	}
 	return ""
 }

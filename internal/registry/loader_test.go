@@ -11,7 +11,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "marketplace", "matter", "message", "summary", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "html", "loop", "marketplace", "matter", "message", "summary", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -46,6 +46,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"html":        20,
 		"marketplace": 25,
 		"summary":     3,
+		"loop":        61,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -58,6 +59,31 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestLoopPublicContractResolvesSharedComponents(t *testing.T) {
+	r := MustNew()
+	create, ok := r.GetOperation("task.create")
+	if !ok {
+		t.Fatal("task.create: not found")
+	}
+	if create.Path != "/api/v1/tasks" || create.BaseURLEnv != "OCTO_LOOP_API_BASE_URL" {
+		t.Fatalf("task.create route = %s (%s)", create.Path, create.BaseURLEnv)
+	}
+	if create.RequestBody == nil {
+		t.Fatal("task.create request body ref was not resolved")
+	}
+	if _, ok := create.RequestBody.Properties["title"]; !ok {
+		t.Fatalf("task.create body properties = %v", create.RequestBody.Properties)
+	}
+
+	list, ok := r.GetOperation("task.list")
+	if !ok {
+		t.Fatal("task.list: not found")
+	}
+	if len(list.Parameters) < 2 || list.Parameters[0].Name == "" {
+		t.Fatalf("task.list parameter refs were not resolved: %+v", list.Parameters)
 	}
 }
 

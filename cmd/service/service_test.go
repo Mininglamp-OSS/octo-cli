@@ -91,6 +91,13 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 		"message": {"edit", "read-receipt", "send", "sync"},
 		"event":   {"ack", "list"},
 	}
+
+	loop := findCmd(root, "loop")
+	for _, resource := range []string{"task", "execution", "expert", "expert-template", "expert-team"} {
+		if findCmd(loop, resource) == nil {
+			t.Errorf("loop: missing resource %q; got %v", resource, childNames(loop))
+		}
+	}
 	for svc, wantCmds := range want {
 		svcCmd := findCmd(root, svc)
 		if svcCmd == nil {
@@ -113,6 +120,46 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	timeline := findCmd(matter, "timeline")
 	if timeline == nil || !contains(childNames(timeline), "add") || !contains(childNames(timeline), "list") || !contains(childNames(timeline), "delete") {
 		t.Errorf("matter timeline should nest add/list/delete; got %v", childNames(timeline))
+	}
+}
+
+func TestLoopCommandUsesFleetEndpointAndPublicPath(t *testing.T) {
+	var gotPath, gotAuth, gotSpace string
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotSpace = r.Header.Get("X-Space-Id")
+		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
+	}))
+	defer fleet.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL:     "http://octo.invalid",
+		LoopAPIBaseURL: fleet.URL,
+		BotToken:       "octo_loop_test",
+		Format:         "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_loop_test", SpaceID: "space-from-legacy-profile"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "task", "get", "task-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop task get: %v", err)
+	}
+	if gotPath != "/api/v1/tasks/task-1" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer octo_loop_test" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotSpace != "" {
+		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
 	}
 }
 
