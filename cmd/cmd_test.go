@@ -446,8 +446,8 @@ func TestDisabledServiceWithheldFromCommandTree(t *testing.T) {
 	if topLevelCmd(root, "matter") != nil {
 		t.Error("disabled service `matter` must not appear in the command tree")
 	}
-	if topLevelCmd(root, "summary") == nil {
-		t.Error("enabled service `summary` must appear in the command tree")
+	if topLevelCmd(root, "summary") != nil {
+		t.Error("disabled service `summary` must not appear in the command tree (see CHANGELOG withhold note)")
 	}
 	if topLevelCmd(root, "message") == nil {
 		t.Error("enabled service `message` must still appear")

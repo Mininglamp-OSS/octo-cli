@@ -74,6 +74,45 @@ func TestSummaryCreateSendsIdempotencyHeaderAndBody(t *testing.T) {
 	}
 }
 
+func TestSummaryCreateRejectsMissingTimeRangeAndSources(t *testing.T) {
+	// Jerry-Xin's P1 on octo-cli PR #113: `summary create` must fail locally
+	// when --data omits the required `time_range`/`sources` object/array
+	// properties. cobra's MarkFlagRequired only covers promoted primitives,
+	// so the gap is closed in resolveBody by walking the spec's
+	// requestBody.required list.
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"empty body", ""},
+		{"only title", `{"title":"weekly"}`},
+		{"time_range without sources", `{"time_range":{"start":"2026-07-21T00:00:00Z","end":"2026-07-28T00:00:00Z"}}`},
+		{"sources without time_range", `{"sources":[{"source_type":1,"source_id":"g1"}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Fatalf("request should not have reached the backend (data=%q)", tc.data)
+			})
+			args := []string{"summary", "create", "--idempotency-key", "k"}
+			if tc.data != "" {
+				args = append(args, "--data", tc.data)
+			}
+			root.SetArgs(args)
+			err := root.Execute()
+			if err == nil {
+				t.Fatalf("summary create with data=%q must fail validation locally", tc.data)
+			}
+			// Sanity check the error text mentions at least one required field,
+			// so an agent gets an actionable message instead of a bare 400.
+			msg := err.Error()
+			if !strings.Contains(msg, "time_range") && !strings.Contains(msg, "sources") {
+				t.Errorf("expected error to name the missing required field(s), got %q", msg)
+			}
+		})
+	}
+}
+
 func TestSummaryListSendsBearerWithoutSpaceHeader(t *testing.T) {
 	var gotPath, gotQuery, gotAuth, gotSpace string
 	root, _, _ := rootWithServiceSpaced(t, "spoofed-space", func(w http.ResponseWriter, r *http.Request) {

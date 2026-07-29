@@ -154,6 +154,17 @@ func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) map[string]stri
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data
 // nor any promoted fields. Explicit flags override --data fields.
+//
+// After merging --data with promoted flag values, this checks the resolved
+// map against the operation's declared `required` list from the spec. Any
+// required field that neither --data nor a flag supplied fails locally with
+// a validation error rather than being forwarded as a partial write. The
+// primitive-required contract (a required *primitive* body property gets a
+// cobra MarkFlagRequired in registerBodyFlags) is unchanged; this closes the
+// gap left by required *object/array* properties like `time_range` and
+// `sources`, which cannot be promoted to flags and previously reached the
+// backend as an empty or partial payload (see summary.create + octo-cli
+// PR #113 review).
 func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRuntime) (any, error) {
 	if rt.bodyData == nil && len(rt.bodyFlags) == 0 {
 		return nil, nil
@@ -191,6 +202,24 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 
 	if len(base) == 0 {
 		return nil, nil
+	}
+
+	// Spec-driven required-field validation. Object/array required fields are
+	// not eligible for flag promotion (promotableKind rejects them), so they
+	// can slip through as absent unless we check here. Primitive requireds are
+	// double-covered by cobra's MarkFlagRequired plus this check — harmless.
+	if rt.detail != nil && rt.detail.RequestBody != nil {
+		var missing []string
+		for _, name := range rt.detail.RequestBody.Required {
+			if _, ok := base[name]; !ok {
+				missing = append(missing, name)
+			}
+		}
+		if len(missing) > 0 {
+			return nil, output.ErrValidation(
+				fmt.Sprintf("--data is missing required field(s): %s", strings.Join(missing, ", ")),
+				"pass the missing fields via --data JSON (or a matching flag when the field is a primitive)")
+		}
 	}
 	return base, nil
 }
