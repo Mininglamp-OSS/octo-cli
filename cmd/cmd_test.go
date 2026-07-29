@@ -446,6 +446,9 @@ func TestDisabledServiceWithheldFromCommandTree(t *testing.T) {
 	if topLevelCmd(root, "matter") != nil {
 		t.Error("disabled service `matter` must not appear in the command tree")
 	}
+	if topLevelCmd(root, "summary") != nil {
+		t.Error("disabled service `summary` must not appear in the command tree")
+	}
 	if topLevelCmd(root, "message") == nil {
 		t.Error("enabled service `message` must still appear")
 	}
@@ -472,11 +475,17 @@ func TestDisabledServiceHiddenFromGlobalSchemaList(t *testing.T) {
 		if s == "matter" {
 			t.Error("global schema --list must not list disabled service `matter`")
 		}
+		if s == "summary" {
+			t.Error("global schema --list must not list disabled service `summary`")
+		}
 	}
 	for _, op := range data["operations"].([]any) {
 		m, _ := op.(map[string]any)
 		if m["service"] == "matter" {
 			t.Errorf("global schema --list leaked a matter op: %v", m["id"])
+		}
+		if m["service"] == "summary" {
+			t.Errorf("global schema --list leaked a summary op: %v", m["id"])
 		}
 	}
 }
@@ -500,5 +509,10 @@ func TestDisabledServiceStillIntrospectable(t *testing.T) {
 	// Explicit operation lookup still resolves.
 	if _, _, err := execRoot(t, f, "schema", "matter.list"); err != nil {
 		t.Errorf("explicit `schema matter.list` must still resolve: %v", err)
+	}
+
+	// summary is likewise disabled but must stay introspectable.
+	if _, _, err := execRoot(t, f, "schema", "summary.list"); err != nil {
+		t.Errorf("explicit `schema summary.list` must still resolve: %v", err)
 	}
 }

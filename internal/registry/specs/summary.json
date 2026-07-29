@@ -1,0 +1,185 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Summary Bot Read API",
+    "version": "1.0.0",
+    "description": "Read-only access to summaries visible to the bot owner's identity. The backend resolves owner and space from the bot token."
+  },
+  "x-octo-service": "summary",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "x-octo-disabled": true,
+  "x-octo-status-values": ["waiting(0)", "waiting_confirm(1)", "processing(2)", "completed(3)", "failed(4)", "cancelled(5)"],
+  "paths": {
+    "/summary/api/v1/bot/summaries": {
+      "get": {
+        "operationId": "summary.list",
+        "summary": "List summaries visible to the bot owner. Returns a page {total, items}; keyword matches title OR topic; space and effective reader are resolved server-side from the bot token.",
+        "description": "Returns a page in {total, items}. keyword matches title or topic. Space and effective reader are resolved server-side from the bot token.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1, "minimum": 1 }, "description": "1-based page number." },
+          { "name": "page_size", "in": "query", "x-octo-flag": "page-size", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 }, "description": "Items per page (1-100); values >100 are silently reset to 20 server-side." },
+          { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "Substring matched against summary title OR topic." },
+          { "name": "status", "in": "query", "schema": { "type": "integer", "enum": [0, 1, 2, 3, 4, 5] }, "description": "Task status filter. 0=waiting (caller-specific aggregate: status 0, OR a pending participant/schedule invitation, OR an unsubmitted personal result on a multi-participant task — so status-0 rows may not have status field 0), 1=waiting_confirm, 2=processing, 3=completed, 4=failed, 5=cancelled." },
+          { "name": "trigger_type", "in": "query", "x-octo-flag": "trigger-type", "schema": { "type": "integer", "enum": [1, 2, 3] }, "description": "How the summary was triggered: 1=manual, 2=scheduled, 3=agent." },
+          { "name": "origin_channel_id", "in": "query", "x-octo-flag": "origin-channel-id", "schema": { "type": "string" }, "description": "Filter to summaries whose origin channel matches this id." },
+          { "name": "created_after", "in": "query", "x-octo-flag": "created-after", "schema": { "type": "string", "format": "date-time" }, "description": "RFC3339 timestamp, e.g. 2026-07-01T00:00:00Z. Malformed values are silently ignored by the server (filter not applied)." },
+          { "name": "created_before", "in": "query", "x-octo-flag": "created-before", "schema": { "type": "string", "format": "date-time" }, "description": "RFC3339 timestamp, e.g. 2026-07-31T23:59:59Z. Malformed values are silently ignored by the server (filter not applied)." },
+          { "name": "sort_by", "in": "query", "x-octo-flag": "sort-by", "schema": { "type": "string", "enum": ["created_at", "updated_at"], "default": "created_at" }, "description": "Sort field." },
+          { "name": "sort_order", "in": "query", "x-octo-flag": "sort-order", "schema": { "type": "string", "enum": ["asc", "desc"], "default": "desc" }, "description": "Sort direction." }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary page (wrapped in the backend {code, message, data} envelope; via octo-cli the jq path is .data.data.items[]).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "Backend envelope. octo-cli nests this under its own `data`, so the effective jq path is `.data.data.*`.",
+                  "properties": {
+                    "code": { "type": "integer", "description": "0 on success." },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "description": "Total matching summaries (not just this page)." },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "task_id": { "type": "integer" },
+                              "task_no": { "type": "string" },
+                              "title": { "type": "string" },
+                              "topic": { "type": "string", "description": "Free-text topic; keyword also matches this." },
+                              "status": { "type": "integer", "description": "0=waiting,1=waiting_confirm,2=processing,3=completed,4=failed,5=cancelled" },
+                              "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent" },
+                              "summary_mode": { "type": "integer" },
+                              "origin_channel_id": { "type": "string" },
+                              "sources": { "type": "array", "description": "Source channels/scopes the summary was built from." },
+                              "participants": { "type": "array", "description": "Participants of a multi-person summary." },
+                              "creator_name": { "type": "string" },
+                              "total_msg_count": { "type": "integer" },
+                              "created_at": { "type": "string", "description": "RFC3339 timestamp" },
+                              "completed_at": { "type": "string", "description": "RFC3339 timestamp; empty until completed." },
+                              "activity_at": { "type": "string", "description": "RFC3339 timestamp of last activity." },
+                              "is_unread": { "type": "boolean" },
+                              "needs_attention": { "type": "boolean" },
+                              "schedule_id": { "type": "integer", "description": "Present for scheduled summaries." }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/summary/api/v1/bot/summaries/{id}": {
+      "get": {
+        "operationId": "summary.get",
+        "summary": "Get summary metadata and the current visible result for one task.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Summary task_id." }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary detail (wrapped in the backend {code, message, data} envelope; via octo-cli the jq path is .data.data.*).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "task_id": { "type": "integer" },
+                        "task_no": { "type": "string" },
+                        "title": { "type": "string" },
+                        "topic": { "type": "string" },
+                        "status": { "type": "integer", "description": "0=waiting,1=waiting_confirm,2=processing,3=completed,4=failed,5=cancelled" },
+                        "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent" },
+                        "origin_channel_id": { "type": "string" },
+                        "created_at": { "type": "string", "description": "RFC3339 timestamp" },
+                        "updated_at": { "type": "string", "description": "RFC3339 timestamp" },
+                        "result": {
+                          "type": ["object", "null"],
+                          "description": "Current visible result; null until the task completes.",
+                          "properties": {
+                            "content": { "type": "string", "description": "Summary body (markdown)." }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/summary/api/v1/bot/summaries/{id}/result": {
+      "get": {
+        "operationId": "summary.result",
+        "summary": "Get the current summary body and citation metadata. Citation context_before/context_after is omitted on bot routes; for a by-person summary the caller does not own, plain `citations` is returned empty while `team_citations` still carries the index→author mapping.",
+        "description": "Citation context_before/context_after is omitted on bot routes. For SummaryMode=by-person, plain `citations` is empty unless the caller owns the producing personal result (`team_citations` still populated).",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" }, "description": "Summary task_id." }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current summary result (wrapped in the backend {code, message, data} envelope; via octo-cli the jq path is .data.data.*).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer" },
+                    "message": { "type": "string" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "content": { "type": "string", "description": "Summary body (markdown), with [n] citation markers." },
+                        "citations": {
+                          "type": "array",
+                          "description": "Grounding messages for [n] markers. context_before/context_after are omitted on bot routes; empty for a by-person summary the caller does not own.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": { "type": "integer", "description": "The [n] marker this entry grounds." },
+                              "sender": { "type": "string" },
+                              "sent_at": { "type": "string", "description": "RFC3339 timestamp" },
+                              "source": { "type": "string", "description": "Origin channel/source label." },
+                              "message_seq": { "type": "integer", "description": "Message sequence in the source channel." },
+                              "content": { "type": "string", "description": "Quoted message text (not stripped on bot routes; use this to attribute claims)." },
+                              "channel_id": { "type": "string" },
+                              "channel_type": { "type": "integer" }
+                            }
+                          }
+                        },
+                        "team_citations": {
+                          "type": "array",
+                          "description": "Index→author mapping for by-person / team summaries; always returned."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
