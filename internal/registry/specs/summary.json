@@ -8,7 +8,7 @@
   "x-octo-service": "summary",
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
-  "x-octo-disabled": false,
+  "x-octo-disabled": true,
   "x-octo-status-values": ["waiting(0)", "waiting_confirm(1)", "processing(2)", "completed(3)", "failed(4)", "cancelled(5)"],
   "paths": {
     "/summary/api/v1/bot/summaries": {

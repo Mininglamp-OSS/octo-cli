@@ -446,8 +446,8 @@ func TestDisabledServiceWithheldFromCommandTree(t *testing.T) {
 	if topLevelCmd(root, "matter") != nil {
 		t.Error("disabled service `matter` must not appear in the command tree")
 	}
-	if topLevelCmd(root, "summary") == nil {
-		t.Error("enabled service `summary` must appear in the command tree")
+	if topLevelCmd(root, "summary") != nil {
+		t.Error("disabled service `summary` must not appear in the command tree (see CHANGELOG withhold note)")
 	}
 	if topLevelCmd(root, "message") == nil {
 		t.Error("enabled service `message` must still appear")
@@ -475,19 +475,28 @@ func TestDisabledServiceHiddenFromGlobalSchemaList(t *testing.T) {
 		if s == "matter" {
 			t.Error("global schema --list must not list disabled service `matter`")
 		}
+		if s == "summary" {
+			t.Error("global schema --list must not list disabled service `summary`")
+		}
 	}
 	for _, op := range data["operations"].([]any) {
 		m, _ := op.(map[string]any)
 		if m["service"] == "matter" {
 			t.Errorf("global schema --list leaked a matter op: %v", m["id"])
 		}
+		if m["service"] == "summary" {
+			t.Errorf("global schema --list leaked a summary op: %v", m["id"])
+		}
 	}
 }
 
 func TestDisabledServiceStillIntrospectable(t *testing.T) {
-	// Disabled services remain introspectable — the schema surface is
-	// deliberately independent of the runtime command tree.
-	for _, svc := range []string{"matter"} {
+	// Both disabled services must remain introspectable — the schema
+	// surface is deliberately independent of the runtime command tree.
+	// Uses a fresh factory per iteration because TestFactory.Out is an
+	// accumulating buffer: reusing one factory would leave iter 2's
+	// unmarshal parsing two concatenated JSON envelopes and error out.
+	for _, svc := range []string{"matter", "summary"} {
 		f := newTestFactoryWithReg()
 		f.SetConfig(&config.Config{Format: "json"})
 
