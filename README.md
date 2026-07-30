@@ -34,14 +34,6 @@ Key properties:
 - **Agent-first output.** A stable JSON envelope with identity, data,
   pagination, and rate-limit metadata; a small fixed error taxonomy.
 
-### Reusable Go client
-
-The public `github.com/Mininglamp-OSS/octo-cli/client` package is independent
-from Cobra and CLI profile storage. A single client instance can route both
-Octo and Fleet/Loop requests through service-specific endpoints and tokens.
-Loop DTOs and business compatibility aliases deliberately stay outside this
-transport package.
-
 ## Domains
 
 | Domain    | Ops | Purpose                                                        |
