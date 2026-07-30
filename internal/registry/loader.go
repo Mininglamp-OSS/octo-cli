@@ -148,9 +148,11 @@ type ParamInfo struct {
 	Description string      `json:"description,omitempty"`
 	Default     any         `json:"default,omitempty"`
 	Enum        []any       `json:"enum,omitempty"`
-	MinLength   int         `json:"min_length,omitempty"`
-	MaxLength   int         `json:"max_length,omitempty"`
-	Pattern     string      `json:"pattern,omitempty"`
+	// String constraints are exposed as schema metadata for callers; request
+	// validation remains the responsibility of the service backend.
+	MinLength int    `json:"min_length,omitempty"`
+	MaxLength int    `json:"max_length,omitempty"`
+	Pattern   string `json:"pattern,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag
 	// extension on the parameter. It lets a spec expose a header/query param
 	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
@@ -173,12 +175,14 @@ type SchemaInfo struct {
 	Enum        []any                 `json:"enum,omitempty"`
 	Format      string                `json:"format,omitempty"`
 	Description string                `json:"description,omitempty"`
-	MinLength   int                   `json:"min_length,omitempty"`
-	MaxLength   int                   `json:"max_length,omitempty"`
-	MinItems    int                   `json:"min_items,omitempty"`
-	MaxItems    int                   `json:"max_items,omitempty"`
-	Pattern     string                `json:"pattern,omitempty"`
-	Ref         string                `json:"$ref,omitempty"`
+	// These constraints are surfaced for schema introspection. The generic CLI
+	// validator currently enforces required and MinItems only.
+	MinLength int    `json:"min_length,omitempty"`
+	MaxLength int    `json:"max_length,omitempty"`
+	MinItems  int    `json:"min_items,omitempty"`
+	MaxItems  int    `json:"max_items,omitempty"`
+	Pattern   string `json:"pattern,omitempty"`
+	Ref       string `json:"$ref,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag extension
 	// on a request-body property, mirroring ParamInfo.FlagName for query/header
 	// params. It lets a promoted body field expose a clean flag name (e.g.
@@ -521,7 +525,7 @@ func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
 
-func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nolint:gocyclo // recursive schema resolver, branching is inherent to OpenAPI
+func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 	if s == nil {
 		return SchemaInfo{}
 	}

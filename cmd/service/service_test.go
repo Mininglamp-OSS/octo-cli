@@ -676,6 +676,20 @@ func TestBuildMultipartBody_FormTextFields(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredBodyFields_SkipsMultipartBinaryProperty(t *testing.T) {
+	rt := &operationRuntime{detail: &registry.OperationDetail{
+		Multipart: true,
+		RequestBody: &registry.SchemaInfo{
+			Type:       "object",
+			Required:   []string{"file", "label"},
+			Properties: map[string]registry.SchemaInfo{"file": {Type: "string", Format: "binary"}, "label": {Type: "string"}},
+		},
+	}}
+	if err := validateRequiredBodyFields(rt, map[string]any{"label": "report"}); err != nil {
+		t.Fatalf("multipart validation must be handled by buildMultipartBody: %v", err)
+	}
+}
+
 // TestBuildMultipartBody_MissingFile confirms the validation error surfaces
 // when --file is empty.
 func TestBuildMultipartBody_MissingFile(t *testing.T) {

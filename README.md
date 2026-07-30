@@ -291,8 +291,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   read/replace.
 - [`octo-summary`](./skills/octo-summary/SKILL.md) — create owner-only summaries
   from explicit sources, then discover, read, and cite summaries visible to the
-  personal Agent's human owner. **Temporarily withheld** while the backend
-  create backend (Mininglamp-OSS/octo-smart-summary#181) is merged and deployed
+  personal Agent's human owner. **Temporarily withheld** while the create
+  backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled
   (not listed by `octo-cli skills`).
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:

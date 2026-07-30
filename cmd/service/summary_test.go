@@ -41,7 +41,16 @@ func TestSummaryRegistryShape(t *testing.T) {
 	if sources := create.RequestBody.Properties["sources"]; sources.MinItems != 1 || sources.MaxItems != 30 {
 		t.Errorf("sources item bounds = %d..%d, want 1..30", sources.MinItems, sources.MaxItems)
 	}
-	key := create.Parameters[0]
+	var key registry.ParamInfo
+	for _, parameter := range create.Parameters {
+		if parameter.Name == "Idempotency-Key" {
+			key = parameter
+			break
+		}
+	}
+	if key.Name == "" {
+		t.Fatal("summary.create missing Idempotency-Key parameter")
+	}
 	if key.MinLength != 1 || key.MaxLength != 128 || key.Pattern == "" {
 		t.Errorf("idempotency key constraints not preserved: %+v", key)
 	}
