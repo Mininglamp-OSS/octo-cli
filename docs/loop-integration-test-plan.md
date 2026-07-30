@@ -2,6 +2,10 @@
 
 Status: test execution pending
 
+The executable, real-Fleet integration design is documented separately in
+`loop-live-integration-test-plan.md`. This file remains the broader release
+test matrix.
+
 Test branch: `feat/loop-integration-test`
 
 The branch contains only the Fleet public API command integration from
