@@ -352,13 +352,7 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 	// leaving only the last page's bytes. No spec op declares both today, so this
 	// never fires in practice; it is a fail-loud guard against a future spec that
 	// wires the two together and would otherwise silently corrupt --output.
-	if firstReq.OutputPath != "" {
-		err := output.ErrWithHint(
-			"internal",
-			"PAGINATION_OUTPUT_CONFLICT",
-			"operation is paginated and also writes a binary body to --output; these are mutually exclusive",
-			"operation-spec bug: an op with x-octo-pagination must not also declare an inline 2xx binary body",
-		)
+	if err := validatePaginationRequest(firstReq); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
@@ -369,50 +363,34 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		return err
 	}
 	pag := rt.detail.Pagination
-	cursorParam := pag.CursorParam
-	if cursorParam == "" {
-		cursorParam = "cursor"
-	}
-	limit := 10
-	if rt.pageLimit != nil && *rt.pageLimit > 0 {
-		limit = *rt.pageLimit
-	}
-
+	cursorParam, limit := paginationControls(rt, pag)
 	merged := make([]json.RawMessage, 0, 64)
 	req := *firstReq
+	seenCursors := paginationSeenCursors(&req, rt, pag, cursorParam)
 	for page := 0; page < limit; page++ {
 		body, err := cli.Do(ctx, &req)
 		if err != nil {
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
-		data, nextCursor, hasMore, perr := parsePage(body)
+		data, nextCursor, hasMore, perr := parsePage(body, pag)
 		if perr != nil {
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
 		}
 		merged = append(merged, data...)
-		if !hasMore || nextCursor == "" {
+		if !hasMore || nextCursor == "" || page+1 >= limit {
 			break
 		}
-		// Prepare next request. Copy the whole struct so no field is silently
-		// dropped (RawBody/ContentType/BinaryResponse/OutputPath). The cursor
-		// goes wherever the spec declares it: a query parameter (GET endpoints
-		// like matter.list) or a JSON body field (POST endpoints like the
-		// message.search family). Either way we clone the container before
-		// setting so the previous page's request is never mutated.
-		next := req
-		if cursorIsQueryParam(rt, cursorParam) {
-			nextQ := url.Values{}
-			for k, vs := range req.Query {
-				nextQ[k] = append([]string(nil), vs...)
-			}
-			nextQ.Set(cursorParam, nextCursor)
-			next.Query = nextQ
-		} else {
-			next.Body = withCursorBody(req.Body, cursorParam, nextCursor)
+		if cursorWasSeen(seenCursors, nextCursor) {
+			loopErr := paginationLoopError(nextCursor)
+			_ = f.EmitError(loopErr) //nolint:errcheck // best-effort emit before returning err
+			return loopErr
 		}
-		req = next
+		if seenCursors != nil {
+			seenCursors[nextCursor] = struct{}{}
+		}
+		req = requestWithCursor(&req, rt, cursorParam, nextCursor)
 	}
 
 	out, err := json.Marshal(merged)
@@ -420,6 +398,72 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		return err
 	}
 	return f.EmitSuccess(out)
+}
+
+func paginationControls(rt *operationRuntime, pag *registry.PaginationInfo) (cursorParam string, limit int) {
+	cursorParam = pag.CursorParam
+	if cursorParam == "" {
+		cursorParam = "cursor"
+	}
+	limit = 10
+	if rt.pageLimit != nil && *rt.pageLimit > 0 {
+		limit = *rt.pageLimit
+	}
+	return cursorParam, limit
+}
+
+func paginationSeenCursors(req *client.Request, rt *operationRuntime, pag *registry.PaginationInfo, cursorParam string) map[string]struct{} {
+	if !pag.RejectCursorRepeats {
+		return nil
+	}
+	return initialSeenCursors(req, rt, cursorParam)
+}
+
+func validatePaginationRequest(req *client.Request) *output.ExitError {
+	if req.OutputPath == "" {
+		return nil
+	}
+	return output.ErrWithHint(
+		"internal",
+		"PAGINATION_OUTPUT_CONFLICT",
+		"operation is paginated and also writes a binary body to --output; these are mutually exclusive",
+		"operation-spec bug: an op with x-octo-pagination must not also declare an inline 2xx binary body",
+	)
+}
+
+func cursorWasSeen(seen map[string]struct{}, cursor string) bool {
+	if seen == nil || cursor == "" {
+		return false
+	}
+	_, ok := seen[cursor]
+	return ok
+}
+
+func paginationLoopError(cursor string) *output.ExitError {
+	return output.ErrWithHint(
+		"internal",
+		"PAGINATION_LOOP",
+		fmt.Sprintf("backend repeated pagination cursor %q", cursor),
+		"retry without --page-all or report the backend cursor loop",
+	)
+}
+
+// requestWithCursor copies the whole request so no field is silently dropped.
+// It clones the query/body container before setting the cursor, leaving the
+// previous page's request unchanged.
+func requestWithCursor(req *client.Request, rt *operationRuntime, cursorParam, cursor string) client.Request {
+	next := *req
+	if cursorIsQueryParam(rt, cursorParam) {
+		nextQ := url.Values{}
+		for key, values := range req.Query {
+			nextQ[key] = append([]string(nil), values...)
+		}
+		nextQ.Set(cursorParam, cursor)
+		next.Query = nextQ
+	} else {
+		next.Body = withCursorBody(req.Body, cursorParam, cursor)
+	}
+	return next
 }
 
 // cursorIsQueryParam reports whether this operation declares its pagination
@@ -434,6 +478,29 @@ func cursorIsQueryParam(rt *operationRuntime, cursorParam string) bool {
 		}
 	}
 	return false
+}
+
+// initialSeenCursors seeds the repeated-cursor guard with the cursor already
+// carried by the first request. This prevents --cursor C --page-all from
+// requesting C twice when a backend incorrectly returns C as its own next cursor.
+func initialSeenCursors(req *client.Request, rt *operationRuntime, cursorParam string) map[string]struct{} {
+	seen := map[string]struct{}{}
+	if cursor := requestCursor(req, rt, cursorParam); cursor != "" {
+		seen[cursor] = struct{}{}
+	}
+	return seen
+}
+
+func requestCursor(req *client.Request, rt *operationRuntime, cursorParam string) string {
+	if cursorIsQueryParam(rt, cursorParam) {
+		return req.Query.Get(cursorParam)
+	}
+	if body, ok := req.Body.(map[string]any); ok {
+		if cursor, ok := body[cursorParam].(string); ok {
+			return cursor
+		}
+	}
+	return ""
 }
 
 // withCursorBody returns a shallow clone of the JSON body map with the cursor
@@ -451,21 +518,115 @@ func withCursorBody(body any, cursorParam, nextCursor string) map[string]any {
 	return next
 }
 
-// parsePage extracts {data:[], pagination:{has_more, next_cursor}} from a
-// backend response. Tolerant: missing fields → empty data, no more pages.
-func parsePage(body []byte) (items []json.RawMessage, cursor string, hasMore bool, exitErr *output.ExitError) {
+// parsePage extracts pagination fields using x-octo-pagination paths. Defaults
+// preserve the historical {data, pagination:{has_more,next_cursor}} contract.
+// Specs without a has-more field must explicitly opt into cursor inference.
+func parsePage(body []byte, pag *registry.PaginationInfo) (items []json.RawMessage, cursor string, hasMore bool, exitErr *output.ExitError) {
 	if len(body) == 0 {
 		return nil, "", false, nil
 	}
-	var page struct {
-		Data       []json.RawMessage `json:"data"`
-		Pagination struct {
-			HasMore    bool   `json:"has_more"`
-			NextCursor string `json:"next_cursor"`
-		} `json:"pagination"`
+	fields := paginationFieldsFor(pag)
+	items, err := parsePageItems(body, fields.items)
+	if err != nil {
+		return nil, "", false, paginationParseError(err)
 	}
-	if err := json.Unmarshal(body, &page); err != nil {
-		return nil, "", false, output.ErrWithHint("internal", "PAGINATION_PARSE", err.Error(), "response did not match expected pagination shape")
+	cursor, err = parsePageCursor(body, fields.cursor)
+	if err != nil {
+		return nil, "", false, paginationParseError(err)
 	}
-	return page.Data, page.Pagination.NextCursor, page.Pagination.HasMore, nil
+	if fields.inferHasMore {
+		return items, cursor, cursor != "", nil
+	}
+	hasMore, err = parsePageHasMore(body, fields.hasMore)
+	if err != nil {
+		return nil, "", false, paginationParseError(err)
+	}
+	return items, cursor, hasMore, nil
+}
+
+type paginationFields struct {
+	items        string
+	cursor       string
+	hasMore      string
+	inferHasMore bool
+}
+
+func paginationFieldsFor(pag *registry.PaginationInfo) paginationFields {
+	fields := paginationFields{items: "data", cursor: "pagination.next_cursor", hasMore: "pagination.has_more"}
+	if pag == nil {
+		return fields
+	}
+	if pag.ItemsField != "" {
+		fields.items = pag.ItemsField
+	}
+	if pag.CursorField != "" {
+		fields.cursor = pag.CursorField
+	}
+	if pag.HasMoreField != "" {
+		fields.hasMore = pag.HasMoreField
+	}
+	fields.inferHasMore = pag.InferHasMore
+	return fields
+}
+
+func parsePageItems(body []byte, path string) ([]json.RawMessage, error) {
+	raw, found, err := rawValueAtPath(body, path)
+	if err != nil || !found {
+		return nil, err
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil, fmt.Errorf("field %q must be an array: %w", path, err)
+	}
+	return items, nil
+}
+
+func parsePageCursor(body []byte, path string) (string, error) {
+	raw, found, err := rawValueAtPath(body, path)
+	if err != nil || !found || string(raw) == "null" {
+		return "", err
+	}
+	var cursor string
+	if err := json.Unmarshal(raw, &cursor); err != nil {
+		return "", fmt.Errorf("field %q must be a string or null: %w", path, err)
+	}
+	return cursor, nil
+}
+
+func parsePageHasMore(body []byte, path string) (bool, error) {
+	raw, found, err := rawValueAtPath(body, path)
+	if err != nil || !found || string(raw) == "null" {
+		return false, err
+	}
+	var hasMore bool
+	if err := json.Unmarshal(raw, &hasMore); err != nil {
+		return false, fmt.Errorf("field %q must be a boolean or null: %w", path, err)
+	}
+	return hasMore, nil
+}
+
+func paginationParseError(err error) *output.ExitError {
+	return output.ErrWithHint("internal", "PAGINATION_PARSE", err.Error(), "response did not match expected pagination shape")
+}
+
+// rawValueAtPath resolves dot-separated object keys while retaining the exact
+// JSON bytes of the selected value. Literal dots in response keys are not
+// supported by x-octo-pagination paths.
+func rawValueAtPath(body []byte, path string) (json.RawMessage, bool, error) {
+	if path == "" {
+		return nil, false, nil
+	}
+	current := json.RawMessage(body)
+	for _, part := range strings.Split(path, ".") {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(current, &object); err != nil {
+			return nil, false, fmt.Errorf("field path %q traverses a non-object: %w", path, err)
+		}
+		next, ok := object[part]
+		if !ok {
+			return nil, false, nil
+		}
+		current = next
+	}
+	return current, true, nil
 }

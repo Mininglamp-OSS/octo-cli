@@ -56,6 +56,10 @@ octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet
 # List docs you own or are a member of. Page-based (see the pagination note below).
 octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
 
+# Full-text search every doc the bot may read. Repeat --doc-type to combine kinds.
+# Search is cursor-based; --page-all follows nextCursor automatically.
+octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board] [--page-size 20] [--page-all]
+
 octo-cli docs get    <docId>                 # metadata + doc_type + your role
 
 # Import a local file into an existing target. .md/.markdown/.docx require a doc;
@@ -73,11 +77,13 @@ octo-cli docs delete <docId>                 # soft delete (admin)
 
 ## Pagination note
 
-The docs list endpoints do **not** use the shared `{data, pagination}` envelope,
-so `--page-all` is intentionally not offered on them:
+Pagination depends on the endpoint's response contract:
 
 - `docs list` is **page-based** — response is `{total, items}`. Walk it with
-  `--page` / `--pageSize`.
+  `--page` / `--pageSize`; `--page-all` is not offered.
+- `docs search` is **cursor-based** — response is `{total, items, nextCursor}`.
+  Pass `nextCursor` back via `--cursor`, or use `--page-all` to follow it
+  automatically; `--page-limit` caps automatic requests (default 10).
 - `docs comments list` and `docs versions list` are **cursor-based** — response is
   `{items, nextCursor}`. Pass the returned `nextCursor` back via `--cursor` to get
   the next page; stop when `nextCursor` is null.
@@ -96,5 +102,6 @@ Any operation's parameters + response schema come from the embedded registry:
 
 ```bash
 octo-cli schema docs.create
+octo-cli schema docs.search
 octo-cli schema docs.content.edit     # + docs.sheet.edit / docs.scene.edit / docs.comments.add / …
 ```

@@ -95,6 +95,112 @@
         }
       }
     },
+    "/v1/bot/docs/search": {
+      "post": {
+        "operationId": "docs.search",
+        "summary": "Search accessible documents by full-text content",
+        "description": "Full-text search across documents the bot can access. Use --keyword for the query and repeat --doc-type to restrict results to doc, sheet, or board. The HTML document type is intentionally not exposed. The default response preserves the backend {total, items, nextCursor} object; --page-all follows nextCursor and emits the merged items array.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "itemsField": "items",
+          "cursorField": "nextCursor",
+          "inferHasMore": true,
+          "rejectCursorRepeats": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "q"
+                ],
+                "properties": {
+                  "q": {
+                    "type": "string",
+                    "x-octo-flag": "keyword",
+                    "description": "full-text search keyword"
+                  },
+                  "docType": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "doc",
+                        "sheet",
+                        "board"
+                      ]
+                    },
+                    "x-octo-flag": "doc-type",
+                    "description": "document type filter; repeat for multiple types (doc, sheet, board)"
+                  },
+                  "cursor": {
+                    "type": "string",
+                    "description": "opaque cursor from the previous page"
+                  },
+                  "pageSize": {
+                    "type": "integer",
+                    "x-octo-flag": "page-size",
+                    "description": "items per page"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "integer"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "docId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "docType": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "spaceId": {
+                            "type": "string"
+                          },
+                          "highlight": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}": {
       "get": {
         "operationId": "docs.get",

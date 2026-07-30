@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli docs search`** — permission-scoped full-text search across online
+  documents, sheets, and boards via `POST /v1/bot/docs/search`. Supports
+  repeatable `--doc-type` filters, manual cursor continuation, and `--page-all`.
+  The metadata-driven pagination engine now supports custom item/cursor paths,
+  explicit cursor-based has-more inference, POST body cursors, and opt-in
+  repeated-cursor detection with a `PAGINATION_LOOP` error.
 - **`octo-cli summary` domain** — `summary create|list|get|result` lets a
   personal Agent create owner-only summaries from explicit authorized sources,
   then discover and cite summaries visible to its human owner. The embedded
