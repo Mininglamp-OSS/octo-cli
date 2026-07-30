@@ -41,7 +41,7 @@ Key properties:
 | `docs`    | 31  | Documents, spreadsheets & whiteboards — lifecycle, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
 | `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
-| `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the backend (Mininglamp-OSS/octo-smart-summary#172, #181) is merged and deployed |
+| `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
 | `thread`  | 8   | Threads — create, list, get, members, join/leave, metadata     |
 | `bot`     | 6   | Bot lifecycle — register, user-info, space-members, heartbeat  |
@@ -292,7 +292,7 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-summary`](./skills/octo-summary/SKILL.md) — create owner-only summaries
   from explicit sources, then discover, read, and cite summaries visible to the
   personal Agent's human owner. **Temporarily withheld** while the backend
-  (Mininglamp-OSS/octo-smart-summary#172 and #181) is merged and deployed
+  create backend (Mininglamp-OSS/octo-smart-summary#181) is merged and deployed
   (not listed by `octo-cli skills`).
 
 These docs are also **embedded in the binary**, so a released `octo-cli` ships them:

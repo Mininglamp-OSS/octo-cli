@@ -24,7 +24,7 @@
             "required": true,
             "x-octo-flag": "idempotency-key",
             "schema": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
-            "description": "Stable caller-generated key. Retries with the same bot, space and key return the original task."
+            "description": "Stable caller-generated key (1-128 chars, pattern ^[A-Za-z0-9][A-Za-z0-9._:-]*$). Reuse it only for an identical request body; changing the body requires a new key."
           }
         ],
         "requestBody": {
@@ -40,6 +40,7 @@
                   "topic": { "type": "string", "maxLength": 2300 },
                   "time_range": {
                     "type": "object",
+                    "description": "Required. RFC3339 start/end with start before end and a maximum range of 31 days.",
                     "additionalProperties": false,
                     "required": ["start", "end"],
                     "properties": {
@@ -49,6 +50,7 @@
                   },
                   "sources": {
                     "type": "array",
+                    "description": "Required. One to 30 explicitly authorized group, thread, or DM sources.",
                     "minItems": 1,
                     "maxItems": 30,
                     "items": {
@@ -61,8 +63,8 @@
                       }
                     }
                   },
-                  "origin_channel_id": { "type": "string", "description": "Optional; must be one of sources." },
-                  "origin_channel_type": { "type": "integer", "enum": [1, 2, 3] },
+                  "origin_channel_id": { "type": "string", "description": "Optional; must be one of sources and requires origin_channel_type." },
+                  "origin_channel_type": { "type": "integer", "enum": [1, 2, 3], "description": "Required when origin_channel_id is set; origin_channel_id is required when this field is set." },
                   "include_archived": { "type": "boolean", "default": false }
                 }
               }
@@ -70,8 +72,11 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Idempotent replay of an unchanged request; returns the original task envelope."
+          },
           "201": {
-            "description": "Created. A replay returns the same envelope with HTTP 200.",
+            "description": "Created.",
             "content": {
               "application/json": {
                 "schema": {
@@ -95,6 +100,9 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Idempotency conflict (backend code 40009): the same key was already used with a different request body; data.existing_task_id identifies the original task."
           }
         }
       },
@@ -140,7 +148,7 @@
                               "title": { "type": "string" },
                               "topic": { "type": "string", "description": "Free-text topic; keyword also matches this." },
                               "status": { "type": "integer", "description": "0=waiting,1=waiting_confirm,2=processing,3=completed,4=failed,5=cancelled" },
-                              "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent" },
+                              "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent,4=bot" },
                               "summary_mode": { "type": "integer" },
                               "origin_channel_id": { "type": "string" },
                               "sources": { "type": "array", "description": "Source channels/scopes the summary was built from." },
@@ -192,7 +200,7 @@
                         "title": { "type": "string" },
                         "topic": { "type": "string" },
                         "status": { "type": "integer", "description": "0=waiting,1=waiting_confirm,2=processing,3=completed,4=failed,5=cancelled" },
-                        "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent" },
+                        "trigger_type": { "type": "integer", "description": "1=manual,2=scheduled,3=agent,4=bot" },
                         "origin_channel_id": { "type": "string" },
                         "created_at": { "type": "string", "description": "RFC3339 timestamp" },
                         "updated_at": { "type": "string", "description": "RFC3339 timestamp" },

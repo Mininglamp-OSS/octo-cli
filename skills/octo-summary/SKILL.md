@@ -24,13 +24,13 @@ octo-cli summary create \
   --data '{"title":"本周项目进展","topic":"整理决策、进展和风险","time_range":{"start":"2026-07-21T00:00:00+08:00","end":"2026-07-28T00:00:00+08:00"},"sources":[{"source_type":1,"source_id":"group-id"}]}'
 ```
 
-Use the same key when retrying an uncertain request. A different key creates a different task. Never generate a fresh key merely because the first response timed out.
+Reuse the same key only when retrying the exact same request body after an uncertain outcome. If any body field changes, generate a new key; reusing the old key with a changed body returns `409/40009`. Never generate a fresh key merely because an otherwise unchanged first request timed out.
 
 Source types are `1=group`, `2=thread`, and `3=DM`. `include_archived` defaults to false. An optional origin channel must also be present in `sources`. Owner, bot identity, Space, source names, and participants are server-controlled; do not send `uid`, `participants`, `source_name`, or `confirm_timeout_hours`.
 
-The result contains `task_id` with an initial pending status. Poll with `summary get <task-id>` until status is completed (`3`), failed (`4`), or cancelled (`5`), then use `summary result <task-id>`. Do not poll indefinitely.
+The result contains `task_id` with an initial pending status. Poll with `summary get <task-id>` until status is completed (`3`), failed (`4`), or cancelled (`5`), then use `summary result <task-id>`. Poll at most 60 times with a 5-second interval; if it is still pending after 5 minutes, report the task id and current status instead of continuing.
 
-Treat `40301/40302` as a source authorization or Space mismatch. Treat `50301` as the create feature being disabled. Do not retry either with altered identity or broader sources.
+Treat `40301/40302` as a source authorization or Space mismatch. Treat `50301` as the create feature being disabled. Treat `409/40009` as key reuse with a changed body: preserve the existing task id for audit and use a new key only if the user still wants the modified request. Do not retry authorization or feature-disabled errors with altered identity or broader sources.
 
 ## Discover summaries
 

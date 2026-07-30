@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
@@ -32,6 +33,17 @@ func TestSummaryRegistryShape(t *testing.T) {
 	}
 	if op, _ := reg.GetOperation("summary.list"); op.Pagination != nil {
 		t.Error("summary.list uses a backend {total,items} page, so generic --page-all must stay disabled")
+	}
+	create, _ := reg.GetOperation("summary.create")
+	if !create.RequestBodyRequired || create.RequestBody == nil {
+		t.Fatal("summary.create must preserve the required request-body contract")
+	}
+	if sources := create.RequestBody.Properties["sources"]; sources.MinItems != 1 || sources.MaxItems != 30 {
+		t.Errorf("sources item bounds = %d..%d, want 1..30", sources.MinItems, sources.MaxItems)
+	}
+	key := create.Parameters[0]
+	if key.MinLength != 1 || key.MaxLength != 128 || key.Pattern == "" {
+		t.Errorf("idempotency key constraints not preserved: %+v", key)
 	}
 }
 
@@ -77,9 +89,8 @@ func TestSummaryCreateSendsIdempotencyHeaderAndBody(t *testing.T) {
 func TestSummaryCreateRejectsMissingTimeRangeAndSources(t *testing.T) {
 	// Jerry-Xin's P1 on octo-cli PR #113: `summary create` must fail locally
 	// when --data omits the required `time_range`/`sources` object/array
-	// properties. cobra's MarkFlagRequired only covers promoted primitives,
-	// so the gap is closed in resolveBody by walking the spec's
-	// requestBody.required list.
+	// properties. registerBodyFlags only marks promoted required primitives in
+	// help text, so resolveBody is the enforcement layer for all body fields.
 	cases := []struct {
 		name string
 		data string
@@ -88,11 +99,16 @@ func TestSummaryCreateRejectsMissingTimeRangeAndSources(t *testing.T) {
 		{"only title", `{"title":"weekly"}`},
 		{"time_range without sources", `{"time_range":{"start":"2026-07-21T00:00:00Z","end":"2026-07-28T00:00:00Z"}}`},
 		{"sources without time_range", `{"sources":[{"source_type":1,"source_id":"g1"}]}`},
+		{"null time_range", `{"time_range":null,"sources":[{"source_type":1,"source_id":"g1"}]}`},
+		{"empty time_range", `{"time_range":{},"sources":[{"source_type":1,"source_id":"g1"}]}`},
+		{"empty sources", `{"time_range":{"start":"2026-07-21T00:00:00Z","end":"2026-07-28T00:00:00Z"},"sources":[]}`},
+		{"source missing id", `{"time_range":{"start":"2026-07-21T00:00:00Z","end":"2026-07-28T00:00:00Z"},"sources":[{"source_type":1}]}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			var backendHits atomic.Int32
 			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-				t.Fatalf("request should not have reached the backend (data=%q)", tc.data)
+				backendHits.Add(1)
 			})
 			args := []string{"summary", "create", "--idempotency-key", "k"}
 			if tc.data != "" {
@@ -102,6 +118,9 @@ func TestSummaryCreateRejectsMissingTimeRangeAndSources(t *testing.T) {
 			err := root.Execute()
 			if err == nil {
 				t.Fatalf("summary create with data=%q must fail validation locally", tc.data)
+			}
+			if hits := backendHits.Load(); hits != 0 {
+				t.Fatalf("request reached backend %d time(s) (data=%q)", hits, tc.data)
 			}
 			// Sanity check the error text mentions at least one required field,
 			// so an agent gets an actionable message instead of a bare 400.

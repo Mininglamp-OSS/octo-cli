@@ -73,7 +73,7 @@ func TestOctoSummarySkillEmbedded(t *testing.T) {
 		t.Fatalf("octo-summary/SKILL.md not embedded: %v", err)
 	}
 	content := string(b)
-	for _, want := range []string{"name: octo-summary", "summary list", "summary get", "summary result", "context_before", "bf_*"} {
+	for _, want := range []string{"name: octo-summary", "summary create", "summary list", "summary get", "summary result", "context_before", "bf_*"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("octo-summary skill missing %q", want)
 		}

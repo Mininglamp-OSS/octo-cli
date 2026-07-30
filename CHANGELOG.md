@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend omits surrounding-message context for bot requests.
   **Currently withheld** behind `x-octo-disabled` (skill `disabled: true`):
   the commands and skill are not listed by the CLI **until the Summary
-  backend (Mininglamp-OSS/octo-smart-summary#172 for read-only routes and
-  #181 for the create route) is merged and deployed, and the create feature
+  backend create route (Mininglamp-OSS/octo-smart-summary#181) is merged and
+  deployed, and the create feature
   is switched on via `BOT_SUMMARY_CREATE_ENABLED=1`**; `octo-cli schema
   summary.*` still introspects. Flip both flags in a one-line follow-up
   once the backend is live.
@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **Generated service commands now reject incomplete JSON bodies locally** —
+  request-schema `required` fields and nested `minItems` constraints are
+  validated after merging `--data` with promoted body flags, before any HTTP
+  request is sent. Optional request bodies remain optional.
 - **Renamed the binary and CLI command from `octo` to `octo-cli`** for
   consistency with the repository and Go module name. This affects every
   install path: release archives are now `octo-cli_<version>_<os>_<arch>`,
