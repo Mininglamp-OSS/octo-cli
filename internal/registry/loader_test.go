@@ -46,7 +46,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"html":        20,
 		"marketplace": 25,
 		"summary":     3,
-		"loop":        61,
+		"loop":        136,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -68,7 +68,7 @@ func TestLoopPublicContractResolvesSharedComponents(t *testing.T) {
 	if !ok {
 		t.Fatal("task.create: not found")
 	}
-	if create.Path != "/api/v1/tasks" || create.BaseURLEnv != "OCTO_LOOP_API_BASE_URL" {
+	if create.Path != "/v1/tasks" || create.BaseURLEnv != "OCTO_LOOP_API_BASE_URL" {
 		t.Fatalf("task.create route = %s (%s)", create.Path, create.BaseURLEnv)
 	}
 	if create.RequestBody == nil {
@@ -84,6 +84,44 @@ func TestLoopPublicContractResolvesSharedComponents(t *testing.T) {
 	}
 	if len(list.Parameters) < 2 || list.Parameters[0].Name == "" {
 		t.Fatalf("task.list parameter refs were not resolved: %+v", list.Parameters)
+	}
+}
+
+func TestLoopExtendedBusinessContract(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{
+		"workspace.list",
+		"label.create",
+		"project.resource.create",
+		"comment.reaction.add",
+		"attachment.upload",
+		"loop.skill.list",
+		"runtime.update_request.create",
+		"autopilot.delivery.replay",
+		"task.team_evaluation.record",
+	} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Errorf("%s: not found", id)
+			continue
+		}
+		if op.Service != "loop" || !strings.HasPrefix(op.Path, "/v1/") {
+			t.Errorf("%s: got service=%q path=%q", id, op.Service, op.Path)
+		}
+	}
+
+	op, ok := r.GetOperation("label.list")
+	if !ok {
+		t.Fatal("label.list: not found")
+	}
+	foundWorkspaceHeader := false
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "X-Workspace-ID" && parameter.In == "header" && parameter.FlagName == "workspace-id" {
+			foundWorkspaceHeader = true
+		}
+	}
+	if !foundWorkspaceHeader {
+		t.Errorf("label.list parameters = %+v, want X-Workspace-ID workspace-id flag", op.Parameters)
 	}
 }
 

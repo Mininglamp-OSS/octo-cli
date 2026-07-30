@@ -28,11 +28,43 @@
     {
       "name": "expert_teams",
       "description": "Expert team and membership operations."
+    },
+    {
+      "name": "skills",
+      "description": "Skills operations."
+    },
+    {
+      "name": "workspaces",
+      "description": "Workspaces operations."
+    },
+    {
+      "name": "labels",
+      "description": "Labels operations."
+    },
+    {
+      "name": "projects",
+      "description": "Projects operations."
+    },
+    {
+      "name": "comments",
+      "description": "Comments operations."
+    },
+    {
+      "name": "attachments",
+      "description": "Attachments operations."
+    },
+    {
+      "name": "runtimes",
+      "description": "Runtimes operations."
+    },
+    {
+      "name": "autopilots",
+      "description": "Autopilots operations."
     }
   ],
   "servers": [
     {
-      "url": "/api/v1"
+      "url": "/v1"
     }
   ],
   "security": [
@@ -68,7 +100,7 @@
     }
   },
   "paths": {
-    "/api/v1/tasks": {
+    "/v1/tasks": {
       "get": {
         "summary": "List tasks",
         "description": "Returns one workspace-scoped page of tasks.",
@@ -143,7 +175,7 @@
         }
       }
     },
-    "/api/v1/tasks/_search": {
+    "/v1/tasks/_search": {
       "get": {
         "summary": "Search tasks",
         "description": "Searches tasks using public task and assignee vocabulary.",
@@ -184,7 +216,7 @@
         }
       }
     },
-    "/api/v1/tasks/_grouped": {
+    "/v1/tasks/_grouped": {
       "get": {
         "summary": "Group tasks",
         "description": "Returns task groups using the requested grouping filters.",
@@ -217,7 +249,7 @@
         }
       }
     },
-    "/api/v1/tasks/_child_progress": {
+    "/v1/tasks/_child_progress": {
       "get": {
         "summary": "Get child progress",
         "description": "Aggregates child-task progress for the requested parents.",
@@ -250,7 +282,7 @@
         }
       }
     },
-    "/api/v1/tasks/_children_by_parent": {
+    "/v1/tasks/_children_by_parent": {
       "get": {
         "summary": "List children by parent",
         "description": "Returns one page of child tasks grouped by parent selection.",
@@ -291,7 +323,7 @@
         }
       }
     },
-    "/api/v1/tasks/_quick_create": {
+    "/v1/tasks/_quick_create": {
       "post": {
         "summary": "Queue task creation",
         "description": "Creates and dispatches a task to exactly one expert or expert team.",
@@ -327,7 +359,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}": {
+    "/v1/tasks/{task_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -430,7 +462,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/comments": {
+    "/v1/tasks/{task_id}/comments": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -510,7 +542,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/comments/_trigger_preview": {
+    "/v1/tasks/{task_id}/comments/_trigger_preview": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -551,7 +583,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/timeline": {
+    "/v1/tasks/{task_id}/timeline": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -597,7 +629,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/subscribers": {
+    "/v1/tasks/{task_id}/subscribers": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -643,7 +675,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/subscribe": {
+    "/v1/tasks/{task_id}/subscribe": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -684,7 +716,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/unsubscribe": {
+    "/v1/tasks/{task_id}/unsubscribe": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -725,7 +757,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/executions": {
+    "/v1/tasks/{task_id}/executions": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -771,7 +803,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/active_executions": {
+    "/v1/tasks/{task_id}/active_executions": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -817,7 +849,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/rerun": {
+    "/v1/tasks/{task_id}/rerun": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -858,7 +890,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/executions/{execution_id}/cancel": {
+    "/v1/tasks/{task_id}/executions/{execution_id}/cancel": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -899,7 +931,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/usage": {
+    "/v1/tasks/{task_id}/usage": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -937,7 +969,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/reactions": {
+    "/v1/tasks/{task_id}/reactions": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1012,7 +1044,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/attachments": {
+    "/v1/tasks/{task_id}/attachments": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1058,7 +1090,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/children": {
+    "/v1/tasks/{task_id}/children": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1104,7 +1136,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/labels": {
+    "/v1/tasks/{task_id}/labels": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1184,7 +1216,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/labels/{label_id}": {
+    "/v1/tasks/{task_id}/labels/{label_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1225,7 +1257,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/metadata": {
+    "/v1/tasks/{task_id}/metadata": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1263,7 +1295,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/metadata/{metadata_id}": {
+    "/v1/tasks/{task_id}/metadata/{metadata_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1338,7 +1370,7 @@
         }
       }
     },
-    "/api/v1/tasks/{task_id}/pull_requests": {
+    "/v1/tasks/{task_id}/pull_requests": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TaskID"
@@ -1384,7 +1416,7 @@
         }
       }
     },
-    "/api/v1/executions/{execution_id}/messages": {
+    "/v1/executions/{execution_id}/messages": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExecutionID"
@@ -1430,7 +1462,7 @@
         }
       }
     },
-    "/api/v1/executions/{execution_id}/cancel": {
+    "/v1/executions/{execution_id}/cancel": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExecutionID"
@@ -1468,7 +1500,7 @@
         }
       }
     },
-    "/api/v1/experts": {
+    "/v1/experts": {
       "get": {
         "summary": "List experts",
         "description": "Returns one page of experts in the current workspace.",
@@ -1543,7 +1575,7 @@
         }
       }
     },
-    "/api/v1/experts/_from_template": {
+    "/v1/experts/_from_template": {
       "post": {
         "summary": "Create expert from template",
         "description": "Instantiates an expert from the selected template.",
@@ -1579,7 +1611,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}": {
+    "/v1/experts/{expert_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1651,7 +1683,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/archive": {
+    "/v1/experts/{expert_id}/archive": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1689,7 +1721,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/restore": {
+    "/v1/experts/{expert_id}/restore": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1727,7 +1759,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/executions/cancel": {
+    "/v1/experts/{expert_id}/executions/cancel": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1765,7 +1797,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/executions": {
+    "/v1/experts/{expert_id}/executions": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1811,7 +1843,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/skills": {
+    "/v1/experts/{expert_id}/skills": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1925,7 +1957,7 @@
         }
       }
     },
-    "/api/v1/experts/{expert_id}/env": {
+    "/v1/experts/{expert_id}/env": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertID"
@@ -1997,7 +2029,7 @@
         }
       }
     },
-    "/api/v1/expert_templates": {
+    "/v1/expert_templates": {
       "get": {
         "summary": "List expert templates",
         "description": "Returns one page of templates available to the workspace.",
@@ -2038,7 +2070,7 @@
         }
       }
     },
-    "/api/v1/expert_templates/{template_id}": {
+    "/v1/expert_templates/{template_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/TemplateID"
@@ -2076,7 +2108,7 @@
         }
       }
     },
-    "/api/v1/expert_teams": {
+    "/v1/expert_teams": {
       "get": {
         "summary": "List expert teams",
         "description": "Returns one page of expert teams in the workspace.",
@@ -2151,7 +2183,7 @@
         }
       }
     },
-    "/api/v1/expert_teams/{expert_team_id}": {
+    "/v1/expert_teams/{expert_team_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertTeamID"
@@ -2254,7 +2286,7 @@
         }
       }
     },
-    "/api/v1/expert_teams/{expert_team_id}/members": {
+    "/v1/expert_teams/{expert_team_id}/members": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertTeamID"
@@ -2368,7 +2400,7 @@
         }
       }
     },
-    "/api/v1/expert_teams/{expert_team_id}/members/role": {
+    "/v1/expert_teams/{expert_team_id}/members/role": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertTeamID"
@@ -2409,7 +2441,7 @@
         }
       }
     },
-    "/api/v1/expert_teams/{expert_team_id}/member_statuses": {
+    "/v1/expert_teams/{expert_team_id}/member_statuses": {
       "parameters": [
         {
           "$ref": "#/components/parameters/ExpertTeamID"
@@ -2442,6 +2474,4001 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "summary": "List workspaces",
+        "description": "List workspaces in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create workspace",
+        "description": "Create workspace in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspace_id}": {
+      "get": {
+        "summary": "Get workspace",
+        "description": "Get workspace in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update workspace",
+        "description": "Update workspace in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.update",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete workspace",
+        "description": "Delete workspace in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/workspaces/{workspace_id}/members": {
+      "get": {
+        "summary": "List workspace members",
+        "description": "List workspace members in the authenticated workspace.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.member.list",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/labels": {
+      "get": {
+        "summary": "List labels",
+        "description": "List labels in the authenticated workspace.",
+        "tags": [
+          "labels"
+        ],
+        "operationId": "label.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create label",
+        "description": "Create label in the authenticated workspace.",
+        "tags": [
+          "labels"
+        ],
+        "operationId": "label.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/labels/{label_id}": {
+      "get": {
+        "summary": "Get label",
+        "description": "Get label in the authenticated workspace.",
+        "tags": [
+          "labels"
+        ],
+        "operationId": "label.get",
+        "parameters": [
+          {
+            "name": "label_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update label",
+        "description": "Update label in the authenticated workspace.",
+        "tags": [
+          "labels"
+        ],
+        "operationId": "label.update",
+        "parameters": [
+          {
+            "name": "label_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete label",
+        "description": "Delete label in the authenticated workspace.",
+        "tags": [
+          "labels"
+        ],
+        "operationId": "label.delete",
+        "parameters": [
+          {
+            "name": "label_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/projects/_search": {
+      "get": {
+        "summary": "Search projects",
+        "description": "Search projects in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include_closed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "summary": "List projects",
+        "description": "List projects in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create project",
+        "description": "Create project in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.create",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/projects/{project_id}": {
+      "get": {
+        "summary": "Get project",
+        "description": "Get project in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update project",
+        "description": "Update project in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.update",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete project",
+        "description": "Delete project in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/projects/{project_id}/resources": {
+      "get": {
+        "summary": "List project resources",
+        "description": "List project resources in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.list",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create project resource",
+        "description": "Create project resource in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.create",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/projects/{project_id}/resources/{project_resource_id}": {
+      "patch": {
+        "summary": "Update project resource",
+        "description": "Update project resource in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.update",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete project resource",
+        "description": "Delete project resource in the authenticated workspace.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/comments/{comment_id}": {
+      "patch": {
+        "summary": "Update comment",
+        "description": "Update comment in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.update",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete comment",
+        "description": "Delete comment in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.delete",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/comments/{comment_id}/resolve": {
+      "post": {
+        "summary": "Resolve comment",
+        "description": "Resolve comment in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.resolve",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/comments/{comment_id}/reopen": {
+      "post": {
+        "summary": "Reopen comment",
+        "description": "Reopen comment in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.reopen",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/comments/{comment_id}/reactions": {
+      "post": {
+        "summary": "Add comment reaction",
+        "description": "Add comment reaction in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.reaction.add",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove comment reaction",
+        "description": "Remove comment reaction in the authenticated workspace.",
+        "tags": [
+          "comments"
+        ],
+        "operationId": "comment.reaction.remove",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/attachments": {
+      "post": {
+        "summary": "Upload attachment",
+        "description": "Upload attachment in the authenticated workspace.",
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachment.upload",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentUpload"
+              }
+            }
+          }
+        },
+        "x-octo-multipart": true,
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/attachments/{attachment_id}": {
+      "get": {
+        "summary": "Get attachment",
+        "description": "Get attachment in the authenticated workspace.",
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachment.get",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete attachment",
+        "description": "Delete attachment in the authenticated workspace.",
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachment.delete",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/attachments/{attachment_id}/content": {
+      "get": {
+        "summary": "Get attachment content",
+        "description": "Get attachment content in the authenticated workspace.",
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachment.content.get",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "x-octo-binary-response": true,
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "description": "Binary content.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/attachments/{attachment_id}/download": {
+      "get": {
+        "summary": "Download attachment",
+        "description": "Download attachment in the authenticated workspace.",
+        "tags": [
+          "attachments"
+        ],
+        "operationId": "attachment.download",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "x-octo-binary-response": true,
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "description": "Binary content.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/skills/_search": {
+      "get": {
+        "summary": "Search skills",
+        "description": "Search skills in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/skills/_import": {
+      "post": {
+        "summary": "Import skill",
+        "description": "Import skill in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.import",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/skills": {
+      "get": {
+        "summary": "List skills",
+        "description": "List skills in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create skill",
+        "description": "Create skill in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.create",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/skills/{skill_id}": {
+      "get": {
+        "summary": "Get skill",
+        "description": "Get skill in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.get",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update skill",
+        "description": "Update skill in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.update",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete skill",
+        "description": "Delete skill in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill.delete",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/skills/{skill_id}/files": {
+      "get": {
+        "summary": "List skill files",
+        "description": "List skill files in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill_file.list",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update skill file",
+        "description": "Create or update skill file in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill_file.upsert",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/skills/{skill_id}/files/{skill_file_id}": {
+      "delete": {
+        "summary": "Delete skill file",
+        "description": "Delete skill file in the authenticated workspace.",
+        "tags": [
+          "skills"
+        ],
+        "operationId": "loop.skill_file.delete",
+        "parameters": [
+          {
+            "name": "skill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "skill_file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes": {
+      "get": {
+        "summary": "List runtimes",
+        "description": "List runtimes in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}": {
+      "patch": {
+        "summary": "Update runtime",
+        "description": "Update runtime in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.update",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete runtime",
+        "description": "Delete runtime in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.delete",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/archive_agents_and_delete": {
+      "post": {
+        "summary": "Archive experts and delete runtime",
+        "description": "Archive experts and delete runtime in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.archive_and_delete",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/usage": {
+      "get": {
+        "summary": "Get runtime usage",
+        "description": "Get runtime usage in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.usage.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/usage_by_expert": {
+      "get": {
+        "summary": "Get runtime usage by expert",
+        "description": "Get runtime usage by expert in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.usage_by_expert.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/usage_by_hour": {
+      "get": {
+        "summary": "Get runtime usage by hour",
+        "description": "Get runtime usage by hour in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.usage_by_hour.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/activity": {
+      "get": {
+        "summary": "List runtime activity",
+        "description": "List runtime activity in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.activity.list",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/updates": {
+      "post": {
+        "summary": "Request runtime update",
+        "description": "Request runtime update in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.update_request.create",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/updates/{runtime_update_id}": {
+      "get": {
+        "summary": "Get runtime update request",
+        "description": "Get runtime update request in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.update_request.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "runtime_update_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/model_requests": {
+      "post": {
+        "summary": "Request runtime models",
+        "description": "Request runtime models in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.model_request.create",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/model_requests/{model_request_id}": {
+      "get": {
+        "summary": "Get runtime model request",
+        "description": "Get runtime model request in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.model_request.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "model_request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/local_skill_requests": {
+      "post": {
+        "summary": "Request local skills",
+        "description": "Request local skills in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.local_skill_request.create",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/local_skill_requests/{local_skill_request_id}": {
+      "get": {
+        "summary": "Get local skill request",
+        "description": "Get local skill request in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.local_skill_request.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "local_skill_request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/local_skill_imports": {
+      "post": {
+        "summary": "Request local skill import",
+        "description": "Request local skill import in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.local_skill_import.create",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/runtimes/{runtime_id}/local_skill_imports/{local_skill_import_id}": {
+      "get": {
+        "summary": "Get local skill import",
+        "description": "Get local skill import in the authenticated workspace.",
+        "tags": [
+          "runtimes"
+        ],
+        "operationId": "runtime.local_skill_import.get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "local_skill_import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots": {
+      "get": {
+        "summary": "List autopilots",
+        "description": "List autopilots in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create autopilot",
+        "description": "Create autopilot in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.create",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}": {
+      "get": {
+        "summary": "Get autopilot",
+        "description": "Get autopilot in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update autopilot",
+        "description": "Update autopilot in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.update",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete autopilot",
+        "description": "Delete autopilot in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.delete",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/trigger": {
+      "post": {
+        "summary": "Trigger autopilot",
+        "description": "Trigger autopilot in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.trigger",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/runs": {
+      "get": {
+        "summary": "List autopilot runs",
+        "description": "List autopilot runs in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.run.list",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/runs/{autopilot_run_id}": {
+      "get": {
+        "summary": "Get autopilot run",
+        "description": "Get autopilot run in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.run.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/deliveries": {
+      "get": {
+        "summary": "List autopilot deliveries",
+        "description": "List autopilot deliveries in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.delivery.list",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}": {
+      "get": {
+        "summary": "Get autopilot delivery",
+        "description": "Get autopilot delivery in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.delivery.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}/replay": {
+      "post": {
+        "summary": "Replay autopilot delivery",
+        "description": "Replay autopilot delivery in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.delivery.replay",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/triggers": {
+      "post": {
+        "summary": "Create autopilot trigger",
+        "description": "Create autopilot trigger in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.trigger_config.create",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}": {
+      "patch": {
+        "summary": "Update autopilot trigger",
+        "description": "Update autopilot trigger in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.trigger_config.update",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete autopilot trigger",
+        "description": "Delete autopilot trigger in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.trigger_config.delete",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/rotate_webhook_token": {
+      "post": {
+        "summary": "Rotate autopilot webhook token",
+        "description": "Rotate autopilot webhook token in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.webhook_token.rotate",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/signing_secret": {
+      "put": {
+        "summary": "Set autopilot signing secret",
+        "description": "Set autopilot signing secret in the authenticated workspace.",
+        "tags": [
+          "autopilots"
+        ],
+        "operationId": "autopilot.signing_secret.set",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        }
+      }
+    },
+    "/v1/tasks/{task_id}/expert_team_evaluation": {
+      "post": {
+        "summary": "Record expert team evaluation",
+        "description": "Record expert team evaluation in the authenticated workspace.",
+        "tags": [
+          "tasks"
+        ],
+        "operationId": "task.team_evaluation.record",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/WorkspaceIDHeader"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
             "$ref": "#/components/responses/Resource"
           }
         }
@@ -2550,6 +6577,17 @@
         "description": "Stable expert-template slug or identifier.",
         "schema": {
           "type": "string"
+        }
+      },
+      "WorkspaceIDHeader": {
+        "name": "X-Workspace-ID",
+        "in": "header",
+        "required": false,
+        "description": "Explicit workspace selector for human credentials; workspace-bound Loop credentials may omit it.",
+        "x-octo-flag": "workspace-id",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
         }
       }
     },
@@ -3138,6 +7176,17 @@
             "type": "string",
             "minLength": 1
           },
+          "parent_comment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "suppress_expert_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           "attachment_ids": {
             "type": "array",
             "items": {
@@ -3275,6 +7324,31 @@
             }
           }
         ]
+      },
+      "FlexibleRequest": {
+        "type": "object",
+        "description": "Operation-specific request fields. Use CLI --data for fields not exposed as dedicated flags.",
+        "additionalProperties": true
+      },
+      "AttachmentUpload": {
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          },
+          "task_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "comment_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     }
   },

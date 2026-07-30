@@ -93,7 +93,11 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	}
 
 	loop := findCmd(root, "loop")
-	for _, resource := range []string{"task", "execution", "expert", "expert-template", "expert-team"} {
+	for _, resource := range []string{
+		"attachment", "autopilot", "comment", "execution", "expert",
+		"expert-template", "expert-team", "label", "project", "runtime",
+		"skill", "skill-file", "task", "workspace",
+	} {
 		if findCmd(loop, resource) == nil {
 			t.Errorf("loop: missing resource %q; got %v", resource, childNames(loop))
 		}
@@ -152,7 +156,7 @@ func TestLoopCommandUsesFleetEndpointAndPublicPath(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("loop task get: %v", err)
 	}
-	if gotPath != "/api/v1/tasks/task-1" {
+	if gotPath != "/v1/tasks/task-1" {
 		t.Fatalf("path = %q", gotPath)
 	}
 	if gotAuth != "Bearer octo_loop_test" {
@@ -160,6 +164,39 @@ func TestLoopCommandUsesFleetEndpointAndPublicPath(t *testing.T) {
 	}
 	if gotSpace != "" {
 		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+}
+
+func TestLoopWorkspaceHeaderFlag(t *testing.T) {
+	var gotPath, gotWorkspace string
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	}))
+	defer fleet.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL:     "http://octo.invalid",
+		LoopAPIBaseURL: fleet.URL,
+		BotToken:       "octo_pat_test",
+		Format:         "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_pat_test"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "label", "list", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop label list: %v", err)
+	}
+	if gotPath != "/v1/labels" || gotWorkspace != "workspace-1" {
+		t.Fatalf("path=%q X-Workspace-ID=%q", gotPath, gotWorkspace)
 	}
 }
 
