@@ -28,7 +28,7 @@ func TestDocs_TreeShape(t *testing.T) {
 	if docs == nil {
 		t.Fatal("missing docs service command")
 	}
-	for _, leaf := range []string{"create", "list", "get", "rename", "delete", "forward-grant"} {
+	for _, leaf := range []string{"create", "list", "search", "get", "rename", "delete", "forward-grant"} {
 		if !contains(childNames(docs), leaf) {
 			t.Errorf("docs: missing leaf %q; got %v", leaf, childNames(docs))
 		}
@@ -69,6 +69,7 @@ func TestDocs_RegistryShape(t *testing.T) {
 	cases := map[string]want{
 		"docs.create":              {"POST", "/v1/bot/docs"},
 		"docs.list":                {"GET", "/v1/bot/docs"},
+		"docs.search":              {"POST", "/v1/bot/docs/search"},
 		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
 		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
 		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
@@ -205,6 +206,116 @@ func TestDocs_NoPagination(t *testing.T) {
 	}
 	if list.Flags().Lookup("page-all") != nil {
 		t.Error("docs list must not have --page-all")
+	}
+}
+
+func TestDocsSearch_FlagsAndRequestBody(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":1,"items":[{"docId":"d1","title":"Plan","docType":"doc","updatedAt":123,"spaceId":"s1","highlight":"roadmap"}]}`))
+	})
+
+	search := findCmd(findCmd(root, "docs"), "search")
+	if search == nil {
+		t.Fatal("docs search command missing")
+	}
+	for _, name := range []string{"keyword", "doc-type", "cursor", "page-size", "page-all", "page-limit"} {
+		if search.Flags().Lookup(name) == nil {
+			t.Errorf("docs search missing --%s", name)
+		}
+	}
+	if search.Flags().Lookup("q") != nil || search.Flags().Lookup("docType") != nil {
+		t.Error("docs search must expose caller-facing flag names, not wire names")
+	}
+
+	root.SetArgs([]string{"docs", "search", "--keyword", "roadmap", "--doc-type", "doc", "--doc-type", "board", "--cursor", "c1", "--page-size", "25"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/docs/search" {
+		t.Errorf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotBody["q"] != "roadmap" || gotBody["cursor"] != "c1" || gotBody["pageSize"] != float64(25) {
+		t.Errorf("body = %#v", gotBody)
+	}
+	types, ok := gotBody["docType"].([]any)
+	if !ok || len(types) != 2 || types[0] != "doc" || types[1] != "board" {
+		t.Errorf("docType = %#v", gotBody["docType"])
+	}
+
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			Total int `json:"total"`
+			Items []struct {
+				DocID string `json:"docId"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.Total != 1 || len(env.Data.Items) != 1 || env.Data.Items[0].DocID != "d1" {
+		t.Errorf("single-page response did not preserve backend object: %+v", env)
+	}
+}
+
+func TestDocsSearch_PageAllUsesBodyCursorAndStopsWithoutNextCursor(t *testing.T) {
+	pages := []string{
+		`{"total":3,"items":[{"docId":"d1"},{"docId":"d2"}],"nextCursor":"next-2"}`,
+		`{"total":3,"items":[{"docId":"d3"}]}`,
+	}
+	var cursors []string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		cursor, _ := body["cursor"].(string)
+		cursors = append(cursors, cursor)
+		if queryCursor := r.URL.Query().Get("cursor"); queryCursor != "" {
+			t.Errorf("cursor leaked into query: %q", queryCursor)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(pages[len(cursors)-1]))
+	})
+	root.SetArgs([]string{"docs", "search", "--keyword", "plan", "--page-all"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "next-2" {
+		t.Fatalf("body cursor progression = %v", cursors)
+	}
+	var env struct {
+		Data []struct {
+			DocID string `json:"docId"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	if len(env.Data) != 3 {
+		t.Errorf("merged data = %+v", env.Data)
+	}
+}
+
+func TestDocsSearch_PageAllStopsOnRepeatedCursor(t *testing.T) {
+	calls := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"total":99,"items":[{"docId":"d"}],"nextCursor":"same"}`))
+	})
+	root.SetArgs([]string{"docs", "search", "--keyword", "plan", "--page-all", "--page-limit", "10"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("repeated cursor should stop after 2 requests, got %d", calls)
 	}
 }
 

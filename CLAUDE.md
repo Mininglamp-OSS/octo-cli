@@ -23,7 +23,7 @@
 - **Search subjects** (`message search` family): a `bf_` token searches as the bot, or as a real person with `--on-behalf-of <uid>` (OBO — requires an active grant); a `uk_` token searches as the real person it belongs to. An `app_` token cannot search — the CLI rejects it locally (`validation`, in `internal/client/search_route.go`) before any request, distinct from a server-side `FORBIDDEN`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
 
-## Command Structure (9 domains, 104 operations)
+## Command Structure (9 domains, 105 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -48,7 +48,7 @@ octo-cli thread    create | list | get | members
 octo-cli file      upload | download | credentials | presigned
 octo-cli bot       register | set-commands | user-info | space-members | typing | heartbeat
 octo-cli event     list | ack
-octo-cli docs      create | list | get | rename | delete | forward-grant
+octo-cli docs      create | list | search | get | rename | delete | forward-grant
                content  get|edit
                sheet    get|edit
                scene    get|edit|export

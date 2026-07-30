@@ -414,6 +414,23 @@ func TestPagination_PageLimitStops(t *testing.T) {
 	}
 }
 
+func TestParsePage_CustomFieldPaths(t *testing.T) {
+	items, cursor, hasMore, err := parsePage([]byte(`{
+		"result":{"hits":[{"id":"1"}]},
+		"paging":{"after":"c2","more":true}
+	}`), &registry.PaginationInfo{
+		ItemsField:   "result.hits",
+		CursorField:  "paging.after",
+		HasMoreField: "paging.more",
+	})
+	if err != nil {
+		t.Fatalf("parsePage: %v", err)
+	}
+	if len(items) != 1 || cursor != "c2" || !hasMore {
+		t.Errorf("items=%s cursor=%q hasMore=%v", items, cursor, hasMore)
+	}
+}
+
 // TestRunPaginated_RejectsOutputPathConflict pins the item-2 guard: pagination
 // and binary output-to-disk are mutually exclusive (the page loop reuses the
 // single OutputPath, so it would write every page over the same file). No spec

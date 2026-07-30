@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // runOperation is the RunE body for every auto-registered operation.
@@ -251,6 +253,7 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 	}
 
 	merged := make([]json.RawMessage, 0, 64)
+	seenCursors := map[string]struct{}{}
 	req := *firstReq
 	for page := 0; page < limit; page++ {
 		body, err := cli.Do(ctx, &req)
@@ -258,7 +261,7 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
-		data, nextCursor, hasMore, perr := parsePage(body)
+		data, nextCursor, hasMore, perr := parsePage(body, pag)
 		if perr != nil {
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
@@ -267,6 +270,10 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		if !hasMore || nextCursor == "" {
 			break
 		}
+		if _, seen := seenCursors[nextCursor]; seen {
+			break
+		}
+		seenCursors[nextCursor] = struct{}{}
 		// Prepare next request. Copy the whole struct so no field is silently
 		// dropped (RawBody/ContentType/BinaryResponse/OutputPath). The cursor
 		// goes wherever the spec declares it: a query parameter (GET endpoints
@@ -323,21 +330,72 @@ func withCursorBody(body any, cursorParam, nextCursor string) map[string]any {
 	return next
 }
 
-// parsePage extracts {data:[], pagination:{has_more, next_cursor}} from a
-// backend response. Tolerant: missing fields → empty data, no more pages.
-func parsePage(body []byte) (items []json.RawMessage, cursor string, hasMore bool, exitErr *output.ExitError) {
+// parsePage extracts pagination fields using x-octo-pagination paths. Defaults
+// preserve the historical {data, pagination:{has_more,next_cursor}} contract.
+// If hasMoreField is omitted, a non-empty cursor means another page exists.
+func parsePage(body []byte, pag *registry.PaginationInfo) (items []json.RawMessage, cursor string, hasMore bool, exitErr *output.ExitError) {
 	if len(body) == 0 {
 		return nil, "", false, nil
 	}
-	var page struct {
-		Data       []json.RawMessage `json:"data"`
-		Pagination struct {
-			HasMore    bool   `json:"has_more"`
-			NextCursor string `json:"next_cursor"`
-		} `json:"pagination"`
-	}
-	if err := json.Unmarshal(body, &page); err != nil {
+	var page any
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&page); err != nil {
 		return nil, "", false, output.ErrWithHint("internal", "PAGINATION_PARSE", err.Error(), "response did not match expected pagination shape")
 	}
-	return page.Data, page.Pagination.NextCursor, page.Pagination.HasMore, nil
+	itemsField, cursorField, hasMoreField := "data", "pagination.next_cursor", "pagination.has_more"
+	if pag != nil {
+		if pag.ItemsField != "" {
+			itemsField = pag.ItemsField
+		}
+		if pag.CursorField != "" {
+			cursorField = pag.CursorField
+		}
+		hasMoreField = pag.HasMoreField
+		// Older specs omitted itemsField but did declare the historical cursor
+		// and has-more paths. Keep data as the default in that case.
+		if pag.HasMoreField == "" && pag.CursorField == "" {
+			hasMoreField = "pagination.has_more"
+		}
+	}
+
+	rawItems, ok := valueAtPath(page, itemsField).([]any)
+	if !ok {
+		rawItems = nil
+	}
+	items = make([]json.RawMessage, 0, len(rawItems))
+	for _, item := range rawItems {
+		raw, err := json.Marshal(item)
+		if err != nil {
+			return nil, "", false, output.ErrWithHint("internal", "PAGINATION_PARSE", err.Error(), "response items could not be encoded")
+		}
+		items = append(items, raw)
+	}
+	if value := valueAtPath(page, cursorField); value != nil {
+		cursor = fmt.Sprint(value)
+	}
+	if hasMoreField == "" {
+		hasMore = cursor != ""
+	} else if value, ok := valueAtPath(page, hasMoreField).(bool); ok {
+		hasMore = value
+	}
+	return items, cursor, hasMore, nil
+}
+
+func valueAtPath(value any, path string) any {
+	if path == "" {
+		return nil
+	}
+	current := value
+	for _, part := range strings.Split(path, ".") {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current, ok = object[part]
+		if !ok {
+			return nil
+		}
+	}
+	return current
 }

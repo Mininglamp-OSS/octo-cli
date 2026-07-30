@@ -183,12 +183,13 @@ type SchemaInfo struct {
 }
 
 // PaginationInfo captures the `x-octo-pagination` extension. It tells the
-// service engine which query parameters carry the cursor / limit and which
-// response fields carry the next cursor / has-more flag, so `--page-all`
-// can walk pages without operation-specific code.
+// service engine which query/body parameters carry the cursor / limit and
+// which response paths carry the items / next cursor / optional has-more flag,
+// so `--page-all` can walk pages without operation-specific code.
 type PaginationInfo struct {
 	CursorParam  string `json:"cursor_param,omitempty"`
 	LimitParam   string `json:"limit_param,omitempty"`
+	ItemsField   string `json:"items_field,omitempty"`
 	CursorField  string `json:"cursor_field,omitempty"`
 	HasMoreField string `json:"has_more_field,omitempty"`
 }
@@ -389,6 +390,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		d.Pagination = &PaginationInfo{
 			CursorParam:  stringOf(pag["cursorParam"]),
 			LimitParam:   stringOf(pag["limitParam"]),
+			ItemsField:   stringOf(pag["itemsField"]),
 			CursorField:  stringOf(pag["cursorField"]),
 			HasMoreField: stringOf(pag["hasMoreField"]),
 		}

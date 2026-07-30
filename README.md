@@ -12,7 +12,7 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 104 operations
+octo-cli is **metadata-driven**. The entire command tree — 105 operations
 across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
@@ -38,7 +38,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 31  | Documents, spreadsheets & whiteboards — lifecycle, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
+| `docs`    | 32  | Documents, spreadsheets & whiteboards — lifecycle, full-text search, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
 | `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
@@ -125,9 +125,10 @@ octo-cli thread create group-abc --name "design review"
 octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
 
-# Docs — create/list, then read and incrementally edit the live body.
+# Docs — create/list/search, then read and incrementally edit the live body.
 octo-cli docs create --title "Design notes"
 octo-cli docs list --sort updatedAt:desc
+octo-cli docs search --keyword "quarterly plan" --doc-type doc --page-all
 octo-cli docs get doc-123
 octo-cli docs content get doc-123          # returns the body + base version token
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
