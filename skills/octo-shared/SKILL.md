@@ -216,4 +216,4 @@ Once these fundamentals are understood, load the skill for the domain you need:
 - `octo-files` — file upload/download, presigned credentials, bot housekeeping
 - `octo-docs` — docs domain (CRDT/Yjs): documents, spreadsheets, whiteboard scenes, members/sharing, comments, versions, attachments
 - `octo-html` — HTML docs domain (octo-doc, a DIFFERENT backend from octo-docs): self-contained interactive HTML documents, share codes, media assets, comments, agent element read/replace
-- `octo-summary` — read and cite existing summaries visible to the personal Agent's human owner — **temporarily withheld** (backend API pending; not currently loadable)
+- `octo-summary` — create owner-only summaries from explicit sources, then discover, read, and cite summaries visible to the personal Agent's human owner — **temporarily withheld** (create backend at Mininglamp-OSS/octo-smart-summary#181 not yet merged/deployed/enabled; not currently loadable)

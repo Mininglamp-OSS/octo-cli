@@ -14,6 +14,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // runOperation is the RunE body for every auto-registered operation.
@@ -154,6 +155,14 @@ func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) map[string]stri
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data
 // nor any promoted fields. Explicit flags override --data fields.
+//
+// After merging --data with promoted flag values, this checks the resolved
+// map against the operation's declared `required` list from the spec. Any
+// required field that neither --data nor a flag supplied fails locally with
+// a validation error rather than being forwarded as a partial write. This is
+// the enforcement layer for both promoted primitives and object/array fields;
+// registerBodyFlags only marks required fields in help text. Nested object and
+// array requirements are validated recursively as well.
 func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRuntime) (any, error) {
 	if rt.bodyData == nil && len(rt.bodyFlags) == 0 {
 		return nil, nil
@@ -173,6 +182,22 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		}
 	}
 
+	applyBodyFlags(cobraCmd, rt, base)
+
+	if err := validateRequiredBodyFields(rt, base); err != nil {
+		return nil, err
+	}
+
+	if len(base) == 0 {
+		return nil, nil
+	}
+	return base, nil
+}
+
+// applyBodyFlags merges body-flag values (--foo, --bar) into base, following the
+// promotable-primitive kinds registered on the operation. Only Changed flags are
+// applied so unset flags do not overwrite --data-supplied values with zero.
+func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[string]any) {
 	for flagName, bf := range rt.bodyFlags {
 		if !cobraCmd.Flags().Changed(flagName) {
 			continue
@@ -188,11 +213,114 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 			base[bf.apiName] = *bf.strVal
 		}
 	}
+}
 
-	if len(base) == 0 {
-		return nil, nil
+// validateRequiredBodyFields enforces the request schema against the merged
+// body. It runs before the empty-body short-circuit so schema-required fields
+// are checked even when no body values were supplied. Optional request bodies
+// remain optional, but if supplied their nested required fields and minItems
+// constraints still apply.
+func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error {
+	if rt.detail == nil || rt.detail.RequestBody == nil {
+		return nil
 	}
-	return base, nil
+	// Multipart bodies are assembled separately from base. Their required
+	// binary part is validated by buildMultipartBody.
+	if rt.detail.Multipart {
+		return nil
+	}
+	if len(base) == 0 && !rt.detail.RequestBodyRequired {
+		return nil
+	}
+	if issue := validateBodySchema(rt.detail.RequestBody, base, ""); issue != "" {
+		return output.ErrValidation(
+			fmt.Sprintf("request body %s", issue),
+			"pass values that satisfy the operation schema via --data JSON or matching body flags")
+	}
+	return nil
+}
+
+func validateBodySchema(schema *registry.SchemaInfo, value any, path string) string {
+	switch schema.Type {
+	case "object":
+		return validateObjectSchema(schema, value, path)
+	case "array":
+		return validateArraySchema(schema, value, path)
+	}
+	return ""
+}
+
+func validateObjectSchema(schema *registry.SchemaInfo, value any, path string) string {
+	obj, ok := value.(map[string]any)
+	if !ok || obj == nil {
+		return fmt.Sprintf("field %s must be an object", bodyPath(path))
+	}
+	var missing []string
+	for _, name := range schema.Required {
+		child, exists := obj[name]
+		if !exists || child == nil {
+			missing = append(missing, joinBodyPath(path, name))
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Sprintf("is missing required field(s): %s", strings.Join(missing, ", "))
+	}
+	for name := range schema.Properties {
+		if child, exists := obj[name]; exists && child != nil {
+			childSchema := schema.Properties[name]
+			if issue := validateBodySchema(&childSchema, child, joinBodyPath(path, name)); issue != "" {
+				return issue
+			}
+		}
+	}
+	return ""
+}
+
+func validateArraySchema(schema *registry.SchemaInfo, value any, path string) string {
+	items, ok := bodyArray(value)
+	if !ok {
+		return fmt.Sprintf("field %s must be an array", bodyPath(path))
+	}
+	if schema.MinItems > 0 && len(items) < schema.MinItems {
+		return fmt.Sprintf("field %s must contain at least %d item(s)", bodyPath(path), schema.MinItems)
+	}
+	if schema.Items != nil {
+		for i, item := range items {
+			if issue := validateBodySchema(schema.Items, item, fmt.Sprintf("%s[%d]", path, i)); issue != "" {
+				return issue
+			}
+		}
+	}
+	return ""
+}
+
+func bodyArray(value any) ([]any, bool) {
+	switch items := value.(type) {
+	case []any:
+		return items, true
+	case []string:
+		out := make([]any, len(items))
+		for i := range items {
+			out[i] = items[i]
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func joinBodyPath(parent, child string) string {
+	if parent == "" {
+		return child
+	}
+	return parent + "." + child
+}
+
+func bodyPath(path string) string {
+	if path == "" {
+		return "<root>"
+	}
+	return path
 }
 
 // emitOnce runs one request and emits the envelope. Returns the same error

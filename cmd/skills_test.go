@@ -78,7 +78,7 @@ func TestLoadSkillsExcludesDisabled(t *testing.T) {
 		t.Error("disabled skill `octo-matter` must not be listed")
 	}
 	if hasSkill(entries, "octo-summary") {
-		t.Error("disabled skill `octo-summary` must not be listed")
+		t.Error("disabled skill `octo-summary` must not be listed (see CHANGELOG withhold note)")
 	}
 	if _, err := skills.FS.ReadFile("octo-matter/SKILL.md"); err != nil {
 		t.Errorf("octo-matter/SKILL.md must stay embedded (only the listing filters it): %v", err)

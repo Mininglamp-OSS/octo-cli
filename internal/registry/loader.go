@@ -148,6 +148,11 @@ type ParamInfo struct {
 	Description string      `json:"description,omitempty"`
 	Default     any         `json:"default,omitempty"`
 	Enum        []any       `json:"enum,omitempty"`
+	// String constraints are exposed as schema metadata for callers; request
+	// validation remains the responsibility of the service backend.
+	MinLength int    `json:"min_length,omitempty"`
+	MaxLength int    `json:"max_length,omitempty"`
+	Pattern   string `json:"pattern,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag
 	// extension on the parameter. It lets a spec expose a header/query param
 	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
@@ -170,9 +175,14 @@ type SchemaInfo struct {
 	Enum        []any                 `json:"enum,omitempty"`
 	Format      string                `json:"format,omitempty"`
 	Description string                `json:"description,omitempty"`
-	MaxLength   int                   `json:"max_length,omitempty"`
-	MaxItems    int                   `json:"max_items,omitempty"`
-	Ref         string                `json:"$ref,omitempty"`
+	// These constraints are surfaced for schema introspection. The generic CLI
+	// validator currently enforces required and MinItems only.
+	MinLength int    `json:"min_length,omitempty"`
+	MaxLength int    `json:"max_length,omitempty"`
+	MinItems  int    `json:"min_items,omitempty"`
+	MaxItems  int    `json:"max_items,omitempty"`
+	Pattern   string `json:"pattern,omitempty"`
+	Ref       string `json:"$ref,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag extension
 	// on a request-body property, mirroring ParamInfo.FlagName for query/header
 	// params. It lets a promoted body field expose a clean flag name (e.g.
@@ -201,12 +211,13 @@ type PaginationInfo struct {
 // binary response).
 type OperationDetail struct {
 	OperationInfo
-	Parameters     []ParamInfo     `json:"parameters,omitempty"`
-	RequestBody    *SchemaInfo     `json:"request_body,omitempty"`
-	ResponseSchema *SchemaInfo     `json:"response_schema,omitempty"`
-	Pagination     *PaginationInfo `json:"pagination,omitempty"`
-	BaseURLEnv     string          `json:"base_url_env,omitempty"`
-	SpaceHeader    bool            `json:"space_header,omitempty"`
+	Parameters          []ParamInfo     `json:"parameters,omitempty"`
+	RequestBody         *SchemaInfo     `json:"request_body,omitempty"`
+	RequestBodyRequired bool            `json:"request_body_required,omitempty"`
+	ResponseSchema      *SchemaInfo     `json:"response_schema,omitempty"`
+	Pagination          *PaginationInfo `json:"pagination,omitempty"`
+	BaseURLEnv          string          `json:"base_url_env,omitempty"`
+	SpaceHeader         bool            `json:"space_header,omitempty"`
 	// SpaceHeaderSet records whether the spec declared x-octo-space-header at
 	// all. It lets the transport distinguish an explicit `false` (suppress the
 	// X-Space-Id header) from an omitted flag (keep the default behaviour of
@@ -369,12 +380,16 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 				if enum, ok := sch["enum"].([]any); ok {
 					pi.Enum = enum
 				}
+				pi.MinLength = intOf(sch["minLength"])
+				pi.MaxLength = intOf(sch["maxLength"])
+				pi.Pattern = stringOf(sch["pattern"])
 			}
 			d.Parameters = append(d.Parameters, pi)
 		}
 	}
 
 	if body, ok := op["requestBody"].(map[string]any); ok {
+		d.RequestBodyRequired = boolOf(body["required"])
 		if s := extractJSONSchema(body); s != nil {
 			resolved := resolveSchema(doc, s)
 			d.RequestBody = &resolved
@@ -483,7 +498,10 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 				resolved := resolveSchema(doc, s)
 				return &resolved
 			}
-			return nil
+			// A valid success status may document only a description (for
+			// example an idempotent 200 replay). Keep looking for another 2xx
+			// response that carries the shared success schema.
+			continue
 		}
 	}
 	for code, r := range resps {
@@ -507,7 +525,7 @@ func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
 
-func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nolint:gocyclo // recursive schema resolver, branching is inherent to OpenAPI
+func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 	if s == nil {
 		return SchemaInfo{}
 	}
@@ -525,6 +543,11 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nol
 		Format:      stringOf(s["format"]),
 		Description: stringOf(s["description"]),
 		FlagName:    stringOf(s["x-octo-flag"]),
+		MinLength:   intOf(s["minLength"]),
+		MaxLength:   intOf(s["maxLength"]),
+		MinItems:    intOf(s["minItems"]),
+		MaxItems:    intOf(s["maxItems"]),
+		Pattern:     stringOf(s["pattern"]),
 	}
 	if req, ok := s["required"].([]any); ok {
 		for _, x := range req {
@@ -535,12 +558,6 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo { //nol
 	}
 	if enum, ok := s["enum"].([]any); ok {
 		info.Enum = enum
-	}
-	if ml, ok := s["maxLength"].(float64); ok {
-		info.MaxLength = int(ml)
-	}
-	if mi, ok := s["maxItems"].(float64); ok {
-		info.MaxItems = int(mi)
 	}
 	if props, ok := s["properties"].(map[string]any); ok {
 		info.Properties = map[string]SchemaInfo{}
@@ -590,6 +607,11 @@ func stringOf(v any) string {
 func boolOf(v any) bool {
 	b, _ := v.(bool)
 	return b
+}
+
+func intOf(v any) int {
+	n, _ := v.(float64)
+	return int(n)
 }
 
 // truthy accepts a JSON value that may be a boolean `true` or the string
