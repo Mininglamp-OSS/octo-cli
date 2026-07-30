@@ -232,7 +232,7 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil
 	}
-	if issue := validateBodySchema(*rt.detail.RequestBody, base, ""); issue != "" {
+	if issue := validateBodySchema(rt.detail.RequestBody, base, ""); issue != "" {
 		return output.ErrValidation(
 			fmt.Sprintf("request body %s", issue),
 			"pass values that satisfy the operation schema via --data JSON or matching body flags")
@@ -240,7 +240,7 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	return nil
 }
 
-func validateBodySchema(schema registry.SchemaInfo, value any, path string) string {
+func validateBodySchema(schema *registry.SchemaInfo, value any, path string) string {
 	switch schema.Type {
 	case "object":
 		return validateObjectSchema(schema, value, path)
@@ -250,7 +250,7 @@ func validateBodySchema(schema registry.SchemaInfo, value any, path string) stri
 	return ""
 }
 
-func validateObjectSchema(schema registry.SchemaInfo, value any, path string) string {
+func validateObjectSchema(schema *registry.SchemaInfo, value any, path string) string {
 	obj, ok := value.(map[string]any)
 	if !ok || obj == nil {
 		return fmt.Sprintf("field %s must be an object", bodyPath(path))
@@ -267,7 +267,8 @@ func validateObjectSchema(schema registry.SchemaInfo, value any, path string) st
 	}
 	for name := range schema.Properties {
 		if child, exists := obj[name]; exists && child != nil {
-			if issue := validateBodySchema(schema.Properties[name], child, joinBodyPath(path, name)); issue != "" {
+			childSchema := schema.Properties[name]
+			if issue := validateBodySchema(&childSchema, child, joinBodyPath(path, name)); issue != "" {
 				return issue
 			}
 		}
@@ -275,7 +276,7 @@ func validateObjectSchema(schema registry.SchemaInfo, value any, path string) st
 	return ""
 }
 
-func validateArraySchema(schema registry.SchemaInfo, value any, path string) string {
+func validateArraySchema(schema *registry.SchemaInfo, value any, path string) string {
 	items, ok := bodyArray(value)
 	if !ok {
 		return fmt.Sprintf("field %s must be an array", bodyPath(path))
@@ -285,7 +286,7 @@ func validateArraySchema(schema registry.SchemaInfo, value any, path string) str
 	}
 	if schema.Items != nil {
 		for i, item := range items {
-			if issue := validateBodySchema(*schema.Items, item, fmt.Sprintf("%s[%d]", path, i)); issue != "" {
+			if issue := validateBodySchema(schema.Items, item, fmt.Sprintf("%s[%d]", path, i)); issue != "" {
 				return issue
 			}
 		}
