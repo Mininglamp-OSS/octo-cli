@@ -346,49 +346,8 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		}
 	}
 
-	if params, ok := op["parameters"].([]any); ok {
-		for _, p := range params {
-			pm, ok := p.(map[string]any)
-			if !ok {
-				continue
-			}
-			if ref := stringOf(pm["$ref"]); ref != "" {
-				pm = followComponentRef(doc, ref, "parameters")
-				if pm == nil {
-					continue
-				}
-			}
-			pi := ParamInfo{
-				Name:        stringOf(pm["name"]),
-				In:          stringOf(pm["in"]),
-				Required:    boolOf(pm["required"]),
-				Description: stringOf(pm["description"]),
-				FlagName:    stringOf(pm["x-octo-flag"]),
-			}
-			if sch, ok := pm["schema"].(map[string]any); ok {
-				pi.Type = stringOf(sch["type"])
-				pi.Default = sch["default"]
-				if items, ok := sch["items"].(map[string]any); ok {
-					resolved := resolveSchema(doc, items)
-					pi.Items = &resolved
-				}
-				if enum, ok := sch["enum"].([]any); ok {
-					pi.Enum = enum
-				}
-			}
-			d.Parameters = append(d.Parameters, pi)
-		}
-	}
-
-	if body, ok := op["requestBody"].(map[string]any); ok {
-		if ref := stringOf(body["$ref"]); ref != "" {
-			body = followComponentRef(doc, ref, "requestBodies")
-		}
-		if s := extractJSONSchema(body); s != nil {
-			resolved := resolveSchema(doc, s)
-			d.RequestBody = &resolved
-		}
-	}
+	d.Parameters = operationParameters(doc, op)
+	d.RequestBody = operationRequestBody(doc, op)
 
 	if resps, ok := op["responses"].(map[string]any); ok {
 		d.ResponseSchema = firstSuccessSchema(doc, resps)
@@ -404,6 +363,58 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	return d
+}
+
+func operationParameters(doc, op map[string]any) []ParamInfo {
+	params, _ := op["parameters"].([]any)
+	result := make([]ParamInfo, 0, len(params))
+	for _, raw := range params {
+		pm, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ref := stringOf(pm["$ref"]); ref != "" {
+			pm = followComponentRef(doc, ref, "parameters")
+			if pm == nil {
+				continue
+			}
+		}
+		parameter := ParamInfo{
+			Name:        stringOf(pm["name"]),
+			In:          stringOf(pm["in"]),
+			Required:    boolOf(pm["required"]),
+			Description: stringOf(pm["description"]),
+			FlagName:    stringOf(pm["x-octo-flag"]),
+		}
+		if schema, ok := pm["schema"].(map[string]any); ok {
+			parameter.Type = stringOf(schema["type"])
+			parameter.Default = schema["default"]
+			if items, ok := schema["items"].(map[string]any); ok {
+				resolved := resolveSchema(doc, items)
+				parameter.Items = &resolved
+			}
+			if enum, ok := schema["enum"].([]any); ok {
+				parameter.Enum = enum
+			}
+		}
+		result = append(result, parameter)
+	}
+	return result
+}
+
+func operationRequestBody(doc, op map[string]any) *SchemaInfo {
+	body, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if ref := stringOf(body["$ref"]); ref != "" {
+		body = followComponentRef(doc, ref, "requestBodies")
+	}
+	if schema := extractJSONSchema(body); schema != nil {
+		resolved := resolveSchema(doc, schema)
+		return &resolved
+	}
+	return nil
 }
 
 func extractJSONSchema(body map[string]any) map[string]any {
