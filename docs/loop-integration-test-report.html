@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>octo-cli Loop 接入测试报告</title>
+  <style>
+    :root{--bg:#f4f7fb;--surface:#fff;--ink:#172033;--muted:#667089;--line:#dfe5ef;--brand:#3159d8;--pass:#16845b;--warn:#a86000;--fail:#c13838}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:1180px;margin:auto;padding:42px 24px 80px}
+    header{padding:36px 40px;border-radius:22px;color:#fff;background:linear-gradient(135deg,#152862,#3159d8 68%,#6685ef);box-shadow:0 12px 36px #28365c17}h1{margin:0 0 8px;font-size:34px}h2{margin:40px 0 14px;font-size:23px}h3{margin:24px 0 9px;font-size:17px}p{margin:7px 0}.subtitle{opacity:.86;font-size:16px}.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.meta span,.badge{border-radius:99px;padding:4px 10px}.meta span{border:1px solid #ffffff55;background:#ffffff12}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}.card{background:var(--surface);border:1px solid var(--line);border-radius:15px;padding:20px;box-shadow:0 5px 18px #28365c0a}.metric{text-align:center}.metric b{display:block;color:var(--brand);font-size:27px}.metric small,.muted{color:var(--muted)}
+    .verdict{margin-top:20px;border-left:5px solid var(--warn)}.verdict strong{display:block;color:var(--warn);font-size:22px}.badge{display:inline-block;font-weight:700;white-space:nowrap}.pass{color:var(--pass);background:#e6f7ef}.warn{color:var(--warn);background:#fff4dc}.fail{color:var(--fail);background:#ffebeb}.info{color:var(--brand);background:#eaf0ff}
+    .wrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:#fff}table{width:100%;border-collapse:collapse}th,td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{font-size:12px;color:#47516a;background:#f7f9fc}tr:last-child td{border:0}code{padding:1px 4px;border-radius:4px;color:#2647a5;background:#eef2fb}pre{overflow:auto;padding:17px 19px;border-radius:12px;color:#e7edf9;background:#101827;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}pre code{padding:0;color:inherit;background:none}
+    .callout{padding:13px 16px;border-left:4px solid var(--brand);border-radius:8px;background:#eaf0ff}.warnbox{border-color:var(--warn);background:#fff4dc}.failbox{border-color:var(--fail);background:#ffebeb}.bar{min-width:120px;height:9px;overflow:hidden;border-radius:99px;background:#edf0f6}.bar i{display:block;height:100%;background:linear-gradient(90deg,#3159d8,#6c8df5)}details{margin:10px 0;border:1px solid var(--line);border-radius:12px;background:#fff}summary{padding:13px 16px;cursor:pointer;font-weight:700}details div{padding:0 16px 16px}.ops{columns:2;padding-left:22px}.ops li{break-inside:avoid}footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);color:var(--muted)}
+    @media(max-width:850px){.grid,.metrics{grid-template-columns:1fr 1fr}.ops{columns:1}header{padding:27px 23px}}@media(max-width:560px){.grid,.metrics{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <header>
+    <h1>octo-cli Loop 接入测试报告</h1>
+    <p class="subtitle">Loop-only 临时测试分支 · 自动化、契约、CLI dry-run 与覆盖率</p>
+    <div class="meta"><span>2026-07-30 15:50 CST</span><span>feat/loop-integration-test</span><span>36c8e624</span><span>Go 1.26.3 · Darwin arm64</span></div>
+  </header>
+
+  <section class="card verdict">
+    <span class="badge warn">CONDITIONAL PASS</span>
+    <strong>本地验证通过，环境集成待执行</strong>
+    <p>构建、Race 测试、契约匹配和路由 smoke 均通过；发现 1 个请求体必填字段未在 CLI 本地校验的问题。尚未使用真实 Fleet 测试身份执行端到端读写，因此不能声明 61 个业务接口“全部可用”。</p>
+  </section>
+  <section class="metrics">
+    <div class="card metric"><b>346</b><small>Go Tests</small></div><div class="card metric"><b>82.6%</b><small>语句覆盖率</small></div><div class="card metric"><b>61/61</b><small>Operation 匹配</small></div><div class="card metric"><b>12</b><small>通过的 Package</small></div><div class="card metric"><b>1</b><small>确认异常</small></div>
+  </section>
+
+  <h2>1. 测试对象与制品</h2>
+  <div class="grid">
+    <div class="card"><h3>源码</h3><table><tr><td>仓库</td><td><code>Mininglamp-OSS/octo-cli</code></td></tr><tr><td>分支</td><td><code>feat/loop-integration-test</code></td></tr><tr><td>HEAD</td><td><code>36c8e62411d64e85bfe8e424b896c6d3d9207b08</code></td></tr><tr><td>Loop 实现</td><td><code>a18d5ba</code></td></tr><tr><td>公共 Client</td><td><span class="badge pass">已移除</span></td></tr></table></div>
+    <div class="card"><h3>测试二进制</h3><table><tr><td>路径</td><td><code>bin/octo-cli</code></td></tr><tr><td>版本</td><td><code>loop-integration-test-20260730</code></td></tr><tr><td>格式</td><td>Mach-O 64-bit arm64</td></tr><tr><td>SHA-256</td><td><code>361cb8e434540db527434a13111485da6db5b62dde9d58a18c21f6859af3e969</code></td></tr></table></div>
+  </div>
+
+  <h2>2. 测试命令</h2>
+  <h3>格式、静态检查、Race 与覆盖率</h3>
+  <pre><code>test_cache_dir=$(mktemp -d /tmp/octo-cli-html-report-cache.XXXXXX)
+GOCACHE="$test_cache_dir" make fmt
+GOCACHE="$test_cache_dir" make vet
+GOCACHE="$test_cache_dir" go test -race -count=1 \
+  -covermode=atomic -coverprofile=/tmp/octo-cli-loop-coverage.out ./...
+GOCACHE="$test_cache_dir" go tool cover -func=/tmp/octo-cli-loop-coverage.out</code></pre>
+  <h3>编译与制品校验</h3>
+  <pre><code>GOCACHE="$test_cache_dir" make build VERSION=loop-integration-test-20260730
+./bin/octo-cli version
+file bin/octo-cli
+shasum -a 256 bin/octo-cli</code></pre>
+  <h3>OpenAPI 契约对比</h3>
+  <pre><code>fleet_ops=$(rg '^\s+operationId:' ../octo-fleet/openapi/public-v1.yaml \
+  | sed 's/.*operationId:\s*//' | sort)
+cli_ops=$(jq -r '.paths[] | to_entries[]
+  | select(.key|IN("get","post","put","patch","delete"))
+  | .value.operationId' internal/registry/specs/loop.json | sort)
+test "$fleet_ops" = "$cli_ops"</code></pre>
+  <h3>隔离 dry-run</h3>
+  <pre><code>export OCTO_CONFIG_DIR="$(mktemp -d /tmp/octo-cli-smoke.XXXXXX)"
+export OCTO_BOT_TOKEN='octo_loop_test_placeholder'
+export OCTO_API_BASE_URL='https://octo.invalid'
+export OCTO_LOOP_API_BASE_URL='http://127.0.0.1:8081'
+export OCTO_SPACE_ID='space-test'
+
+./bin/octo-cli schema --list loop
+./bin/octo-cli --dry-run loop task list
+./bin/octo-cli --dry-run loop task get task-test
+./bin/octo-cli --dry-run loop task create --data '{"title":"CLI smoke test"}'
+./bin/octo-cli --dry-run loop execution message list execution-test
+./bin/octo-cli --dry-run loop expert list
+./bin/octo-cli --dry-run loop expert-template list
+./bin/octo-cli --dry-run loop expert-team list</code></pre>
+
+  <h2>3. Test Case 与实际结果</h2>
+  <div class="wrap"><table>
+    <thead><tr><th>ID</th><th>内容</th><th>期望</th><th>实际</th><th>状态</th></tr></thead><tbody>
+    <tr><td>BUILD-001</td><td>格式检查</td><td>无待格式化文件</td><td><code>make fmt</code> exit 0</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>BUILD-002</td><td>Go Vet</td><td>无静态错误</td><td><code>go vet ./...</code> exit 0</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>BUILD-003</td><td>Race 全量单测</td><td>无失败、无 race</td><td>346 tests / 12 packages 通过</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>BUILD-004</td><td>测试版编译</td><td>生成 arm64 binary</td><td><code>bin/octo-cli</code> 可执行</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>SCOPE-001</td><td>公共 Client 清理</td><td>无 <code>client/</code> 包</td><td>目录及 main diff 均不存在</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CONTRACT-001</td><td>Operation ID</td><td>CLI/Fleet 完全一致</td><td>61 / 61</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CONTRACT-002</td><td>共享 Schema 引用</td><td>参数与 Body 可解析</td><td>相关 Registry Test 通过</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-001</td><td>Schema discovery</td><td>返回 61 个 Operation</td><td>exit 0</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-002</td><td>Task list</td><td><code>GET /api/v1/tasks</code></td><td>Fleet URL 正确</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-003</td><td>Task get</td><td>替换 task ID</td><td><code>/tasks/task-test</code></td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-004</td><td>Task create 合法 Body</td><td>POST + title</td><td>方法、路径、Body 正确</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-005</td><td>Execution messages</td><td>子资源路径正确</td><td><code>/executions/execution-test/messages</code></td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-006</td><td>Expert list</td><td><code>/api/v1/experts</code></td><td>符合预期</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-007</td><td>Expert template</td><td><code>/api/v1/expert_templates</code></td><td>符合预期</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-008</td><td>Expert team</td><td><code>/api/v1/expert_teams</code></td><td>符合预期</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CLI-009</td><td>Task create 缺少 title</td><td>validation / exit 2</td><td>dry-run 成功 / exit 0</td><td><span class="badge fail">FAIL</span></td></tr>
+    <tr><td>AUTH-001</td><td>Token 缺失</td><td>认证错误 / exit 3</td><td><code>UNAUTHORIZED</code> / exit 3</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>AUTH-002</td><td>Token 脱敏</td><td>不输出完整值</td><td><code>octo_loop_te***lder</code></td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>AUTH-003</td><td>Space Header</td><td>Loop 不发送 <code>X-Space-Id</code></td><td>仅 Authorization</td><td><span class="badge pass">PASS</span></td></tr>
+    <tr><td>CONFIG-001</td><td>Fleet Endpoint override</td><td>使用 <code>OCTO_LOOP_API_BASE_URL</code></td><td>请求指向 127.0.0.1:8081</td><td><span class="badge pass">PASS</span></td></tr>
+  </tbody></table></div>
+
+  <h2>4. 覆盖率</h2>
+  <div class="callout"><strong>仓库总语句覆盖率：82.6%</strong><p>不是 61 个业务 API 的端到端覆盖率；Loop 特有覆盖集中在 Registry、Service command tree、Config、Credential 和 Client routing。</p></div>
+  <div class="wrap" style="margin-top:14px"><table><thead><tr><th>Package</th><th>覆盖率</th><th>可视化</th><th>覆盖内容</th></tr></thead><tbody>
+    <tr><td><code>cmd</code></td><td>75.9%</td><td><div class="bar"><i style="width:75.9%"></i></div></td><td>Root/Auth/Config</td></tr><tr><td><code>cmd/octo-cli</code></td><td>0.0%</td><td><div class="bar"></div></td><td>main wrapper；核心逻辑在 cmd</td></tr><tr><td><code>cmd/service</code></td><td>87.6%</td><td><div class="bar"><i style="width:87.6%"></i></div></td><td>命令树、参数、Body、路由</td></tr><tr><td><code>internal/authstore</code></td><td>72.9%</td><td><div class="bar"><i style="width:72.9%"></i></div></td><td>本地身份存储</td></tr><tr><td><code>internal/client</code></td><td>87.0%</td><td><div class="bar"><i style="width:87%"></i></div></td><td>HTTP、重试、Header、dry-run</td></tr><tr><td><code>internal/cmdutil</code></td><td>84.0%</td><td><div class="bar"><i style="width:84%"></i></div></td><td>Factory、输入</td></tr><tr><td><code>internal/config</code></td><td>100.0%</td><td><div class="bar"><i style="width:100%"></i></div></td><td>Loop endpoint override</td></tr><tr><td><code>internal/credential</code></td><td>88.1%</td><td><div class="bar"><i style="width:88.1%"></i></div></td><td>Token 分类、脱敏</td></tr><tr><td><code>internal/fracindex</code></td><td>100.0%</td><td><div class="bar"><i style="width:100%"></i></div></td><td>非 Loop 专属</td></tr><tr><td><code>internal/output</code></td><td>91.8%</td><td><div class="bar"><i style="width:91.8%"></i></div></td><td>Envelope、错误</td></tr><tr><td><code>internal/registry</code></td><td>90.6%</td><td><div class="bar"><i style="width:90.6%"></i></div></td><td>OpenAPI 装载、Ref 解析</td></tr><tr><td><code>skills</code></td><td>无语句</td><td>—</td><td>嵌入文档内容测试</td></tr>
+  </tbody></table></div>
+
+  <h2>5. Loop API 覆盖内容</h2>
+  <p>以下 61 个 Operation 均已进入 CLI 命令和嵌入契约；“覆盖”不表示已对真实数据库执行全部生命周期。</p>
+  <details open><summary>Task · 33</summary><div><ul class="ops"><li>task.list</li><li>task.create</li><li>task.search</li><li>task.group</li><li>task.child_progress</li><li>task.children_by_parent</li><li>task.quick_create</li><li>task.get</li><li>task.update</li><li>task.delete</li><li>task.comment.list</li><li>task.comment.create</li><li>task.comment.preview</li><li>task.timeline.list</li><li>task.subscriber.list</li><li>task.subscribe</li><li>task.unsubscribe</li><li>task.execution.list</li><li>task.active_execution.list</li><li>task.rerun</li><li>task.execution.cancel</li><li>task.usage</li><li>task.reaction.add</li><li>task.reaction.remove</li><li>task.attachment.list</li><li>task.child.list</li><li>task.label.list</li><li>task.label.add</li><li>task.label.remove</li><li>task.metadata.list</li><li>task.metadata.set</li><li>task.metadata.delete</li><li>task.pull_request.list</li></ul></div></details>
+  <details><summary>Execution · 2</summary><div><ul><li>execution.cancel</li><li>execution.message.list</li></ul></div></details>
+  <details><summary>Expert · 14</summary><div><ul class="ops"><li>expert.list</li><li>expert.create</li><li>expert.create_from_template</li><li>expert.get</li><li>expert.update</li><li>expert.archive</li><li>expert.restore</li><li>expert.execution.cancel</li><li>expert.execution.list</li><li>expert.skill.list</li><li>expert.skill.replace</li><li>expert.skill.add</li><li>expert.environment.get</li><li>expert.environment.update</li></ul></div></details>
+  <details><summary>Expert template · 2</summary><div><ul><li>expert_template.list</li><li>expert_template.get</li></ul></div></details>
+  <details><summary>Expert team · 10</summary><div><ul class="ops"><li>expert_team.list</li><li>expert_team.create</li><li>expert_team.get</li><li>expert_team.update</li><li>expert_team.delete</li><li>expert_team.member.list</li><li>expert_team.member.add</li><li>expert_team.member.remove</li><li>expert_team.member.update</li><li>expert_team.member_status.list</li></ul></div></details>
+
+  <h2>6. 异常与限制</h2>
+  <div class="wrap"><table><thead><tr><th>ID</th><th>类型</th><th>现象/影响</th><th>处理或建议</th></tr></thead><tbody>
+    <tr><td>ISSUE-001</td><td><span class="badge fail">代码异常</span></td><td><code>task.create --data '{}'</code> exit 0；CLI 未校验 Schema required Body 字段</td><td>在通用 Service engine 校验 <code>RequestBody.Required</code>，增加回归测试</td></tr>
+    <tr><td>ENV-001</td><td><span class="badge warn">环境</span></td><td>默认 Go build cache 无写权限，首次 vet 被沙箱阻止</td><td>已使用临时 <code>GOCACHE</code>，非代码异常</td></tr>
+    <tr><td>ENV-002</td><td><span class="badge warn">环境</span></td><td>module stat cache 有 permission warning；build exit 0</td><td>制品可执行且已记录哈希；CI 使用可写 cache</td></tr>
+    <tr><td>ENV-003</td><td><span class="badge warn">未执行</span></td><td><code>golangci-lint</code> 未安装</td><td>CI 或安装后补跑</td></tr>
+    <tr><td>SCOPE-001</td><td><span class="badge info">范围</span></td><td>无测试 Fleet 地址和专用身份，未验证真实权限、写入与跨 Space</td><td>执行下一节的端到端矩阵</td></tr>
+  </tbody></table></div>
+
+  <h2>7. 真实环境待测矩阵</h2>
+  <div class="callout warnbox"><strong>前置条件：</strong>测试 Fleet Base URL、隔离测试 Space、非生产测试凭证。凭证不得进入报告、Git、命令参数或共享日志。</div>
+  <ol><li>认证：允许的 Octo Session、bf_、uk_、octo_loop_；过期、撤销、错误 Principal。</li><li>Task：create → get → update → comment/label/metadata/reaction → execution/rerun → delete。</li><li>Expert：create → update → skills/env → archive/restore → template create。</li><li>Expert team：create → member add/update/remove → status → delete。</li><li>隔离：同 Space 成功、跨 Space 拒绝，且 Loop 不依赖 X-Space-Id。</li><li>稳定性：404/409/422/429/5xx、retry、timeout、分页、空结果和错误 envelope。</li></ol>
+
+  <h2>8. 最终判断</h2>
+  <div class="callout failbox"><strong>暂不标记为“全部功能可用”。</strong><p>准确状态：Loop CLI 本地自动化与契约接入通过；存在 1 个 Body required 本地校验缺口；真实 Fleet 端到端测试待执行。</p></div>
+  <footer>测试使用临时配置目录和占位 Token，未读取或修改开发者保存的 CLI 凭证。</footer>
+</main></body></html>

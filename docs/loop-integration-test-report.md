@@ -15,7 +15,7 @@ pending**
 - Version: `loop-integration-test-20260730`
 - Platform: macOS arm64
 - SHA-256:
-  `505ced0b12b3069d834ec60652e74d74c09251491244b5bdd894e233071967bc`
+  `361cb8e434540db527434a13111485da6db5b62dde9d58a18c21f6859af3e969`
 
 Build command:
 
@@ -127,13 +127,14 @@ Verified:
 
 - task list
 - task get
-- task create with request-body validation
+- task create with a valid request body
 - execution message list
 - expert list
 - expert-template list
 - expert-team list
 
-Result: passed.
+Result: routing passed. Required request-body validation has one confirmed
+defect documented below.
 
 Observed behavior:
 
@@ -162,3 +163,20 @@ fully available”. The supported statement is:
 
 > All local builds, tests, command routing, and embedded Fleet public API
 > contract checks pass. Authenticated environment integration remains pending.
+
+## Confirmed issue
+
+`task.create` declares `title` as a required request-body property, but this
+currently succeeds with exit code 0:
+
+```bash
+octo-cli --dry-run loop task create --data '{}'
+```
+
+The generic service engine resolves the request-body schema but does not
+validate `RequestBody.Required` against the merged body. Fleet should reject
+the real request, but the CLI does not fail early. This is a CLI validation
+defect, not a passed Loop test.
+
+The detailed commands, case matrix, package coverage, all 61 operations, and
+execution limitations are in `loop-integration-test-report.html`.

@@ -53,7 +53,8 @@ This TODO does not add enrollment commands to `octo-cli`.
 - Loop command-tree discovery
 - isolated dry-run routing for task, execution, expert, expert-template, and
   expert-team
-- isolated task-create body validation and routing
+- isolated task-create routing; required-body validation defect recorded in
+  the test report
 
 Local checks use a temporary `OCTO_CONFIG_DIR` and placeholder credentials.
 They do not read or modify a developer's saved CLI profiles.
