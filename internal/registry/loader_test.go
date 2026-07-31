@@ -42,7 +42,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        31,
+		"docs":        32,
 		"html":        20,
 		"marketplace": 25,
 		"summary":     4,
@@ -132,6 +132,20 @@ func TestGetOperationMatterList_Pagination(t *testing.T) {
 	}
 	if !foundStatus {
 		t.Error("missing status query parameter")
+	}
+}
+
+func TestGetOperationDocsSearch_Pagination(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("docs.search")
+	if !ok {
+		t.Fatal("docs.search not found")
+	}
+	if op.Pagination == nil {
+		t.Fatal("pagination: nil, want non-nil")
+	}
+	if op.Pagination.CursorParam != "cursor" || op.Pagination.ItemsField != "items" || op.Pagination.CursorField != "nextCursor" || op.Pagination.HasMoreField != "" || !op.Pagination.InferHasMore || !op.Pagination.RejectCursorRepeats {
+		t.Errorf("pagination: got %+v", op.Pagination)
 	}
 }
 

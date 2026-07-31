@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
@@ -399,18 +400,99 @@ func TestPagination_BodyCursorEndpoint(t *testing.T) {
 }
 
 func TestPagination_PageLimitStops(t *testing.T) {
-	page := `{"data":[{"id":"x"}],"pagination":{"has_more":true,"next_cursor":"c"}}`
 	calls := 0
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		page := fmt.Sprintf(`{"data":[{"id":"x"}],"pagination":{"has_more":true,"next_cursor":"c%d"}}`, calls)
 		_, _ = w.Write([]byte(page))
 	})
-	root.SetArgs([]string{"matter", "list", "--page-all", "--page-limit", "2"})
+	root.SetArgs([]string{"matter", "list", "--page-all", "--page-limit", "5"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if calls != 2 {
-		t.Errorf("expected 2 calls bounded by --page-limit, got %d", calls)
+	if calls != 5 {
+		t.Errorf("expected 5 calls bounded by --page-limit, got %d", calls)
+	}
+}
+
+func TestPagination_LegacyStableCursorStillUsesPageLimit(t *testing.T) {
+	calls := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{"data":[{"id":"x"}],"pagination":{"has_more":true,"next_cursor":"stable"}}`))
+	})
+	root.SetArgs([]string{"matter", "list", "--page-all", "--page-limit", "5"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if calls != 5 {
+		t.Errorf("stable cursor must remain valid for legacy operations: got %d calls, want 5", calls)
+	}
+}
+
+func TestParsePage_CustomFieldPaths(t *testing.T) {
+	items, cursor, hasMore, err := parsePage([]byte(`{
+		"result":{"hits":[{"z":1,"a":"<b>hi</b>"}]},
+		"paging":{"after":"c2","more":true}
+	}`), &registry.PaginationInfo{
+		ItemsField:   "result.hits",
+		CursorField:  "paging.after",
+		HasMoreField: "paging.more",
+	})
+	if err != nil {
+		t.Fatalf("parsePage: %v", err)
+	}
+	if len(items) != 1 || string(items[0]) != `{"z":1,"a":"<b>hi</b>"}` || cursor != "c2" || !hasMore {
+		t.Errorf("items=%s cursor=%q hasMore=%v", items, cursor, hasMore)
+	}
+}
+
+func TestParsePage_InferHasMoreRequiresOptIn(t *testing.T) {
+	body := []byte(`{"items":[],"nextCursor":"c2"}`)
+	base := registry.PaginationInfo{ItemsField: "items", CursorField: "nextCursor"}
+	_, _, hasMore, err := parsePage(body, &base)
+	if err != nil {
+		t.Fatalf("parsePage without inference: %v", err)
+	}
+	if hasMore {
+		t.Fatal("cursor alone must not imply has-more without explicit opt-in")
+	}
+	base.InferHasMore = true
+	_, _, hasMore, err = parsePage(body, &base)
+	if err != nil {
+		t.Fatalf("parsePage with inference: %v", err)
+	}
+	if !hasMore {
+		t.Fatal("non-empty cursor must imply has-more with explicit opt-in")
+	}
+}
+
+func TestParsePage_LegacyNullItemsAreEmpty(t *testing.T) {
+	items, cursor, hasMore, err := parsePage([]byte(`{"data":null,"pagination":{"has_more":false,"next_cursor":null}}`), nil)
+	if err != nil {
+		t.Fatalf("parsePage: %v", err)
+	}
+	if items != nil || cursor != "" || hasMore {
+		t.Errorf("items=%s cursor=%q hasMore=%v, want empty page", items, cursor, hasMore)
+	}
+}
+
+func TestParsePage_RejectsInvalidFieldTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "items object", body: `{"data":{},"pagination":{"has_more":false,"next_cursor":null}}`},
+		{name: "cursor object", body: `{"data":[],"pagination":{"has_more":true,"next_cursor":{}}}`},
+		{name: "has-more string", body: `{"data":[],"pagination":{"has_more":"yes","next_cursor":"c2"}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, err := parsePage([]byte(tt.body), nil)
+			if err == nil || err.Code != "PAGINATION_PARSE" {
+				t.Fatalf("error = %#v, want PAGINATION_PARSE", err)
+			}
+		})
 	}
 }
 
