@@ -236,7 +236,7 @@ func TestDocsSearch_FlagsAndRequestBody(t *testing.T) {
 		t.Error("docs search must expose caller-facing flag names, not wire names")
 	}
 
-	root.SetArgs([]string{"docs", "search", "--keyword", "roadmap", "--doc-type", "doc", "--doc-type", "board", "--cursor", "c1", "--page-size", "25"})
+	root.SetArgs([]string{"docs", "search", "--keyword", "roadmap", "--doc-type", "doc", "--doc-type", "board", "--doc-type", "html", "--cursor", "c1", "--page-size", "25"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestDocsSearch_FlagsAndRequestBody(t *testing.T) {
 		t.Errorf("body = %#v", gotBody)
 	}
 	types, ok := gotBody["docType"].([]any)
-	if !ok || len(types) != 2 || types[0] != "doc" || types[1] != "board" {
+	if !ok || len(types) != 3 || types[0] != "doc" || types[1] != "board" || types[2] != "html" {
 		t.Errorf("docType = %#v", gotBody["docType"])
 	}
 

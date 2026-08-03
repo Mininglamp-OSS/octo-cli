@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -146,6 +147,14 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	}
 	if op.Pagination.CursorParam != "cursor" || op.Pagination.ItemsField != "items" || op.Pagination.CursorField != "nextCursor" || op.Pagination.HasMoreField != "" || !op.Pagination.InferHasMore || !op.Pagination.RejectCursorRepeats {
 		t.Errorf("pagination: got %+v", op.Pagination)
+	}
+	docType, ok := op.RequestBody.Properties["docType"]
+	if !ok || docType.Items == nil {
+		t.Fatal("docs.search docType item schema missing")
+	}
+	wantTypes := []any{"doc", "sheet", "board", "html"}
+	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
+		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}
 }
 

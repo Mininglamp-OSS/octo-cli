@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`octo-cli docs search`** — permission-scoped full-text search across online
-  documents, sheets, and boards via `POST /v1/bot/docs/search`. Supports
-  repeatable `--doc-type` filters, manual cursor continuation, and `--page-all`.
+  documents, sheets, boards, and mounted HTML documents registered in docs-backend
+  via `POST /v1/bot/docs/search`. Supports repeatable `--doc-type` filters, manual
+  cursor continuation, and `--page-all`. Resolve an HTML result's `octoDocSlug`
+  with `docs get` before continuing in the separate `html` domain.
   The metadata-driven pagination engine now supports custom item/cursor paths,
   explicit cursor-based has-more inference, POST body cursors, and opt-in
   repeated-cursor detection with a `PAGINATION_LOOP` error.
