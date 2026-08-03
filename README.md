@@ -137,6 +137,12 @@ octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
+# Mounted HTML documents registered in docs-backend use the same search endpoint.
+# Resolve a hit's slug with docs get, then continue in the separate html domain.
+octo-cli docs search --keyword "interactive roadmap" --doc-type html --page-all
+octo-cli docs get html-doc-id              # returns octoDocSlug for HTML documents
+octo-cli html get html-document-slug
+
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
 octo-cli docs sheet get sheet-9                      # whole sheet + base version token
 octo-cli docs import sheet-9 --file ./report.xlsx    # imports the first visible worksheet
