@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 )
 
@@ -77,6 +78,7 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		{"NOT_FOUND", "api_error"},
 		{"ASSIGNEE_NOT_FOUND", "api_error"},
 		{"FORBIDDEN", "permission"},
+		{"BOT_WORKSPACE_MEMBERSHIP_REQUIRED", "permission"},
 		{"SPACE_FORBIDDEN", "permission"},
 		{"DUPLICATE_ASSIGNEE", "validation"},
 		{"RATE_LIMITED", "rate_limited"},
@@ -102,6 +104,17 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 				t.Errorf("Detail should preserve original body")
 			}
 		})
+	}
+}
+
+func TestParseBackendErrorWorkspaceBotMembershipHint(t *testing.T) {
+	body := []byte(`{"error":{"code":"BOT_WORKSPACE_MEMBERSHIP_REQUIRED","message":"bot must be added to workspace members"}}`)
+	ee := ParseBackendError(http.StatusForbidden, body)
+	if ee.Code != "BOT_WORKSPACE_MEMBERSHIP_REQUIRED" || ee.Type != "permission" {
+		t.Fatalf("error = %+v", ee)
+	}
+	if ee.Hint != "ask a Workspace owner or admin to add this Bot in Workspace Members" {
+		t.Fatalf("hint = %q", ee.Hint)
 	}
 }
 

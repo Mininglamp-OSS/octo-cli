@@ -1,7 +1,7 @@
 ---
 name: octo-shared
 version: 0.5.0
-description: Shared knowledge for using the octo CLI — authentication, multi-service config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
+description: Shared knowledge for using the octo CLI — authentication, unified gateway config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -60,12 +60,15 @@ Token prefix determines capability — the CLI does NOT enforce this locally (th
 
 Before acting, inspect `octo-cli auth status` (or `octo-cli config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
 
-## 2. Multi-service configuration
+## 2. Unified gateway configuration
 
-Different Octo services run at different URLs. Set whichever you need:
+All Octo domains use one gateway. Override it only for test or self-hosted
+deployments:
 
 ```bash
-export OCTO_API_BASE_URL=https://api.example.com   # unified API base URL for all services
+# Production defaults to https://im.deepminer.com.cn. Override for test or
+# self-hosted deployments:
+export OCTO_API_BASE_URL=https://im-test.deepminer.com.cn
 
 export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bots
 export OCTO_FORMAT=json                            # default output format

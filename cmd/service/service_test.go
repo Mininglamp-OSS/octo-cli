@@ -92,6 +92,17 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 		"message": {"edit", "read-receipt", "send", "sync"},
 		"event":   {"ack", "list"},
 	}
+
+	loop := findCmd(root, "loop")
+	for _, resource := range []string{
+		"attachment", "autopilot", "comment", "execution", "expert",
+		"expert-template", "expert-team", "label", "project", "runtime",
+		"skill", "skill-file", "task", "workspace",
+	} {
+		if findCmd(loop, resource) == nil {
+			t.Errorf("loop: missing resource %q; got %v", resource, childNames(loop))
+		}
+	}
 	for svc, wantCmds := range want {
 		svcCmd := findCmd(root, svc)
 		if svcCmd == nil {
@@ -114,6 +125,134 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	timeline := findCmd(matter, "timeline")
 	if timeline == nil || !contains(childNames(timeline), "add") || !contains(childNames(timeline), "list") || !contains(childNames(timeline), "delete") {
 		t.Errorf("matter timeline should nest add/list/delete; got %v", childNames(timeline))
+	}
+}
+
+func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
+	var gotPath, gotAuth, gotSpace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotSpace = r.Header.Get("X-Space-Id")
+		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL: gateway.URL,
+		BotToken:   "octo_loop_test",
+		Format:     "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_loop_test", SpaceID: "space-from-legacy-profile"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "task", "get", "task-1", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop task get: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/tasks/task-1" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer octo_loop_test" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotSpace != "" {
+		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+}
+
+func TestLoopTaskWorkspaceHeaderFlag(t *testing.T) {
+	var gotPath, gotWorkspace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL: gateway.URL,
+		BotToken:   "octo_pat_test",
+		Format:     "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_pat_test"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop task list: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/tasks" || gotWorkspace != "workspace-1" {
+		t.Fatalf("path=%q X-Workspace-ID=%q", gotPath, gotWorkspace)
+	}
+}
+
+func TestLoopWorkspacePathHeaderFlag(t *testing.T) {
+	var gotPath, gotWorkspace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		_, _ = w.Write([]byte(`{"id":"workspace-1"}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{APIBaseURL: gateway.URL, BotToken: "octo_pat_test", Format: "json"}
+	cred := &credential.BotCredential{Token: "octo_pat_test"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "workspace", "get", "workspace-1", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop workspace get: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/workspaces/workspace-1" || gotWorkspace != "workspace-1" {
+		t.Fatalf("path=%q X-Workspace-ID=%q", gotPath, gotWorkspace)
+	}
+}
+
+func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
+	requestCount := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	})
+
+	root.SetArgs([]string{"loop", "task", "list"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "required flag(s) \"workspace-id\"") {
+		t.Fatalf("loop task list error = %v, want required workspace-id", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("request count = %d, want 0", requestCount)
+	}
+}
+
+func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("hidden workspace create command must not send a request")
+	})
+	workspace := findCmd(findCmd(root, "loop"), "workspace")
+	if workspace == nil {
+		t.Fatal("loop workspace command not registered")
+	}
+	if findCmd(workspace, "create") != nil {
+		t.Fatal("loop workspace create must not be registered")
 	}
 }
 

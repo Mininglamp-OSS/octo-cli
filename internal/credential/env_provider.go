@@ -6,7 +6,7 @@ import (
 )
 
 // EnvProvider reads the bot credential from environment variables.
-// OCTO_BOT_TOKEN holds one of the three token kinds (app_*, bf_*, or uk_*).
+// OCTO_BOT_TOKEN holds an Octo or Loop bearer credential.
 // OCTO_SPACE_ID is optional and only required for platform-scoped bots.
 type EnvProvider struct {
 	// TokenVar is the env var holding the token. Defaults to OCTO_BOT_TOKEN.

@@ -12,8 +12,8 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 105 operations
-across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
+octo-cli is **metadata-driven**. The command tree is auto-registered at startup
+from OpenAPI 3.x specs
 embedded into the binary. Adding or changing an endpoint means editing a
 spec, not the code.
 
@@ -26,8 +26,8 @@ Key properties:
 
 - **Thin client.** All business logic lives in backend services (matters,
   dmworkim). The CLI is transport, validation, and formatting.
-- **Multi-backend routing.** Each operation declares its base URL via
-  `x-octo-base-url`; the client selects the correct service per call.
+- **Unified gateway routing.** Each operation declares its complete
+  module-qualified path and uses `OCTO_API_BASE_URL`.
 - **Factory DI.** `internal/cmdutil.Factory` is the dependency container.
   No mutable package-level globals; tests inject stubs through `ConfigFunc`
   / `CredentialFunc` / `ClientFunc` / `RegistryFunc`.
@@ -48,6 +48,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
+| `loop`    | 126 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, repos, skills, automations, attachments, and related resources |
 
 ## Installation
 
@@ -101,7 +102,8 @@ curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/instal
 ```bash
 # Authenticate as a bot.
 export OCTO_BOT_TOKEN="bf_your_user_bot_token"
-export OCTO_API_BASE_URL="https://api.example.com"
+# Optional for test or self-hosted deployments; production is the default.
+# export OCTO_API_BASE_URL="https://im-test.deepminer.com.cn"
 
 # NOTE: the `matter` domain is temporarily withheld (backend API stabilizing).
 
@@ -135,6 +137,9 @@ octo-cli docs content get doc-123          # returns the body + base version tok
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
+
+# Fleet/Loop uses the same gateway under /fleet/api/v1.
+octo-cli loop task list
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Mounted HTML documents registered in docs-backend use the same search endpoint.
@@ -206,8 +211,8 @@ All backend services are accessed through a single API base URL.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Required.       |
-| `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
+| `OCTO_BOT_TOKEN`    | Active Octo or Loop bearer credential. Required.         |
+| `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |

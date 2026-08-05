@@ -44,7 +44,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
-		Service:        serviceForBaseURL(d.BaseURLEnv),
+		Service:        d.Service,
 		Method:         d.Method,
 		Path:           urlPath,
 		Query:          q,

@@ -25,7 +25,7 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv(EnvSpaceID, "")
 
 	cfg := Load()
-	if cfg.APIBaseURL != "http://127.0.0.1:8080" {
+	if cfg.APIBaseURL != DefaultAPIBaseURL {
 		t.Errorf("APIBaseURL = %q, want default", cfg.APIBaseURL)
 	}
 	if cfg.Format != "json" {

@@ -9,7 +9,9 @@
 - Go single binary, cobra CLI framework.
 - **Metadata-driven**: the entire service command tree is auto-registered at startup from OpenAPI 3.x specs embedded into the binary via `internal/registry`. To add or change an endpoint, update a spec — not code.
 - **Thin client**: all business logic lives in backend services (matters, dmworkim). CLI is transport + validation + formatting.
-- **Multi-backend**: different domains live at different base URLs, all routed through a unified API base URL (`OCTO_API_BASE_URL`).
+- **Unified gateway**: every domain uses `OCTO_API_BASE_URL`; embedded OpenAPI
+  paths carry module namespaces such as `/market/api`, `/docs-html`, and
+  `/fleet/api`.
 - **Factory DI**: `internal/cmdutil.Factory` is the DI container; no package-level globals. Tests inject stubs through `ConfigFunc` / `CredentialFunc` / `ClientFunc` / `RegistryFunc`. `Factory.ErrorEmitted` tracks whether an error envelope was already written to stderr, preventing double-emit between RunE and the top-level main error handler.
 - **JSON envelope I/O**: `{ok, identity, data, _pagination, _rate_limit}` on stdout for success; `{ok:false, error:{type,code,message,hint,detail}}` on stderr for failure. Exit codes: auth=3, validation/config=2, rest=1.
 
@@ -85,7 +87,7 @@ Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agen
 | `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Fallback when no stored profile is selected. |
 | `OCTO_BOT_ID`       | Robot id selecting a stored profile (env form of `--bot-id`). Selector, not a secret. |
 | `OCTO_CONFIG_DIR`   | Override the credential dir (default `~/.octo-cli`).     |
-| `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
+| `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` | `table` | `csv` | `ndjson`). |
 

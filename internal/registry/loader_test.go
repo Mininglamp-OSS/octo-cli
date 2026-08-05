@@ -12,7 +12,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "marketplace", "matter", "message", "summary", "thread"}
+	want := []string{"bot", "docs", "event", "file", "group", "html", "loop", "marketplace", "matter", "message", "summary", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -47,6 +47,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"html":        20,
 		"marketplace": 25,
 		"summary":     4,
+		"loop":        126,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -59,6 +60,167 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestLoopWorkspaceManagementOperationsAreHidden(t *testing.T) {
+	r := MustNew()
+	hidden := []string{"workspace.create", "workspace.update", "workspace.delete"}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+		}
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
+		}
+	}
+}
+
+func TestLoopRuntimeMutationOperationsAreHidden(t *testing.T) {
+	r := MustNew()
+	hidden := []string{
+		"runtime.update",
+		"runtime.delete",
+		"runtime.archive_and_delete",
+		"runtime.update_request.create",
+		"runtime.model_request.create",
+		"runtime.local_skill_request.create",
+		"runtime.local_skill_import.create",
+	}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+		}
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
+		}
+	}
+}
+
+func TestLoopRuntimeListIsSpaceScopedAndExpertsAcceptRuntimeRef(t *testing.T) {
+	r := MustNew()
+	list, ok := r.GetOperation("runtime.list")
+	if !ok {
+		t.Fatal("runtime.list not found")
+	}
+	for _, parameter := range list.Parameters {
+		if parameter.In == "header" && parameter.Name == "X-Workspace-ID" {
+			t.Fatal("runtime.list must not require a Workspace selector")
+		}
+	}
+
+	for _, operationID := range []string{"expert.create", "expert.update"} {
+		op, ok := r.GetOperation(operationID)
+		if !ok || op.RequestBody == nil {
+			t.Fatalf("%s request body not found", operationID)
+		}
+		if _, ok := op.RequestBody.Properties["runtime_ref"]; !ok {
+			t.Fatalf("%s must accept the Space-level runtime_ref", operationID)
+		}
+	}
+}
+
+func TestLoopPublicContractResolvesSharedComponents(t *testing.T) {
+	r := MustNew()
+	create, ok := r.GetOperation("task.create")
+	if !ok {
+		t.Fatal("task.create: not found")
+	}
+	if create.Path != "/fleet/api/v1/tasks" || create.BaseURLEnv != "OCTO_API_BASE_URL" {
+		t.Fatalf("task.create route = %s (%s)", create.Path, create.BaseURLEnv)
+	}
+	if create.RequestBody == nil {
+		t.Fatal("task.create request body ref was not resolved")
+	}
+	if _, ok := create.RequestBody.Properties["title"]; !ok {
+		t.Fatalf("task.create body properties = %v", create.RequestBody.Properties)
+	}
+
+	list, ok := r.GetOperation("task.list")
+	if !ok {
+		t.Fatal("task.list: not found")
+	}
+	if len(list.Parameters) < 2 || list.Parameters[0].Name == "" {
+		t.Fatalf("task.list parameter refs were not resolved: %+v", list.Parameters)
+	}
+}
+
+func TestLoopExtendedBusinessContract(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{
+		"workspace.list",
+		"label.create",
+		"project.resource.create",
+		"comment.reaction.add",
+		"attachment.upload",
+		"loop.skill.list",
+		"runtime.update_request.get",
+		"autopilot.delivery.replay",
+		"task.team_evaluation.record",
+	} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Errorf("%s: not found", id)
+			continue
+		}
+		if op.Service != "loop" || !strings.HasPrefix(op.Path, "/fleet/api/v1/") {
+			t.Errorf("%s: got service=%q path=%q", id, op.Service, op.Path)
+		}
+	}
+
+	op, ok := r.GetOperation("label.list")
+	if !ok {
+		t.Fatal("label.list: not found")
+	}
+	foundWorkspaceHeader := false
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "X-Workspace-ID" && parameter.In == "header" && parameter.FlagName == "workspace-id" {
+			foundWorkspaceHeader = true
+		}
+	}
+	if !foundWorkspaceHeader {
+		t.Errorf("label.list parameters = %+v, want X-Workspace-ID workspace-id flag", op.Parameters)
+	}
+}
+
+func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
+	r := MustNew()
+	for _, info := range r.ListOperations("loop") {
+		op, ok := r.GetOperation(info.ID)
+		if !ok {
+			t.Fatalf("%s: operation disappeared", info.ID)
+		}
+
+		workspaceHeaders := 0
+		requiredWorkspaceHeaders := 0
+		for _, parameter := range op.Parameters {
+			if parameter.Name == "X-Workspace-ID" && parameter.In == "header" && parameter.FlagName == "workspace-id" {
+				workspaceHeaders++
+				if parameter.Required {
+					requiredWorkspaceHeaders++
+				}
+			}
+		}
+
+		// Workspace collection and logical Runtime list operations are
+		// Space-scoped. Workspace path operations and every other Fleet business
+		// route must send the header selector used before member validation.
+		wantHeader := strings.HasPrefix(info.Path, "/fleet/api/v1/") &&
+			info.Path != "/fleet/api/v1/workspaces" &&
+			info.Path != "/fleet/api/v1/runtimes"
+		if wantHeader && workspaceHeaders != 1 {
+			t.Errorf("%s: workspace headers = %d, want exactly one", info.ID, workspaceHeaders)
+		}
+		if wantHeader && requiredWorkspaceHeaders != 1 {
+			t.Errorf("%s: required workspace headers = %d, want exactly one", info.ID, requiredWorkspaceHeaders)
+		}
+		if !wantHeader && workspaceHeaders != 0 {
+			t.Errorf("%s: workspace headers = %d, want none", info.ID, workspaceHeaders)
+		}
 	}
 }
 

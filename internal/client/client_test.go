@@ -50,6 +50,55 @@ func TestDo_SetsAuthAndSpaceHeaders(t *testing.T) {
 	}
 }
 
+func TestDo_LoopSelectsPublicAPIContract(t *testing.T) {
+	t.Parallel()
+
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/workspaces",
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if gotAccept != publicAPIMediaType {
+		t.Fatalf("Accept = %q, want %q", gotAccept, publicAPIMediaType)
+	}
+}
+
+func TestDo_LoopPreservesExplicitAccept(t *testing.T) {
+	t.Parallel()
+
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/workspaces",
+		Headers: map[string]string{"Accept": "application/json"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if gotAccept != "application/json" {
+		t.Fatalf("Accept = %q, want application/json", gotAccept)
+	}
+}
+
 func TestDo_SuppressSpaceHeader(t *testing.T) {
 	var sawSpaceHeader bool
 	var gotSpace string
@@ -677,6 +726,16 @@ func TestBuildURL_NoLeadingSlash(t *testing.T) {
 		t.Fatalf("buildURL: %v", err)
 	}
 	if u != "http://h/path/x" {
+		t.Errorf("buildURL = %q", u)
+	}
+}
+
+func TestBuildURL_NormalizesBoundarySlashes(t *testing.T) {
+	u, err := buildURL("https://example.com/", "/fleet/api/v1/tasks", nil)
+	if err != nil {
+		t.Fatalf("buildURL: %v", err)
+	}
+	if u != "https://example.com/fleet/api/v1/tasks" {
 		t.Errorf("buildURL = %q", u)
 	}
 }
