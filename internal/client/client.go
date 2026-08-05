@@ -1,6 +1,6 @@
-// Package client is the REST transport for the Octo backend. It supports
-// per-service URL routing (matters / dmworkim / default), retry with
-// exponential backoff + jitter, Retry-After, verbose logging, and --dry-run.
+// Package client is the REST transport for the Octo gateway. It supports
+// module-qualified paths, retry with exponential backoff + jitter, Retry-After,
+// verbose logging, and --dry-run.
 package client
 
 import (
@@ -29,10 +29,11 @@ import (
 
 // Retry defaults per architecture-design.md §6.2.
 const (
-	defaultMaxRetries = 3
-	defaultBaseDelay  = 500 * time.Millisecond
-	defaultMaxDelay   = 10 * time.Second
-	defaultTimeout    = 30 * time.Second
+	defaultMaxRetries  = 3
+	defaultBaseDelay   = 500 * time.Millisecond
+	defaultMaxDelay    = 10 * time.Second
+	defaultTimeout     = 30 * time.Second
+	publicAPIMediaType = "application/vnd.octo+json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -44,9 +45,10 @@ type Options struct {
 	ErrOut  io.Writer // verbose traces and dry-run output go here
 }
 
-// Request is a generic API request. Service selects per-service URL; Path is
-// the URL suffix (e.g. "/api/v1/todos/t1"). Body is JSON-encoded if non-nil.
-// Query is merged into the URL; headers take precedence over client defaults.
+// Request is a generic API request. Service identifies the logical domain for
+// diagnostics; Path is the module-qualified gateway suffix (for example,
+// "/fleet/api/v1/tasks/t1"). Body is JSON-encoded if non-nil. Query is merged
+// into the URL; headers take precedence over client defaults.
 //
 // For non-JSON payloads (e.g. multipart uploads) set RawBody + ContentType.
 // When RawBody is non-nil, Body is ignored and no JSON marshaling is performed.
@@ -834,11 +836,27 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		contentType = "application/json"
 	}
 
+	if req.Service == "loop" && headerValue(req.Headers, "Accept") == "" {
+		if req.Headers == nil {
+			req.Headers = make(map[string]string)
+		}
+		req.Headers["Accept"] = publicAPIMediaType
+	}
+
 	if c.options.DryRun {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
 	return c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+}
+
+func headerValue(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
@@ -1114,9 +1132,8 @@ func (c *Client) verbosef(format string, args ...any) {
 }
 
 func buildURL(base, path string, query url.Values) (string, error) {
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
+	base = strings.TrimRight(base, "/")
+	path = "/" + strings.TrimLeft(path, "/")
 	u, err := url.Parse(base + path)
 	if err != nil {
 		return "", fmt.Errorf("build url: %w", err)

@@ -20,6 +20,9 @@ const (
 	EnvBotToken = "OCTO_BOT_TOKEN"
 	EnvSpaceID  = "OCTO_SPACE_ID"
 	EnvFormat   = "OCTO_FORMAT"
+	// DefaultAPIBaseURL is the production Octo gateway. Service operations
+	// append their registered paths (for example, /v1/bot/groups).
+	DefaultAPIBaseURL = "https://im.deepminer.com.cn"
 	// EnvBotID is the env form of --bot-id: a robot id that selects a stored
 	// credential profile. It is a selector, not a secret (cf. EnvBotToken).
 	EnvBotID = "OCTO_BOT_ID"
@@ -46,7 +49,7 @@ type Config struct {
 // so the auth gate and `config show` agree with the resolved credential.
 func Load() *Config {
 	return &Config{
-		APIBaseURL: envOrDefault(EnvAPIBaseURL, "http://127.0.0.1:8080"),
+		APIBaseURL: envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
 		BotToken:   envToken(),
 		SpaceID:    os.Getenv(EnvSpaceID),
 		Format:     envOrDefault(EnvFormat, "json"),
@@ -78,7 +81,7 @@ func (c *Config) Validate() error {
 // API base URL model all services share the same URL — this method exists
 // for interface compatibility so the client and service engine don't need
 // to change their routing logic.
-func (c *Config) ServiceURL(service string) string {
+func (c *Config) ServiceURL(_ string) string {
 	return c.APIBaseURL
 }
 

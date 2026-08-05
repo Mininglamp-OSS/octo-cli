@@ -293,11 +293,3 @@ func extractPathParams(path string) []string {
 		path = path[end+1:]
 	}
 }
-
-// serviceForBaseURL maps the spec's x-octo-base-url env-var name to the
-// config-level service key used by client.Request.Service. With the unified
-// gateway model all services route to the same URL, so this always returns
-// empty (default service). Retained for interface compatibility.
-func serviceForBaseURL(_ string) string {
-	return ""
-}

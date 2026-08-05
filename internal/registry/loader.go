@@ -135,8 +135,8 @@ type OperationInfo struct {
 	Risk    string `json:"risk,omitempty"`
 }
 
-// ParamInfo describes a single parameter on an operation (one entry in the
-// OpenAPI `parameters` array). Covers path, query, and header parameters;
+// ParamInfo describes a single parameter on a path or operation (one entry in
+// an OpenAPI `parameters` array). Covers path, query, and header parameters;
 // the `In` field records which. Type/Default/Enum come from the nested
 // schema when present.
 type ParamInfo struct {
@@ -411,46 +411,8 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		}
 	}
 
-	if params, ok := op["parameters"].([]any); ok {
-		for _, p := range params {
-			pm, ok := p.(map[string]any)
-			if !ok {
-				continue
-			}
-			pi := ParamInfo{
-				Name:        stringOf(pm["name"]),
-				In:          stringOf(pm["in"]),
-				Required:    boolOf(pm["required"]),
-				Description: stringOf(pm["description"]),
-				FlagName:    stringOf(pm["x-octo-flag"]),
-				Secret:      truthy(pm["x-octo-secret"]),
-			}
-			if sch, ok := pm["schema"].(map[string]any); ok {
-				pi.Type = stringOf(sch["type"])
-				pi.Format = stringOf(sch["format"])
-				pi.Default = sch["default"]
-				if items, ok := sch["items"].(map[string]any); ok {
-					resolved := resolveSchema(doc, items)
-					pi.Items = &resolved
-				}
-				if enum, ok := sch["enum"].([]any); ok {
-					pi.Enum = enum
-				}
-				pi.MinLength = intOf(sch["minLength"])
-				pi.MaxLength = intOf(sch["maxLength"])
-				pi.Pattern = stringOf(sch["pattern"])
-			}
-			d.Parameters = append(d.Parameters, pi)
-		}
-	}
-
-	if body, ok := op["requestBody"].(map[string]any); ok {
-		d.RequestBodyRequired = boolOf(body["required"])
-		if s := extractJSONSchema(body); s != nil {
-			resolved := resolveSchema(doc, s)
-			d.RequestBody = &resolved
-		}
-	}
+	d.Parameters = operationParameters(doc, pathStr, op)
+	d.RequestBody, d.RequestBodyRequired = operationRequestBody(doc, op)
 
 	if resps, ok := op["responses"].(map[string]any); ok {
 		d.ResponseSchema = firstSuccessSchema(doc, resps)
@@ -469,6 +431,93 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	return d
+}
+
+func operationParameters(doc map[string]any, pathStr string, op map[string]any) []ParamInfo {
+	// OpenAPI allows parameters shared by every operation on a path to be
+	// declared on the Path Item Object. Operation-level parameters are merged
+	// afterwards and override a path-level parameter with the same name and
+	// location (OpenAPI 3.1 section 4.8.12.1).
+	var pathParams []any
+	if paths, ok := doc["paths"].(map[string]any); ok {
+		if pathItem, ok := paths[pathStr].(map[string]any); ok {
+			pathParams, _ = pathItem["parameters"].([]any)
+		}
+	}
+	opParams, _ := op["parameters"].([]any)
+
+	result := make([]ParamInfo, 0, len(pathParams)+len(opParams))
+	indexes := make(map[string]int, len(pathParams)+len(opParams))
+	appendParams := func(params []any) {
+		for _, raw := range params {
+			pm, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if ref := stringOf(pm["$ref"]); ref != "" {
+				pm = followComponentRef(doc, ref, "parameters")
+				if pm == nil {
+					continue
+				}
+			}
+			parameter := ParamInfo{
+				Name:        stringOf(pm["name"]),
+				In:          stringOf(pm["in"]),
+				Required:    boolOf(pm["required"]),
+				Description: stringOf(pm["description"]),
+				FlagName:    stringOf(pm["x-octo-flag"]),
+				Secret:      truthy(pm["x-octo-secret"]),
+			}
+			if schema, ok := pm["schema"].(map[string]any); ok {
+				parameter.Type = stringOf(schema["type"])
+				parameter.Format = stringOf(schema["format"])
+				parameter.Default = schema["default"]
+				if items, ok := schema["items"].(map[string]any); ok {
+					resolved := resolveSchema(doc, items)
+					parameter.Items = &resolved
+				}
+				if enum, ok := schema["enum"].([]any); ok {
+					parameter.Enum = enum
+				}
+				parameter.MinLength = intOf(schema["minLength"])
+				parameter.MaxLength = intOf(schema["maxLength"])
+				parameter.Pattern = stringOf(schema["pattern"])
+			}
+			name := parameter.Name
+			if strings.EqualFold(parameter.In, "header") {
+				name = strings.ToLower(name)
+			}
+			key := strings.ToLower(parameter.In) + "\x00" + name
+			if index, exists := indexes[key]; exists {
+				result[index] = parameter
+				continue
+			}
+			indexes[key] = len(result)
+			result = append(result, parameter)
+		}
+	}
+	appendParams(pathParams)
+	appendParams(opParams)
+	return result
+}
+
+func operationRequestBody(doc, op map[string]any) (*SchemaInfo, bool) {
+	body, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	if ref := stringOf(body["$ref"]); ref != "" {
+		body = followComponentRef(doc, ref, "requestBodies")
+		if body == nil {
+			return nil, false
+		}
+	}
+	required := boolOf(body["required"])
+	if schema := extractJSONSchema(body); schema != nil {
+		resolved := resolveSchema(doc, schema)
+		return &resolved, required
+	}
+	return nil, required
 }
 
 func extractJSONSchema(body map[string]any) map[string]any {
@@ -531,7 +580,11 @@ func hasSuccessBody(doc, resps map[string]any) bool {
 // followResponseRef resolves a `#/components/responses/<name>` pointer to its
 // response object. It returns nil for any other ref shape or an unknown name.
 func followResponseRef(doc map[string]any, ref string) map[string]any {
-	const prefix = "#/components/responses/"
+	return followComponentRef(doc, ref, "responses")
+}
+
+func followComponentRef(doc map[string]any, ref, section string) map[string]any {
+	prefix := "#/components/" + section + "/"
 	if !strings.HasPrefix(ref, prefix) {
 		return nil
 	}
@@ -540,11 +593,11 @@ func followResponseRef(doc map[string]any, ref string) map[string]any {
 	if !ok {
 		return nil
 	}
-	responses, ok := comps["responses"].(map[string]any)
+	entries, ok := comps[section].(map[string]any)
 	if !ok {
 		return nil
 	}
-	s, _ := responses[name].(map[string]any)
+	s, _ := entries[name].(map[string]any)
 	return s
 }
 
@@ -553,6 +606,9 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 	order := []string{"200", "201", "204"}
 	for _, code := range order {
 		if r, ok := resps[code].(map[string]any); ok {
+			if ref := stringOf(r["$ref"]); ref != "" {
+				r = followResponseRef(doc, ref)
+			}
 			if s := extractJSONSchema(r); s != nil {
 				resolved := resolveSchema(doc, s)
 				return &resolved
