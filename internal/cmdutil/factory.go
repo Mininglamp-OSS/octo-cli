@@ -168,6 +168,14 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 // buildCredential resolves the credential through the file→env chain, applying
 // the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
 func (f *Factory) buildCredential() (*credential.BotCredential, error) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)))
+	if mode == config.CredentialModeTask {
+		return f.buildTaskCredential()
+	}
+	if mode != "" {
+		return nil, fmt.Errorf("unsupported %s %q", config.EnvCredentialMode, mode)
+	}
+
 	store, err := f.AuthStore()
 	if err != nil {
 		return nil, err
@@ -187,6 +195,34 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		cred.SpaceID = f.Globals.Space
 	}
+	return cred, nil
+}
+
+// buildTaskCredential is deliberately separate from the normal provider
+// chain. A daemon-launched task must use exactly the claim credential injected
+// through OCTO_BOT_TOKEN; local profiles and identity selectors must never
+// replace it. Fleet verifies that the opaque bearer is really an agent_task
+// credential and enforces its bindings/actions.
+func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
+	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
+		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
+		return nil, fmt.Errorf("%s=task does not allow --profile, --bot-id, or %s", config.EnvCredentialMode, config.EnvBotID)
+	}
+	if f.Globals.Space != "" {
+		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
+	}
+
+	cred, err := credential.NewEnvProvider().Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvBotToken)
+	}
+	// Task credentials are server-bound; never forward a caller-selected Space
+	// context alongside them.
+	cred.SpaceID = ""
+	cred.BotKind = "agent_task"
 	return cred, nil
 }
 
@@ -271,14 +307,20 @@ func (f *Factory) identityValue() any {
 	if f.cred == nil {
 		return nil
 	}
-	id := map[string]any{"type": "bot"}
+	identityType := "bot"
+	if f.cred.BotKind == "agent_task" {
+		identityType = "agent_task"
+	}
+	id := map[string]any{"type": identityType}
 	if f.cred.Profile != "" {
 		id["profile"] = f.cred.Profile
 	}
 	if f.cred.RobotID != "" {
 		id["robot_id"] = f.cred.RobotID
 	}
-	if kind := credential.TokenKind(f.cred.Token); kind != "" {
+	if f.cred.BotKind == "agent_task" {
+		id["credential_kind"] = "agent_task"
+	} else if kind := credential.TokenKind(f.cred.Token); kind != "" {
 		id["bot_kind"] = kind
 	}
 	if f.cred.Source != "" {

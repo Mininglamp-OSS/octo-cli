@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/authstore"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -93,6 +94,60 @@ func TestFactory_CredentialFromEnv(t *testing.T) {
 	if cred.SpaceID != "space-A" {
 		t.Errorf("SpaceID = %q", cred.SpaceID)
 	}
+}
+
+func TestFactory_TaskCredentialMode(t *testing.T) {
+	t.Run("uses only injected token without opening auth store", func(t *testing.T) {
+		blockedStore := t.TempDir() + "/not-a-directory"
+		if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(authstore.EnvConfigDir, blockedStore)
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "octo_loop_task")
+
+		f := NewDefaultFactory()
+		cred, err := f.Credential()
+		if err != nil {
+			t.Fatalf("Credential: %v", err)
+		}
+		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" {
+			t.Fatalf("credential = %+v", cred)
+		}
+		identity, ok := f.identityValue().(map[string]any)
+		if !ok || identity["type"] != "agent_task" || identity["credential_kind"] != "agent_task" {
+			t.Fatalf("identity = %#v", identity)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, *Factory)
+	}{
+		{"profile selector", func(_ *testing.T, f *Factory) { f.Globals.Profile = "default" }},
+		{"bot id selector", func(_ *testing.T, f *Factory) { f.Globals.BotID = "bot-1" }},
+		{"bot id environment", func(t *testing.T, _ *Factory) { t.Setenv(config.EnvBotID, "bot-1") }},
+		{"space override", func(_ *testing.T, f *Factory) { f.Globals.Space = "space-1" }},
+	} {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+			t.Setenv(config.EnvBotToken, "octo_loop_task")
+			f := NewDefaultFactory()
+			tc.setup(t, f)
+			if _, err := f.Credential(); err == nil {
+				t.Fatalf("task mode should reject %s", tc.name)
+			}
+		})
+	}
+
+	t.Run("missing injected token fails closed", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {
+			t.Fatalf("Credential error = %v, want ErrNoCredential", err)
+		}
+	})
 }
 
 func TestFactory_CredentialSpaceOverride(t *testing.T) {

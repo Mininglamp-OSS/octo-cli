@@ -112,3 +112,22 @@ func TestNewRootCmd_LeafStillRequiresAuth(t *testing.T) {
 		t.Errorf("leaf should hit auth gate (type=auth_error), got type=%q msg=%s", ee.Type, ee.Message)
 	}
 }
+
+func TestNewRootCmd_TaskModeAllowsOnlyLoopOnlineCommands(t *testing.T) {
+	t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+	t.Setenv(config.EnvBotToken, "octo_loop_task")
+
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{APIBaseURL: "http://localhost", BotToken: "octo_loop_task", CredentialMode: config.CredentialModeTask})
+	root := NewRootCmd(f.Factory)
+	root.SetArgs([]string{"group", "list"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "only allows Loop commands") {
+		t.Fatalf("group list error = %v, want task-mode rejection", err)
+	}
+
+	root = NewRootCmd(f.Factory)
+	root.SetArgs([]string{"schema", "task.get"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("offline schema should remain available: %v", err)
+	}
+}

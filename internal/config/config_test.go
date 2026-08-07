@@ -18,11 +18,21 @@ func TestValidate_OK(t *testing.T) {
 	}
 }
 
+func TestValidate_CredentialMode(t *testing.T) {
+	if err := (&Config{BotToken: "octo_loop_task", CredentialMode: CredentialModeTask}).Validate(); err != nil {
+		t.Fatalf("task mode should validate: %v", err)
+	}
+	if err := (&Config{BotToken: "token", CredentialMode: "unknown"}).Validate(); err == nil {
+		t.Fatal("unknown credential mode should fail validation")
+	}
+}
+
 func TestLoad_Defaults(t *testing.T) {
 	t.Setenv(EnvBotToken, "")
 	t.Setenv(EnvAPIBaseURL, "")
 	t.Setenv(EnvFormat, "")
 	t.Setenv(EnvSpaceID, "")
+	t.Setenv(EnvCredentialMode, "")
 
 	cfg := Load()
 	if cfg.APIBaseURL != DefaultAPIBaseURL {
@@ -38,6 +48,7 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
+	t.Setenv(EnvCredentialMode, CredentialModeTask)
 
 	cfg := Load()
 	if cfg.APIBaseURL != "http://api.example" {
@@ -45,6 +56,9 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	}
 	if cfg.BotToken != "app_xxx" {
 		t.Errorf("BotToken = %q", cfg.BotToken)
+	}
+	if cfg.CredentialMode != CredentialModeTask {
+		t.Errorf("CredentialMode = %q", cfg.CredentialMode)
 	}
 	if cfg.SpaceID != "space-1" {
 		t.Errorf("SpaceID = %q", cfg.SpaceID)

@@ -6,10 +6,15 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 )
 
 // NewRootCmd builds the top-level command tree.
@@ -23,6 +28,9 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Octo CLI — command-line interface for the Octo ecosystem",
 		Long:  "octo-cli is a CLI for AI Agent Bots to interact with Octo services.\nService commands are generated from the embedded OpenAPI registry.",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateTaskModeCommand(cmd); err != nil {
+				return err
+			}
 			if skipValidation(cmd) {
 				return nil
 			}
@@ -60,6 +68,29 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	withholdDisabledServices(root, f)
 
 	return root
+}
+
+// validateTaskModeCommand is defense in depth. It keeps daemon task processes
+// on the Loop surface without duplicating Fleet's route/action policy in the
+// CLI. Offline discovery commands remain available to agents.
+func validateTaskModeCommand(cmd *cobra.Command) error {
+	if strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode))) != config.CredentialModeTask {
+		return nil
+	}
+	root := cmd.Root()
+	current := cmd
+	for current.Parent() != nil && current.Parent() != root {
+		current = current.Parent()
+	}
+	if current == root {
+		return nil
+	}
+	switch current.Name() {
+	case "loop", "help", "version", "schema", "skills", "completion":
+		return nil
+	default:
+		return fmt.Errorf("%s=task only allows Loop commands", config.EnvCredentialMode)
+	}
 }
 
 // withholdDisabledServices removes the command subtree for any service whose

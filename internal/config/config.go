@@ -6,14 +6,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Environment variable names. Centralised for testability and discoverability.
 const (
 	EnvAPIBaseURL = "OCTO_API_BASE_URL"
 	EnvBotToken   = "OCTO_BOT_TOKEN"
-	EnvSpaceID    = "OCTO_SPACE_ID"
-	EnvFormat     = "OCTO_FORMAT"
+	// EnvCredentialMode selects the credential resolution policy. The empty
+	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
+	// used by octo-daemon task processes.
+	EnvCredentialMode  = "OCTO_CREDENTIAL_MODE"
+	CredentialModeTask = "task"
+	EnvSpaceID         = "OCTO_SPACE_ID"
+	EnvFormat          = "OCTO_FORMAT"
 	// DefaultAPIBaseURL is the production Octo gateway. Service operations
 	// append their registered paths (for example, /v1/bot/groups).
 	DefaultAPIBaseURL = "https://im.deepminer.com.cn"
@@ -32,6 +38,10 @@ type Config struct {
 	APIBaseURL string
 	// BotToken is the active Octo or Loop bearer credential.
 	BotToken string
+	// CredentialMode controls credential selection, not server authorization.
+	// Fleet remains authoritative for the bearer credential's principal kind,
+	// bindings, and actions.
+	CredentialMode string
 	// SpaceID is the platform-bot space context (OCTO_SPACE_ID). Optional for space-scoped bots.
 	SpaceID string
 	// Format is the default output format.
@@ -41,10 +51,11 @@ type Config struct {
 // Load reads configuration from the environment.
 func Load() *Config {
 	return &Config{
-		APIBaseURL: envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
-		BotToken:   os.Getenv(EnvBotToken),
-		SpaceID:    os.Getenv(EnvSpaceID),
-		Format:     envOrDefault(EnvFormat, "json"),
+		APIBaseURL:     envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
+		BotToken:       os.Getenv(EnvBotToken),
+		CredentialMode: strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode))),
+		SpaceID:        os.Getenv(EnvSpaceID),
+		Format:         envOrDefault(EnvFormat, "json"),
 	}
 }
 
@@ -52,6 +63,9 @@ func Load() *Config {
 // space-id validation is deferred to the client (which knows whether the bot
 // is space- or platform-scoped from the spec).
 func (c *Config) Validate() error {
+	if c.CredentialMode != "" && c.CredentialMode != CredentialModeTask {
+		return fmt.Errorf("unsupported %s %q", EnvCredentialMode, c.CredentialMode)
+	}
 	if c.BotToken == "" {
 		return fmt.Errorf("%s is required (Octo or Loop bearer credential)", EnvBotToken)
 	}

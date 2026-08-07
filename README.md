@@ -212,6 +212,7 @@ All backend services are accessed through a single API base URL.
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
 | `OCTO_BOT_TOKEN`    | Active Octo or Loop bearer credential. Required.         |
+| `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
