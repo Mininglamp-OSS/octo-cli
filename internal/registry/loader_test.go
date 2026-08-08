@@ -593,6 +593,27 @@ func TestResolvesComponentRef(t *testing.T) {
 	}
 }
 
+func TestWorkspaceListResolvesTypedCollection(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("workspace.list")
+	if !ok {
+		t.Fatal("workspace.list not found")
+	}
+	if op.ResponseSchema == nil {
+		t.Fatal("response schema: nil")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Items == nil {
+		t.Fatalf("workspace.list data schema = %+v", data)
+	}
+	if data.Items.Ref != "#/components/schemas/Workspace" {
+		t.Fatalf("workspace item schema ref = %q, want Workspace", data.Items.Ref)
+	}
+	if _, ok := op.ResponseSchema.Properties["pagination"]; !ok {
+		t.Fatalf("workspace.list response schema = %+v, want pagination", op.ResponseSchema.Properties)
+	}
+}
+
 func operationIDs(ops []OperationInfo) []string {
 	out := make([]string, len(ops))
 	for i, o := range ops {
