@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -87,7 +88,35 @@ func (c *Config) Validate() error {
 	if c.BotToken == "" {
 		return fmt.Errorf("%s or %s is required (app_*, bf_*, or uk_* token)", EnvToken, EnvBotToken)
 	}
+	if c.APIBaseURL != "" {
+		baseURL, err := NormalizeAPIBaseURL(c.APIBaseURL)
+		if err != nil {
+			return err
+		}
+		c.APIBaseURL = baseURL
+	}
 	return nil
+}
+
+// NormalizeAPIBaseURL validates the unified Octo gateway base URL. The CLI
+// stores only the origin and appends module-qualified paths per operation.
+func NormalizeAPIBaseURL(raw string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: %w", EnvAPIBaseURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", fmt.Errorf("%s must use http or https", EnvAPIBaseURL)
+	}
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", fmt.Errorf("%s must be an absolute base URL without credentials, query parameters, or fragments", EnvAPIBaseURL)
+	}
+	if strings.TrimRight(u.Path, "/") != "" {
+		return "", fmt.Errorf("%s must not include a service or API path", EnvAPIBaseURL)
+	}
+	u.Path = ""
+	u.RawPath = ""
+	return strings.TrimRight(u.String(), "/"), nil
 }
 
 // ServiceURL returns the base URL for the named service. With the unified

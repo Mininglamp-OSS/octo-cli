@@ -12,9 +12,25 @@ func TestValidate_MissingToken(t *testing.T) {
 }
 
 func TestValidate_OK(t *testing.T) {
-	c := &Config{APIBaseURL: "http://localhost", BotToken: "app_xxx"}
+	c := &Config{APIBaseURL: "http://localhost/", BotToken: "app_xxx"}
 	if err := c.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if c.APIBaseURL != "http://localhost" {
+		t.Fatalf("APIBaseURL = %q", c.APIBaseURL)
+	}
+}
+
+func TestValidate_RejectsServicePathAsBaseURL(t *testing.T) {
+	for _, raw := range []string{
+		"https://im-test.deepminer.com.cn/fleet",
+		"https://im-test.deepminer.com.cn/fleet/api/v1",
+		"ws://im-test.deepminer.com.cn",
+	} {
+		c := &Config{APIBaseURL: raw, BotToken: "app_xxx"}
+		if err := c.Validate(); err == nil {
+			t.Errorf("Validate accepted %q", raw)
+		}
 	}
 }
 
