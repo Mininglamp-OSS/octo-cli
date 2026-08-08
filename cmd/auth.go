@@ -86,6 +86,12 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 			if err := assertBotIDFree(store, botID, name); err != nil {
 				return failErr(f, err)
 			}
+			if apiBaseURL != "" {
+				apiBaseURL, err = config.NormalizeAPIBaseURL(apiBaseURL)
+				if err != nil {
+					return failErr(f, output.ErrValidation(err.Error(), "pass only the Octo gateway base URL, without a service path"))
+				}
+			}
 			meta := authstore.ProfileMeta{
 				APIBaseURL: apiBaseURL,
 				SpaceID:    f.Globals.Space,
