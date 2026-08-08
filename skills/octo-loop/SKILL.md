@@ -1,6 +1,11 @@
 ---
 name: octo-loop
-description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, projects, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop."
+version: 0.1.0
+description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, projects, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
+metadata:
+  requires:
+    bins: ["octo-cli"]
+    skills: ["octo-shared"]
 ---
 
 # Octo Loop
