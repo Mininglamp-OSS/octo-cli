@@ -2676,7 +2676,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Collection"
+            "$ref": "#/components/responses/WorkspaceCollection"
           }
         }
       },
@@ -7094,6 +7094,16 @@
           }
         }
       },
+      "WorkspaceCollection": {
+        "description": "Paginated workspace collection returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/WorkspaceCollectionEnvelope"
+            }
+          }
+        }
+      },
       "Empty": {
         "description": "Operation completed with no resource payload.",
         "content": {
@@ -7207,6 +7217,25 @@
           }
         }
       },
+      "WorkspaceCollectionEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Workspace"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/OffsetPagination"
+          }
+        }
+      },
       "LogicalRuntimeCollectionEnvelope": {
         "type": "object",
         "required": [
@@ -7302,6 +7331,68 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100
+          }
+        }
+      },
+      "Workspace": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "workspace_id",
+          "name",
+          "slug",
+          "description",
+          "context",
+          "settings",
+          "repos",
+          "issue_prefix",
+          "avatar_url",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": ["string", "null"]
+          },
+          "context": {
+            "type": ["string", "null"]
+          },
+          "settings": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "issue_prefix": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": ["string", "null"]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
