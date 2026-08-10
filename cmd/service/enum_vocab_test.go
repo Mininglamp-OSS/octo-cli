@@ -313,6 +313,13 @@ func bodyEnums(t *testing.T, opID string, schema *registry.SchemaInfo, path stri
 		if prop.Type == "object" {
 			out = append(out, bodyEnums(t, opID, &prop, field)...)
 		}
+		// An array of objects: the production walker enforces enums on the item
+		// schema's properties (validateArray → validate → validateObject), so a
+		// vocabulary declared there is a live hard gate. Without this branch the
+		// completeness guard is blind to exactly the class it exists to catch.
+		if prop.Items != nil && prop.Items.Type == "object" {
+			out = append(out, bodyEnums(t, opID, prop.Items, field+"[]")...)
+		}
 	}
 	return out
 }
@@ -354,4 +361,42 @@ func sameSet(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestEnum_BodyWalkerFindsAnEnumInsideAnArrayOfObjects covers the walker itself
+// rather than the registry, because no spec currently declares such an enum. The
+// production validator does enforce one (validateArray → validate → validateObject),
+// so without the array-of-object branch in bodyEnums the completeness guard above
+// would be blind to the first spec that adds one — a new hard gate would ship with
+// nobody having transcribed the backend's vocabulary.
+//
+// A synthetic schema is the only way to assert this today. Waiting for a real one is
+// exactly the order that lets the gap through.
+func TestEnum_BodyWalkerFindsAnEnumInsideAnArrayOfObjects(t *testing.T) {
+	schema := &registry.SchemaInfo{
+		Type: "object",
+		Properties: map[string]registry.SchemaInfo{
+			"filters": {
+				Type: "array",
+				Items: &registry.SchemaInfo{
+					Type: "object",
+					Properties: map[string]registry.SchemaInfo{
+						"op": {Type: "string", Enum: []any{"eq", "neq"}},
+					},
+				},
+			},
+		},
+	}
+
+	found := bodyEnums(t, "synthetic.op", schema, "")
+	for _, v := range found {
+		if v.field == "filters[].op" {
+			if !sameSet(v.want, []string{"eq", "neq"}) {
+				t.Errorf("discovered filters[].op = %v, want [eq neq]", v.want)
+			}
+			return
+		}
+	}
+	t.Errorf("bodyEnums did not discover the enum on filters[].op; found %v.\n"+
+		"An enum on an array item's property is enforced by the walker, so the guard must see it.", found)
 }

@@ -213,3 +213,38 @@ func TestSecretEcho_ClientRedactsEveryErrorItReturns(t *testing.T) {
 		})
 	}
 }
+
+// Round-9 P2-3. rejectUnknownSubcommand echoed the token when it was all
+// lower-case, which is a third path in the class the round-8 fix addressed. Rather
+// than tighten the shape test again — the previous attempt is what left this open —
+// the token is not echoed at all and the available subcommands are listed instead,
+// which is more useful for a typo anyway.
+func TestSecretEcho_UnknownSubcommandNeverEchoesTheToken(t *testing.T) {
+	for _, token := range []string{
+		"ozvbmdlkqnwtyeh",    // all lower-case: the shape rule used to allow this
+		"ozvbmd-lkqnwtyeh",   // lower-case with a dash
+		"SUPERSECRETSHAREID", // upper-case: previously suppressed
+		"abc123def456",       // digits
+	} {
+		t.Run(token, func(t *testing.T) {
+			env := newDriveTestEnv(t, "uk_person", func(w http.ResponseWriter, r *http.Request) {}, nil)
+			root, tf := secretsTestRoot(t, env.api.URL, client.Options{NoRetry: true})
+			root.SetArgs([]string{"drive", "share", token})
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("an unknown subcommand must fail")
+			}
+			seen := tf.Out.String() + tf.ErrOut.String() + err.Error()
+			if ee := output.AsExitError(err); ee != nil {
+				seen += ee.Message + " " + ee.Hint
+			}
+			if strings.Contains(seen, token) {
+				t.Errorf("the unknown-subcommand error echoed %q:\n%s", token, seen)
+			}
+			// It must still be actionable: name at least one real subcommand.
+			if !strings.Contains(seen, "revoke") {
+				t.Errorf("the error should list the available subcommands:\n%s", seen)
+			}
+		})
+	}
+}

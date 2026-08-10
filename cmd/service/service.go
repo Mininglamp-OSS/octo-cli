@@ -13,6 +13,7 @@ package service
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -114,38 +115,32 @@ func findChild(parent *cobra.Command, name string) *cobra.Command {
 // help, and exits 0 — which can let automation treat a removed
 // command as a success.
 //
-// The token is echoed only when it looks like a command name someone mistyped.
-// The other way to land here is omitting the verb — `drive share <token>` instead
-// of `drive share revoke <token>` — which would otherwise print a share token in
-// an error the caller did not opt into.
+// The token is never echoed. Landing here means either a mistyped verb or an
+// omitted one — `drive share <token>` instead of `drive share revoke <token>` —
+// and the second spelling puts a share token in an error the caller did not opt
+// into. A previous attempt echoed the token only when it "looked like a command
+// word", which still echoed an all-lower-case id; listing the real subcommands is
+// both safe and more useful for a typo than quoting the wrong word back.
 func rejectUnknownSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		if looksLikeSubcommandName(args[0]) {
-			return fmt.Errorf("unknown subcommand %q for %q", args[0], cmd.CommandPath())
-		}
-		return fmt.Errorf("unknown subcommand for %q; run `%s --help` for the available ones",
-			cmd.CommandPath(), cmd.CommandPath())
+		return fmt.Errorf("unknown subcommand for %q; available: %s",
+			cmd.CommandPath(), strings.Join(childCommandNames(cmd), ", "))
 	}
 	return cmd.Help()
 }
 
-// looksLikeSubcommandName reports whether s has the shape of a command word, so
-// echoing it back helps with a typo rather than disclosing an id. Command names
-// in this tree are short, lower-case and dash-separated; ids are longer, mixed
-// case, and often carry "_" or ":".
-func looksLikeSubcommandName(s string) bool {
-	if s == "" || len(s) > 24 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= 'a' && c <= 'z', c == '-':
-		default:
-			return false
+// childCommandNames lists a parent's registered subcommands, for the
+// unknown-subcommand message.
+func childCommandNames(cmd *cobra.Command) []string {
+	children := cmd.Commands()
+	names := make([]string, 0, len(children))
+	for _, c := range children {
+		if c.IsAvailableCommand() {
+			names = append(names, c.Name())
 		}
 	}
-	return true
+	sort.Strings(names)
+	return names
 }
 
 // buildOperationCmd builds the leaf cobra.Command for one operation.
