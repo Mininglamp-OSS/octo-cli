@@ -243,3 +243,128 @@ func assertTraceMasks(t *testing.T, text, secret string) {
 		t.Errorf("output should show the masked value:\n%s", text)
 	}
 }
+
+// TestBackendError_DoesNotLeakASecretItEchoes pins the response half of the
+// error-envelope leak. The transport half (a *url.Error carrying the request URL)
+// was closed first; this is the other one — a backend error body that echoes the
+// value it was given.
+//
+// For drive.share.access / drive.share.download / drive.invite.accept the id *is*
+// the secret, and a not-found message naming the requested id is the most natural
+// thing for a backend to write. ParseBackendError copies the backend's message
+// into the envelope and the whole body into Detail, so an unredacted response body
+// put the token on stderr unconditionally — no --verbose needed.
+func TestBackendError_DoesNotLeakASecretItEchoes(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+	const password = "P@ssw0rd-SECRET"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		// The shape a backend naturally produces: the requested path, which
+		// contains the token, echoed back in the message.
+		body := `{"code":"not_found","message":"share ` + r.URL.Path +
+			` not found (password attempt \"` + password + `\")"}`
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + token + "/access",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	})
+	if err == nil {
+		t.Fatal("expected a backend error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	for _, secret := range []string{token, password} {
+		if strings.Contains(ee.Message, secret) {
+			t.Errorf("the error message leaked %q: %s", secret, ee.Message)
+		}
+		if strings.Contains(string(ee.Detail), secret) {
+			t.Errorf("the error detail leaked %q: %s", secret, ee.Detail)
+		}
+	}
+	if !strings.Contains(ee.Message, secretMask) && !strings.Contains(string(ee.Detail), secretMask) {
+		t.Errorf("expected the masked value to be visible: %s / %s", ee.Message, ee.Detail)
+	}
+	// The mask contains no quote or backslash, so a JSON Detail stays parseable.
+	if len(ee.Detail) > 0 && !json.Valid(ee.Detail) {
+		t.Errorf("redaction broke the JSON detail: %s", ee.Detail)
+	}
+	// The backend's own diagnostic must survive.
+	if !strings.Contains(ee.Message, "not_found") && ee.Code != "NOT_FOUND" {
+		t.Errorf("the backend's error classification was lost: code=%q message=%q", ee.Code, ee.Message)
+	}
+}
+
+// TestRedactBodyValue_UnknownShapesFailSafe covers the fallback branch. Every
+// secret-bearing body today is a map[string]any, but the engine already builds a
+// map[string]string elsewhere, and the day one of those carries a secret the mask
+// must not silently no-op.
+func TestRedactBodyValue_UnknownShapesFailSafe(t *testing.T) {
+	const secret = `p@ss"w\ord`
+	secrets := []string{secret}
+
+	cases := []struct {
+		name string
+		body any
+	}{
+		{"map[string]string", map[string]string{"password": secret}},
+		{"struct", struct {
+			Password string `json:"password"`
+		}{Password: secret}},
+		{"pointer to struct", &struct {
+			Password string `json:"password"`
+		}{Password: secret}},
+		{"slice of maps", []map[string]string{{"password": secret}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			buf, err := json.Marshal(redactBodyValue(tc.body, secrets))
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			for _, form := range secretForms(secret) {
+				if strings.Contains(string(buf), form) {
+					t.Errorf("the fallback passed the secret through as %q: %s", form, buf)
+				}
+			}
+			if !strings.Contains(string(buf), secretMask) {
+				t.Errorf("expected the mask in the rendered body: %s", buf)
+			}
+		})
+	}
+}
+
+// TestRedactBodyValue_PreservesScalarsAndNumbers guards the fallback's blast
+// radius: it must not reshape values the structural walk already handles, and a
+// json.Number must keep its exact digits.
+func TestRedactBodyValue_PreservesScalarsAndNumbers(t *testing.T) {
+	body := map[string]any{
+		"id":    json.Number("18446744073709551615"),
+		"count": 7,
+		"ratio": 1.5,
+		"flag":  true,
+		"none":  nil,
+		"name":  "public",
+	}
+	buf, err := json.Marshal(redactBodyValue(body, []string{"unrelated-secret"}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"id":18446744073709551615`, `"count":7`, `"ratio":1.5`, `"flag":true`, `"none":null`, `"name":"public"`} {
+		if !strings.Contains(string(buf), want) {
+			t.Errorf("rendered body lost %s: %s", want, buf)
+		}
+	}
+}

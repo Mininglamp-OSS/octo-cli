@@ -159,13 +159,33 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 	return redactSecrets(string(marshalled), req.SecretValues)
 }
 
+// redactSecretBytes is redactSecrets over a byte slice, returning the input
+// untouched when there is nothing to mask so the common path allocates nothing.
+func redactSecretBytes(b []byte, secrets []string) []byte {
+	if len(b) == 0 || len(secrets) == 0 {
+		return b
+	}
+	return []byte(redactSecrets(string(b), secrets))
+}
+
 // redactBodyValue deep-copies v with every string leaf run through
 // redactSecrets. json.Number is a distinct type from string, so a uint64 id is
 // copied through untouched and keeps marshalling as a bare JSON integer.
+//
+// The default branch marshals and text-redacts rather than passing the value
+// through: a body shape this function does not walk structurally (a
+// map[string]string, say — cmd/service/aliases.go already builds one) would
+// otherwise have its secrets silently unmasked, with no test failing. Failing
+// safe by construction is worth the marshal on a path that only runs for
+// secret-bearing requests.
 func redactBodyValue(v any, secrets []string) any {
 	switch t := v.(type) {
 	case string:
 		return redactSecrets(t, secrets)
+	case json.Number:
+		return t
+	case bool, nil, int, int64, float64:
+		return v
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for key, val := range t {
@@ -185,7 +205,13 @@ func redactBodyValue(v any, secrets []string) any {
 		}
 		return out
 	}
-	return v
+	// Unknown shape: render it, mask the text, and hand back the masked JSON so
+	// the value is never emitted unredacted.
+	buf, err := json.Marshal(v)
+	if err != nil {
+		return secretMask
+	}
+	return json.RawMessage(redactSecrets(string(buf), secrets))
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
@@ -429,7 +455,16 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		return respBody, nil
 	}
 
-	ee := output.ParseBackendError(resp.StatusCode, respBody)
+	// A backend error body can echo the value it was given, and a not-found
+	// message naming the requested id is the most natural thing for a backend to
+	// write — which for drive.share.access / drive.share.download /
+	// drive.invite.accept means the id *is* the secret. ParseBackendError copies
+	// the backend's message into the envelope and the whole body into Detail, so
+	// the response path is redacted here as the transport path already is. This is
+	// not a --verbose surface: it is the structured error on stderr, emitted
+	// unconditionally. The mask contains no quote or backslash, so Detail stays
+	// valid JSON.
+	ee := output.ParseBackendError(resp.StatusCode, redactSecretBytes(respBody, req.SecretValues))
 
 	if isRetryableStatus(resp.StatusCode) {
 		re := &retryableErr{ExitError: ee}
