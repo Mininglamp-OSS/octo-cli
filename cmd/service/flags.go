@@ -184,22 +184,66 @@ func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.O
 	}
 }
 
-// reservedFlagNames are the flag names the engine itself registers on an
-// operation. A spec-declared flag colliding with one of them would panic pflag
-// ("flag redefined") at startup, which takes down the whole binary — every leaf
-// is built in RegisterServiceCommands, so even `octo-cli version` would die.
-// All four registration paths (path / query / header / body) refuse a colliding
-// name instead.
+// reservedFlagNames are the flag names a spec-declared flag must not claim,
+// because the CLI already registers them: the engine's own per-leaf flags, and
+// the global flags root registers as persistent flags.
 //
-// Refusing means the spec's flag is silently absent, which is a spec bug the
-// engine cannot report at load time (registration has no error channel). It is
-// still strictly better than a dead binary, and
+// The two halves fail differently. An engine flag is registered on the leaf
+// itself, so a colliding spec flag would panic pflag ("flag redefined") at
+// startup, which takes down the whole binary — every leaf is built in
+// RegisterServiceCommands, so even `octo-cli version` would die. A global is
+// inherited, and cobra merges inherited flags with AddFlagSet, which skips a
+// name the leaf already has: there is no panic, the leaf's local flag wins, and
+// the global becomes unreachable for that one command. A spec param named
+// `format` would therefore silently disable `--format` on its leaf alone.
+//
+// All four registration paths (path / query / header / body) refuse a colliding
+// name instead. Refusing means the spec's flag is silently absent, which is a
+// spec bug the engine cannot report at load time (registration has no error
+// channel). It is still strictly better than either failure above, and
 // TestFlags_NoSpecCollidesWithEngineFlags turns the whole class into a test
 // failure at development time rather than a silent loss in production.
-var reservedFlagNames = map[string]bool{
-	"data": true, "file": true,
-	"page-all": true, "page-limit": true,
-	"output": true, "o": true,
+var reservedFlagNames = buildReservedFlagNames()
+
+// engineFlagNames are the flags the engine registers on an operation leaf.
+var engineFlagNames = []string{
+	"data", "file",
+	"page-all", "page-limit",
+	"output", "o",
+}
+
+// rootPersistentFlagNames are the global flags root registers as persistent
+// flags. Only long names are listed: `--jq`'s `-q` shorthand lives in pflag's
+// separate shorthand namespace, so a spec param legitimately named `q`
+// (matter.list, skill.list) does not shadow it and must stay registrable.
+//
+// The list is spelled out here rather than read from the root command because
+// package cmd imports this package, not the other way round.
+// TestRoot_ReservedGlobalFlagNamesMatchPersistentFlags (package cmd) fails if
+// root's persistent flag set and this list ever drift apart.
+var rootPersistentFlagNames = []string{
+	"format", "jq",
+	"dry-run", "verbose",
+	"timeout", "no-retry",
+	"space", "bot-id", "profile",
+}
+
+func buildReservedFlagNames() map[string]bool {
+	reserved := make(map[string]bool, len(engineFlagNames)+len(rootPersistentFlagNames))
+	for _, name := range engineFlagNames {
+		reserved[name] = true
+	}
+	for _, name := range rootPersistentFlagNames {
+		reserved[name] = true
+	}
+	return reserved
+}
+
+// ReservedGlobalFlagNames returns the global flag names the engine refuses to
+// let a spec-declared flag shadow. Exported so the root command's own test can
+// assert the list still matches the flags root actually registers.
+func ReservedGlobalFlagNames() []string {
+	return append([]string(nil), rootPersistentFlagNames...)
 }
 
 // registerPathFlags binds every path parameter that declares x-octo-flag to an

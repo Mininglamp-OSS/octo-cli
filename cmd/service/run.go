@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -189,23 +190,47 @@ func missingPathValueError(cobraCmd *cobra.Command, paramName string, pf *pathFl
 			cobraCmd.CommandPath(), pf.flagName, cobraCmd.CommandPath()))
 }
 
-// validatePathArgs range-checks every resolved path value whose spec parameter
-// is a backend uint64 id (integer / format uint64). Non-id path params are left
-// alone, so this is a no-op for every operation that does not declare the format.
+// validatePathArgs checks every resolved path value before it is substituted
+// into the URL: no value may be a dot segment, and a value whose spec parameter
+// is a backend uint64 id (integer / format uint64) is range-checked. Non-id path
+// params are otherwise left alone, so the format check is a no-op for every
+// operation that does not declare it.
 func validatePathArgs(rt *operationRuntime, values []string) *output.ExitError {
 	for i, name := range rt.pathParams {
 		if i >= len(values) {
 			return nil
 		}
+		arg := "<" + strings.ReplaceAll(name, "_", "-") + ">"
+		if err := rejectDotSegment(arg, values[i]); err != nil {
+			return err
+		}
 		p := findParam(rt.detail, name, "path")
 		if p == nil || p.Format != uint64Format {
 			continue
 		}
-		if _, err := output.ParseUint64Decimal("<"+strings.ReplaceAll(name, "_", "-")+">", values[i]); err != nil {
+		if _, err := output.ParseUint64Decimal(arg, values[i]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// rejectDotSegment refuses a path value that is exactly "." or "..".
+//
+// url.PathEscape does not escape a dot, so both reach the URL as real dot
+// segments. A single segment cannot climb more than one level (a "/" would be
+// escaped), which bounds this — but the engine emits DELETE for high-risk-write
+// operations, and any gateway that normalises dot segments turns
+// `DELETE /shares/..` into `DELETE /shares`. Whether such a route exists is a
+// backend question the CLI should not be asking, so the value is refused here.
+// No backend id shape is "." or "..", so nothing legitimate is lost.
+func rejectDotSegment(label, value string) *output.ExitError {
+	if value != "." && value != ".." {
+		return nil
+	}
+	return output.ErrValidation(
+		fmt.Sprintf("%s must be an id, not the path segment %q", label, value),
+		"pass the id value; a dot segment would retarget the request at a different resource")
 }
 
 // collectSecrets gathers the literal values of every x-octo-secret parameter or
@@ -359,6 +384,13 @@ func queryItemEnum(d *registry.OperationDetail, apiName string) []any {
 // buildHeaders assembles the per-request headers from spec-declared header
 // flags the user explicitly set. Returns nil when none were set, so an omitted
 // optional header stays absent from the wire.
+//
+// Enum vocabularies are deliberately NOT enforced here, and neither are they in
+// validatePathArgs: the local enum gate covers query and body parameters only.
+// No embedded spec declares an enum on a header or path parameter today, so a
+// check here would be unreachable code; TestEnum_NoHeaderOrPathParamDeclaresEnum
+// fails the build the day one does, which is the point at which the asymmetry
+// stops being deliberate and has to be closed.
 func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) map[string]string {
 	var headers map[string]string
 	for flagName, hf := range rt.headerFlags {
@@ -396,8 +428,23 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err), "pass inline JSON, @file, or @-")
 		}
 		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &base); err != nil {
+			// UseNumber, not a plain Unmarshal: a plain decode turns every JSON
+			// number into float64, which silently rounds a uint64 id above 2^53.
+			// For a parent_id-style field that id selects a destination row, so a
+			// rounded value is a *valid* id pointing somewhere the caller did not
+			// ask for. json.Number keeps the caller's exact digits all the way to
+			// the wire and lets the schema walker range-check them.
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.UseNumber()
+			if err := dec.Decode(&base); err != nil {
 				return nil, output.ErrValidation(fmt.Sprintf("--data is not a JSON object: %v", err), "expected a JSON object for this operation")
+			}
+			// A Decoder stops after the first value where json.Unmarshal rejected
+			// trailing bytes, so trailing content is checked explicitly to keep
+			// --data exactly as strict as it was before UseNumber.
+			if dec.More() {
+				return nil, output.ErrValidation("--data has trailing content after the JSON object",
+					"pass exactly one JSON object for this operation")
 			}
 		}
 	}
@@ -502,6 +549,9 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
 	}
+	if err := checkUint64Field(schema, value, path, flagName); err != nil {
+		return err
+	}
 	switch schema.Type {
 	case "object":
 		return v.validateObject(schema, value, path)
@@ -509,6 +559,32 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		return v.validateArray(schema, value, path, flagName)
 	}
 	return nil
+}
+
+// checkUint64Field range-checks a body field the spec marks `format: uint64`.
+// The promoted-flag path validates through ParseUint64Decimal before the value
+// is ever placed in the body; this is the same check for a value that arrived
+// through --data, at whatever nesting depth, so the lossless-id contract does
+// not hold on one input path and lapse on the other.
+//
+// A non-numeric JSON value is rejected rather than forwarded: the wire contract
+// for these fields is a JSON integer, so a quoted id would come back as a
+// backend decode error naming a server struct. The message names the promoted
+// flag when there is one, which is the decimal-string surface a caller reaching
+// for a string actually wants.
+func checkUint64Field(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
+	if schema.Format != uint64Format || value == nil {
+		return nil
+	}
+	label := enumFieldLabel(path, flagName)
+	num, ok := value.(json.Number)
+	if !ok {
+		return output.ErrValidation(
+			fmt.Sprintf("%s must be a JSON integer uint64 id, got %T", label, value),
+			"pass the id as a bare JSON number with digits only, or use the matching flag which accepts it as a decimal string")
+	}
+	_, err := output.ParseUint64Decimal(label, num.String())
+	return err
 }
 
 func (v bodySchemaValidator) validateObject(schema *registry.SchemaInfo, value any, path string) *output.ExitError {
@@ -657,6 +733,17 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	// Pagination and the spec-declared output transforms are likewise mutually
+	// exclusive: the merged pages are emitted below without going through
+	// normalizeResponse, so an operation declaring both would answer the same
+	// call with two different response contracts depending on --page-all. Refused
+	// here rather than transformed per page — the transforms rewrite field names
+	// and id representations, and a per-page rewrite would have to prove it never
+	// touches the cursor the loop reads back.
+	if err := validatePaginationTransforms(rt); err != nil {
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+		return err
+	}
 
 	cli, err := f.Client()
 	if err != nil {
@@ -729,6 +816,30 @@ func validatePaginationRequest(req *client.Request) *output.ExitError {
 		"PAGINATION_OUTPUT_CONFLICT",
 		"operation is paginated and also writes a binary body to --output; these are mutually exclusive",
 		"operation-spec bug: an op with x-octo-pagination must not also declare an inline 2xx binary body",
+	)
+}
+
+// validatePaginationTransforms refuses an operation that declares
+// x-octo-pagination together with either output transform
+// (x-octo-response-fields, x-octo-lossless-id-fields). No embedded spec declares
+// both today — TestPagination_NoSpecPairsWithOutputTransforms holds that line at
+// development time — so this never fires in practice; it exists so the first spec
+// that wires the two together fails loudly instead of silently returning
+// post-alias, decimal-string ids on a single call and raw backend keys with raw
+// JSON-number ids under --page-all.
+func validatePaginationTransforms(rt *operationRuntime) *output.ExitError {
+	if rt == nil || rt.detail == nil {
+		return nil
+	}
+	if len(rt.detail.ResponseFieldAliases) == 0 && len(rt.detail.LosslessIDFields) == 0 {
+		return nil
+	}
+	return output.ErrWithHint(
+		"internal",
+		"PAGINATION_TRANSFORM_CONFLICT",
+		"operation is paginated and also declares a response output transform; these are mutually exclusive",
+		"operation-spec bug: an op with x-octo-pagination must not also declare "+
+			"x-octo-response-fields or x-octo-lossless-id-fields",
 	)
 }
 
