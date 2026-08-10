@@ -287,8 +287,8 @@ Flags:
 - download file: --output/-o (required), --overwrite
 - doc mount: --space-id, --parent-id, --doc-id, --source (user-mount|docs-sync; no --doc-title: the title and doc_space_id are read server-side from the document metadata)
 - doc list: --space-id (required), --parent-id; doc candidates: --space-id (required), --page, --page-size
-- share create / blob-create: --permission (view|download), --expires-in-seconds, --password
-- share access: --password; share download: --output/-o (required), --password, --overwrite
+- share create / blob-create: --permission (view|download), --expires-in-seconds, --password / --password-file (mutually exclusive)
+- share access: --password / --password-file; share download: --output/-o (required), --password / --password-file, --overwrite
 - invite create: --role (required, role ∈ preview_only | downloader | uploader_downloader | editor | admin — `custom` and `super_admin` are rejected), --expires-in-seconds
 - im-transfer create: --im-group-no (required), --im-channel-type (required, 1=DM|2=group|5=thread; picks the message-read route — 1 is the DM route, 2 and 5 share the group route — and is stored as the first segment of the row's source_key, which the already-transferred batch lookup matches on. Transfer idempotency is (target space, type=blob, object path), so a wrong value cannot duplicate a file), --im-msg-id (required), --target-space-id (required), --target-parent-id, --name-override
 
@@ -317,12 +317,30 @@ Notes:
   are different scopes. When a mount predates drive capturing `doc_space_id`,
   `share create` fails with `MISSING_DOC_SPACE_ID` rather than substituting.
 - The presigned PUT/GET runs on a separate HTTP client with **no** Octo
-  credential and no space header. A failed `upload file` cancels the pending row
-  and reports `file_id` + the cancel outcome in the error detail.
-- `download file` / `share download` write `<output>.part`, fsync, then rename;
-  an existing destination is refused unless `--overwrite` is passed.
-- `--password`, share tokens and invite tokens are marked `x-octo-secret`: they
-  go on the wire unchanged but are masked in `--verbose` and `--dry-run` output.
+  credential and no space header. Redirects are followed (storage gateways use
+  them) but every hop is re-validated against the same https-or-loopback-http
+  rule as the first, so an accepted presigned URL cannot redirect the transfer to
+  an unsafe destination. A failed `upload file` cancels the pending row and
+  reports `file_id` + the cancel outcome in the error detail. A transport failure
+  names the storage host and the cause but never the URL — the presigned
+  signature is in the query string, which makes the whole URL a short-lived
+  bearer credential for the object.
+- `download file` / `share download` write a randomly-named `<base>.<rand>.part`
+  created `O_EXCL` in the destination directory, fsync, then rename; an existing
+  destination is refused unless `--overwrite` is passed. The name is random
+  rather than `<output>.part` so a pre-created symlink at a predictable path
+  cannot redirect the write, and two concurrent downloads to one destination
+  cannot interleave. `--overwrite=false` remains best-effort against a file that
+  appears inside the check-to-rename window: POSIX rename replaces
+  unconditionally.
+- Share passwords, share tokens and invite tokens are marked `x-octo-secret`:
+  they go on the wire unchanged but are masked in `--verbose` and `--dry-run`
+  output, and in the default error envelope. Body masking is structural — the
+  body value is walked and matching leaves replaced *before* marshalling — so a
+  password containing `"`, `\` or a newline is masked in the form it would
+  actually be logged. A password may also be supplied off argv with
+  `--password-file <path>` (or `-` for stdin), mirroring `auth login
+  --token-file`.
 - **base64url ids may start with `-`**, which cobra parses as a flag before the
   command runs. The three affected path params (`share_id`, `invite_id`,
   `invite_token`) declare `x-octo-flag`, so each also accepts a flag form —

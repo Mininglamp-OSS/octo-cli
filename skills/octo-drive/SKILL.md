@@ -174,10 +174,12 @@ The low-level steps stay available (`upload prepare|confirm|cancel`, `download u
 There is exactly one thing the two sides exchange: `data.share_url`.
 
 ```bash
-octo-cli drive share create "$FILE" --permission download --expires-in-seconds 86400 --password "$PW"
+octo-cli drive share create "$FILE" --permission download --expires-in-seconds 86400 --password-file ./pw
 ```
 
-- `--password` is passed out of band — it is never in the URL, and it is masked in `--verbose` / `--dry-run` output.
+- The password is passed out of band — it is never in the URL, and it is masked in `--verbose` / `--dry-run` output.
+- **Prefer `--password-file <path>` (or `--password-file -` for stdin) over `--password`.** A value on argv is readable from `ps` and `/proc` and lands in shell history for the process lifetime, the same reason `auth login` takes its token from `--token-file` / stdin and never from the command line. `--password` still works for interactive use. One trailing newline is stripped from the file; nothing else is, so a password may begin or end with a space.
+- `--permission` is held to the spec's `view | download` enum locally: anything else is `ENUM_NOT_ALLOWED` / exit 2 with no request sent.
 - **Both sides need a credential.** There is no anonymous share. The token (and password) authorise the *share*; your credential authenticates *you*. The receiver does not have to be a member of the file's space.
 - `share access` / `share download` accept only links on your configured Octo origin, in exactly the `/drive/s/<token>` or `/d/<docId>?sp=<docSpaceId>` shape. Anything else fails with `INVALID_SHARE_URL` — the CLI parses the link, it never fetches the host in it.
 - `downloadable` tells you which command to use next. Documents are always `false`, and so is a blob shared with `--permission view` — `share download` on either answers `permission_denied`. Only `--permission download` yields bytes.
@@ -192,7 +194,7 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 | `ENUM_NOT_ALLOWED` | validation / 2 | the value is outside the spec's enum; the hint lists the accepted set |
 | `unauthorized` | auth / 3 | token invalid, revoked, or the user/bot is inactive |
 | `permission_denied` | permission / 1 | the identity lacks the space role; `drive member add` it |
-| `password_required` / `wrong_password` | permission / 1 | pass or fix `--password` |
+| `password_required` / `wrong_password` | permission / 1 | pass or fix the password (`--password-file`) |
 | `share_expired` | permission / 1 | ask for a new link |
 | `not_found` | api_error / 1 | check the id and that the space is reachable |
 | `conflict` | validation / 2 | re-read state, then retry |
