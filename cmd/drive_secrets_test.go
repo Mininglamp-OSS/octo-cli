@@ -125,9 +125,17 @@ func TestSecrets_ShareIDIsMaskedOnEverySurface(t *testing.T) {
 		if streams := tf.Out.String() + tf.ErrOut.String(); strings.Contains(streams, shareID) {
 			t.Errorf("the emitted output echoed the share id:\n%s", streams)
 		}
-		// Redaction must not cost the backend's machine-readable code.
-		if !strings.EqualFold(ee.Code, "not_found") {
-			t.Errorf("code: got %q, want not_found — redaction must not break parsing", ee.Code)
+		// Case-sensitive on purpose. This assertion was EqualFold in round 6, and
+		// that is exactly why it passed while the property it guards was violated:
+		// when redaction masked the code value, parsing fell back to the
+		// status-derived "NOT_FOUND" and EqualFold accepted it, so the test stayed
+		// green with the backend's real code gone and detail dropped.
+		if ee.Code != "not_found" {
+			t.Errorf("code: got %q, want exactly \"not_found\" — an upper-case value means the real code was "+
+				"masked and parsing fell back to the status", ee.Code)
+		}
+		if len(ee.Detail) == 0 {
+			t.Error("detail was dropped, which is the other half of the same fallback")
 		}
 	})
 
@@ -226,6 +234,100 @@ func TestSecrets_CredentialEquivalentPathParamsAreMarked(t *testing.T) {
 	}
 }
 
+// TestSecrets_ASecretNameIsSecretEverywhere is the derived half of the same
+// property, and the round-6 ask the allowlist above only partly met.
+//
+// The allowlist pins seven known operations; it derives nothing, so a *new*
+// operation carrying the same credential-equivalent value unmarked slips through —
+// the round-8 review demonstrated exactly that by injecting a drive.share.peek with
+// an unmarked share_token and watching the secrets tests stay green.
+//
+// The rule here needs no list: if any operation marks a parameter name as secret,
+// that name is credential-equivalent by nature, so every other operation using it
+// in a path or query must mark it too. Exceptions have to be stated, not defaulted.
+func TestSecrets_ASecretNameIsSecretEverywhere(t *testing.T) {
+	// Names that are legitimately secret in one place and not in another. Empty
+	// today, and that is the point: an entry here is a claim someone has to defend.
+	knownExceptions := map[string]string{}
+
+	reg := registry.MustNew()
+	type site struct{ op, in string }
+	secretNames := map[string]site{}
+	var allSites []struct {
+		op, in, name string
+		secret       bool
+	}
+
+	for _, svc := range reg.ListServices() {
+		for _, info := range reg.ListOperations(svc) {
+			d, ok := reg.GetOperation(info.ID)
+			if !ok {
+				continue
+			}
+			for i := range d.Parameters {
+				p := &d.Parameters[i]
+				if p.In != "path" && p.In != "query" {
+					continue
+				}
+				allSites = append(allSites, struct {
+					op, in, name string
+					secret       bool
+				}{info.ID, p.In, p.Name, p.Secret})
+				if p.Secret {
+					secretNames[p.Name] = site{info.ID, p.In}
+				}
+			}
+		}
+	}
+	if len(secretNames) == 0 {
+		t.Fatal("no x-octo-secret path or query parameter found at all; this guard has nothing to derive from")
+	}
+
+	for _, s := range allSites {
+		if s.secret {
+			continue
+		}
+		declaredAt, isSecretSomewhere := secretNames[s.name]
+		if !isSecretSomewhere {
+			continue
+		}
+		if why, excepted := knownExceptions[s.op+"|"+s.name]; excepted {
+			t.Logf("%s %s is a documented exception: %s", s.op, s.name, why)
+			continue
+		}
+		t.Errorf("%s declares %s parameter %q without x-octo-secret, but %s marks the same name as secret. "+
+			"The same value cannot be credential-equivalent in one operation and not in another — mark it, or "+
+			"add it to knownExceptions with the reason it genuinely differs.",
+			s.op, s.in, s.name, declaredAt.op)
+	}
+}
+
+// secretBodyFields collects the request-body properties marked x-octo-secret at
+// any depth, so the tripwire sees a nested declaration too.
+func secretBodyFields(schema *registry.SchemaInfo, path string) []string {
+	if schema == nil {
+		return nil
+	}
+	var out []string
+	for name := range schema.Properties {
+		prop := schema.Properties[name]
+		field := name
+		if path != "" {
+			field = path + "." + name
+		}
+		if prop.Secret {
+			out = append(out, field)
+		}
+		if prop.Type == "object" {
+			out = append(out, secretBodyFields(&prop, field)...)
+		}
+		if prop.Items != nil && prop.Items.Type == "object" {
+			out = append(out, secretBodyFields(prop.Items, field+"[]")...)
+		}
+	}
+	return out
+}
+
 // TestSecrets_EverySecretBodyPropertyBelongsToADetachedLeaf is the round-6 P2
 // tripwire, and the reason collectSecrets' flag-only behaviour is recorded as
 // unreachable rather than fixed.
@@ -252,12 +354,11 @@ func TestSecrets_EverySecretBodyPropertyBelongsToADetachedLeaf(t *testing.T) {
 			if !ok || d.RequestBody == nil {
 				continue
 			}
-			var secretFields []string
-			for name, prop := range d.RequestBody.Properties {
-				if prop.Secret {
-					secretFields = append(secretFields, name)
-				}
-			}
+			// Recursive: an operation declaring x-octo-secret on a *nested*
+			// property would otherwise pass this guard while
+			// --data '{"credentials":{"password":"…"}}' --verbose logged it,
+			// because collectSecrets reads promoted top-level flags only.
+			secretFields := secretBodyFields(d.RequestBody, "")
 			if len(secretFields) == 0 {
 				continue
 			}

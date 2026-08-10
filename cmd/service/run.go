@@ -161,9 +161,12 @@ func resolvePathValues(cobraCmd *cobra.Command, rt *operationRuntime, args []str
 		return nil, missingPathValueError(cobraCmd, name, byParam[name])
 	}
 	if next < len(args) {
+		// The extra argument is not echoed: for the operations that have a path
+		// flag it is by construction the id, and this check runs before
+		// collectSecrets. Naming which mistake was made is the actionable part.
 		return nil, output.ErrValidation(
-			fmt.Sprintf("unexpected extra argument %q", args[next]),
-			"a path value supplied by flag must not also be given positionally")
+			"a path value was supplied both positionally and by flag",
+			"a path value supplied by flag must not also be given positionally; drop one of the two")
 	}
 	return values, nil
 }

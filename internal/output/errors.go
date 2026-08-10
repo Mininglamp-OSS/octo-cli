@@ -196,7 +196,33 @@ func ParseBackendError(status int, body []byte) *ExitError {
 		Code:    codeFromStatus(status),
 		Message: msg,
 		Hint:    hintFromStatus(status),
+		// The backend's payload is carried even here. This branch is reached for
+		// any shape the three envelope families do not match, and dropping the
+		// body left message — truncated at 2048 bytes — as the only copy of the
+		// backend's answer. Only valid JSON is attached: Detail is spliced into
+		// the envelope raw, so non-JSON text would make the envelope unparseable.
+		Detail: jsonDetail(body),
 	}
+}
+
+// jsonDetail returns body as a raw JSON detail payload, or nil when it is not
+// JSON and therefore cannot be embedded in the envelope.
+func jsonDetail(body []byte) json.RawMessage {
+	if len(body) == 0 || !json.Valid(body) {
+		return nil
+	}
+	return json.RawMessage(body)
+}
+
+// IsErrorCodeShaped reports whether s has the shape of a machine-readable error
+// code — lower-case alphanumerics and underscores.
+//
+// Exported for the transport's response redaction: the code is a closed
+// vocabulary the caller branches on, so masking it destroys the CLI's own error
+// contract while protecting nothing. Redaction uses this to leave a code-shaped
+// value alone.
+func IsErrorCodeShaped(s string) bool {
+	return looksLikeErrorCode(s)
 }
 
 // newBackendError builds the ExitError for a backend-supplied code. A code

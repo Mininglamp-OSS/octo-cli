@@ -554,3 +554,115 @@ func TestReplaceSecretForm_ShortSecretIsStillMaskedInEveryEchoShape(t *testing.T
 		}
 	}
 }
+
+// Round-8 P1-3. Round 5 made response-side redaction structural so it stopped
+// corrupting the body's syntax; round 8 found it still destroys the body's
+// *meaning*. redactResponseBody preserves object keys and masks string values —
+// and the drive error envelope carries its machine-readable code in a value
+// ({"error":"wrong_password"}). A masked code fails looksLikeErrorCode, parsing
+// falls back to codeFromStatus, and that branch set no Detail at all.
+//
+// The consequence is behavioural, not cosmetic: on `share access` the caller
+// cannot tell "wrong password, retry" from "no permission, stop".
+//
+// The trigger set is ordinary, not exotic: any secret of 8+ runes appearing
+// anywhere in the code value, and any shorter secret that is a "_"-delimited
+// component of it — password, wrong, not, found, denied, expired, invalid.
+func TestBackendError_MachineReadableCodeSurvivesRedaction(t *testing.T) {
+	cases := []struct {
+		name     string
+		password string
+	}{
+		{"long secret unrelated to the code", "correct-horse-battery-staple"},
+		{"mixed-case secret", "Passw0rd!"},
+		// The two from the round-8 report: 8 runes takes the unconditional
+		// substring path, and 5 runes passes the token-boundary rule because "_"
+		// is not a word byte.
+		{"exactly the short-secret threshold", "password"},
+		{"a boundary-delimited component of the code", "wrong"},
+		// Every other component of a realistic code vocabulary.
+		{"component: not", "not"},
+		{"component: found", "found"},
+		{"component: denied", "denied"},
+		{"component: expired", "expired"},
+		{"component: invalid", "invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"wrong_password","message":"the share password is incorrect"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/TOKENABC/access",
+				Body:         map[string]any{"password": tc.password},
+				SecretValues: []string{tc.password},
+			})
+			if err == nil {
+				t.Fatal("expected a backend error")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			// Case-sensitive on purpose: the fallback produces FORBIDDEN, and an
+			// EqualFold comparison against "wrong_password" would not have noticed
+			// that the real code was gone.
+			if ee.Code != "wrong_password" {
+				t.Errorf("code = %q, want exactly \"wrong_password\"; the caller branches on this to tell "+
+					"a retryable wrong password from a terminal permission failure", ee.Code)
+			}
+			if len(ee.Detail) == 0 {
+				t.Error("detail is empty; the fallback branch must carry the backend payload")
+			}
+			// The secret itself must still be gone from everything human-readable.
+			if strings.Contains(ee.Message, tc.password) {
+				t.Errorf("the message leaked the password: %s", ee.Message)
+			}
+		})
+	}
+}
+
+// TestBackendError_FallbackCarriesDetail pins the other half independently of
+// redaction: a body that matches no envelope family at all still has to reach the
+// caller as detail, or the only copy of the backend's answer is a truncated
+// sentence inside message.
+func TestBackendError_FallbackCarriesDetail(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantDetail bool
+	}{
+		{"unrecognised JSON shape", `{"unexpected":"shape","n":1}`, true},
+		{"JSON array", `[{"a":1}]`, true},
+		{"free-text error value", `{"error":"missing X-Space-Id"}`, true},
+		// Not JSON: embedding it raw would produce an invalid envelope, so detail
+		// stays empty and message carries the text.
+		{"not JSON at all", `upstream exploded`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ee := output.ParseBackendError(http.StatusBadGateway, []byte(tc.body))
+			if ee == nil {
+				t.Fatal("expected an ExitError")
+			}
+			if tc.wantDetail {
+				if len(ee.Detail) == 0 {
+					t.Errorf("detail is empty for %s; the backend payload was dropped", tc.name)
+				} else if !json.Valid(ee.Detail) {
+					t.Errorf("detail is not valid JSON, so the envelope would be malformed: %s", ee.Detail)
+				}
+			} else if len(ee.Detail) != 0 && !json.Valid(ee.Detail) {
+				t.Errorf("non-JSON body was spliced into detail as-is: %s", ee.Detail)
+			}
+		})
+	}
+}

@@ -205,7 +205,11 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 		return string(marshalled)
 	}
 	if req.Body != nil && len(req.RawBody) == 0 {
-		if buf, err := json.Marshal(redactBodyValue(req.Body, req.SecretValues)); err == nil {
+		// Keys are redacted on the request side and not on the response side. A
+		// request body's keys are caller-controlled — --data merges arbitrary JSON,
+		// so a secret can land in a key — while a response body's keys are the
+		// backend's contract and masking them is what broke error parsing.
+		if buf, err := json.Marshal(redactBodyKeysAndValues(req.Body, req.SecretValues)); err == nil {
 			return string(buf)
 		}
 	}
@@ -235,11 +239,88 @@ func redactResponseBody(b []byte, secrets []string) []byte {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	if err := dec.Decode(&parsed); err == nil {
-		if buf, merr := json.Marshal(redactBodyValue(parsed, secrets)); merr == nil {
+		if buf, merr := json.Marshal(redactErrorEnvelope(parsed, secrets)); merr == nil {
 			return buf
 		}
 	}
 	return []byte(redactSecrets(string(b), secrets))
+}
+
+// redactErrorEnvelope masks a decoded error body, leaving the machine-readable
+// code alone.
+//
+// The code is what a caller branches on — "wrong password, retry" versus "no
+// permission, stop" — and it lives in a *value*, not a key: the drive envelope is
+// {"error":"wrong_password"}, the matters envelope {"error":{"code":…}}. Masking
+// it made the value fail looksLikeErrorCode, so parsing fell through to a generic
+// status-derived code and the caller lost the distinction. Any secret long enough
+// to appear anywhere in the code, or short enough to be one of its
+// underscore-delimited words, triggered that: `password`, `wrong`, `not`, `found`.
+//
+// The exemption is narrow and safe. It applies only to the code position, and only
+// when the value is already code-shaped — lower-case alphanumerics and
+// underscores. A share or invite token is base64url, so it carries upper-case
+// characters or "-" and never qualifies. A value that does qualify is being
+// reported as an error code, which is a closed vocabulary the CLI prints on every
+// such failure anyway, so nothing is disclosed by leaving it.
+func redactErrorEnvelope(v any, secrets []string) any {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return redactBodyValue(v, secrets)
+	}
+	out := make(map[string]any, len(obj))
+	for key, val := range obj {
+		switch {
+		case isCodeBearingKey(key) && isExemptCode(val):
+			out[key] = val
+		case key == "error":
+			// The matters envelope nests {"code":…,"message":…} under "error";
+			// recurse so its code is exempt too while its message is masked.
+			out[key] = redactErrorEnvelope(val, secrets)
+		default:
+			out[key] = redactBodyValue(val, secrets)
+		}
+	}
+	return out
+}
+
+// isCodeBearingKey names the keys the three envelope families put a
+// machine-readable code under.
+func isCodeBearingKey(key string) bool {
+	return key == "code" || key == "error"
+}
+
+// isExemptCode reports whether val is a code-shaped string, and so safe to leave
+// unmasked in the code position.
+func isExemptCode(val any) bool {
+	s, ok := val.(string)
+	return ok && output.IsErrorCodeShaped(s)
+}
+
+// redactBodyKeysAndValues is redactBodyValue plus key masking, for a body whose
+// keys the caller supplied.
+func redactBodyKeysAndValues(v any, secrets []string) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for key, val := range t {
+			out[redactSecrets(key, secrets)] = redactBodyKeysAndValues(val, secrets)
+		}
+		return out
+	case map[string]string:
+		out := make(map[string]string, len(t))
+		for key, val := range t {
+			out[redactSecrets(key, secrets)] = redactSecrets(val, secrets)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = redactBodyKeysAndValues(val, secrets)
+		}
+		return out
+	}
+	return redactBodyValue(v, secrets)
 }
 
 // redactBodyValue deep-copies v with every string leaf run through
@@ -331,7 +412,74 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 // Do performs req against the service URL, applying auth, retry, and dry-run.
 // Returns the raw response body on 2xx; an *output.ExitError on non-2xx or
 // transport failure.
+//
+// Every error leaving this method is redacted against req.SecretValues. That is
+// deliberately a boundary rather than a set of per-site calls: three rounds of
+// review each found another site that formatted a secret-bearing string into an
+// error, because masking had been installed around the transport window and
+// anything raised outside it — URL construction, service routing, body marshal,
+// response read — echoed freely. Redacting on the way out makes the property hold
+// for sites that do not exist yet.
 func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
+	body, err := c.do(ctx, req)
+	if err != nil {
+		return nil, redactError(err, req.SecretValues)
+	}
+	return body, nil
+}
+
+// redactError returns err with every declared secret masked in its human-readable
+// fields. The concrete type is preserved where it carries meaning: a
+// *retryableErr is rebuilt as one so a caller inspecting retryability still sees
+// it, and a plain error with nothing to redact is returned untouched.
+func redactError(err error, secrets []string) error {
+	if err == nil || len(secrets) == 0 {
+		return err
+	}
+	var re *retryableErr
+	if errors.As(err, &re) && re.ExitError != nil {
+		return &retryableErr{
+			ExitError:  redactExitError(re.ExitError, secrets),
+			retryAfter: re.retryAfter,
+		}
+	}
+	var ee *output.ExitError
+	if errors.As(err, &ee) {
+		return redactExitError(ee, secrets)
+	}
+	// Not one of ours: wrap so the text is still masked rather than passed
+	// through, since the caller renders whatever it receives.
+	return output.ErrNetwork(redactSecrets(err.Error(), secrets), "")
+}
+
+// redactExitError copies e with its message, hint and detail masked. A copy
+// rather than a mutation: the value may be shared (a package-level sentinel, or
+// an error already handed to another caller).
+func redactExitError(e *output.ExitError, secrets []string) *output.ExitError {
+	if e == nil {
+		return nil
+	}
+	out := *e
+	out.Message = redactSecrets(e.Message, secrets)
+	out.Hint = redactSecrets(e.Hint, secrets)
+	if len(e.Detail) > 0 {
+		out.Detail = redactSecretBytes(e.Detail, secrets)
+	}
+	return &out
+}
+
+// redactSecretBytes masks secrets in a JSON fragment, preserving its structure
+// where it parses so a detail payload stays readable.
+func redactSecretBytes(b []byte, secrets []string) []byte {
+	if len(b) == 0 || len(secrets) == 0 {
+		return b
+	}
+	return redactResponseBody(b, secrets)
+}
+
+// do is Do's body. It returns errors unredacted; Do is the single place that
+// masks them.
+func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 	if req.Service == "" {
 		req.Service = "default"
 	}
@@ -480,7 +628,11 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		if req.BinaryResponse {
-			loc := resp.Header.Get("Location")
+			// Redacted like the sibling 3xx error path below. No secret-bearing
+			// operation declares a binary response today, so this does not fire —
+			// but the two renderings of the same header disagreeing is the kind of
+			// asymmetry that becomes a finding a round later.
+			loc := redactSecrets(resp.Header.Get("Location"), req.SecretValues)
 			env := map[string]any{
 				"url":    loc,
 				"status": resp.StatusCode,

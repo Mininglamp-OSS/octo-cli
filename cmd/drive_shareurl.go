@@ -102,9 +102,13 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 			canonical:  buildDocShareURL(origin, docID, docSpaceID),
 		}, nil
 	}
+	// The path is not echoed: on `share access` / `share download` the whole link
+	// is the argument, so its path contains the share token, and this error is
+	// raised before the token is known to be a secret. Naming the two accepted
+	// shapes is the actionable part.
 	return nil, invalidShareURL(fmt.Sprintf(
-		"path %q is not a share link; expected %s<token> or %s<docId>?sp=<docSpaceId>",
-		u.Path, blobSharePathPrefix, docSharePathPrefix))
+		"the link path is not a share link; expected %s<token> or %s<docId>?sp=<docSpaceId>",
+		blobSharePathPrefix, docSharePathPrefix))
 }
 
 // assertSameOrigin enforces the "compare, never contact" rule for an incoming

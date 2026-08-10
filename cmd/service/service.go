@@ -113,11 +113,39 @@ func findChild(parent *cobra.Command, name string) *cobra.Command {
 // as args, finds no RunE on the parent (Runnable()==false), prints
 // help, and exits 0 — which can let automation treat a removed
 // command as a success.
+//
+// The token is echoed only when it looks like a command name someone mistyped.
+// The other way to land here is omitting the verb — `drive share <token>` instead
+// of `drive share revoke <token>` — which would otherwise print a share token in
+// an error the caller did not opt into.
 func rejectUnknownSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return fmt.Errorf("unknown subcommand %q for %q", args[0], cmd.CommandPath())
+		if looksLikeSubcommandName(args[0]) {
+			return fmt.Errorf("unknown subcommand %q for %q", args[0], cmd.CommandPath())
+		}
+		return fmt.Errorf("unknown subcommand for %q; run `%s --help` for the available ones",
+			cmd.CommandPath(), cmd.CommandPath())
 	}
 	return cmd.Help()
+}
+
+// looksLikeSubcommandName reports whether s has the shape of a command word, so
+// echoing it back helps with a typo rather than disclosing an id. Command names
+// in this tree are short, lower-case and dash-separated; ids are longer, mixed
+// case, and often carry "_" or ":".
+func looksLikeSubcommandName(s string) bool {
+	if s == "" || len(s) > 24 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // buildOperationCmd builds the leaf cobra.Command for one operation.
@@ -224,16 +252,23 @@ func commandPathFor(d *registry.OperationDetail) string {
 
 // leadingDashFlagError rewrites cobra's raw flag-parse failure for commands
 // that accept a flaggable positional id, because the overwhelmingly common
-// cause is a base64url id starting with "-" being read as a flag. The original
-// error is preserved; only an actionable hint is added, naming the flag forms
-// this operation actually has.
+// cause is a base64url id starting with "-" being read as a flag.
+//
+// cobra's own text quotes the offending token ("unknown shorthand flag: 'A' in
+// -Ab3…"), and for these operations that token is the id — a share token or an
+// invite token. This runs before collectSecrets, so there is nothing to mask
+// with: the value is dropped rather than redacted. The diagnostic loses nothing
+// that matters, because the actionable part is which flag to use, and the hint
+// already says it. The sibling guards rejectEmptyPathValue / rejectDotSegment
+// take the same line.
 func leadingDashFlagError(rt *operationRuntime) func(*cobra.Command, error) error {
 	names := make([]string, 0, len(rt.pathFlags))
 	for _, pf := range rt.pathFlags {
 		names = append(names, "--"+pf.flagName)
 	}
 	return func(cmd *cobra.Command, err error) error {
-		return output.ErrWithHint("validation", "INVALID_FLAG", err.Error(),
+		return output.ErrWithHint("validation", "INVALID_FLAG",
+			"a positional value was parsed as a flag",
 			fmt.Sprintf("if this is an id starting with \"-\", pass it as %s, "+
 				"or put it after a \"--\" separator: %s -- <id>",
 				strings.Join(names, " / "), cmd.CommandPath()))
