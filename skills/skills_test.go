@@ -125,7 +125,9 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 		// List responses are flattened by the output layer: items at .data,
 		// pagination at ._pagination. The docs must NOT tell readers to use
 		// `.data.data // .data` on a list (that indexes an array and errors).
-		"items are at\n`.data`",
+		// Match on the claim, not on where the paragraph happens to wrap.
+		"items are at",
+		"pagination metadata is at `._pagination`",
 		"NOT apply the `.data.data // .data` normalization here",
 	} {
 		if !strings.Contains(content, want) {

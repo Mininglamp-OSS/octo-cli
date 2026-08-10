@@ -152,7 +152,51 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "name",
+                  "summary"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Display name (unique per Space; required)"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "One-line summary (required)"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "Category NAME, resolved from expert-category list"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Tag names"
+                  },
+                  "publisher": {
+                    "type": "string",
+                    "description": "Publisher label"
+                  },
+                  "instruction": {
+                    "type": "string",
+                    "description": "System instruction for the expert"
+                  },
+                  "mcp_config": {
+                    "type": "string",
+                    "description": "Raw mcpServers config as a JSON string"
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Agent-Skill packages: [{name, upload_object_key?, content?, file_name?, file_size?}]"
+                  }
+                }
               }
             }
           },
@@ -404,7 +448,47 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Display name (unique per Space)"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "One-line summary"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "Category NAME, resolved from expert-category list"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Tag names"
+                  },
+                  "publisher": {
+                    "type": "string",
+                    "description": "Publisher label"
+                  },
+                  "instruction": {
+                    "type": "string",
+                    "description": "System instruction for the expert"
+                  },
+                  "mcp_config": {
+                    "type": "string",
+                    "description": "Raw mcpServers config as a JSON string"
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Agent-Skill packages: [{name, upload_object_key?, content?, file_name?, file_size?}]"
+                  }
+                }
               }
             }
           },
@@ -759,7 +843,62 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "name",
+                  "summary"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Display name (unique per Space; required)"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "One-line summary (required)"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "Category NAME, resolved from expert-category list --kind squad"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Tag names"
+                  },
+                  "publisher": {
+                    "type": "string",
+                    "description": "Publisher label"
+                  },
+                  "leader": {
+                    "type": "string",
+                    "description": "Leader member_key (else the first member leads)"
+                  },
+                  "strategies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Collaboration strategies"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "description": "Permission mode"
+                  },
+                  "dependencies": {
+                    "type": "object",
+                    "description": "Inter-member dependency graph"
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "≥ 1 member: [{member_key, name, role, is_leader, instruction, mcp_config, skills}]"
+                  }
+                }
               }
             }
           },
@@ -1011,7 +1150,58 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Display name (unique per Space)"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "One-line summary"
+                  },
+                  "category": {
+                    "type": "string",
+                    "description": "Category NAME, resolved from expert-category list --kind squad"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Tag names"
+                  },
+                  "publisher": {
+                    "type": "string",
+                    "description": "Publisher label"
+                  },
+                  "leader": {
+                    "type": "string",
+                    "description": "Leader member_key (else the first member leads)"
+                  },
+                  "strategies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Collaboration strategies"
+                  },
+                  "permission": {
+                    "type": "string",
+                    "description": "Permission mode"
+                  },
+                  "dependencies": {
+                    "type": "object",
+                    "description": "Inter-member dependency graph"
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Full member list REPLACES the stored array: [{member_key, name, role, is_leader, instruction, mcp_config, skills}]"
+                  }
+                }
               }
             }
           },
@@ -1254,7 +1444,11 @@
             "in": "query",
             "name": "kind",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "agent",
+                "squad"
+              ]
             }
           }
         ],
@@ -1271,9 +1465,6 @@
                       "items": {
                         "type": "object"
                       }
-                    },
-                    "pagination": {
-                      "type": "object"
                     }
                   }
                 }
@@ -1318,7 +1509,11 @@
             "in": "query",
             "name": "kind",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "agent",
+                "squad"
+              ]
             }
           },
           {
@@ -1342,7 +1537,11 @@
             "in": "query",
             "name": "mode",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "all",
+                "mine"
+              ]
             }
           }
         ],
@@ -1359,9 +1558,6 @@
                       "items": {
                         "type": "object"
                       }
-                    },
-                    "pagination": {
-                      "type": "object"
                     }
                   }
                 }

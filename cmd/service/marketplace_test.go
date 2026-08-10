@@ -215,6 +215,53 @@ func TestMarketplaceExpertSkillUploadRequest(t *testing.T) {
 	}
 }
 
+// TestMarketplaceExpertSkillmdRequest pins the only non-obvious flag mapping in
+// the expert surface: query param `i` is fronted by `--index` via x-octo-flag.
+// A rename of that override would otherwise sail through the shape tests.
+func TestMarketplaceExpertSkillmdRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"content":"# SKILL"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert", "skillmd", "get", "e1", "--index", "2"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts/e1/skill_md" {
+		t.Errorf("got %s %s, want GET /market/api/v1/experts/e1/skill_md", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotQuery, "i=2") {
+		t.Errorf("query = %q, want i=2 (--index maps to wire param i)", gotQuery)
+	}
+}
+
+// TestMarketplaceSquadSkillDownloadRequest pins the squad-only `--member`
+// selector alongside the `--index`→`i` mapping on the download path.
+func TestMarketplaceSquadSkillDownloadRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"download_url":"https://example.invalid/x.zip"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "squad", "skill-download", "s1", "--member", "m1", "--index", "0"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/squads/s1/skill_download" {
+		t.Errorf("got %s %s, want GET /market/api/v1/squads/s1/skill_download", gotMethod, gotPath)
+	}
+	for _, want := range []string{"i=0", "member=m1"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want %q", gotQuery, want)
+		}
+	}
+}
+
 func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
 	var gotQuery map[string][]string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {

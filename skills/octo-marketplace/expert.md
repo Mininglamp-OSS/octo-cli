@@ -8,9 +8,9 @@ the id argument name (`<expert-id>` / `<squad-id>`) differ.
 
 ## Pagination is offset-based (not cursor)
 
-Unlike `skill list` / `mcp list`, the expert lists page by number, so
-`--page-all` does **not** apply. Walk pages with `--page` (one-based) and
-`--page-size` (max 100):
+Unlike the cursor-based `skill list` / `skill mine list`, the expert lists page
+by number, so `--page-all` does **not** apply (the same offset scheme as
+`mcp list`). Walk pages with `--page` (one-based) and `--page-size` (max 100):
 
 ```bash
 octo-cli marketplace expert list --page 1 --page-size 20
@@ -75,7 +75,7 @@ octo-cli marketplace expert create --data '{
   "tags": ["架构评审", "可靠性"],
   "instruction": "你是资深后端架构师……",
   "mcp_config": "{\"mcpServers\":{}}",
-  "skills": ["架构评审清单"]
+  "skills": [{"name": "架构评审清单"}]
 }'
 
 # Partial update — owner only; send only mutable fields
