@@ -148,15 +148,6 @@ func resolvePathValues(cobraCmd *cobra.Command, rt *operationRuntime, args []str
 	next := 0
 	for _, name := range rt.pathParams {
 		if pf := byParam[name]; pf != nil && cobraCmd.Flags().Changed(pf.flagName) {
-			// An empty flag value would address the collection URL instead of a
-			// resource — `--share-id "$SHARE_ID"` with an unset variable would
-			// DELETE /shares/ rather than fail. cobra used to catch the equivalent
-			// as a missing positional; MaximumNArgs no longer does.
-			if *pf.strVal == "" {
-				return nil, output.ErrValidation(
-					fmt.Sprintf("--%s is empty", pf.flagName),
-					"pass the id value; an empty flag would address the collection, not a resource")
-			}
 			values = append(values, *pf.strVal)
 			continue
 		}
@@ -191,16 +182,23 @@ func missingPathValueError(cobraCmd *cobra.Command, paramName string, pf *pathFl
 }
 
 // validatePathArgs checks every resolved path value before it is substituted
-// into the URL: no value may be a dot segment, and a value whose spec parameter
-// is a backend uint64 id (integer / format uint64) is range-checked. Non-id path
-// params are otherwise left alone, so the format check is a no-op for every
-// operation that does not declare it.
+// into the URL: no value may be empty or a dot segment, and a value whose spec
+// parameter is a backend uint64 id (integer / format uint64) is range-checked.
+// Non-id path params are otherwise left alone, so the format check is a no-op for
+// every operation that does not declare it.
+//
+// Both structural checks run for flag-supplied and positional values alike. The
+// empty check used to live in resolvePathValues and covered only the flag form,
+// which is the less common spelling of the mistake it was written for.
 func validatePathArgs(rt *operationRuntime, values []string) *output.ExitError {
 	for i, name := range rt.pathParams {
 		if i >= len(values) {
 			return nil
 		}
 		arg := "<" + strings.ReplaceAll(name, "_", "-") + ">"
+		if err := rejectEmptyPathValue(arg, values[i]); err != nil {
+			return err
+		}
 		if err := rejectDotSegment(arg, values[i]); err != nil {
 			return err
 		}
@@ -213,6 +211,21 @@ func validatePathArgs(rt *operationRuntime, values []string) *output.ExitError {
 		}
 	}
 	return nil
+}
+
+// rejectEmptyPathValue refuses an empty path value, which would address the
+// collection URL instead of a resource: `drive share revoke "$SHARE_ID"` with an
+// unset variable would send DELETE to {mount}/shares/ rather than fail, and the
+// same holds for the --share-id spelling. cobra used to catch the positional case
+// as a missing argument; MaximumNArgs no longer does, and no domain has ever had
+// an id that is the empty string.
+func rejectEmptyPathValue(label, value string) *output.ExitError {
+	if value != "" {
+		return nil
+	}
+	return output.ErrValidation(
+		fmt.Sprintf("%s is empty", label),
+		"pass the id value; an empty path value would address the collection, not a resource")
 }
 
 // rejectDotSegment refuses a path value that is exactly "." or "..".

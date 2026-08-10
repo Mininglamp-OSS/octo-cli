@@ -60,8 +60,9 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 
 // canonicalEnumValue reduces a scalar to a type-tagged canonical string.
 // The tag keeps the string "1" from matching the number 1, so a spec that
-// declares a string enum still rejects a numeric --data value. Numbers
-// normalise so 1, 1.0 and json.Number("1") all compare equal.
+// declares a string enum still rejects a numeric --data value. Numbers compare by
+// exact decimal text (see canonicalNumber), so an integer vocabulary admits only
+// values that are integers on the wire.
 // Reports false for anything that is not a string, bool or number.
 func canonicalEnumValue(v any) (string, bool) {
 	switch t := v.(type) {
@@ -76,28 +77,40 @@ func canonicalEnumValue(v any) (string, bool) {
 	case uint64:
 		return "n:" + strconv.FormatUint(t, 10), true
 	case float64:
-		return "n:" + canonicalNumber(strconv.FormatFloat(t, 'f', -1, 64)), true
+		return "n:" + canonicalNumber(specNumberText(t)), true
 	case json.Number:
 		return "n:" + canonicalNumber(t.String()), true
 	}
 	return "", false
 }
 
-// canonicalNumber strips a trailing ".0"-style fraction so an integral value
-// written as a float compares equal to the same value written as an integer.
-// Non-integral and unparseable text is returned unchanged — it simply will not
-// match an integral enum entry.
+// canonicalNumber reduces a number's text to the form used for comparison.
+//
+// An integral value written as a float compares equal to the same value written
+// as an integer, so a spec literal (which encoding/json hands over as float64,
+// text "1") matches a caller's `1`. What does NOT match is a value that is not an
+// integer on the wire: `1.0`, `1e0` and `1.00000000000000000001` all truncate to
+// 1, but the body keeps the caller's original json.Number, so accepting them here
+// would pass the local gate and then send a non-integer to a backend field that
+// rejects it on decode — reporting an internal struct name for a value the CLI
+// said was valid. Comparison is therefore on exact decimal text: a float64 is
+// formatted without an exponent (which is how a spec literal arrives), and a
+// json.Number is compared as the caller wrote it.
 func canonicalNumber(s string) string {
-	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return strconv.FormatInt(n, 10)
+	if _, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return s
 	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil {
-		if f == float64(int64(f)) {
-			return strconv.FormatInt(int64(f), 10)
-		}
-		return strconv.FormatFloat(f, 'f', -1, 64)
+	if _, err := strconv.ParseUint(s, 10, 64); err == nil {
+		return s
 	}
 	return s
+}
+
+// specNumberText renders a number that came from a spec literal. encoding/json
+// decodes every JSON number as float64, so an integral vocabulary entry has to be
+// formatted back to its integer text to be comparable with the caller's digits.
+func specNumberText(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 // formatEnumValue renders the rejected value for the error message: strings
