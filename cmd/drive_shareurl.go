@@ -109,10 +109,16 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 
 // assertSameOrigin enforces the "compare, never contact" rule for an incoming
 // share link. A site-relative link has no authority to check. An absolute one
-// must match the configured origin exactly — scheme http(s), host equal
+// must match the configured origin exactly — same scheme, and host equal
 // (comparison is case-insensitive but includes the port, so a link on another
-// port is a different origin), and no userinfo, which would otherwise be sent
-// to the host and can also disguise the real target.
+// port is a different origin) — and must carry no userinfo, which would
+// otherwise be sent to the host and can also disguise the real target.
+//
+// The scheme is compared rather than merely required to be http(s): the
+// docstring has always described strict same-origin matching, and accepting
+// `http://host/…` against an `https://host` origin would let a downgraded link
+// pass a check whose whole purpose is to establish that the link names the
+// configured Octo deployment and nothing else.
 //
 // Percent-encoding in the path is refused rather than decoded: %2F would decode
 // to a slash and let a crafted link pass the later shape check while actually
@@ -124,6 +130,10 @@ func assertSameOrigin(u, origin *url.URL) *output.ExitError {
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
 			return invalidShareURL(fmt.Sprintf("unsupported scheme %q", u.Scheme))
+		}
+		if !strings.EqualFold(u.Scheme, origin.Scheme) {
+			return invalidShareURL(fmt.Sprintf(
+				"the share link scheme %q is not the configured Octo origin's scheme %q", u.Scheme, origin.Scheme))
 		}
 		if !strings.EqualFold(u.Host, origin.Host) {
 			return invalidShareURL(fmt.Sprintf(

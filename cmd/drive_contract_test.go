@@ -566,6 +566,80 @@ func TestDriveShareCreate_EmittedLinksRoundTrip(t *testing.T) {
 	}
 }
 
+// --- tabular output agrees with JSON about a uint64 id ---
+
+// TestDriveOutput_TabularFormatsKeepTheIDExact drives the whole stack — real
+// command tree, real client, real formatter — because the unit-level guard in
+// internal/output cannot see the factory's decode step. A drive response id above
+// 2^53 must read the same under --format table / csv / ndjson as under json.
+//
+// The lossless-id extension converts declared fields to decimal *strings*, so this
+// uses a field the spec does not declare, which is the reachable case: any raw
+// integer a backend returns.
+func TestDriveOutput_TabularFormatsKeepTheIDExact(t *testing.T) {
+	const beyondFloat64 = "9007199254740993"
+
+	for _, format := range []string{"json", "table", "csv", "ndjson"} {
+		t.Run(format, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"id":1,"type":"blob","name":"c.pdf","size":` + beyondFloat64 + `}`))
+			}, nil)
+			env.tf.Globals.Format = format
+
+			if err := env.run("drive", "file", "get", "1"); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if got := env.tf.Out.String(); !strings.Contains(got, beyondFloat64) {
+				t.Errorf("--format %s rounded the value: want %s in\n%s", format, beyondFloat64, got)
+			}
+		})
+	}
+}
+
+// --- share links must match the configured origin's scheme ---
+
+// TestParseShareURL_SchemeMustMatchTheOrigin closes the drift between what
+// assertSameOrigin documented (strict same-origin) and what it enforced (any
+// http(s) scheme with a matching host). The link host is never fetched, so this is
+// not an exploit — but the check exists to establish that a link names the
+// configured Octo deployment, and a downgraded scheme is a different origin.
+func TestParseShareURL_SchemeMustMatchTheOrigin(t *testing.T) {
+	cases := []struct {
+		name      string
+		apiBase   string
+		link      string
+		wantValid bool
+	}{
+		{"https origin, https link", "https://octo.example.com", "https://octo.example.com/drive/s/tok", true},
+		{"https origin, http link", "https://octo.example.com", "http://octo.example.com/drive/s/tok", false},
+		{"http origin, http link", "http://octo.example.com", "http://octo.example.com/drive/s/tok", true},
+		{"http origin, https link", "http://octo.example.com", "https://octo.example.com/drive/s/tok", false},
+		// A site-relative link has no authority to compare and must keep working.
+		{"https origin, relative link", "https://octo.example.com", "/drive/s/tok", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := parseShareURL(&config.Config{APIBaseURL: tc.apiBase}, tc.link)
+			if tc.wantValid {
+				if err != nil {
+					t.Fatalf("expected the link to be accepted: %v", err)
+				}
+				// The canonical form is always rebuilt from the configured origin.
+				if !strings.HasPrefix(parsed.canonical, tc.apiBase) {
+					t.Errorf("canonical %q should be rooted at the configured origin %q", parsed.canonical, tc.apiBase)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected INVALID_SHARE_URL")
+			}
+			if err.Code != "INVALID_SHARE_URL" {
+				t.Errorf("code: got %q, want INVALID_SHARE_URL", err.Code)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 // assertNoSignature fails when a presigned signature appears anywhere the caller

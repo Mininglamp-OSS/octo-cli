@@ -310,7 +310,8 @@ Notes:
   document; the receiver passes that link straight to `share access` /
   `share download`. The token is never a caller-facing parameter.
 - `share access` / `share download` parse the link and refuse anything that is
-  not one of those two shapes on the configured Octo origin. The CLI never
+  not one of those two shapes on the configured Octo origin — same scheme, same
+  host and port, no userinfo, no percent-encoding in the id segment. The CLI never
   fetches the link's host — it calls the configured API with the parsed token.
   Both sides need a credential; there is no anonymous share.
 - `doc_space_id` (the document's own Octo Space) and `space_id` (the drive space)
