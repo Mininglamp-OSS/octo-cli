@@ -88,6 +88,13 @@ const secretMask = "***REDACTED***"
 // redactSecrets masks every non-empty SecretValues entry found in s. Values are
 // masked longest-first so a secret that contains another as a substring cannot
 // leave a fragment behind.
+//
+// Every encoding the same value can wear on its way into a log line is masked,
+// not just the literal: a secret in a URL path arrives percent-encoded, and one
+// inside a marshalled JSON body arrives with `"`, `\` and control characters
+// escaped. Masking only the literal is how a password containing a quote used to
+// survive a `--verbose` trace verbatim — json.Marshal had already rewritten it,
+// so the substitution found nothing to replace.
 func redactSecrets(s string, secrets []string) string {
 	if s == "" || len(secrets) == 0 {
 		return s
@@ -100,17 +107,85 @@ func redactSecrets(s string, secrets []string) string {
 	}
 	sort.Slice(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
 	for _, v := range ordered {
-		s = strings.ReplaceAll(s, v, secretMask)
-		// A secret embedded in a URL path arrives percent-encoded; mask that
-		// form too so `--verbose` on `invite accept <token>` stays clean.
-		if esc := url.PathEscape(v); esc != v {
-			s = strings.ReplaceAll(s, esc, secretMask)
-		}
-		if esc := url.QueryEscape(v); esc != v {
-			s = strings.ReplaceAll(s, esc, secretMask)
+		for _, form := range secretForms(v) {
+			s = strings.ReplaceAll(s, form, secretMask)
 		}
 	}
 	return s
+}
+
+// secretForms lists the encodings of v that could appear in text destined for a
+// log: the literal, the two percent-encoded forms, and the JSON-string body
+// (without its surrounding quotes).
+func secretForms(v string) []string {
+	forms := []string{v}
+	for _, enc := range []string{url.PathEscape(v), url.QueryEscape(v), jsonStringBody(v)} {
+		if enc != v && enc != "" {
+			forms = append(forms, enc)
+		}
+	}
+	return forms
+}
+
+// jsonStringBody returns v as json.Marshal would render it inside a JSON
+// document, minus the surrounding quotes. Returns "" when v needs no escaping,
+// so the caller skips a duplicate of the literal form.
+func jsonStringBody(v string) string {
+	buf, err := json.Marshal(v)
+	if err != nil || len(buf) < 2 {
+		return ""
+	}
+	return string(buf[1 : len(buf)-1])
+}
+
+// redactBodyForLog renders req's JSON body for a verbose trace or a dry-run
+// description with every declared secret masked.
+//
+// Where the body is a Go value the client marshalled itself, the masking is
+// structural: the value is walked and matching leaf strings are replaced *before*
+// marshalling, so the mask lands on the value the caller actually passed rather
+// than on whatever escaped form it took in the output. A RawBody (multipart) has
+// no structure to walk, so it falls back to text substitution over the encoded
+// forms. Either way the bytes on the wire are untouched — only the log copy is.
+func redactBodyForLog(req *Request, marshalled []byte) string {
+	if len(req.SecretValues) == 0 {
+		return string(marshalled)
+	}
+	if req.Body != nil && len(req.RawBody) == 0 {
+		if buf, err := json.Marshal(redactBodyValue(req.Body, req.SecretValues)); err == nil {
+			return string(buf)
+		}
+	}
+	return redactSecrets(string(marshalled), req.SecretValues)
+}
+
+// redactBodyValue deep-copies v with every string leaf run through
+// redactSecrets. json.Number is a distinct type from string, so a uint64 id is
+// copied through untouched and keeps marshalling as a bare JSON integer.
+func redactBodyValue(v any, secrets []string) any {
+	switch t := v.(type) {
+	case string:
+		return redactSecrets(t, secrets)
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for key, val := range t {
+			out[key] = redactBodyValue(val, secrets)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = redactBodyValue(val, secrets)
+		}
+		return out
+	case []string:
+		out := make([]string, len(t))
+		for i, val := range t {
+			out[i] = redactSecrets(val, secrets)
+		}
+		return out
+	}
+	return v
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
@@ -250,7 +325,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, urlStr, reader)
 	if err != nil {
-		return nil, output.ErrNetwork(err.Error(), "invalid request")
+		return nil, output.ErrNetwork(redactSecrets(err.Error(), req.SecretValues), "invalid request")
 	}
 
 	if c.cred != nil && c.cred.Token != "" {
@@ -268,16 +343,20 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 
 	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
 	if c.options.Verbose && len(body) > 0 {
-		c.verbosef("request body: %s", truncate(redactSecrets(string(body), req.SecretValues), 1024))
+		c.verbosef("request body: %s", truncate(redactBodyForLog(req, body), 1024))
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		// *url.Error.Error() embeds the whole request URL, so an x-octo-secret
+		// path parameter (invite / share token) would otherwise reach the default
+		// stderr error envelope — no --verbose needed to leak it.
+		msg := redactSecrets(err.Error(), req.SecretValues)
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, output.ErrNetwork(err.Error(), "request timed out or was cancelled")
+			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}
 		return nil, &retryableErr{
-			ExitError: output.ErrNetwork(err.Error(), "transport error; will retry"),
+			ExitError: output.ErrNetwork(msg, "transport error; will retry"),
 		}
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
@@ -313,7 +392,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		}
 		return nil, output.ErrAPI(
 			fmt.Sprintf("HTTP_%d", resp.StatusCode),
-			fmt.Sprintf("unexpected redirect to %q", resp.Header.Get("Location")),
+			fmt.Sprintf("unexpected redirect to %q", redactSecrets(resp.Header.Get("Location"), req.SecretValues)),
 			"",
 		)
 	}
@@ -407,7 +486,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte, error) {
 	var bodyField any
 	if len(body) > 0 {
-		redacted := redactSecrets(string(body), req.SecretValues)
+		redacted := redactBodyForLog(req, body)
 		// UseNumber so a uint64 id in the echoed body is shown at full precision;
 		// a plain unmarshal would round it and make --dry-run misreport what the
 		// request actually carries.
