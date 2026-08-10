@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strconv"
@@ -454,8 +456,12 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 			}
 			// A Decoder stops after the first value where json.Unmarshal rejected
 			// trailing bytes, so trailing content is checked explicitly to keep
-			// --data exactly as strict as it was before UseNumber.
-			if dec.More() {
+			// --data exactly as strict as it was before UseNumber. The check is a
+			// second Decode requiring io.EOF, not dec.More(): More reports whether
+			// another element follows *inside the current array or object*, so at
+			// top level it answers false for a stray "]" or "}" and let
+			// `{"a":1}]` through.
+			if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 				return nil, output.ErrValidation("--data has trailing content after the JSON object",
 					"pass exactly one JSON object for this operation")
 			}

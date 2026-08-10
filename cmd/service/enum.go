@@ -61,7 +61,7 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 // canonicalEnumValue reduces a scalar to a type-tagged canonical string.
 // The tag keeps the string "1" from matching the number 1, so a spec that
 // declares a string enum still rejects a numeric --data value. Numbers compare by
-// exact decimal text (see canonicalNumber), so an integer vocabulary admits only
+// exact decimal text (see canonicalNumberText), so an integer vocabulary admits only
 // values that are integers on the wire.
 // Reports false for anything that is not a string, bool or number.
 func canonicalEnumValue(v any) (string, bool) {
@@ -77,32 +77,27 @@ func canonicalEnumValue(v any) (string, bool) {
 	case uint64:
 		return "n:" + strconv.FormatUint(t, 10), true
 	case float64:
-		return "n:" + canonicalNumber(specNumberText(t)), true
+		return "n:" + canonicalNumberText(specNumberText(t)), true
 	case json.Number:
-		return "n:" + canonicalNumber(t.String()), true
+		return "n:" + canonicalNumberText(t.String()), true
 	}
 	return "", false
 }
 
-// canonicalNumber reduces a number's text to the form used for comparison.
+// canonicalNumberText is the text a number is compared by: exactly what the
+// caller wrote.
 //
 // An integral value written as a float compares equal to the same value written
-// as an integer, so a spec literal (which encoding/json hands over as float64,
-// text "1") matches a caller's `1`. What does NOT match is a value that is not an
-// integer on the wire: `1.0`, `1e0` and `1.00000000000000000001` all truncate to
-// 1, but the body keeps the caller's original json.Number, so accepting them here
-// would pass the local gate and then send a non-integer to a backend field that
-// rejects it on decode — reporting an internal struct name for a value the CLI
-// said was valid. Comparison is therefore on exact decimal text: a float64 is
-// formatted without an exponent (which is how a spec literal arrives), and a
-// json.Number is compared as the caller wrote it.
-func canonicalNumber(s string) string {
-	if _, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return s
-	}
-	if _, err := strconv.ParseUint(s, 10, 64); err == nil {
-		return s
-	}
+// as an integer only because a spec literal is formatted back to integer text by
+// specNumberText before it gets here — encoding/json hands over every JSON number
+// as float64, so the entry `1` arrives as 1.0 and is rendered "1". What does NOT
+// compare equal is a value that is not an integer on the wire: `1.0`, `1e0` and
+// `1.00000000000000000001` are all distinct text from "1", which is the point.
+// Collapsing them (as an earlier ParseFloat-and-truncate version did) let them
+// pass the local gate and then travel verbatim, because the body keeps the
+// caller's original json.Number — so a Go int field rejected them at the backend,
+// reporting an internal struct name for a value the CLI had called valid.
+func canonicalNumberText(s string) string {
 	return s
 }
 

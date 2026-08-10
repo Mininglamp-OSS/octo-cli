@@ -148,6 +148,12 @@ func TestBodyUint64_DataStaysAsStrictAsUnmarshal(t *testing.T) {
 		{"trailing object", `{"parent_id":1}{"parent_id":2}`},
 		{"trailing junk", `{"parent_id":1} nonsense`},
 		{"array instead of object", `[{"parent_id":1}]`},
+		// A stray closing delimiter is the case dec.More() missed: at top level
+		// More reports whether another element follows *inside* the current array
+		// or object, so it answers false for "]" and "}" and let these through.
+		{"trailing close bracket", `{"parent_id":1}]`},
+		{"trailing close brace", `{"parent_id":1}}`},
+		{"trailing comma", `{"parent_id":1},`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
