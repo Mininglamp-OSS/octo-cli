@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -79,7 +80,17 @@ type driveUploadOpts struct {
 //
 //nolint:gocyclo // one linear upload sequence; every branch is a separate covered failure mode
 func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string, o driveUploadOpts) error {
-	info, statErr := os.Stat(localPath)
+	// Open once and keep the descriptor: the size below is what gets signed, and
+	// re-opening by path after the prepare round-trip would let a replacement at
+	// that path be uploaded under the previous file's signed Content-Length.
+	// Stat'ing the descriptor rather than the path closes the same window.
+	file, openErr := os.Open(localPath)
+	if openErr != nil {
+		return failErr(f, output.ErrValidation(fmt.Sprintf("<local-path>: %v", openErr), "check the path and permissions"))
+	}
+	defer file.Close() //nolint:errcheck // read-only handle
+
+	info, statErr := file.Stat()
 	if statErr != nil {
 		return failErr(f, output.ErrValidation(fmt.Sprintf("<local-path>: %v", statErr), "check the path and permissions"))
 	}
@@ -160,12 +171,13 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	}
 
 	// From here on a pending row exists: every failure path must try to cancel it.
-	uploadURL, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL)
+	loopbackAPI := apiOriginIsLoopback(f)
+	uploadURL, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL, loopbackAPI)
 	if uerr != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, uerr))
 	}
 	progressf(f, "uploading %d bytes to object storage", size)
-	if perr := putObject(cmd, localPath, int64(size), &prepared, uploadURL); perr != nil {
+	if perr := putObject(cmd, file, int64(size), &prepared, uploadURL, loopbackAPI); perr != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, perr))
 	}
 	progressf(f, "upload complete; confirming file %s", fileID)
@@ -194,21 +206,23 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	return f.EmitSuccessWithMeta(normalized, output.EnvelopeMeta{Notice: notice})
 }
 
-// putObject streams the local file to the presigned URL. The request echoes the
-// Content-Type (and Content-Disposition when the backend set one) and sends an
-// exact Content-Length, all of which the storage gateway signed — omitting or
-// changing any of them makes it reject the upload with 403. No Authorization or
-// X-Space-Id is set: the caller's Octo credential must never reach storage.
+// putObject streams the already-open local file to the presigned URL. The
+// request echoes the Content-Type (and Content-Disposition when the backend set
+// one) and sends an exact Content-Length, all of which the storage gateway
+// signed — omitting or changing any of them makes it reject the upload with 403.
+// No Authorization or X-Space-Id is set: the caller's Octo credential must never
+// reach storage.
+//
+// The descriptor is the one that was stat'd for the signed size, not a fresh
+// open: re-opening by path after the prepare round-trip would let a replacement
+// at that path be sent under the previous file's signed Content-Length.
 //
 // A transport failure is reported through transferNetworkError, which names the
 // host but never the URL: the presigned signature is in the query string.
-func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepareUploadResponse, target *url.URL) *output.ExitError {
-	file, err := os.Open(localPath)
-	if err != nil {
+func putObject(cmd *cobra.Command, file *os.File, size int64, prepared *prepareUploadResponse, target *url.URL, loopbackAPI bool) *output.ExitError {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return output.ErrValidation(fmt.Sprintf("<local-path>: %v", err), "check the path and permissions")
 	}
-	defer file.Close() //nolint:errcheck // read-only handle
-
 	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPut, prepared.UploadURL, file)
 	if err != nil {
 		return transferNetworkError("upload", target, err)
@@ -221,7 +235,7 @@ func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepa
 		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
 	}
 
-	resp, err := transferClient("upload_url").Do(req)
+	resp, err := transferClient("upload_url", loopbackAPI).Do(req)
 	if err != nil {
 		return transferNetworkError("upload", target, err)
 	}

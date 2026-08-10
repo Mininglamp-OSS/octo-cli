@@ -31,9 +31,10 @@ func newDriveDownloadFileCmd(f *cmdutil.Factory) *cobra.Command {
 
 Fetches a short-lived signed URL, then reads the bytes on a separate HTTP client
 that carries no Octo credential — the signed URL is its own authorisation. The
-bytes are written to "<output>.part", fsync'd, and renamed into place only after
-a complete transfer, so an interrupted download never leaves a truncated file
-that looks whole. An existing destination is refused unless --overwrite is set.
+bytes are written to a randomly-named partial file next to the destination,
+fsync'd, and renamed into place only after a complete transfer, so an interrupted
+download never leaves a truncated file that looks whole. An existing destination
+is refused unless --overwrite is set.
 
 Use ` + "`drive download url`" + ` instead if you only want the signed URL.
 

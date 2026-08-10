@@ -82,14 +82,28 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // holds for the destination that actually serves the bytes and not merely for
 // the first URL the backend handed over. An unsafe hop fails the transfer rather
 // than downgrading it, and the 10-hop cap Go's default policy applies is kept.
-func transferClient(field string) *http.Client {
+//
+// The Referer header is dropped on every hop. Go fills it in from the previous
+// request's full URL, and for a presigned URL that includes the signature in the
+// query string — a short-lived bearer credential for the object. The redirect
+// target addresses its own URL and never presents the original signature, so it
+// has no use for the value; sending it would leave object read (GET) or write
+// (PUT) access sitting in a third party's access log.
+//
+// loopbackAPI reflects whether the configured Octo origin is itself loopback. It
+// gates the plain-http exception: that exception exists so local development
+// works, and against a remote origin a cooperating storage host could otherwise
+// answer 302 http://127.0.0.1:<port>/… and steer the transfer at a service on
+// the caller's own machine.
+func transferClient(field string, loopbackAPI bool) *http.Client {
 	return &http.Client{
 		Timeout: transferTimeout,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			req.Header.Del("Referer")
 			if len(via) >= maxTransferRedirects {
 				return fmt.Errorf("stopped after %d redirects", maxTransferRedirects)
 			}
-			if err := assertSafeTransferTarget(field, req.URL); err != nil {
+			if err := assertSafeTransferTarget(field, req.URL, loopbackAPI); err != nil {
 				return err
 			}
 			return nil
@@ -102,28 +116,57 @@ func transferClient(field string) *http.Client {
 // restated or a redirect loop would run until the transfer timeout.
 const maxTransferRedirects = 10
 
+// apiOriginIsLoopback reports whether the configured Octo origin is a loopback
+// host, which is the only situation in which plain-http object storage is
+// accepted. A config that cannot be read is treated as non-loopback: the strict
+// rule is the safe default.
+func apiOriginIsLoopback(f *cmdutil.Factory) bool {
+	cfg, err := f.Config()
+	if err != nil {
+		return false
+	}
+	origin, oerr := webOrigin(cfg)
+	if oerr != nil {
+		return false
+	}
+	return isLoopbackHost(origin.Hostname())
+}
+
 // assertSafeTransferURL rejects a presigned URL that is not safe to fetch, and
 // returns it parsed for the caller.
-func assertSafeTransferURL(field, raw string) (*url.URL, *output.ExitError) {
+func assertSafeTransferURL(field, raw string, loopbackAPI bool) (*url.URL, *output.ExitError) {
 	u, err := url.Parse(raw)
 	if err != nil {
+		// url.Error's text embeds the whole raw URL, signature included, so the
+		// parse cause is reported without it.
 		return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
-			fmt.Sprintf("%s is not a valid URL: %v", field, err),
+			fmt.Sprintf("%s is not a valid URL: %v", field, urlParseCause(err)),
 			"the backend returned an unusable presigned URL; report it")
 	}
-	if serr := assertSafeTransferTarget(field, u); serr != nil {
+	if serr := assertSafeTransferTarget(field, u, loopbackAPI); serr != nil {
 		return nil, serr
 	}
 	return u, nil
 }
 
+// urlParseCause strips the *url.Error wrapper that url.Parse returns, whose
+// Error() quotes the entire input URL.
+func urlParseCause(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) && ue.Err != nil {
+		return ue.Err
+	}
+	return err
+}
+
 // assertSafeTransferTarget holds the transfer safety rules for an already-parsed
 // URL, so the initial presigned URL and every redirect hop are judged by exactly
 // the same code. Only absolute http(s) URLs are allowed, plain http only for
-// loopback hosts so local development works without weakening production.
-// Embedded credentials are refused outright — a userinfo component would be
-// silently sent to the host and can also be used to disguise the real target.
-func assertSafeTransferTarget(field string, u *url.URL) *output.ExitError {
+// loopback hosts and only when the configured Octo origin is itself loopback, so
+// local development works without weakening production. Embedded credentials are
+// refused outright — a userinfo component would be silently sent to the host and
+// can also be used to disguise the real target.
+func assertSafeTransferTarget(field string, u *url.URL, loopbackAPI bool) *output.ExitError {
 	if u == nil || u.Host == "" || !u.IsAbs() {
 		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 			fmt.Sprintf("%s must be an absolute URL", field),
@@ -141,6 +184,11 @@ func assertSafeTransferTarget(field string, u *url.URL) *output.ExitError {
 			return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 				fmt.Sprintf("%s uses plain http on a non-loopback host", field),
 				"object storage must be https outside local development")
+		}
+		if !loopbackAPI {
+			return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+				fmt.Sprintf("%s points at a loopback host, but the configured Octo origin is not local", field),
+				"plain-http loopback object storage is accepted only against a local Octo origin")
 		}
 	default:
 		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
@@ -216,7 +264,8 @@ type downloadResult struct {
 // complete. The partial file is removed on any failure. Unless overwrite is set,
 // an existing target is refused before a single byte is fetched.
 func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target string, overwrite bool) (*downloadResult, *output.ExitError) {
-	u, err := assertSafeTransferURL(field, rawURL)
+	loopbackAPI := apiOriginIsLoopback(f)
+	u, err := assertSafeTransferURL(field, rawURL, loopbackAPI)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +280,7 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}
-	resp, rerr := transferClient(field).Do(req)
+	resp, rerr := transferClient(field, loopbackAPI).Do(req)
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}
