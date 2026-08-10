@@ -86,7 +86,7 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		t.Fatalf("octo-marketplace/SKILL.md not embedded: %v", err)
 	}
 	content := string(b)
-	for _, ref := range []string{"skills.md", "mcp.md"} {
+	for _, ref := range []string{"skills.md", "mcp.md", "expert.md"} {
 		if !strings.Contains(content, ref) {
 			t.Errorf("octo-marketplace/SKILL.md must route to %q", ref)
 		}
@@ -99,6 +99,37 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		if len(rb) == 0 {
 			t.Errorf("reference %q is empty", path)
 		}
+	}
+}
+
+func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/expert.md")
+	if err != nil {
+		t.Fatalf("read marketplace expert reference: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"marketplace expert list",
+		"marketplace expert get <expert-id>",
+		"marketplace expert create",
+		"marketplace expert update <expert-id>",
+		"marketplace expert delete <expert-id>",
+		"marketplace squad",
+		"marketplace expert-category list",
+		"marketplace expert-tag list",
+		"marketplace expert-skill-upload create",
+		"marketplace expert skill-download <expert-id> --index",
+		"marketplace squad skill-download <squad-id> --member",
+		"upload_object_key",
+		"--page-all` does **not** apply", // offset pagination, distinct from skill/mcp
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expert workflow must document %q", want)
+		}
+	}
+	// The package upload must presign before it is referenced in create/update.
+	if strings.Index(content, "expert-skill-upload create") > strings.Index(content, `"upload_object_key": "expert-uploads`) {
+		t.Error("presign step must precede referencing upload_object_key in a create/update body")
 	}
 }
 

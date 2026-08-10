@@ -1,7 +1,7 @@
 ---
 name: octo-marketplace
-version: 0.3.0
-description: Search, install, publish, and update Marketplace Skills and MCP server listings. Load after octo-shared.
+version: 0.4.0
+description: Search, install, publish, and update Marketplace Skills, MCP server listings, and Experts/Squads (专家/专家团). Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -12,7 +12,8 @@ metadata:
 
 All commands use `$OCTO_API_BASE_URL/market/api/v1/*`, authenticate with the
 active bot profile, and send its Space context. Marketplace is one backend with
-two catalog domains, exposed as `marketplace skill` and `marketplace mcp`.
+several catalog domains, exposed as `marketplace skill`, `marketplace mcp`, and
+`marketplace expert` / `marketplace squad`.
 
 Load only the reference matching the task:
 
@@ -20,6 +21,7 @@ Load only the reference matching the task:
 |---|---|
 | Search, install, publish, or update a Skill ZIP | [`skills.md`](skills.md) |
 | Search, install, create, probe, or update an MCP listing | [`mcp.md`](mcp.md) |
+| Search, create, update, or publish an Expert (专家) or Squad (专家团) | [`expert.md`](expert.md) |
 
 ## Shared output rule
 
@@ -40,5 +42,5 @@ Do not apply that expression to paginated search commands: `skill list` and
   replacement, or update; continue only after explicit user confirmation.
 - Never print presigned URLs, tokens, headers containing secrets, or raw secret
   values.
-- Do not change records outside the user-selected Skill or MCP.
+- Do not change records outside the user-selected Skill, MCP, Expert, or Squad.
 - On failure, preserve the previously installed runtime configuration.

@@ -13,6 +13,1457 @@
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": true,
   "paths": {
+
+    "/market/api/v1/experts": {
+      "get": {
+        "description": "List experts visible in the current Space (system + public + own private).",
+        "operationId": "expert.list",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring match on name/summary/category/creator_name",
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Category id; repeat to OR-combine; 'all' disables the filter",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Tag name; repeat to AND-combine",
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "system / public / private; repeat to OR-combine",
+            "in": "query",
+            "name": "visibility",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "human / bot / import; repeat to OR-combine",
+            "in": "query",
+            "name": "created_by_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "updated | relevance | (default: creation-time DESC)",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One-based page number (default 1)",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, default 20, max 100",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List experts",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      },
+      "post": {
+        "description": "Publish a new standalone expert owned by the caller. Send the flat ExpertAgentDetail body (name/summary required) via --data.",
+        "operationId": "expert.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Expert (flat ExpertAgentDetail minus server-only fields)",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "409": {
+            "description": "DUPLICATE"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Create expert",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "write"
+      }
+    },
+    "/market/api/v1/experts/mine": {
+      "get": {
+        "description": "Every expert owned by the caller in their Space regardless of visibility.",
+        "operationId": "expert.mine.list",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring match on name/summary/category/creator_name",
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Category id; repeat to OR-combine; 'all' disables the filter",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Tag name; repeat to AND-combine",
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "system / public / private; repeat to OR-combine",
+            "in": "query",
+            "name": "visibility",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "human / bot / import; repeat to OR-combine",
+            "in": "query",
+            "name": "created_by_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "updated | relevance | (default: creation-time DESC)",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One-based page number (default 1)",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, default 20, max 100",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List owned experts",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/experts/{expert_id}": {
+      "get": {
+        "description": "Full ExpertAgentDetail if visible; otherwise 404.",
+        "operationId": "expert.get",
+        "parameters": [
+          {
+            "description": "expert_id",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get expert",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      },
+      "patch": {
+        "description": "Owner-only partial update. Send mutable fields via --data.",
+        "operationId": "expert.update",
+        "parameters": [
+          {
+            "description": "expert_id",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Partial ExpertAgentDetail (mutable fields only)",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Update expert",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "write"
+      },
+      "delete": {
+        "description": "Owner-only soft delete; the name frees up for reuse.",
+        "operationId": "expert.delete",
+        "parameters": [
+          {
+            "description": "expert_id",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Delete expert",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "write"
+      }
+    },
+    "/market/api/v1/experts/{expert_id}/skill_md": {
+      "get": {
+        "description": "Return the stored SKILL.md text for the skill at index i.",
+        "operationId": "expert.skillmd.get",
+        "parameters": [
+          {
+            "description": "expert_id",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skill index within the record",
+            "in": "query",
+            "name": "i",
+            "x-octo-flag": "index",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get expert skill SKILL.md",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/experts/{expert_id}/skill_download": {
+      "get": {
+        "description": "Return a short-lived presigned GET URL for the skill package at index i.",
+        "operationId": "expert.skill_download",
+        "parameters": [
+          {
+            "description": "expert_id",
+            "in": "path",
+            "name": "expert_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skill index within the record",
+            "in": "query",
+            "name": "i",
+            "x-octo-flag": "index",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get expert skill package download URL",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/squads": {
+      "get": {
+        "description": "List squads visible in the current Space.",
+        "operationId": "squad.list",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring match on name/summary/category/creator_name",
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Category id; repeat to OR-combine; 'all' disables the filter",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Tag name; repeat to AND-combine",
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "system / public / private; repeat to OR-combine",
+            "in": "query",
+            "name": "visibility",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "human / bot / import; repeat to OR-combine",
+            "in": "query",
+            "name": "created_by_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "updated | relevance | (default: creation-time DESC)",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One-based page number (default 1)",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, default 20, max 100",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List squads",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "read"
+      },
+      "post": {
+        "description": "Publish a new squad owned by the caller. Body carries generic fields + leader/strategies/dependencies/permission/members (>=1). Send via --data.",
+        "operationId": "squad.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Squad (flat ExpertSquadDetail minus server-only fields)",
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "409": {
+            "description": "DUPLICATE"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Create squad",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "write"
+      }
+    },
+    "/market/api/v1/squads/mine": {
+      "get": {
+        "description": "Every squad owned by the caller in their Space regardless of visibility.",
+        "operationId": "squad.mine.list",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring match on name/summary/category/creator_name",
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Category id; repeat to OR-combine; 'all' disables the filter",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "Tag name; repeat to AND-combine",
+            "in": "query",
+            "name": "tag",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "system / public / private; repeat to OR-combine",
+            "in": "query",
+            "name": "visibility",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "human / bot / import; repeat to OR-combine",
+            "in": "query",
+            "name": "created_by_type",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "description": "updated | relevance | (default: creation-time DESC)",
+            "in": "query",
+            "name": "sort",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One-based page number (default 1)",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, default 20, max 100",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List owned squads",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/squads/{squad_id}": {
+      "get": {
+        "description": "Full ExpertSquadDetail (with members) if visible; otherwise 404.",
+        "operationId": "squad.get",
+        "parameters": [
+          {
+            "description": "squad_id",
+            "in": "path",
+            "name": "squad_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get squad",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "read"
+      },
+      "patch": {
+        "description": "Owner-only partial update. Sending members replaces the whole array. Send via --data.",
+        "operationId": "squad.update",
+        "parameters": [
+          {
+            "description": "squad_id",
+            "in": "path",
+            "name": "squad_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "description": "Partial ExpertSquadDetail (mutable fields only)",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Update squad",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "write"
+      },
+      "delete": {
+        "description": "Owner-only soft delete; the name frees up for reuse.",
+        "operationId": "squad.delete",
+        "parameters": [
+          {
+            "description": "squad_id",
+            "in": "path",
+            "name": "squad_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Delete squad",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "write"
+      }
+    },
+    "/market/api/v1/squads/{squad_id}/skill_md": {
+      "get": {
+        "description": "Return the stored SKILL.md text for member's skill at index i.",
+        "operationId": "squad.skillmd.get",
+        "parameters": [
+          {
+            "description": "squad_id",
+            "in": "path",
+            "name": "squad_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Squad member_key",
+            "in": "query",
+            "name": "member",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skill index within the record",
+            "in": "query",
+            "name": "i",
+            "x-octo-flag": "index",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get squad member skill SKILL.md",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/squads/{squad_id}/skill_download": {
+      "get": {
+        "description": "Return a short-lived presigned GET URL for member's skill package at index i.",
+        "operationId": "squad.skill_download",
+        "parameters": [
+          {
+            "description": "squad_id",
+            "in": "path",
+            "name": "squad_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Squad member_key",
+            "in": "query",
+            "name": "member",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Skill index within the record",
+            "in": "query",
+            "name": "i",
+            "x-octo-flag": "index",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Get squad member skill package download URL",
+        "tags": [
+          "squad"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/expert_categories": {
+      "get": {
+        "description": "Every live category with a count of records visible to the caller of the requested kind.",
+        "operationId": "expert_category.list",
+        "parameters": [
+          {
+            "description": "agent (experts) | squad (expert_squads); default agent",
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List expert categories",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/expert_tags": {
+      "get": {
+        "description": "Tag suggestions aggregated from records visible to the caller, sorted by descending count.",
+        "operationId": "expert_tag.list",
+        "parameters": [
+          {
+            "description": "agent (experts) | squad (expert_squads); default agent",
+            "in": "query",
+            "name": "kind",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Case-insensitive substring match on tag name",
+            "in": "query",
+            "name": "q",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max results, clamped to [1,100]; default 50",
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "'mine' restricts to caller-owned rows",
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "List expert tags",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "read"
+      }
+    },
+    "/market/api/v1/expert_skill_uploads": {
+      "post": {
+        "description": "Presign an upload for a .zip/.skill Agent-Skill package (<=20 MiB). PUT the raw bytes to the returned presigned_url with headers, then reference upload_object_key in an expert/squad create or update.",
+        "operationId": "expert_skill_upload.create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file_name",
+                  "file_size"
+                ],
+                "properties": {
+                  "file_name": {
+                    "type": "string",
+                    "description": "Original package file name (.zip/.skill)"
+                  },
+                  "file_size": {
+                    "type": "integer",
+                    "description": "Package size in bytes (<= 20 MiB)"
+                  }
+                }
+              }
+            }
+          },
+          "description": "Skill package upload init",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR"
+          },
+          "401": {
+            "description": "AUTH_REQUIRED"
+          },
+          "403": {
+            "description": "FORBIDDEN"
+          },
+          "404": {
+            "description": "NOT_FOUND"
+          },
+          "500": {
+            "description": "INTERNAL_ERROR"
+          }
+        },
+        "security": [
+          {
+            "Bearer": []
+          }
+        ],
+        "summary": "Initialize expert skill package upload",
+        "tags": [
+          "expert"
+        ],
+        "x-octo-risk": "write"
+      }
+    },
     "/market/api/v1/bot/skills/publish": {
       "post": {
         "description": "Parse an uploaded Skill archive synchronously through the bounded worker pool, then create a Skill owned by the bot owner.",

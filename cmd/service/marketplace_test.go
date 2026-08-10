@@ -41,6 +41,28 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"mcp.update":               {http.MethodPatch, "/market/api/v1/mcps/{mcp_id}"},
 		"mcp.delete":               {http.MethodDelete, "/market/api/v1/mcps/{mcp_id}"},
 		"mcp_icon_upload.create":   {http.MethodPost, "/market/api/v1/mcp_icon_uploads"},
+
+		// Expert Marketplace (docs/api/expert-v1.md): experts + squads + the
+		// dedicated expert taxonomy and skill-package upload surface.
+		"expert.list":                {http.MethodGet, "/market/api/v1/experts"},
+		"expert.create":              {http.MethodPost, "/market/api/v1/experts"},
+		"expert.mine.list":           {http.MethodGet, "/market/api/v1/experts/mine"},
+		"expert.get":                 {http.MethodGet, "/market/api/v1/experts/{expert_id}"},
+		"expert.update":              {http.MethodPatch, "/market/api/v1/experts/{expert_id}"},
+		"expert.delete":              {http.MethodDelete, "/market/api/v1/experts/{expert_id}"},
+		"expert.skillmd.get":         {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_md"},
+		"expert.skill_download":      {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_download"},
+		"squad.list":                 {http.MethodGet, "/market/api/v1/squads"},
+		"squad.create":               {http.MethodPost, "/market/api/v1/squads"},
+		"squad.mine.list":            {http.MethodGet, "/market/api/v1/squads/mine"},
+		"squad.get":                  {http.MethodGet, "/market/api/v1/squads/{squad_id}"},
+		"squad.update":               {http.MethodPatch, "/market/api/v1/squads/{squad_id}"},
+		"squad.delete":               {http.MethodDelete, "/market/api/v1/squads/{squad_id}"},
+		"squad.skillmd.get":          {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_md"},
+		"squad.skill_download":       {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_download"},
+		"expert_category.list":       {http.MethodGet, "/market/api/v1/expert_categories"},
+		"expert_tag.list":            {http.MethodGet, "/market/api/v1/expert_tags"},
+		"expert_skill_upload.create": {http.MethodPost, "/market/api/v1/expert_skill_uploads"},
 	}
 
 	if got := len(r.ListOperations("marketplace")); got != len(wants) {
@@ -230,6 +252,13 @@ func TestMarketplaceCommandTree(t *testing.T) {
 		"skill-icon-upload": {"create"},
 		"mcp":               {"list", "mine", "create", "probe", "get", "update", "delete"},
 		"mcp-icon-upload":   {"create"},
+
+		// Expert Marketplace command groups.
+		"expert":              {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
+		"squad":               {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
+		"expert-category":     {"list"},
+		"expert-tag":          {"list"},
+		"expert-skill-upload": {"create"},
 	}
 	for domain, children := range domains {
 		domainCmd := findCmd(marketplace, domain)

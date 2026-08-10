@@ -291,7 +291,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   (rich-text body), `board.md` (whiteboard), and `common.md` (comments,
   versions, members/sharing, attachments).
 - [`octo-marketplace`](./skills/octo-marketplace/SKILL.md) — search, install,
-  publish, and update Marketplace Skills and MCP server listings.
+  publish, and update Marketplace Skills and MCP server listings, plus Experts
+  (专家) and Squads (专家团).
 - [`octo-html`](./skills/octo-html/SKILL.md) — HTML docs (octo-doc, a
   **separate backend** from `octo-docs`): publish immutable versions, drafts,
   share codes & per-uid grants, media assets, inline comments, agent element

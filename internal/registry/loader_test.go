@@ -45,7 +45,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"event":       2,
 		"docs":        32,
 		"html":        20,
-		"marketplace": 25,
+		"marketplace": 44,
 		"summary":     4,
 	}
 	totalWant := 0
