@@ -162,17 +162,27 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	if err != nil {
 		return failErr(f, err)
 	}
+	// The pending row exists as soon as prepare returns 2xx — before the reply is
+	// decoded, not after. encoding/json saves type errors and keeps going, so a
+	// reply whose file_id is readable but whose other fields are malformed used to
+	// return a decode error with no cancel attempted, leaving exactly the orphan
+	// the command's help text promises not to leave. Both branches below cancel
+	// whenever a file id is recoverable.
 	var prepared prepareUploadResponse
-	if derr := decodeDriveResponse(raw, &prepared); derr != nil {
+	derr := decodeDriveResponse(raw, &prepared)
+	fileID := prepared.FileID.String()
+	if derr != nil {
+		if fileID != "" && fileID != "0" {
+			return failErr(f, withCancel(cmd, f, cli, mount, fileID, derr))
+		}
 		return failErr(f, derr)
 	}
-	fileID := prepared.FileID.String()
 	if fileID == "" || fileID == "0" {
 		return failErr(f, output.ErrWithHint("internal", "RESPONSE_DECODE",
 			"prepare-upload did not return a file_id", "report the backend response"))
 	}
 
-	// From here on a pending row exists: every failure path must try to cancel it.
+	// From here on every failure path must try to cancel the pending row.
 	loopbackAPI := apiOriginIsLoopback(f)
 	uploadURL, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL, loopbackAPI)
 	if uerr != nil {

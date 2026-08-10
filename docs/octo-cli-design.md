@@ -354,7 +354,18 @@ Notes:
   temp file's default nor silently tightens a destination the caller had widened.
 - Share passwords, share tokens, `share_id` and invite tokens are marked
   `x-octo-secret`: they go on the wire unchanged but are masked in `--verbose` and
-  `--dry-run` output, and in the default error envelope on **both** of its paths —
+  `--dry-run` output, and in **every** error the transport returns — redaction is
+  applied once, on the way out of `client.Do`, rather than at individual sites,
+  because three review rounds each found another site that formatted a
+  secret-bearing string into an error raised outside the transport window (URL
+  construction, service routing, response read). Two error paths sit outside the
+  client and cannot redact, because they run before the spec's secret list is
+  resolved — a flag-parse failure and the both-forms-supplied check — so those
+  report which mistake was made without echoing the value, as the sibling
+  empty-value and dot-segment guards already did. The masked value is never the
+  backend's machine-readable `code`: that is a closed vocabulary the caller
+  branches on, so masking it destroyed the CLI's own error contract while
+  protecting nothing. The two paths of the error envelope are
   the transport error (whose `*url.Error` embeds the request URL) and the backend
   error body (which may echo the value it was given, and for these operations the
   id *is* the secret). `share_id` is on that list because the backend returns one

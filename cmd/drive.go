@@ -1,6 +1,7 @@
 // Package cmd — drive composite commands.
 //
-// Forty of the drive leaves are generated from internal/registry/specs/drive.json.
+// Thirty-nine of the drive leaves are generated from
+// internal/registry/specs/drive.json (42 spec operations, 3 of them detached).
 // The six in this file and its siblings are hand-written because they are not a
 // single request: `upload file` runs prepare → object PUT → confirm, `download
 // file` and `share download` fetch a presigned URL and then write bytes to disk,
@@ -304,7 +305,12 @@ func isLoopbackHost(host string) bool {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
+		// IsUnspecified as well as IsLoopback: connect() to 0.0.0.0 or [::]
+		// reaches the local machine, so treating them as remote let a redirect
+		// steer a transfer at a local service under a remote origin — and, in the
+		// mirror-image, refused a dev object store advertising http://0.0.0.0:9000
+		// under a local one.
+		return ip.IsLoopback() || ip.IsUnspecified()
 	}
 	return false
 }
@@ -400,27 +406,18 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		cleanup()
 		return nil, output.ErrValidation(fmt.Sprintf("flush the partial file for %q: %v", target, err), "check available disk space")
 	}
-	if err := part.Close(); err != nil {
+	partInfo, serr := sealPartFile(part, target)
+	if serr != nil {
 		cleanup()
-		return nil, output.ErrValidation(fmt.Sprintf("close the partial file for %q: %v", target, err), "")
+		return nil, serr
 	}
-	// Re-check just before the rename so --overwrite=false does not clobber a
-	// file that appeared while the transfer was running. This narrows the window
-	// but cannot close it: POSIX rename replaces unconditionally, so a file
-	// created between this check and the rename below is still replaced.
-	// --overwrite=false is therefore best-effort against a concurrent writer,
-	// which is the right trade for a CLI — the alternative (linkat/O_EXCL) would
-	// lose atomic replacement.
+	// Re-check just before publishing so --overwrite=false does not clobber a
+	// file that appeared while the transfer was running.
 	if err := assertWritableTarget(target, overwrite); err != nil {
 		cleanup()
 		return nil, err
 	}
-	// Publish. The mode is set explicitly rather than left to os.CreateTemp's
-	// 0600, so a download does not silently tighten a destination the caller had
-	// deliberately made readable: an existing target keeps its own mode, a fresh
-	// one gets 0600. (The binary --output path in internal/client uses 0644, which
-	// is why leaving this implicit made two downloads in one CLI disagree.)
-	if err := publishDownload(partPath, target, overwrite); err != nil {
+	if err := publishDownload(partPath, target, overwrite, partInfo); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -438,6 +435,28 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	}, nil
 }
 
+// sealPartFile finishes the partial file and returns its identity.
+//
+// Mode and identity are both taken through the descriptor, before it is closed.
+// fchmod cannot be redirected by a symlink the way a path-based chmod can, and the
+// recorded identity is what publishDownload compares the path against — so a part
+// file swapped between here and publication is detected rather than acted on.
+func sealPartFile(part *os.File, target string) (os.FileInfo, *output.ExitError) {
+	if err := applyDownloadMode(part, target); err != nil {
+		_ = part.Close() //nolint:errcheck // already returning the chmod error
+		return nil, err
+	}
+	info, statErr := part.Stat()
+	if statErr != nil {
+		_ = part.Close() //nolint:errcheck // already returning the stat error
+		return nil, output.ErrValidation(fmt.Sprintf("stat the partial file for %q: %v", target, statErr), "")
+	}
+	if err := part.Close(); err != nil {
+		return nil, output.ErrValidation(fmt.Sprintf("close the partial file for %q: %v", target, err), "")
+	}
+	return info, nil
+}
+
 // publishDownload moves the completed partial file onto target.
 //
 // Without --overwrite the publication is a hard link, which fails with EEXIST
@@ -448,9 +467,14 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 // filesystem without hard links falls back to rename, which is the previous
 // behaviour rather than a failure.
 //
-// The mode is applied before the file is visible under its final name.
-func publishDownload(partPath, target string, overwrite bool) *output.ExitError {
-	if err := applyDownloadMode(partPath, target); err != nil {
+// created is the part file as it was when the descriptor was still open. The path
+// is re-Lstat'd here and compared against it, because os.Link and os.Rename act on
+// whatever the name resolves to now: if something replaced the part file between
+// close and publication, this refuses instead of publishing a file the CLI never
+// wrote — the alternative being a success envelope whose path and sha256 describe
+// different files.
+func publishDownload(partPath, target string, overwrite bool, created os.FileInfo) *output.ExitError {
+	if err := assertPartFileUnchanged(partPath, created); err != nil {
 		return err
 	}
 	if !overwrite {
@@ -472,15 +496,40 @@ func publishDownload(partPath, target string, overwrite bool) *output.ExitError 
 	return nil
 }
 
+// assertPartFileUnchanged refuses to publish when the part path no longer names
+// the file the transfer wrote. Lstat, not Stat: a symlink planted at the path must
+// be seen as a symlink rather than followed to its target.
+func assertPartFileUnchanged(partPath string, created os.FileInfo) *output.ExitError {
+	if created == nil {
+		return output.ErrValidation("the partial file was not identified before publication", "")
+	}
+	now, err := os.Lstat(partPath)
+	if err != nil {
+		return output.ErrValidation(fmt.Sprintf("re-check the partial file: %v", err), "")
+	}
+	if !now.Mode().IsRegular() || !os.SameFile(now, created) {
+		return output.ErrWithHint("validation", "PARTIAL_FILE_REPLACED",
+			"the partial download file was replaced before it could be published",
+			"another process wrote to the destination directory mid-download; re-run, and prefer a directory only you can write")
+	}
+	return nil
+}
+
 // applyDownloadMode gives the partial file the mode its destination should end up
 // with: an existing target's own mode, so --overwrite does not narrow a file the
-// caller widened on purpose, and 0600 for a fresh one.
-func applyDownloadMode(partPath, target string) *output.ExitError {
+// caller widened on purpose, and 0600 for a fresh one. (The binary --output path
+// in internal/client uses 0644, which is why leaving this implicit made two
+// downloads in one CLI disagree.)
+//
+// The chmod goes through the open descriptor. A path-based os.Chmod is the one
+// operation in this sequence that follows a symlink, so doing it by path handed
+// back exactly the arbitrary-file write the random O_EXCL name exists to prevent.
+func applyDownloadMode(part *os.File, target string) *output.ExitError {
 	mode := os.FileMode(0o600)
 	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
 		mode = info.Mode().Perm()
 	}
-	if err := os.Chmod(partPath, mode); err != nil {
+	if err := part.Chmod(mode); err != nil {
 		return output.ErrValidation(fmt.Sprintf("set mode on the partial file for %q: %v", target, err), "")
 	}
 	return nil

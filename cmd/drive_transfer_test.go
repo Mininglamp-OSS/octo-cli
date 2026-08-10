@@ -697,7 +697,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err := publishDownload(part, target, false)
+		err := publishDownload(part, target, false, mustLstat(t, part))
 		if err == nil {
 			t.Fatal("publishing over an existing target without --overwrite must fail")
 		}
@@ -724,7 +724,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := publishDownload(part, target, true); err != nil {
+		if err := publishDownload(part, target, true, mustLstat(t, part)); err != nil {
 			t.Fatalf("publishing with --overwrite must succeed: %v", err)
 		}
 		got, rerr := os.ReadFile(target)
@@ -744,7 +744,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := publishDownload(part, target, false); err != nil {
+		if err := publishDownload(part, target, false, mustLstat(t, part)); err != nil {
 			t.Fatalf("publishing to a fresh target must succeed: %v", err)
 		}
 		got, rerr := os.ReadFile(target)
@@ -758,4 +758,319 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Error("the part file must not survive publication")
 		}
 	})
+}
+
+// Round-8 P1-4. os.Link, os.Rename and os.Remove do not follow symlinks;
+// os.Chmod is the one operation in the publish path that does. applyDownloadMode
+// chmod'd the part file *by path*, after the descriptor was closed, several
+// syscalls before publication — which handed back the arbitrary-file chmod the
+// random O_EXCL name was introduced to remove, and let --overwrite publish an
+// attacker's symlink while the envelope reported ok:true with a sha256 that does
+// not describe what is at that path.
+//
+// Preconditions are real but narrow: a different-uid writer on the destination
+// directory, and that directory not sticky. /tmp is sticky; a group-writable
+// shared, project or NFS directory is not. Same-uid is outside the trust model,
+// so the test drives the primitive rather than racing it.
+func TestPublishDownload_DoesNotChmodThroughASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.bin")
+	part := filepath.Join(dir, "out.bin.rand.part")
+
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The part file the CLI believes it created is replaced by a symlink to the
+	// victim — the swap a directory co-writer can make in the publish window.
+	if err := os.Symlink(victim, part); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := publishDownload(part, target, false, symlinkPartInfo(t, victim))
+	if err == nil {
+		t.Error("publishing a part path that is no longer the file we created must fail closed")
+	}
+
+	info, statErr := os.Lstat(victim)
+	if statErr != nil {
+		t.Fatalf("lstat victim: %v", statErr)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("the victim's mode changed to %#o: chmod followed the symlink", got)
+	}
+	if fi, lerr := os.Lstat(target); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("the destination is a symlink: the attacker's link was published")
+	}
+}
+
+// TestPublishDownload_DoesNotPublishASwappedPartFile is the same swap under
+// --overwrite, where rename replaces unconditionally. The failure being pinned is
+// the false success: bytes lost, attacker's file at the destination, envelope
+// reporting ok.
+func TestPublishDownload_DoesNotPublishASwappedPartFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.bin")
+	part := filepath.Join(dir, "out.bin.rand.part")
+	if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("attacker-chosen"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, part); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if err := publishDownload(part, target, true, symlinkPartInfo(t, victim)); err == nil {
+		t.Error("publishing a swapped part path must fail rather than report success")
+	}
+	if fi, lerr := os.Lstat(target); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("the destination is a symlink: the attacker's link was published under --overwrite")
+	}
+	if info, serr := os.Lstat(victim); serr == nil && info.Mode().Perm() != 0o600 {
+		t.Errorf("the victim's mode changed to %#o", info.Mode().Perm())
+	}
+}
+
+// TestPublishDownload_HappyPathsStillWork bounds the new check: an untouched part
+// file must still publish, with the mode rules from round 4 intact.
+func TestPublishDownload_HappyPathsStillWork(t *testing.T) {
+	t.Run("fresh destination", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.bin")
+		part, info := mustCreatePartFor(t, dir, "payload", target)
+		if err := publishDownload(part, target, false, info); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+		assertFileContents(t, target, "payload")
+		assertMode(t, target, 0o600)
+	})
+
+	t.Run("overwrite keeps the existing mode", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.bin")
+		if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(target, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		part, info := mustCreatePartFor(t, dir, "new", target)
+		if err := publishDownload(part, target, true, info); err != nil {
+			t.Fatalf("publish: %v", err)
+		}
+		assertFileContents(t, target, "new")
+		assertMode(t, target, 0o644)
+	})
+}
+
+// mustCreatePartFor mirrors fetchToFile's publication prelude in order: create
+// O_EXCL, write, set the mode through the descriptor, record identity, close. The
+// order is the point — applyDownloadMode operates on the open file, so a test that
+// creates the part and calls publishDownload directly would skip it and assert a
+// mode nothing had set.
+//
+// target may be empty to skip the mode step.
+func mustCreatePartFor(t *testing.T, dir, contents, target string) (partPath string, created os.FileInfo) {
+	t.Helper()
+	f, err := os.CreateTemp(dir, "out.bin.*.part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, werr := f.WriteString(contents); werr != nil {
+		t.Fatal(werr)
+	}
+	if target != "" {
+		if merr := applyDownloadMode(f, target); merr != nil {
+			t.Fatalf("applyDownloadMode: %v", merr)
+		}
+	}
+	info, serr := f.Stat()
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if cerr := f.Close(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	return f.Name(), info
+}
+
+func assertFileContents(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+	if string(got) != want {
+		t.Errorf("contents of %q: got %q, want %q", path, got, want)
+	}
+}
+
+// mustLstat records a part file's identity the way fetchToFile does through its
+// open descriptor.
+func mustLstat(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("lstat %q: %v", path, err)
+	}
+	return info
+}
+
+// symlinkPartInfo stands in for the identity fetchToFile would have recorded: the
+// regular file it created, which is NOT the symlink now sitting at the path. The
+// victim is used only as a convenient regular file with a different identity.
+func symlinkPartInfo(t *testing.T, other string) os.FileInfo {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "created.*.part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, serr := f.Stat()
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	_ = f.Close()
+	return info
+}
+
+// TestIsLoopbackHost_UnspecifiedAddressesCountAsLocal covers round-8 P2-1.
+// net.IP.IsLoopback() is false for 0.0.0.0 and [::], but connect() to either
+// reaches the local machine — so a redirect onto one was followed under a remote
+// origin, and a dev object store advertising http://0.0.0.0:9000 was refused under
+// a local one.
+func TestIsLoopbackHost_UnspecifiedAddressesCountAsLocal(t *testing.T) {
+	for _, host := range []string{"0.0.0.0", "::", "0:0:0:0:0:0:0:0"} {
+		if !isLoopbackHost(host) {
+			t.Errorf("isLoopbackHost(%q) = false; connect() to it reaches the local machine", host)
+		}
+	}
+	// Still not local: a routable address must not be swept in.
+	for _, host := range []string{"0.0.0.1", "203.0.113.9", "storage.example.com"} {
+		if isLoopbackHost(host) {
+			t.Errorf("isLoopbackHost(%q) = true, want false", host)
+		}
+	}
+}
+
+// TestDriveUpload_CancelsWhenThePrepareReplyFailsToDecode covers round-8 P2-2.
+// The pending row exists as soon as prepare returns 2xx. encoding/json saves type
+// errors and keeps decoding, so file_id can be readable on exactly the path that
+// used to return a decode error with no cancel attempted — orphaning the row the
+// command's help text promises not to leave.
+func TestDriveUpload_CancelsWhenThePrepareReplyFailsToDecode(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(src, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var cancelled bool
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			// file_id is readable; max_file_size is the wrong type, so the decode
+			// fails after the row already exists.
+			_, _ = w.Write([]byte(`{"file_id":42,"upload_url":"https://storage.example.com/obj","max_file_size":"big"}`))
+		case strings.HasSuffix(r.URL.Path, "/cancel-upload"):
+			cancelled = true
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}, nil)
+
+	err := env.run("drive", "upload", "file", src, "--space-id", "s1")
+	if err == nil {
+		t.Fatal("a malformed prepare reply must fail")
+	}
+	if !cancelled {
+		t.Error("the pending row was orphaned: cancel-upload was never attempted despite a readable file_id")
+	}
+}
+
+// TestDriveShareAccess_DocLinkMarksItsDryRun covers round-8 P2-3. The document
+// branch resolves locally and returned a plain success envelope, so a scripted
+// caller could not tell a dry run from a live one by inspecting the output.
+func TestDriveShareAccess_DocLinkMarksItsDryRun(t *testing.T) {
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a document link must not reach the API")
+	}, nil)
+	env.tf.Globals.DryRun = true
+
+	if err := env.run("drive", "share", "access", env.api.URL+"/d/doc-1?sp=space-1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	data := env.data(t)
+	if data["dry_run"] != true {
+		t.Errorf("the document branch emitted no dry_run marker: %v", data)
+	}
+	if data["doc_id"] != "doc-1" {
+		t.Errorf("the dry run should still report the resolved target: %v", data)
+	}
+}
+
+// TestApplyDownloadMode_ChmodsTheDescriptorNotThePath isolates the fchmod half of
+// P1-4 from the identity check that follows it.
+//
+// This exists because the first version of the P1-4 tests did not distinguish the
+// two fixes: publishDownload's os.SameFile check refuses a swapped part file
+// before any chmod happens, so switching applyDownloadMode back to a path-based
+// os.Chmod left them green. Both changes are load-bearing — the identity check is
+// what turns a swap into an error, and fchmod is what makes the chmod itself
+// unaddressable — so each needs its own failing test.
+//
+// Here the descriptor is held open while a symlink replaces its path, which is
+// what a directory co-writer can do. fchmod acts on the file the descriptor
+// names; os.Chmod(part.Name()) would follow the symlink and re-mode the victim.
+func TestApplyDownloadMode_ChmodsTheDescriptorNotThePath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "out.bin")
+	// An existing 0644 destination, so applyDownloadMode picks a mode that differs
+	// from the victim's — otherwise a path-based chmod would be a no-op and the
+	// test could not tell the two implementations apart.
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(target, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("private"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	part, err := os.CreateTemp(dir, "out.bin.*.part")
+	if err != nil {
+		t.Fatal(err)
+	}
+	partPath := part.Name()
+	t.Cleanup(func() { _ = part.Close() })
+
+	// Swap the path out from under the open descriptor.
+	if rerr := os.Remove(partPath); rerr != nil {
+		t.Fatal(rerr)
+	}
+	if serr := os.Symlink(victim, partPath); serr != nil {
+		t.Skipf("symlinks unavailable: %v", serr)
+	}
+
+	if merr := applyDownloadMode(part, target); merr != nil {
+		t.Fatalf("applyDownloadMode: %v", merr)
+	}
+
+	info, serr := os.Lstat(victim)
+	if serr != nil {
+		t.Fatalf("lstat victim: %v", serr)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Errorf("the victim's mode became %#o: the chmod followed the symlink at the part path "+
+			"instead of acting on the descriptor", got)
+	}
 }

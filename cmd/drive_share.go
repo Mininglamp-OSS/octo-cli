@@ -483,8 +483,24 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 	}
 
 	// A document link carries its own target; there is nothing to ask the
-	// backend, and the link conveys no permission of its own.
+	// backend, and the link conveys no permission of its own. Under --dry-run it
+	// still has to say so: every other composite marks its dry run, and a scripted
+	// caller distinguishes the two by inspecting the envelope, not by remembering
+	// which flags it passed.
 	if parsed.kind == shareKindDoc {
+		if f.Globals != nil && f.Globals.DryRun {
+			return emitJSON(f, map[string]any{
+				"dry_run":      true,
+				"operation":    "drive.share.access",
+				"kind":         shareKindDoc,
+				"share_url":    parsed.canonical,
+				"doc_id":       parsed.docID,
+				"doc_space_id": parsed.docSpaceID,
+				"downloadable": false,
+				"permission":   docPermission,
+				"note":         "a document link resolves locally; no request is made even without --dry-run",
+			})
+		}
 		return emitJSON(f, shareTarget{
 			Kind:         shareKindDoc,
 			ShareURL:     parsed.canonical,
