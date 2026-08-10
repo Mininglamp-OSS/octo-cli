@@ -111,6 +111,110 @@ func TestMarketplaceSkillSearchRequest(t *testing.T) {
 	}
 }
 
+// TestMarketplaceExpertListRequest pins the query-flag wiring for the new
+// offset-paginated expert list AND the envelope flattening the skill docs rely
+// on: a backend {data:[...],pagination:{...}} response surfaces items at CLI
+// .data (already an array) and pagination at ._pagination.
+func TestMarketplaceExpertListRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"expert_id":"e1"}],"pagination":{"total":1,"page":2,"page_size":20}}`))
+	})
+
+	root.SetArgs([]string{
+		"marketplace", "expert", "list",
+		"--keyword", "架构", "--category", "dev-tools", "--tag", "可靠性",
+		"--visibility", "public", "--created-by-type", "human",
+		"--sort", "updated", "--page", "2", "--page-size", "20",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts" {
+		t.Errorf("got %s %s, want GET /market/api/v1/experts", gotMethod, gotPath)
+	}
+	for _, want := range []string{
+		"keyword=%E6%9E%B6%E6%9E%84", "category=dev-tools", "tag=%E5%8F%AF%E9%9D%A0%E6%80%A7",
+		"visibility=public", "created_by_type=human", "sort=updated", "page=2", "page_size=20",
+	} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want %q", gotQuery, want)
+		}
+	}
+
+	// Envelope flattening: items at .data (array), pagination at ._pagination.
+	var env struct {
+		Data       []map[string]any `json:"data"`
+		Pagination map[string]any   `json:"_pagination"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if len(env.Data) != 1 || env.Data[0]["expert_id"] != "e1" {
+		t.Errorf(".data must be the item array, got %s", tf.Out.String())
+	}
+	if env.Pagination["total"] == nil {
+		t.Errorf("._pagination must carry backend pagination, got %s", tf.Out.String())
+	}
+}
+
+// TestMarketplaceExpertCreateRequest pins the create path/method and that the
+// --data JSON body is forwarded verbatim.
+func TestMarketplaceExpertCreateRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"expert_id":"e1"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x"}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/experts" {
+		t.Errorf("got %s %s, want POST /market/api/v1/experts", gotMethod, gotPath)
+	}
+	if gotBody["name"] != "后端架构师" || gotBody["summary"] != "x" {
+		t.Errorf("body = %#v", gotBody)
+	}
+}
+
+// TestMarketplaceExpertSkillUploadRequest pins the presign endpoint and that
+// its promoted --file-name / --file-size flags reach the body.
+func TestMarketplaceExpertSkillUploadRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"upload_object_key":"expert-uploads/x"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert-skill-upload", "create", "--file-name", "skill.zip", "--file-size", "12345"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/expert_skill_uploads" {
+		t.Errorf("got %s %s, want POST /market/api/v1/expert_skill_uploads", gotMethod, gotPath)
+	}
+	if gotBody["file_name"] != "skill.zip" {
+		t.Errorf("file_name = %#v", gotBody["file_name"])
+	}
+	if n, ok := gotBody["file_size"].(float64); !ok || int(n) != 12345 {
+		t.Errorf("file_size = %#v, want 12345", gotBody["file_size"])
+	}
+}
+
 func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
 	var gotQuery map[string][]string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {

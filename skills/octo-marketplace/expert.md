@@ -10,19 +10,26 @@ the id argument name (`<expert-id>` / `<squad-id>`) differ.
 
 Unlike `skill list` / `mcp list`, the expert lists page by number, so
 `--page-all` does **not** apply. Walk pages with `--page` (one-based) and
-`--page-size` (max 100); the envelope carries `pagination.total`:
+`--page-size` (max 100):
 
 ```bash
 octo-cli marketplace expert list --page 1 --page-size 20
 ```
 
-Read items from the normalized payload — the list envelope is
-`{data:[...], pagination:{total,page,page_size}}`, so items are at
-`.data.data` (or `.data` if the CLI unwraps the backend envelope):
+The backend returns `{data:[...], pagination:{total,page,page_size}}`, and the
+CLI output layer flattens that shape onto the envelope: list **items are at
+`.data`** (already an array) and pagination metadata is at `._pagination`. Do
+NOT apply the `.data.data // .data` normalization here — `.data` is the array,
+so indexing it errors.
 
 ```bash
-items=$(octo-cli marketplace expert list --keyword "架构" | jq -c '.data.data // .data')
+items=$(octo-cli marketplace expert list --keyword "架构" | jq -c '.data')
+total=$(octo-cli marketplace expert list --keyword "架构" | jq '._pagination.total')
 ```
+
+Single-record and non-paginated reads (`expert get`, `expert-category list`,
+`expert-tag list`) return no `pagination` key, so they are NOT flattened —
+apply the shared `.data.data // .data` rule from `SKILL.md` to those instead.
 
 ## Search
 

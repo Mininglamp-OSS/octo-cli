@@ -32,9 +32,12 @@ fields because CLI versions may either unwrap the backend envelope or retain it:
 payload=$(octo-cli marketplace ... | jq -c '.data.data // .data')
 ```
 
-Do not apply that expression to paginated search commands: `skill list` and
-`mcp list` expose their result array directly as CLI `.data` and pagination as
-`._pagination`.
+Do not apply that expression to any command whose backend response is
+`{data:[...], pagination:{...}}` — the CLI output layer flattens that shape,
+exposing the result array directly as CLI `.data` and pagination as
+`._pagination`. This covers the paginated `skill list` / `mcp list` search
+commands **and** the offset-paginated `expert list` / `squad list` (and their
+`mine` variants), regardless of whether the command supports `--page-all`.
 
 ## Shared safety rule
 

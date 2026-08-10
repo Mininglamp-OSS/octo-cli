@@ -122,6 +122,11 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 		"marketplace squad skill-download <squad-id> --member",
 		"upload_object_key",
 		"--page-all` does **not** apply", // offset pagination, distinct from skill/mcp
+		// List responses are flattened by the output layer: items at .data,
+		// pagination at ._pagination. The docs must NOT tell readers to use
+		// `.data.data // .data` on a list (that indexes an array and errors).
+		"items are at\n`.data`",
+		"NOT apply the `.data.data // .data` normalization here",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("expert workflow must document %q", want)
