@@ -348,11 +348,17 @@ func TestPublishDownload_PinsThePublicationIdentityCheck(t *testing.T) {
 		// whatever the name resolves to now, so without the post-publication
 		// comparison the destination holds a file the CLI never wrote while the
 		// success envelope describes the one it did.
-		if rmErr := os.Remove(partPath); rmErr != nil {
-			t.Fatal(rmErr)
-		}
-		if wErr := os.WriteFile(partPath, []byte("substituted"), 0o600); wErr != nil {
+		//
+		// The substitute is renamed in from elsewhere rather than written at the
+		// same path, so it is a genuinely different inode on every filesystem.
+		// remove-then-create is not portable here: Linux hands the freed inode
+		// straight back, which made this case depend on the platform.
+		substitute := filepath.Join(dir, "substitute")
+		if wErr := os.WriteFile(substitute, []byte("substituted"), 0o600); wErr != nil {
 			t.Fatal(wErr)
+		}
+		if rErr := os.Rename(substitute, partPath); rErr != nil {
+			t.Fatal(rErr)
 		}
 	})
 
@@ -460,5 +466,43 @@ func TestTransferDial_KeepsTheIPv6Zone(t *testing.T) {
 	if !strings.Contains(dialled[0], "%eth0") {
 		t.Errorf("dialled %q, which has lost the zone — a scoped address without its "+
 			"interface identifier names a different (undiallable) destination", dialled[0])
+	}
+}
+
+// TestAssertPublishedFileMatches_RejectsAnInPlaceRewrite is the case CI found and
+// macOS hid. os.SameFile compares device and inode, and a filesystem may hand a
+// freed inode straight to the next file created in that directory — Linux does — so
+// a replacement can be byte-for-byte a different file while SameFile calls it
+// identical. Rewriting in place is the same condition made deterministic: the inode
+// is unchanged by construction, so only the size and mtime comparison can refuse it.
+//
+// Without that comparison this test passes on every platform and the check means
+// nothing on the one CI runs.
+func TestAssertPublishedFileMatches_RejectsAnInPlaceRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "obj")
+	if err := os.WriteFile(path, []byte("the bytes we wrote"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created, err := os.Lstat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same path, same inode, different contents and length.
+	if werr := os.WriteFile(path, []byte("different bytes entirely, and longer"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	if now, serr := os.Lstat(path); serr != nil {
+		t.Fatal(serr)
+	} else if !os.SameFile(now, created) {
+		t.Skip("this filesystem changed the identity on an in-place rewrite, so the condition under test does not arise here")
+	}
+
+	if ee := assertPublishedFileMatches(path, created); ee == nil {
+		t.Error("the file at the destination is not the one that was written, and os.SameFile cannot tell — " +
+			"size and modification time are what distinguish them")
+	} else if ee.Code != "PARTIAL_FILE_REPLACED" {
+		t.Errorf("code = %q, want PARTIAL_FILE_REPLACED", ee.Code)
 	}
 }

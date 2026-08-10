@@ -828,6 +828,29 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 // removes the harm that mattered — a caller reading back "its" file and getting
 // someone else's, under an envelope carrying a path and sha256 that describe
 // different bytes.
+// sameDownloadedFile decides whether now is still the file described by created.
+//
+// os.SameFile alone is not enough, and CI on Linux is what proved it: it compares
+// device and inode, and a filesystem is free to hand the inode of a just-deleted file
+// straight back to the next file created in that directory. ext4 and tmpfs do exactly
+// that, so remove-then-create at the same path produced a *different* file that
+// SameFile called identical — precisely the substitution these two checks exist to
+// refuse. macOS did not reuse the inode, which is why it went unnoticed until the
+// change ran on another platform.
+//
+// Size and modification time close that gap. Both come from the fstat taken while the
+// CLI still held the descriptor, so they describe the bytes it wrote, and a
+// replacement has to match all three to pass. That is not a cryptographic identity —
+// a local process able to set an exact mtime and size could still forge it — and it is
+// not meant to be: the guarantee for the no-overwrite path is the atomic os.Link
+// below, and this is defence in depth for the window around it.
+func sameDownloadedFile(now, created os.FileInfo) bool {
+	return now.Mode().IsRegular() &&
+		os.SameFile(now, created) &&
+		now.Size() == created.Size() &&
+		now.ModTime().Equal(created.ModTime())
+}
+
 func assertPublishedFileMatches(target string, created os.FileInfo) *output.ExitError {
 	if created == nil {
 		return output.ErrValidation("the published file was not identified before publication", "")
@@ -836,7 +859,7 @@ func assertPublishedFileMatches(target string, created os.FileInfo) *output.Exit
 	if err != nil {
 		return output.ErrValidation(fmt.Sprintf("verify the published file: %v", err), "")
 	}
-	if !now.Mode().IsRegular() || !os.SameFile(now, created) {
+	if !sameDownloadedFile(now, created) {
 		return output.ErrWithHint("validation", "PARTIAL_FILE_REPLACED",
 			"the destination does not hold the file this download wrote",
 			"another process wrote to the destination directory mid-download; re-run, and prefer a directory only you can write")
@@ -855,7 +878,7 @@ func assertPartFileUnchanged(partPath string, created os.FileInfo) *output.ExitE
 	if err != nil {
 		return output.ErrValidation(fmt.Sprintf("re-check the partial file: %v", err), "")
 	}
-	if !now.Mode().IsRegular() || !os.SameFile(now, created) {
+	if !sameDownloadedFile(now, created) {
 		return output.ErrWithHint("validation", "PARTIAL_FILE_REPLACED",
 			"the partial download file was replaced before it could be published",
 			"another process wrote to the destination directory mid-download; re-run, and prefer a directory only you can write")
