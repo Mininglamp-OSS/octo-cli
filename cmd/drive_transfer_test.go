@@ -470,8 +470,8 @@ func TestIsLoopbackHost_SpellingVariants(t *testing.T) {
 		}
 	}
 	remote := []string{
-		"storage.example.com", "STORAGE.EXAMPLE.COM", "192.168.0.9", "10.0.0.1",
-		"8.8.8.8", "localhostx", "notlocalhost", "",
+		"storage.example.com", "STORAGE.EXAMPLE.COM", "192.168.0.9", "172.16.0.1",
+		"203.0.113.9", "localhostx", "notlocalhost", "",
 	}
 	for _, host := range remote {
 		if isLoopbackHost(host) {
