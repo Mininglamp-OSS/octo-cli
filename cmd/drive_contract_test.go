@@ -668,7 +668,7 @@ func assertNoSignature(t *testing.T, err error, streams, signature string) {
 func assertBodyCarriesPassword(t *testing.T, gotBody, password string) {
 	t.Helper()
 	var decoded map[string]any
-	if err := decodeLossless([]byte(gotBody), &decoded); err != nil {
+	if err := decodeDriveResponse([]byte(gotBody), &decoded); err != nil {
 		t.Fatalf("parse share body %q: %v", gotBody, err)
 	}
 	if decoded["password"] != password {

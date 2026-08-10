@@ -253,7 +253,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 		return failErr(f, err)
 	}
 	var entry driveEntryResponse
-	if derr := decodeLossless(raw, &entry); derr != nil {
+	if derr := decodeDriveResponse(raw, &entry); derr != nil {
 		return failErr(f, derr)
 	}
 
@@ -417,7 +417,7 @@ func createBlobShare(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client,
 		return nil, err
 	}
 	var share shareResponse
-	if derr := decodeLossless(raw, &share); derr != nil {
+	if derr := decodeDriveResponse(raw, &share); derr != nil {
 		return nil, derr
 	}
 	if share.ID == "" {
@@ -524,7 +524,7 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 		return failErr(f, err)
 	}
 	var access shareAccessResponse
-	if derr := decodeLossless(raw, &access); derr != nil {
+	if derr := decodeDriveResponse(raw, &access); derr != nil {
 		return failErr(f, derr)
 	}
 	return emitJSON(f, shareTarget{
@@ -618,7 +618,7 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 		return failErr(f, err)
 	}
 	var signed downloadURLResponse
-	if derr := decodeLossless(raw, &signed); derr != nil {
+	if derr := decodeDriveResponse(raw, &signed); derr != nil {
 		return failErr(f, derr)
 	}
 	if signed.URL == "" {

@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -293,9 +295,15 @@ func TestDriveUpload_MethodChangingRedirectFailsAndCancels(t *testing.T) {
 }
 
 // TestDriveTransfer_RedirectToLoopbackRefusedUnderARemoteOrigin covers the
-// https half of the same steering concern. The initial presigned URL comes from
-// the trusted backend and may legitimately name an internal host, but a hop the
-// storage host chooses may not point at the caller's own machine.
+// end-to-end path: a storage host that redirects at the caller's own machine gets
+// nothing written.
+//
+// Its redirect target is a plain-http httptest server, so the pre-existing
+// https-or-loopback-http rule already refuses it — the loopback-hop rule added for
+// the https case is covered by TestTransferClient_LoopbackHopSpellingsAreAllRefused
+// and the table in TestTransferClient_CheckRedirectPolicy, which drive the policy
+// directly because an https loopback hop would need a TLS server whose certificate
+// the transfer client rejects first.
 //
 // Deliberately not a private-range block: a self-hosted deployment can reasonably
 // run object storage on an internal https host, and refusing those would break it.
@@ -437,6 +445,317 @@ func TestTransferClient_CheckRedirectPolicy(t *testing.T) {
 		_ = policy(next, []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")})
 		if got := next.Header.Get("Referer"); got != "" {
 			t.Errorf("Referer survived the policy: %q", got)
+		}
+	})
+}
+
+// Round-4 review: the loopback rules were spelling-sensitive, and the two
+// download paths in this CLI disagreed about the mode of the file they publish.
+
+// TestIsLoopbackHost_SpellingVariants pins the normalisation. url.Parse does not
+// lower-case a host and does not strip the root dot, while a resolver treats all
+// of these alike — so before this, a hop onto "LOCALHOST" was followed under a
+// remote origin, and a developer whose configured origin read "LOCALHOST" was
+// refused plain-http object storage. The same helper gates both directions, so a
+// missed spelling was simultaneously too permissive and too strict.
+func TestIsLoopbackHost_SpellingVariants(t *testing.T) {
+	loopback := []string{
+		"localhost", "LOCALHOST", "LocalHost", "localhost.", "LOCALHOST.",
+		"127.0.0.1", "127.1.2.3", "::1", "0:0:0:0:0:0:0:1",
+		"api.localhost", "API.LOCALHOST.",
+	}
+	for _, host := range loopback {
+		if !isLoopbackHost(host) {
+			t.Errorf("isLoopbackHost(%q) = false, want true", host)
+		}
+	}
+	remote := []string{
+		"storage.example.com", "STORAGE.EXAMPLE.COM", "192.168.0.9", "10.0.0.1",
+		"8.8.8.8", "localhostx", "notlocalhost", "",
+	}
+	for _, host := range remote {
+		if isLoopbackHost(host) {
+			t.Errorf("isLoopbackHost(%q) = true, want false", host)
+		}
+	}
+}
+
+// TestAssertNumericHostIsAnIP covers the spelling net.ParseIP refuses but a
+// resolver accepts. A zero-padded dotted quad would otherwise be treated as a
+// name and slip past whichever loopback rule was being applied; resolving it here
+// would put a DNS lookup on a validation path, so it is refused as malformed.
+func TestAssertNumericHostIsAnIP(t *testing.T) {
+	refused := []string{
+		"http://127.000.000.001/obj",
+		"http://127.0.0.01/obj",
+		"https://1.2.3.4.5/obj",
+		"https://999.999.999.999/obj",
+		"https://0177.0.0.1/obj",
+	}
+	for _, raw := range refused {
+		u, perr := url.Parse(raw)
+		if perr != nil {
+			t.Fatalf("parse %q: %v", raw, perr)
+		}
+		if err := assertNumericHostIsAnIP("url", u); err == nil {
+			t.Errorf("%q: a numeric host that is not a valid IP must be refused", raw)
+		}
+	}
+	allowed := []string{
+		"https://127.0.0.1/obj", "https://192.168.0.9/obj", "https://storage.example.com/obj",
+		"https://s3.eu-west-1.amazonaws.com/obj", "https://[::1]:9000/obj", "https://host2.example/obj",
+	}
+	for _, raw := range allowed {
+		u, perr := url.Parse(raw)
+		if perr != nil {
+			t.Fatalf("parse %q: %v", raw, perr)
+		}
+		if err := assertNumericHostIsAnIP("url", u); err != nil {
+			t.Errorf("%q: must be allowed, got %v", raw, err)
+		}
+	}
+}
+
+// TestTransferClient_LoopbackHopSpellingsAreAllRefused is the policy-level
+// consequence: every spelling of the local machine is refused as a redirect target
+// under a remote origin, not just the three the first version happened to catch.
+func TestTransferClient_LoopbackHopSpellingsAreAllRefused(t *testing.T) {
+	policy := transferClient("url", false).CheckRedirect
+	previous, err := http.NewRequest(http.MethodGet, "https://storage.example.com/obj", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{
+		"https://127.0.0.1:9443/x", "https://localhost:9443/x", "https://[::1]:9443/x",
+		"https://LOCALHOST:9443/x", "https://LocalHost:9443/x", "https://localhost.:9443/x",
+		"https://127.000.000.001:9443/x",
+	} {
+		next, nerr := http.NewRequest(http.MethodGet, target, http.NoBody)
+		if nerr != nil {
+			t.Fatalf("build %q: %v", target, nerr)
+		}
+		if perr := policy(next, []*http.Request{previous}); perr == nil {
+			t.Errorf("%s: a hop onto the local machine must be refused under a remote origin", target)
+		}
+	}
+}
+
+// TestDriveDownload_FileModeIsExplicit pins the publication mode. os.CreateTemp
+// makes a 0600 file and nothing chmod'd it, so a fresh download landed at 0600
+// while the binary --output path in internal/client produces 0644 — and
+// --overwrite silently tightened a destination the caller may have deliberately
+// made group-readable.
+func TestDriveDownload_FileModeIsExplicit(t *testing.T) {
+	t.Run("a fresh destination is private", func(t *testing.T) {
+		dest := filepath.Join(t.TempDir(), "out.bin")
+		runOneDownload(t, dest, false)
+		assertMode(t, dest, 0o600)
+	})
+
+	t.Run("overwrite keeps the existing mode", func(t *testing.T) {
+		dest := filepath.Join(t.TempDir(), "out.bin")
+		if err := os.WriteFile(dest, []byte("old"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(dest, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runOneDownload(t, dest, true)
+		assertMode(t, dest, 0o644)
+	})
+}
+
+// TestDriveDownload_NoOverwritePublishesAtomically asserts --overwrite=false is a
+// guarantee rather than a narrowed window: the publication is a hard link, which
+// fails with EEXIST atomically, so a file that appears between the pre-check and
+// the publication is not clobbered.
+func TestDriveDownload_NoOverwritePublishesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "out.bin")
+	const existing = "must-survive"
+
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"url":"` + env.store.URL + `/obj"}`))
+	}, func(w http.ResponseWriter, r *http.Request) {
+		// Create the destination after the pre-check has already passed, which is
+		// the window a rename would have clobbered.
+		if err := os.WriteFile(dest, []byte(existing), 0o600); err != nil {
+			t.Errorf("plant: %v", err)
+		}
+		_, _ = w.Write([]byte("downloaded-bytes"))
+	})
+
+	err := env.run("drive", "download", "file", "1", "-o", dest)
+	if err == nil {
+		t.Fatal("a destination that appeared mid-transfer must not be replaced without --overwrite")
+	}
+	got, rerr := os.ReadFile(dest)
+	if rerr != nil {
+		t.Fatalf("read %q: %v", dest, rerr)
+	}
+	if string(got) != existing {
+		t.Errorf("destination contents: got %q, want the file that was already there (%q)", got, existing)
+	}
+	assertNoPartialFiles(t, dest)
+}
+
+func runOneDownload(t *testing.T, dest string, overwrite bool) {
+	t.Helper()
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"url":"` + env.store.URL + `/obj"}`))
+	}, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("downloaded-bytes"))
+	})
+	args := []string{"drive", "download", "file", "1", "-o", dest}
+	if overwrite {
+		args = append(args, "--overwrite")
+	}
+	if err := env.run(args...); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %q: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Errorf("mode of %q: got %#o, want %#o", path, got, want)
+	}
+}
+
+// TestDriveUpload_CancelSurvivesAnInterruptedContext asserts the best-effort
+// cleanup actually runs on its most common trigger.
+//
+// withCancel used to send cancel-upload on the command context, which is
+// cancelled by SIGINT/SIGTERM — so a caller interrupting an upload triggered the
+// cleanup and, by the same act, killed the channel the cleanup needed. The pending
+// row survived. The cleanup context is now detached from cancellation with its own
+// short bound.
+func TestDriveUpload_CancelSurvivesAnInterruptedContext(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(src, []byte("payload-bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cancelled as soon as the object PUT is under way, standing in for the signal
+	// a caller sends mid-upload.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	var cancelled bool
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			_, _ = w.Write([]byte(`{"file_id":7,"upload_url":"` + env.store.URL + `/obj"}`))
+		case strings.HasSuffix(r.URL.Path, "/cancel-upload"):
+			cancelled = true
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}, func(w http.ResponseWriter, r *http.Request) {
+		// Interrupt the run, then fail the transfer the way a cancelled request
+		// would.
+		cancel()
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	env.root.SetArgs([]string{"drive", "upload", "file", src, "--space-id", "s1"})
+	if err := env.root.ExecuteContext(ctx); err == nil {
+		t.Fatal("the interrupted upload must fail")
+	}
+	if !cancelled {
+		t.Error("cancel-upload must still reach the backend after the command context is cancelled")
+	}
+	if out := env.tf.ErrOut.String() + env.tf.Out.String(); strings.Contains(out, "cancel_failed") {
+		t.Errorf("the cleanup reported failure on a cancelled context: %s", out)
+	}
+}
+
+// TestPublishDownload_NoOverwriteIsAtomic drives the publication directly, which
+// is the only way to cover the primitive: from a command-level test the file can
+// only be planted before the pre-rename re-check, so that check catches it and the
+// publication is never reached. Here the target already exists when publish runs,
+// which is exactly the state the check-to-publish window leaves behind.
+func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
+	const existing = "must-survive"
+	const fresh = "downloaded"
+
+	t.Run("without overwrite an existing target is not replaced", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.bin")
+		part := filepath.Join(dir, "out.bin.tmp.part")
+		if err := os.WriteFile(target, []byte(existing), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(part, []byte(fresh), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		err := publishDownload(part, target, false)
+		if err == nil {
+			t.Fatal("publishing over an existing target without --overwrite must fail")
+		}
+		if err.Code != "FILE_EXISTS" {
+			t.Errorf("code: got %q, want FILE_EXISTS", err.Code)
+		}
+		got, rerr := os.ReadFile(target)
+		if rerr != nil {
+			t.Fatalf("read %q: %v", target, rerr)
+		}
+		if string(got) != existing {
+			t.Errorf("target contents: got %q, want %q — the existing file was replaced", got, existing)
+		}
+	})
+
+	t.Run("with overwrite the target is replaced", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.bin")
+		part := filepath.Join(dir, "out.bin.tmp.part")
+		if err := os.WriteFile(target, []byte(existing), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(part, []byte(fresh), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := publishDownload(part, target, true); err != nil {
+			t.Fatalf("publishing with --overwrite must succeed: %v", err)
+		}
+		got, rerr := os.ReadFile(target)
+		if rerr != nil {
+			t.Fatalf("read %q: %v", target, rerr)
+		}
+		if string(got) != fresh {
+			t.Errorf("target contents: got %q, want the downloaded bytes %q", got, fresh)
+		}
+	})
+
+	t.Run("a fresh target is published and the part file removed", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.bin")
+		part := filepath.Join(dir, "out.bin.tmp.part")
+		if err := os.WriteFile(part, []byte(fresh), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := publishDownload(part, target, false); err != nil {
+			t.Fatalf("publishing to a fresh target must succeed: %v", err)
+		}
+		got, rerr := os.ReadFile(target)
+		if rerr != nil {
+			t.Fatalf("read %q: %v", target, rerr)
+		}
+		if string(got) != fresh {
+			t.Errorf("target contents: got %q, want %q", got, fresh)
+		}
+		if _, serr := os.Stat(part); !os.IsNotExist(serr) {
+			t.Error("the part file must not survive publication")
 		}
 	})
 }

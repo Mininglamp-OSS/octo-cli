@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -221,6 +222,9 @@ func assertSafeTransferTarget(field string, u *url.URL, loopbackAPI bool) *outpu
 			fmt.Sprintf("%s must not embed credentials", field),
 			"the backend returned an unusable presigned URL; report it")
 	}
+	if err := assertNumericHostIsAnIP(field, u); err != nil {
+		return err
+	}
 	switch u.Scheme {
 	case "https":
 	case "http":
@@ -281,14 +285,47 @@ func unwrapTransferError(err error) error {
 	}
 }
 
+// isLoopbackHost reports whether host names the local machine.
+//
+// The host is lower-cased and a trailing root dot stripped first, because
+// url.Parse normalises neither while a resolver treats "LOCALHOST", "localhost."
+// and "localhost" alike. Both directions this helper gates were wrong without
+// that: a hop onto "LOCALHOST" was followed under a remote origin, and a
+// developer whose configured origin read "LOCALHOST" was refused plain-http
+// object storage.
+//
+// A numeric-looking host that net.ParseIP rejects is handled by
+// assertNumericHostIsAnIP rather than here, so no resolver lookup happens on a
+// validation path.
 func isLoopbackHost(host string) bool {
-	if host == "localhost" {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	// RFC 6761 reserves .localhost for the loopback interface.
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// assertNumericHostIsAnIP refuses a host made only of digits and dots that is
+// not a valid IP address. A zero-padded dotted quad such as 127.000.000.001 is
+// rejected by net.ParseIP but accepted by the resolver, so treating it as a name
+// would let it slip past the loopback rules above in whichever direction those
+// are being applied. No legitimate storage host is spelled that way, and
+// resolving it here would put a DNS lookup on a validation path.
+func assertNumericHostIsAnIP(field string, u *url.URL) *output.ExitError {
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "" || net.ParseIP(host) != nil {
+		return nil
+	}
+	if strings.TrimFunc(host, func(r rune) bool { return r == '.' || (r >= '0' && r <= '9') }) != "" {
+		return nil // contains something other than digits and dots: a real name
+	}
+	return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+		fmt.Sprintf("%s has a numeric host %q that is not a valid IP address", field, u.Hostname()),
+		"a zero-padded or malformed numeric host is refused rather than resolved; report it")
 }
 
 // --- local file writing ---
@@ -378,9 +415,14 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		cleanup()
 		return nil, err
 	}
-	if err := os.Rename(partPath, target); err != nil {
+	// Publish. The mode is set explicitly rather than left to os.CreateTemp's
+	// 0600, so a download does not silently tighten a destination the caller had
+	// deliberately made readable: an existing target keeps its own mode, a fresh
+	// one gets 0600. (The binary --output path in internal/client uses 0644, which
+	// is why leaving this implicit made two downloads in one CLI disagree.)
+	if err := publishDownload(partPath, target, overwrite); err != nil {
 		cleanup()
-		return nil, output.ErrValidation(fmt.Sprintf("finalise %q: %v", target, err), "")
+		return nil, err
 	}
 
 	filename := resp.Header.Get("X-Octo-Filename")
@@ -396,9 +438,60 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	}, nil
 }
 
+// publishDownload moves the completed partial file onto target.
+//
+// Without --overwrite the publication is a hard link, which fails with EEXIST
+// atomically and in the same directory — so "refuse an existing destination"
+// becomes an actual guarantee rather than a check-then-rename window a second
+// writer can slip through. With --overwrite, replacement is the point, so rename
+// is correct and unconditional replacement is what the caller asked for. A
+// filesystem without hard links falls back to rename, which is the previous
+// behaviour rather than a failure.
+//
+// The mode is applied before the file is visible under its final name.
+func publishDownload(partPath, target string, overwrite bool) *output.ExitError {
+	if err := applyDownloadMode(partPath, target); err != nil {
+		return err
+	}
+	if !overwrite {
+		switch err := os.Link(partPath, target); {
+		case err == nil:
+			_ = os.Remove(partPath) //nolint:errcheck // best-effort cleanup of the link source
+			return nil
+		case errors.Is(err, os.ErrExist):
+			return output.ErrWithHint("validation", "FILE_EXISTS",
+				fmt.Sprintf("%q already exists", target),
+				"pass --overwrite to replace it, or choose another path")
+		}
+		// Hard links unsupported (or cross-device): fall through to rename, which
+		// is what this did before and is still guarded by the re-check above.
+	}
+	if err := os.Rename(partPath, target); err != nil {
+		return output.ErrValidation(fmt.Sprintf("finalise %q: %v", target, err), "")
+	}
+	return nil
+}
+
+// applyDownloadMode gives the partial file the mode its destination should end up
+// with: an existing target's own mode, so --overwrite does not narrow a file the
+// caller widened on purpose, and 0600 for a fresh one.
+func applyDownloadMode(partPath, target string) *output.ExitError {
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
+		mode = info.Mode().Perm()
+	}
+	if err := os.Chmod(partPath, mode); err != nil {
+		return output.ErrValidation(fmt.Sprintf("set mode on the partial file for %q: %v", target, err), "")
+	}
+	return nil
+}
+
 // assertWritableTarget refuses an existing destination unless overwrite is set,
 // and refuses a destination that is not a regular file even with --overwrite
 // (renaming over a directory or a device would fail or do damage).
+//
+// The Lstat is deliberate: a symlink at the destination is refused even with
+// --overwrite, so a download never writes through one.
 func assertWritableTarget(target string, overwrite bool) *output.ExitError {
 	info, err := os.Lstat(target)
 	if os.IsNotExist(err) {
@@ -433,7 +526,7 @@ func progressf(f *cmdutil.Factory, format string, args ...any) {
 
 // decodeLossless unmarshals a backend body with UseNumber so uint64 ids keep
 // their exact decimal text on the way through the composite commands.
-func decodeLossless(raw []byte, into any) *output.ExitError {
+func decodeDriveResponse(raw []byte, into any) *output.ExitError {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(into); err != nil {

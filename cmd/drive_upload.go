@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -161,7 +163,7 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		return failErr(f, err)
 	}
 	var prepared prepareUploadResponse
-	if derr := decodeLossless(raw, &prepared); derr != nil {
+	if derr := decodeDriveResponse(raw, &prepared); derr != nil {
 		return failErr(f, derr)
 	}
 	fileID := prepared.FileID.String()
@@ -248,6 +250,11 @@ func putObject(cmd *cobra.Command, file *os.File, size int64, prepared *prepareU
 	return nil
 }
 
+// cancelUploadTimeout bounds the detached best-effort cancel-upload. Short on
+// purpose: the caller is already failing, and the cleanup must not add a long
+// wait to the exit path.
+const cancelUploadTimeout = 5 * time.Second
+
 // withCancel attaches a best-effort cancel-upload to a failure so the pending
 // row does not linger. The original error stays authoritative; the cancel
 // outcome is reported alongside it as detail, including when the cancel itself
@@ -257,8 +264,17 @@ func withCancel(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, moun
 	if ee == nil {
 		ee = output.ErrWithHint("internal", "UPLOAD_FAILED", cause.Error(), "")
 	}
+	// The command context is cancelled by SIGINT/SIGTERM, and a caller
+	// interrupting an upload is the most common way to get here — so sending the
+	// cleanup on that context would mean the failure that triggers the cleanup has
+	// already killed the channel the cleanup needs, leaving the pending row behind.
+	// Detached, with its own short bound so an unreachable backend cannot hang the
+	// process on the way out.
+	cancelCtx, stop := context.WithTimeout(context.WithoutCancel(cmd.Context()), cancelUploadTimeout)
+	defer stop()
+
 	cancelResult := "cancelled"
-	if _, err := cli.Do(cmd.Context(), &client.Request{
+	if _, err := cli.Do(cancelCtx, &client.Request{
 		Method:              http.MethodPost,
 		Path:                mount + "/files/" + fileID + "/cancel-upload",
 		SuppressSpaceHeader: true,

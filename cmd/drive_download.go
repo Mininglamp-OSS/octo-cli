@@ -97,7 +97,7 @@ func runDriveDownloadFile(cmd *cobra.Command, f *cmdutil.Factory, fileID, output
 		return failErr(f, err)
 	}
 	var signed downloadURLResponse
-	if derr := decodeLossless(raw, &signed); derr != nil {
+	if derr := decodeDriveResponse(raw, &signed); derr != nil {
 		return failErr(f, derr)
 	}
 	if signed.URL == "" {
