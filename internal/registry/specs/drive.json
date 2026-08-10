@@ -759,7 +759,7 @@
         "summary": "Revoke a share; access and download stop working immediately",
         "x-octo-risk": "high-risk-write",
         "parameters": [
-          { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-flag": "share-id", "description": "share_id from share create / share list. base64url ids may start with \"-\", which cobra would read as a flag: pass --share-id <id>, or put the value after a \"--\" separator" }
+          { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-flag": "share-id", "x-octo-secret": true, "description": "share_id from share create / share list. Marked x-octo-secret because the backend returns one opaque id that is both the management handle and the access token, so this value is credential-equivalent today; masking it costs only a masked id in output if a future rotation splits the two. base64url ids may start with \"-\", which cobra would read as a flag: pass --share-id <id>, or put the value after a \"--\" separator" }
         ],
         "responses": { "204": { "description": "Revoked" } }
       }
