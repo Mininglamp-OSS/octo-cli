@@ -110,6 +110,15 @@ func parseParamsJSON(spec string) (url.Values, error) {
 			"pass an object like '{\"status\":\"open\"}'",
 		)
 	}
+	// null decodes into a map without failing and leaves obj nil. Ranging a nil map is
+	// a no-op, so this used to mean "no query parameters" rather than being refused —
+	// the same unchecked-successful-decode as --data null, with a quieter symptom.
+	if obj == nil {
+		return nil, output.ErrValidation(
+			"--params is not a JSON object: null",
+			"pass an object like '{\"status\":\"open\"}', or omit --params",
+		)
+	}
 	q := url.Values{}
 	for k, v := range obj {
 		switch val := v.(type) {

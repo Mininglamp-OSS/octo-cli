@@ -469,6 +469,18 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 			if err := dec.Decode(&base); err != nil {
 				return nil, output.ErrValidation(fmt.Sprintf("--data is not a JSON object: %v", err), "expected a JSON object for this operation")
 			}
+			// JSON null is the one non-object shape that *decodes successfully* into a
+			// map: it leaves base nil rather than failing. Every other non-object shape
+			// (true, a number, a string, an array) fails in Decode above and was always
+			// a clean validation error, which is why this is a nil check on success and
+			// not another special case. Without it the promoted-flag merge below wrote
+			// into a nil map and panicked — a Go stack trace on caller input, in the one
+			// path whose purpose is to enforce the local contract — and `--data null`
+			// with no promoted flag silently behaved like an absent body.
+			if base == nil {
+				return nil, output.ErrValidation("--data is not a JSON object: null",
+					"expected a JSON object for this operation; omit --data to send no body")
+			}
 			// A Decoder stops after the first value where json.Unmarshal rejected
 			// trailing bytes, so trailing content is checked explicitly to keep
 			// --data exactly as strict as it was before UseNumber. The check is a
