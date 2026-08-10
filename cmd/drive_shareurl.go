@@ -156,17 +156,28 @@ func assertShareIDSegment(what, seg string) *output.ExitError {
 		return invalidShareURL(fmt.Sprintf("the %s must be an id, not the path segment %q", what, seg))
 	}
 	for i := 0; i < len(seg); i++ {
-		c := seg[i]
-		switch {
-		case c >= 'a' && c <= 'z':
-		case c >= 'A' && c <= 'Z':
-		case c >= '0' && c <= '9':
-		case c == '-' || c == '_' || c == '.' || c == ':':
-		default:
-			return invalidShareURL(fmt.Sprintf("the %s contains an unexpected character %q", what, string(c)))
+		if !isShareIDChar(seg[i]) {
+			return invalidShareURL(fmt.Sprintf("the %s contains an unexpected character %q", what, string(seg[i])))
 		}
 	}
 	return nil
+}
+
+// isShareIDChar reports whether c may appear in an Octo id segment: base64url
+// plus the two separators Octo ids use. A dot is included because ids contain
+// them; a segment that is *entirely* dots is refused by the caller.
+func isShareIDChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z':
+		return true
+	case c >= 'A' && c <= 'Z':
+		return true
+	case c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '_' || c == '.' || c == ':':
+		return true
+	}
+	return false
 }
 
 // webOrigin derives the Octo web origin from the configured API base URL. The

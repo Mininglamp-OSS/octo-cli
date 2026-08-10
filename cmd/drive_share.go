@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -150,16 +151,16 @@ var shareCreateFlagLabels = map[string]string{
 // the credential is resolved and gated for that operation.
 //
 // It returns the assembled body and the resolved mount.
-func prepareBlobShare(f *cmdutil.Factory, o shareCreateOpts, fileID uint64) (map[string]any, string, error) {
+func prepareBlobShare(f *cmdutil.Factory, o shareCreateOpts, fileID uint64) (body map[string]any, mount string, err error) {
 	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
 	if perr != nil {
 		return nil, "", perr
 	}
-	body := o.body(fileID, password)
+	body = o.body(fileID, password)
 	if verr := service.ValidateRequestBody(f, driveShareCreateOp, body, shareCreateFlagLabels); verr != nil {
 		return nil, "", verr
 	}
-	mount, err := service.MountForOperation(f, driveShareCreateOp)
+	mount, err = service.MountForOperation(f, driveShareCreateOp)
 	if err != nil {
 		return nil, "", err
 	}
@@ -257,34 +258,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 
 	switch entry.Type {
 	case shareKindDoc:
-		if entry.DocSpaceID == "" {
-			return failErr(f, output.ErrWithHint("validation", "MISSING_DOC_SPACE_ID",
-				"this document mount has no doc_space_id, so a correct document link cannot be built",
-				"re-mount the document with `octo-cli drive doc mount`; the drive space id is NOT a valid substitute"))
-		}
-		docID := entry.RefID
-		if docID == "" {
-			return failErr(f, output.ErrWithHint("internal", "RESPONSE_DECODE",
-				"the document mount returned no ref_id (doc id)", "report the backend response"))
-		}
-		// The doc id comes from the backend, and buildDocShareURL concatenates it
-		// into the path. Hold it to the same charset the consuming side enforces
-		// (assertShareIDSegment, used by `share access`) so this command cannot
-		// hand out a link its own parser would refuse — a `?`, `#`, space or slash
-		// in a ref_id would otherwise produce a structurally different URL.
-		if verr := assertShareIDSegment("document id", docID); verr != nil {
-			return failErr(f, verr)
-		}
-		return emitJSON(f, shareTarget{
-			Kind:         shareKindDoc,
-			ShareURL:     buildDocShareURL(origin, docID, entry.DocSpaceID),
-			Downloadable: false,
-			DriveFileID:  entry.ID.String(),
-			DocID:        docID,
-			DocSpaceID:   entry.DocSpaceID,
-			Filename:     entry.Name,
-			Permission:   docPermission,
-		})
+		return emitDocShareTarget(f, origin, &entry)
 
 	case shareKindBlob:
 		share, serr := createBlobShare(cmd, f, cli, shareMount, shareBody)
@@ -309,6 +283,41 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 			fmt.Sprintf("a node of type %q cannot be shared", entry.Type),
 			"share an individual file or a mounted document, not a folder"))
 	}
+}
+
+// emitDocShareTarget renders the document branch of `share create`. A document
+// link is an entrance, not a grant, so it carries no share token and no
+// permission of its own — but it must be built from the document's own Octo
+// Space and must be a link this CLI can parse back.
+func emitDocShareTarget(f *cmdutil.Factory, origin *url.URL, entry *driveEntryResponse) error {
+	if entry.DocSpaceID == "" {
+		return failErr(f, output.ErrWithHint("validation", "MISSING_DOC_SPACE_ID",
+			"this document mount has no doc_space_id, so a correct document link cannot be built",
+			"re-mount the document with `octo-cli drive doc mount`; the drive space id is NOT a valid substitute"))
+	}
+	docID := entry.RefID
+	if docID == "" {
+		return failErr(f, output.ErrWithHint("internal", "RESPONSE_DECODE",
+			"the document mount returned no ref_id (doc id)", "report the backend response"))
+	}
+	// The doc id comes from the backend, and buildDocShareURL concatenates it
+	// into the path. Hold it to the same charset the consuming side enforces
+	// (assertShareIDSegment, used by `share access`) so this command cannot hand
+	// out a link its own parser would refuse — a `?`, `#`, space or slash in a
+	// ref_id would otherwise produce a structurally different URL.
+	if verr := assertShareIDSegment("document id", docID); verr != nil {
+		return failErr(f, verr)
+	}
+	return emitJSON(f, shareTarget{
+		Kind:         shareKindDoc,
+		ShareURL:     buildDocShareURL(origin, docID, entry.DocSpaceID),
+		Downloadable: false,
+		DriveFileID:  entry.ID.String(),
+		DocID:        docID,
+		DocSpaceID:   entry.DocSpaceID,
+		Filename:     entry.Name,
+		Permission:   docPermission,
+	})
 }
 
 // --- drive share blob-create ---
@@ -560,26 +569,7 @@ Underlying operation: drive.share.download.`,
 }
 
 func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, outputPath string, o sharePasswordOpts, overwrite bool) error {
-	cfg, err := f.Config()
-	if err != nil {
-		return failErr(f, err)
-	}
-	parsed, perr := parseShareURL(cfg, shareURL)
-	if perr != nil {
-		return failErr(f, perr)
-	}
-	if parsed.kind == shareKindDoc {
-		return failErr(f, output.ErrWithHint("validation", "NOT_DOWNLOADABLE",
-			"an online document has no downloadable bytes",
-			"use `octo-cli drive share access` to resolve the target, or open the link in a browser"))
-	}
-	if outputPath == "" {
-		return failErr(f, output.ErrValidation("--output is required", "pass -o with a destination file path"))
-	}
-	if werr := assertWritableTarget(outputPath, overwrite); werr != nil {
-		return failErr(f, werr)
-	}
-	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
+	parsed, password, perr := prepareShareDownload(f, shareURL, outputPath, o, overwrite)
 	if perr != nil {
 		return failErr(f, perr)
 	}
@@ -639,6 +629,41 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 }
 
 // --- shared helpers ---
+
+// prepareShareDownload runs everything `share download` can decide without a
+// credential: the link is parsed and required to be a blob share, the
+// destination is checked, and the password is loaded. Each of these is a property
+// of the invocation itself, so reporting them precisely is more useful than
+// failing on the credential first.
+func prepareShareDownload(f *cmdutil.Factory, shareURL, outputPath string, o sharePasswordOpts, overwrite bool) (*parsedShareURL, string, *output.ExitError) {
+	cfg, err := f.Config()
+	if err != nil {
+		if ee := output.AsExitError(err); ee != nil {
+			return nil, "", ee
+		}
+		return nil, "", output.ErrValidation(err.Error(), "")
+	}
+	parsed, perr := parseShareURL(cfg, shareURL)
+	if perr != nil {
+		return nil, "", perr
+	}
+	if parsed.kind == shareKindDoc {
+		return nil, "", output.ErrWithHint("validation", "NOT_DOWNLOADABLE",
+			"an online document has no downloadable bytes",
+			"use `octo-cli drive share access` to resolve the target, or open the link in a browser")
+	}
+	if outputPath == "" {
+		return nil, "", output.ErrValidation("--output is required", "pass -o with a destination file path")
+	}
+	if werr := assertWritableTarget(outputPath, overwrite); werr != nil {
+		return nil, "", werr
+	}
+	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
+	if perr != nil {
+		return nil, "", perr
+	}
+	return parsed, password, nil
+}
 
 // sharePasswordOpts is the password surface of the two commands that consume a
 // share link. Both accept the value on argv (--password) or off it
