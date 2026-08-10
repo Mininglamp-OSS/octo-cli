@@ -12,9 +12,11 @@
 |-------------|------|-------------|
 | `app_*` | App Bot | DM only, no group/thread write, no voice; **cannot search** (CLI rejects locally) |
 | `bf_*` | User Bot | Full access (DM + group + thread + voice); can search (as bot, or as a person via `--on-behalf-of`) |
-| `uk_*` | User API key | Real-person identity, used mainly for `message search`; routed to `/v1/user/*`. `bot_kind` shows `user_key` |
+| `uk_*` | User API key | Real-person identity, used for `message search` and all of `drive`; routed to `/v1/user/*`. `bot_kind` shows `user_key` |
 
-> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with one exception: an `app_*` token running `message search` is rejected locally (`validation`) before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with two exceptions: an `app_*` token running `message search`, and a credential whose kind a domain's spec does not list in `x-octo-allowed-token-kinds` (`TOKEN_KIND_NOT_ALLOWED`). Both are local `validation` errors (exit 2) raised before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+
+> **Token source.** The token comes from a stored profile, else `OCTO_TOKEN`, else `OCTO_BOT_TOKEN`. `OCTO_TOKEN` is the preferred env slot and accepts any of the three kinds; `identity.source` in the success envelope names the variable actually used.
 
 ---
 
@@ -206,6 +208,137 @@ Notes:
 
 ---
 
+## Domain 8: drive (octo-drive, 45 commands)
+
+All three token kinds are accepted. The mount is chosen from the kind, so the
+command surface is identical either way: `uk_*` → `/v1/user/drive/*` (acts as the
+real person), `bf_*` / `app_*` → `/v1/bot/drive/*` (acts as the bot). Paths below
+are written with `{mount}` standing for whichever applies.
+
+A bot has no implicit access to a shared drive space — it must be added as a
+member exactly like a person, and gets `permission_denied` until it is. Drive
+never sends `X-Space-Id`; the tenant comes from the verified identity.
+
+`<file-id>` and `--parent-id` are backend **uint64** values. They are decimal
+strings on the CLI surface (validated in `[0, 2^64-1]`, sent as JSON integers,
+returned as decimal strings) so a value above 2^53 cannot be rounded by a
+JavaScript-style parser into a different file's id.
+
+| # | Command | Method | Path | Risk |
+|---|---------|--------|------|------|
+| 51 | `octo-cli drive space create` | POST | {mount}/spaces | write |
+| 52 | `octo-cli drive space list` | GET | {mount}/spaces | read |
+| 53 | `octo-cli drive space ensure-personal` | POST | {mount}/spaces/personal | write (idempotent) |
+| 54 | `octo-cli drive space get <space-id>` | GET | {mount}/spaces/:id | read |
+| 55 | `octo-cli drive space rename <space-id>` | PUT | {mount}/spaces/:id | write |
+| 56 | `octo-cli drive space delete <space-id>` | DELETE | {mount}/spaces/:id | high-risk-write |
+| 57 | `octo-cli drive member list <space-id>` | GET | {mount}/spaces/:id/members | read |
+| 58 | `octo-cli drive member add <space-id>` | POST | {mount}/spaces/:id/members | write |
+| 59 | `octo-cli drive member set-role <space-id> <uid>` | PUT | {mount}/spaces/:id/members/:uid | write |
+| 60 | `octo-cli drive member remove <space-id> <uid>` | DELETE | {mount}/spaces/:id/members/:uid | high-risk-write |
+| 61 | `octo-cli drive browse` | GET | {mount}/browse | read |
+| 62 | `octo-cli drive folder create` | POST | {mount}/folders | write |
+| 63 | `octo-cli drive folder list <space-id> <parent-id>` | GET | {mount}/folders/:space_id/:parent_id | read |
+| 64 | `octo-cli drive folder rename <folder-id>` | PATCH | {mount}/folders/:id/rename | write |
+| 65 | `octo-cli drive folder move <folder-id>` | PATCH | {mount}/folders/:id/move | write |
+| 66 | `octo-cli drive folder delete <folder-id>` | DELETE | {mount}/folders/:id | high-risk-write |
+| 67 | `octo-cli drive file get <file-id>` | GET | {mount}/files/:id | read |
+| 68 | `octo-cli drive file move <file-id>` | POST | {mount}/files/:id/move | write |
+| 69 | `octo-cli drive file copy <file-id>` | POST | {mount}/files/:id/copy | write |
+| 70 | `octo-cli drive file rename <file-id>` | POST | {mount}/files/:id/rename | write |
+| 71 | `octo-cli drive blob create` | POST | {mount}/blobs | write |
+| 72 | `octo-cli drive blob get <blob-id>` | GET | {mount}/blobs/:id | read |
+| 73 | `octo-cli drive blob list` | GET | {mount}/blobs | read |
+| 74 | `octo-cli drive blob delete <blob-id>` | DELETE | {mount}/blobs/:id | high-risk-write |
+| 75 | `octo-cli drive upload prepare` | POST | {mount}/files/prepare-upload | write |
+| 76 | `octo-cli drive upload confirm <file-id>` | POST | {mount}/files/:id/confirm-upload | write |
+| 77 | `octo-cli drive upload cancel <file-id>` | POST | {mount}/files/:id/cancel-upload | write (idempotent) |
+| 78 | `octo-cli drive upload file <local-path>` | — | composite: prepare → PUT → confirm | write |
+| 79 | `octo-cli drive download url <file-id>` | GET | {mount}/files/:id/download | read |
+| 80 | `octo-cli drive download file <file-id>` | — | composite: download-url → object GET | read + local write |
+| 81 | `octo-cli drive doc mount` | POST | {mount}/docs | write |
+| 82 | `octo-cli drive doc unmount <file-id>` | DELETE | {mount}/docs/:id | high-risk-write |
+| 83 | `octo-cli drive doc list` | GET | {mount}/docs | read |
+| 84 | `octo-cli drive doc candidates` | GET | {mount}/mountable-docs | read |
+| 85 | `octo-cli drive share create <file-id>` | — | composite: file get → blob token or doc link | write |
+| 86 | `octo-cli drive share blob-create <file-id>` | POST | {mount}/shares | write |
+| 87 | `octo-cli drive share list` | GET | {mount}/shares | read |
+| 88 | `octo-cli drive share revoke <share-id>` | DELETE | {mount}/shares/:id | high-risk-write |
+| 89 | `octo-cli drive share access <share-url>` | POST | {mount}/shares/:token/access | read |
+| 90 | `octo-cli drive share download <share-url>` | POST | {mount}/shares/:token/download | read + local write |
+| 91 | `octo-cli drive invite create <space-id>` | POST | {mount}/spaces/:id/invites | write |
+| 92 | `octo-cli drive invite list <space-id>` | GET | {mount}/spaces/:id/invites | read |
+| 93 | `octo-cli drive invite revoke <space-id> <invite-id>` | DELETE | {mount}/spaces/:id/invites/:invite_id | high-risk-write |
+| 94 | `octo-cli drive invite accept <invite-token>` | POST | {mount}/invites/:token/accept | write (idempotent) |
+| 95 | `octo-cli drive im-transfer create` | POST | {mount}/blobs/transfer-from-im | write (idempotent) |
+
+Flags:
+- space create / rename: --name
+- space list: --page-index, --page-size
+- member add: --uid, --role; member set-role: --role
+  (role ∈ preview_only | downloader | uploader_downloader | editor | admin | custom; `super_admin` is server-rejected — it is bound to the space creator at space creation. `custom` is accepted here but rejected by `invite create`; see the role matrix below)
+- browse: --space-id (required), --parent-id, --type (all|doc|blob|folder), --source (all|user-upload|im-transfer|user-mount|docs-sync), --page-index, --page-size
+- folder create: --space-id, --parent-id, --name; folder rename: --name; folder move: --parent-id
+- file move: --parent-id; file copy: --parent-id, --name; file rename: --name
+- blob create: --space-id, --parent-id, --name, --object-path, --size, --content-type, --source (user-mount is Type-1 only). The backend **verifies the object**: an `--object-path` storage does not hold is `invalid_argument`, and a `--size` that conflicts with the stored object is rejected (including `--size 0` for a non-empty object — 0 is a stated count, not an omission). An inconclusive probe (storage unreachable/timeout) surfaces as a 500, not `invalid_argument`. A row created this way carries no persisted download URL, so `share download` on it is `not_found` — use `upload file` for a shareable blob.
+- blob list: --space-id (required), --parent-id
+- upload prepare: --space-id, --parent-id, --name, --size, --content-type; upload confirm: --actual-size
+- upload file: --space-id (required), --parent-id, --name, --content-type
+- download file: --output/-o (required), --overwrite
+- doc mount: --space-id, --parent-id, --doc-id, --source (user-mount|docs-sync; no --doc-title: the title and doc_space_id are read server-side from the document metadata)
+- doc list: --space-id (required), --parent-id; doc candidates: --space-id (required), --page, --page-size
+- share create / blob-create: --permission (view|download), --expires-in-seconds, --password
+- share access: --password; share download: --output/-o (required), --password, --overwrite
+- invite create: --role (required, role ∈ preview_only | downloader | uploader_downloader | editor | admin — `custom` and `super_admin` are rejected), --expires-in-seconds
+- im-transfer create: --im-group-no (required), --im-channel-type (required, 1=DM|2=group|5=thread; picks the message-read route — 1 is the DM route, 2 and 5 share the group route — and is stored as the first segment of the row's source_key, which the already-transferred batch lookup matches on. Transfer idempotency is (target space, type=blob, object path), so a wrong value cannot duplicate a file), --im-msg-id (required), --target-space-id (required), --target-parent-id, --name-override
+
+Role grantability matrix (the enum is one shared schema; the accepted subset is not):
+
+| role | member add / set-role | invite create | notes |
+|---|---|---|---|
+| `preview_only` | ✅ | ✅ | rank 20 |
+| `downloader` | ✅ | ✅ | rank 30 |
+| `uploader_downloader` | ✅ | ✅ | rank 40 |
+| `editor` | ✅ | ✅ | rank 60 |
+| `admin` | ✅ super_admin only | ✅ super_admin only | rank 80; an admin cannot grant admin |
+| `custom` | ✅ | ❌ | rank 10 — lowest; carries no invite-link semantics |
+| `super_admin` | ❌ | ❌ | rank 100; bound to the creator at space creation |
+
+Notes:
+- **Share hand-over is the `share_url`, nothing else.** `share create` returns
+  `/drive/s/<token>` for a blob or `/d/<docId>?sp=<docSpaceId>` for a mounted
+  document; the receiver passes that link straight to `share access` /
+  `share download`. The token is never a caller-facing parameter.
+- `share access` / `share download` parse the link and refuse anything that is
+  not one of those two shapes on the configured Octo origin. The CLI never
+  fetches the link's host — it calls the configured API with the parsed token.
+  Both sides need a credential; there is no anonymous share.
+- `doc_space_id` (the document's own Octo Space) and `space_id` (the drive space)
+  are different scopes. When a mount predates drive capturing `doc_space_id`,
+  `share create` fails with `MISSING_DOC_SPACE_ID` rather than substituting.
+- The presigned PUT/GET runs on a separate HTTP client with **no** Octo
+  credential and no space header. A failed `upload file` cancels the pending row
+  and reports `file_id` + the cancel outcome in the error detail.
+- `download file` / `share download` write `<output>.part`, fsync, then rename;
+  an existing destination is refused unless `--overwrite` is passed.
+- `--password`, share tokens and invite tokens are marked `x-octo-secret`: they
+  go on the wire unchanged but are masked in `--verbose` and `--dry-run` output.
+- **base64url ids may start with `-`**, which cobra parses as a flag before the
+  command runs. The three affected path params (`share_id`, `invite_id`,
+  `invite_token`) declare `x-octo-flag`, so each also accepts a flag form —
+  `drive share revoke --share-id <id>`, `drive invite revoke <space> --invite-id
+  <id>`, `drive invite accept --invite-token <tok>`. The `--` separator still
+  works. Positional parsing is unchanged for every other operation: only a path
+  param that declares `x-octo-flag` relaxes its command's arity, and the flag is
+  optional. Supplying both forms for the same slot is a validation error rather
+  than a silent winner.
+- `browse` returns the full listing; its `page` object is an envelope, not a
+  database page, so `--page-all` is deliberately not offered yet.
+- There are no `drive org` commands: the product's member picker is a frontend
+  filter over the space roster, not a backend search.
+
+---
+
 ## Summary
 
 | Domain | Commands | App Bot (Y) | App Bot (N) | User Bot (Y) | User Bot (N) |
@@ -217,8 +350,17 @@ Notes:
 | file | 4 | 4 | 0 | 4 | 0 |
 | bot | 6 | 6 | 0 | 6 | 0 |
 | event | 2 | 2 | 0 | 2 | 0 |
-| **Total** | **56** | **38** | **18** | **56** | **0** |
+| drive | 45 | 45 (needs a resolvable space) | 0 | 45 | 0 |
+| **Total** | **101** | **83** | **18** | **101** | **0** |
 
-- **App Bot**: 38/56 commands available (68%)
-- **User Bot**: 56/56 commands available (100%)
+- **App Bot**: 83/101 commands available (82%)
+- **User Bot**: 101/101 commands available (100%)
 - **App Bot blocked**: group write (4) + thread all (8) + message search (6) = 18 commands
+- **drive** additionally accepts a `uk_*` user API key, which acts as the real
+  person rather than a bot. An `app_*` token reaches drive only if the server can
+  resolve a space for it; otherwise the mount returns 401 (exit 3) and a `bf_*`
+  or `uk_*` credential is required.
+
+> This reference predates the `docs`, `html`, `marketplace` and `summary`
+> domains and does not cover them. `octo-cli schema --list` is the authoritative,
+> always-current inventory.

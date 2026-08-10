@@ -1,0 +1,1149 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Drive API",
+    "version": "1.0.0",
+    "description": "Drive spaces, file tree, blob upload/download, online-document mounts, shares, invites and IM transfer. The same business surface is served under a bot mount and a user-API-key mount; the CLI picks one from the active credential's token kind (x-octo-mount-by-token-kind), so every command works unchanged as a bot (bf_/app_) or as a real person (uk_)."
+  },
+  "x-octo-service": "drive",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-space-header": false,
+  "x-octo-allowed-token-kinds": ["user_key", "user_bot", "app_bot"],
+  "x-octo-mount-by-token-kind": {
+    "user_key": "/v1/user/drive",
+    "user_bot": "/v1/bot/drive",
+    "app_bot": "/v1/bot/drive"
+  },
+  "paths": {
+    "/v1/bot/drive/spaces": {
+      "post": {
+        "operationId": "drive.space.create",
+        "summary": "Create a shared drive space in the caller's Octo Space",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "maxLength": 255, "description": "shared space display name (UTF-8, 255 bytes max)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Space" } } } }
+        }
+      },
+      "get": {
+        "operationId": "drive.space.list",
+        "summary": "List drive spaces the caller can access",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "page_index", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number; currently only shapes the response page envelope" },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 }, "description": "page size; the backend still returns the full list" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Spaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "spaces": { "type": "array", "items": { "$ref": "#/components/schemas/Space" } },
+                    "page": { "$ref": "#/components/schemas/Page" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/spaces/personal": {
+      "post": {
+        "operationId": "drive.space.ensure-personal",
+        "summary": "Get or create the caller's personal drive space (idempotent)",
+        "x-octo-risk": "write",
+        "responses": {
+          "200": { "description": "Personal space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Space" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/spaces/{space_id}": {
+      "get": {
+        "operationId": "drive.space.get",
+        "summary": "Read one drive space",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id (personal:<octo-space>:<uid> or shared:<uuid>)" }
+        ],
+        "responses": {
+          "200": { "description": "Space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Space" } } } }
+        }
+      },
+      "put": {
+        "operationId": "drive.space.rename",
+        "summary": "Rename a drive space (admin+)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": { "name": { "type": "string", "maxLength": 255, "description": "new space name" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Renamed" } }
+      },
+      "delete": {
+        "operationId": "drive.space.delete",
+        "summary": "Soft-delete a drive space (admin+)",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/drive/spaces/{space_id}/members": {
+      "get": {
+        "operationId": "drive.member.list",
+        "summary": "List drive space members and their roles",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "members": { "type": "array", "items": { "$ref": "#/components/schemas/Member" } } }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "drive.member.add",
+        "summary": "Add a member to a drive space (admin+)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["uid", "role"],
+                "properties": {
+                  "uid": { "type": "string", "description": "target user or bot uid" },
+                  "role": { "$ref": "#/components/schemas/Role" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Added", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Member" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/spaces/{space_id}/members/{uid}": {
+      "put": {
+        "operationId": "drive.member.set-role",
+        "summary": "Change a member's role (admin+)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" }, "description": "target member uid" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role"],
+                "properties": { "role": { "$ref": "#/components/schemas/Role" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Updated" } }
+      },
+      "delete": {
+        "operationId": "drive.member.remove",
+        "summary": "Remove a member from a drive space (admin+)",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" }, "description": "target member uid" }
+        ],
+        "responses": { "204": { "description": "Removed" } }
+      }
+    },
+    "/v1/bot/drive/browse": {
+      "get": {
+        "operationId": "drive.browse",
+        "summary": "List folders, mounted documents and blobs in one directory",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["entries[].id", "entries[].parent_id"],
+        "parameters": [
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "parent_id", "in": "query", "schema": { "type": "integer", "format": "uint64", "default": 0 }, "description": "parent folder id; 0 is the space root" },
+          { "name": "type", "in": "query", "schema": { "type": "string", "default": "all", "enum": ["all", "doc", "blob", "folder"] }, "description": "node-type filter" },
+          { "name": "source", "in": "query", "schema": { "type": "string", "default": "all", "enum": ["all", "user-upload", "im-transfer", "user-mount", "docs-sync"] }, "description": "origin filter" },
+          { "name": "page_index", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number for the response page envelope" },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 }, "description": "page size for the response page envelope" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Directory listing. entries is the complete result set; page is an envelope, not a database page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": { "type": "array", "items": { "$ref": "#/components/schemas/DriveEntry" } },
+                    "page": { "$ref": "#/components/schemas/Page" },
+                    "filter": {
+                      "type": "object",
+                      "properties": {
+                        "type": { "type": "string" },
+                        "source": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/folders": {
+      "post": {
+        "operationId": "drive.folder.create",
+        "summary": "Create a folder",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["space_id", "name"],
+                "properties": {
+                  "space_id": { "type": "string", "description": "drive space id" },
+                  "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "parent folder id; 0 is the space root" },
+                  "name": { "type": "string", "description": "folder name" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DriveEntry" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/folders/{space_id}/{parent_id}": {
+      "get": {
+        "operationId": "drive.folder.list",
+        "summary": "List the direct children of one folder",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["files[].id", "files[].parent_id"],
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "parent_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "parent folder id; 0 is the space root" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Children",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "files": { "type": "array", "items": { "$ref": "#/components/schemas/DriveEntry" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/folders/{folder_id}/rename": {
+      "patch": {
+        "operationId": "drive.folder.rename",
+        "summary": "Rename a folder",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "folder_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "folder node id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": { "name": { "type": "string", "description": "new folder name" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Renamed" } }
+      }
+    },
+    "/v1/bot/drive/folders/{folder_id}/move": {
+      "patch": {
+        "operationId": "drive.folder.move",
+        "summary": "Move a folder to another parent",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "folder_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "folder node id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["parent_id"],
+                "properties": { "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Moved" } }
+      }
+    },
+    "/v1/bot/drive/folders/{folder_id}": {
+      "delete": {
+        "operationId": "drive.folder.delete",
+        "summary": "Soft-delete a folder and its subtree",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "folder_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "folder node id" }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}": {
+      "get": {
+        "operationId": "drive.file.get",
+        "summary": "Read one file-tree node by its unified drive file id",
+        "description": "Returns the node regardless of kind. type decides the branch: blob (object storage), doc (online document; ref_id is the doc id and doc_space_id its real Octo Space) or folder.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "unified drive file id from browse / folder / upload / doc mount / im-transfer" }
+        ],
+        "responses": {
+          "200": { "description": "Node", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DriveEntry" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/move": {
+      "post": {
+        "operationId": "drive.file.move",
+        "summary": "Move any file-tree node to another parent",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "node id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["parent_id"],
+                "properties": { "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Moved" } }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/copy": {
+      "post": {
+        "operationId": "drive.file.copy",
+        "summary": "Copy a file or a whole folder subtree",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["root.id", "root.parent_id"],
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "source node id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["parent_id"],
+                "properties": {
+                  "parent_id": { "type": "integer", "format": "uint64", "description": "destination parent folder id" },
+                  "name": { "type": "string", "description": "name for the copied root node; defaults to the source name" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Copied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "root": { "$ref": "#/components/schemas/FileNode" },
+                    "total_rows": { "type": "integer", "description": "number of rows copied, including descendants" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/rename": {
+      "post": {
+        "operationId": "drive.file.rename",
+        "summary": "Rename any file-tree node",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "node id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": { "name": { "type": "string", "description": "new name" } }
+              }
+            }
+          }
+        },
+        "responses": { "204": { "description": "Renamed" } }
+      }
+    },
+    "/v1/bot/drive/blobs": {
+      "post": {
+        "operationId": "drive.blob.create",
+        "summary": "Register an existing object-storage key as a blob (low-level)",
+        "description": "Compatibility endpoint for objects already in storage. New uploads should use `drive upload file`, which runs prepare → PUT → confirm. The backend VERIFIES the object: an object_path storage does not hold is rejected with invalid_argument, and a `size` that conflicts with the stored object's is rejected too. A row created here carries no persisted download URL, so `share download` on it reports not_found — use `drive upload file` when you need a shareable blob.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["space_id", "name", "object_path", "size", "content_type"],
+                "properties": {
+                  "space_id": { "type": "string", "description": "drive space id" },
+                  "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "parent folder id" },
+                  "name": { "type": "string", "description": "file name" },
+                  "object_path": { "type": "string", "description": "object-storage key (not a URL). Must already be in storage — the backend probes it and rejects a key it cannot find" },
+                  "size": { "type": "integer", "format": "uint64", "description": "exact byte count; the backend compares it against the stored object and rejects a mismatch when storage discloses a length. 0 is a stated value, not an omission — pass the real count" },
+                  "content_type": { "type": "string", "description": "MIME type" },
+                  "source": { "type": "string", "default": "user-upload", "enum": ["user-upload", "im-transfer"], "description": "origin tag" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Blob" } } } }
+        }
+      },
+      "get": {
+        "operationId": "drive.blob.list",
+        "summary": "List blobs in one directory",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["blobs[].id", "blobs[].parent_id"],
+        "parameters": [
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "parent_id", "in": "query", "schema": { "type": "integer", "format": "uint64", "default": 0 }, "description": "parent folder id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blobs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "blobs": { "type": "array", "items": { "$ref": "#/components/schemas/Blob" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/blobs/{blob_id}": {
+      "get": {
+        "operationId": "drive.blob.get",
+        "summary": "Read one blob's metadata",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "parameters": [
+          { "name": "blob_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "blob node id" }
+        ],
+        "responses": {
+          "200": { "description": "Blob", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Blob" } } } }
+        }
+      },
+      "delete": {
+        "operationId": "drive.blob.delete",
+        "summary": "Soft-delete a blob",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "blob_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "blob node id" }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/drive/files/prepare-upload": {
+      "post": {
+        "operationId": "drive.upload.prepare",
+        "summary": "Create a pending file and get presigned PUT parameters (low-level)",
+        "description": "Step 1 of 3. `drive upload file` runs the whole sequence; use this only when driving the PUT yourself. The PUT must echo content_type (and content_disposition when present) and send exactly max_file_size bytes, with no Authorization header.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["file_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["space_id", "name", "size", "content_type"],
+                "properties": {
+                  "space_id": { "type": "string", "description": "destination drive space id" },
+                  "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },
+                  "name": { "type": "string", "description": "file name in the drive" },
+                  "size": { "type": "integer", "format": "uint64", "description": "exact byte count; signed into the presigned URL" },
+                  "content_type": { "type": "string", "description": "MIME type; must be echoed on the PUT" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Prepared", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PrepareUpload" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/confirm-upload": {
+      "post": {
+        "operationId": "drive.upload.confirm",
+        "summary": "Confirm a pending upload after the object PUT succeeded (low-level)",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "file_id returned by prepare" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "actual_size": { "type": "integer", "format": "uint64", "description": "bytes actually uploaded; must match the prepared size when supplied" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Confirmed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Blob" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/cancel-upload": {
+      "post": {
+        "operationId": "drive.upload.cancel",
+        "summary": "Cancel a pending upload (idempotent, low-level)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "pending file_id" }
+        ],
+        "responses": { "204": { "description": "Cancelled; repeating the call also succeeds" } }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/download": {
+      "get": {
+        "operationId": "drive.download.url",
+        "summary": "Get a short-lived signed download URL for a blob (low-level)",
+        "description": "Returns the URL only. `drive download file` fetches the bytes with a credential-free client and writes them atomically.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "confirmed blob node id" }
+        ],
+        "responses": {
+          "200": { "description": "Signed URL", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DownloadURL" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/docs": {
+      "post": {
+        "operationId": "drive.doc.mount",
+        "summary": "Mount an accessible online document into the drive",
+        "description": "The title and the document's real Octo Space are read server-side from the document metadata by doc_id; a client-supplied doc_title is ignored.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["space_id", "doc_id"],
+                "properties": {
+                  "space_id": { "type": "string", "description": "destination drive space id" },
+                  "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },
+                  "doc_id": { "type": "string", "description": "document id from `drive doc candidates`" },
+                  "source": { "type": "string", "default": "user-mount", "enum": ["user-mount", "docs-sync"], "description": "origin tag; octo-drive's allowedMountSources accepts both (user-upload / im-transfer are Type-2 only and are rejected)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Mounted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocRef" } } } }
+        }
+      },
+      "get": {
+        "operationId": "drive.doc.list",
+        "summary": "List mounted online documents in one directory",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["docs[].id", "docs[].parent_id"],
+        "parameters": [
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "drive space id" },
+          { "name": "parent_id", "in": "query", "schema": { "type": "integer", "format": "uint64", "default": 0 }, "description": "parent folder id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "docs": { "type": "array", "items": { "$ref": "#/components/schemas/DocRef" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/docs/{file_id}": {
+      "delete": {
+        "operationId": "drive.doc.unmount",
+        "summary": "Remove a document mount; the document itself is untouched",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "mount node id (NOT the doc id)" }
+        ],
+        "responses": { "204": { "description": "Unmounted" } }
+      }
+    },
+    "/v1/bot/drive/mountable-docs": {
+      "get": {
+        "operationId": "drive.doc.candidates",
+        "summary": "List documents the caller may mount that are not yet mounted here",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "destination drive space id" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number (a real database page)" },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 50 }, "description": "page size" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/MountableDoc" } },
+                    "page": { "$ref": "#/components/schemas/Page" },
+                    "total": { "type": "integer", "description": "total candidate count" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/shares": {
+      "post": {
+        "operationId": "drive.share.blob-create",
+        "summary": "Create a blob share token (low-level)",
+        "description": "Prefer `drive share create`, which detects blob vs document and returns a ready-to-hand-over share_url. This is the raw token API for automation that manages passwords, expiry, or revocation directly; the CLI leaf takes <file-id> positionally.",
+        "x-octo-risk": "write",
+        "x-octo-response-fields": { "id": ["share_id", "share_token"], "file_id": ["drive_file_id"] },
+        "x-octo-lossless-id-fields": ["drive_file_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["file_id"],
+                "properties": {
+                  "file_id": { "type": "integer", "format": "uint64", "description": "confirmed blob node id" },
+                  "permission": { "type": "string", "default": "download", "enum": ["view", "download"], "description": "what the receiver may do" },
+                  "expires_in_seconds": { "type": "integer", "default": 0, "description": "0 uses the backend default (7 days)" },
+                  "password": { "type": "string", "maxLength": 72, "x-octo-secret": true, "description": "optional share password; hand it over out of band, never in the URL" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Share" } } } }
+        }
+      },
+      "get": {
+        "operationId": "drive.share.list",
+        "summary": "List the shares the caller created",
+        "x-octo-risk": "read",
+        "x-octo-response-fields": { "shares[].id": ["share_id", "share_token"], "shares[].file_id": ["drive_file_id"] },
+        "x-octo-lossless-id-fields": ["shares[].drive_file_id"],
+        "responses": {
+          "200": {
+            "description": "Shares",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "shares": { "type": "array", "items": { "$ref": "#/components/schemas/Share" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/shares/{share_id}": {
+      "delete": {
+        "operationId": "drive.share.revoke",
+        "summary": "Revoke a share; access and download stop working immediately",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "share_id", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-flag": "share-id", "description": "share_id from share create / share list. base64url ids may start with \"-\", which cobra would read as a flag: pass --share-id <id>, or put the value after a \"--\" separator" }
+        ],
+        "responses": { "204": { "description": "Revoked" } }
+      }
+    },
+    "/v1/bot/drive/shares/{share_token}/access": {
+      "post": {
+        "operationId": "drive.share.access",
+        "summary": "Resolve a blob share by its token (low-level; requires a verified identity)",
+        "description": "The CLI leaf `drive share access` takes the whole share URL and parses this token out of it. Authentication is always required — there is no anonymous share surface.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["file_id"],
+        "parameters": [
+          { "name": "share_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "description": "share token parsed out of the share URL" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "password": { "type": "string", "x-octo-secret": true, "description": "share password when the share is password-protected" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Share target", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ShareAccess" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/shares/{share_token}/download": {
+      "post": {
+        "operationId": "drive.share.download",
+        "summary": "Get the object URL for a shared blob (low-level; requires a verified identity)",
+        "description": "The CLI leaf `drive share download` takes the whole share URL, calls this endpoint, then writes the bytes to disk. Authentication is always required — there is no anonymous share surface.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "share_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "description": "share token parsed out of the share URL" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "password": { "type": "string", "x-octo-secret": true, "description": "share password when the share is password-protected" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Object URL", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ShareDownload" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/spaces/{space_id}/invites": {
+      "post": {
+        "operationId": "drive.invite.create",
+        "summary": "Create a shared-space invite (admin+)",
+        "x-octo-risk": "write",
+        "x-octo-response-fields": { "id": ["invite_id"], "space_id": ["drive_space_id"], "token": ["invite_token"] },
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "shared drive space id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["role"],
+                "properties": {
+                  "role": { "$ref": "#/components/schemas/Role" },
+                  "expires_in_seconds": { "type": "integer", "default": 0, "description": "0 uses the backend default (7 days)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Invite" } } } }
+        }
+      },
+      "get": {
+        "operationId": "drive.invite.list",
+        "summary": "List a space's live invites (admin+)",
+        "x-octo-risk": "read",
+        "x-octo-response-fields": { "invites[].id": ["invite_id"], "invites[].space_id": ["drive_space_id"], "invites[].token": ["invite_token"] },
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "shared drive space id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Invites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "invites": { "type": "array", "items": { "$ref": "#/components/schemas/Invite" } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/spaces/{space_id}/invites/{invite_id}": {
+      "delete": {
+        "operationId": "drive.invite.revoke",
+        "summary": "Revoke an invite (admin+)",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "space_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "shared drive space id" },
+          { "name": "invite_id", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-flag": "invite-id", "description": "invite_id (NOT the invite_token). base64url ids may start with \"-\": pass --invite-id <id>, or put the value after a \"--\" separator" }
+        ],
+        "responses": { "204": { "description": "Revoked" } }
+      }
+    },
+    "/v1/bot/drive/invites/{invite_token}/accept": {
+      "post": {
+        "operationId": "drive.invite.accept",
+        "summary": "Accept an invite as the current identity (idempotent)",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "invite_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "x-octo-flag": "invite-token", "description": "invite_token from invite create / invite list. base64url tokens may start with \"-\": pass --invite-token <token>, or put the value after a \"--\" separator" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted; already_member=true means the identity was already in the space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "space_id": { "type": "string" },
+                    "role": { "type": "string" },
+                    "already_member": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/blobs/transfer-from-im": {
+      "post": {
+        "operationId": "drive.im-transfer.create",
+        "summary": "Save an IM attachment into the drive (idempotent)",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["im_group_no", "im_channel_type", "im_msg_id", "target_space_id"],
+                "properties": {
+                  "im_group_no": { "type": "string", "description": "group/channel id from `octo-cli message search files`" },
+                  "im_channel_type": { "type": "integer", "enum": [1, 2, 5], "description": "channel kind of the source message: 1=DM, 2=group, 5=thread. Required, and it must be the kind the message actually came from, for two reasons. (1) It picks the upstream message-read route: 1 uses the person/DM route, while 2 and 5 share the group route (group vs sub-thread is chosen by the composite group_no, not by this field), so 1 vs 2/5 resolves a different message or nothing. (2) It is stored as the first segment of the row's source_key (channelType#channelID#msgID), which `blobs/im-transferred/batch` matches on — a wrong value makes that already-transferred lookup miss the row. It is NOT the transfer idempotency key: that is (target space, type=blob, object path), so a wrong value cannot produce a duplicate file." },
+                  "im_msg_id": { "type": "string", "description": "message id as a string — never a JSON number, which would lose precision" },
+                  "target_space_id": { "type": "string", "description": "destination drive space id" },
+                  "target_parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },
+                  "name_override": { "type": "string", "description": "replaces the attachment's original name" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Transferred", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransferResult" } } } },
+          "200": { "description": "Idempotent replay — a pre-existing row is returned with idempotent=true" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Role": {
+        "type": "string",
+        "enum": ["preview_only", "downloader", "uploader_downloader", "editor", "admin", "super_admin", "custom"],
+        "description": "drive space role. Grantability differs per surface: member add / member set-role accept preview_only, downloader, uploader_downloader, editor, admin and custom (custom is the lowest rank, below preview_only); invite create accepts the same set except custom, which carries no invite-link semantics. super_admin is never grantable through either — it is bound to the space creator at space creation. Granting admin is super_admin-only on both surfaces."
+      },
+      "Page": {
+        "type": "object",
+        "description": "shared page envelope. Drive v1 has no CLI auto-pagination; several endpoints return the full list alongside this envelope.",
+        "properties": {
+          "page_index": { "type": "integer", "description": "1-based page number" },
+          "page_size": { "type": "integer", "description": "page size" },
+          "total": { "type": "integer", "description": "total row count" },
+          "data": { "type": "array", "items": { "type": "object" }, "description": "this page's rows" }
+        }
+      },
+      "Space": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "drive space id: personal:<octo-space>:<uid> or shared:<uuid>" },
+          "type": { "type": "string", "enum": ["personal", "shared"] },
+          "octo_space_id": { "type": "string", "description": "owning Octo Space tenant id — a different scope from id; never interchange them" },
+          "name": { "type": "string" },
+          "super_admin_uid": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "Member": {
+        "type": "object",
+        "properties": {
+          "space_id": { "type": "string" },
+          "uid": { "type": "string" },
+          "name": { "type": "string", "description": "display name resolved via octo-server; absent means fall back to uid" },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "granted_by": { "type": "string", "description": "uid that granted the role, or \"system\"" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "DriveEntry": {
+        "type": "object",
+        "description": "unified file-tree node. id and parent_id are emitted as decimal strings (see x-octo-lossless-id-fields) because the backend uses uint64.",
+        "properties": {
+          "id": { "type": "string", "description": "node id, decimal string" },
+          "space_id": { "type": "string", "description": "drive space id" },
+          "parent_id": { "type": "string", "description": "parent folder id, decimal string; \"0\" is the space root" },
+          "name": { "type": "string" },
+          "is_folder": { "type": "boolean" },
+          "type": { "type": "string", "enum": ["doc", "blob", "folder"] },
+          "ref_type": { "type": "string", "description": "underlying reference kind; present on some endpoints" },
+          "ref_id": { "type": "string", "description": "doc id for type=doc, object-storage key for type=blob" },
+          "doc_space_id": { "type": "string", "description": "type=doc only: the document's real Octo Space. Build document links from this — never substitute space_id, which is the drive space." },
+          "size": { "type": "integer", "description": "byte count; 0 for folders and documents" },
+          "content_type": { "type": "string" },
+          "source": { "type": "string", "enum": ["user-upload", "im-transfer", "user-mount", "docs-sync"] },
+          "owner_uid": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "FileNode": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "node id, decimal string" },
+          "space_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "parent folder id, decimal string" },
+          "name": { "type": "string" },
+          "is_folder": { "type": "boolean" },
+          "type": { "type": "string", "enum": ["doc", "blob", "folder"] },
+          "ref_id": { "type": "string" }
+        }
+      },
+      "Blob": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "blob node id, decimal string" },
+          "space_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "parent folder id, decimal string" },
+          "name": { "type": "string" },
+          "object_path": { "type": "string", "description": "object-storage key" },
+          "size": { "type": "integer" },
+          "content_type": { "type": "string" },
+          "source": { "type": "string", "enum": ["user-upload", "im-transfer"] },
+          "status": { "type": "string", "enum": ["pending", "confirmed"] },
+          "owner_uid": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "DocRef": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "mount node id, decimal string. Use this for doc unmount — not doc_id." },
+          "space_id": { "type": "string", "description": "destination drive space id" },
+          "parent_id": { "type": "string", "description": "parent folder id, decimal string" },
+          "doc_id": { "type": "string", "description": "document id in the docs backend" },
+          "doc_space_id": { "type": "string", "description": "the document's real Octo Space id; absent on rows mounted before drive captured it" },
+          "title": { "type": "string", "description": "authoritative title read from the document metadata" },
+          "source": { "type": "string" },
+          "owner_uid": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "MountableDoc": {
+        "type": "object",
+        "properties": {
+          "doc_id": { "type": "string" },
+          "title": { "type": "string" },
+          "doc_type": { "type": "string", "description": "doc / sheet / board / html" },
+          "owner_id": { "type": "string" },
+          "space_id": { "type": "string", "description": "the document's real Octo Space id" },
+          "octo_doc_slug": { "type": "string", "description": "slug for HTML documents" },
+          "access_type": { "type": "string", "enum": ["owner", "member"] },
+          "granted_role": { "type": "integer", "description": "docs-backend numeric role" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "PrepareUpload": {
+        "type": "object",
+        "properties": {
+          "file_id": { "type": "string", "description": "pending drive file id, decimal string" },
+          "status": { "type": "string", "enum": ["pending"] },
+          "upload_url": { "type": "string", "description": "presigned PUT URL. Never send a caller credential to it." },
+          "object_path": { "type": "string", "description": "final object-storage key" },
+          "content_type": { "type": "string", "description": "must be echoed as the PUT Content-Type" },
+          "content_disposition": { "type": "string", "description": "when present, must be echoed on the PUT verbatim" },
+          "max_file_size": { "type": "integer", "description": "exact byte count the signature allows" },
+          "expires_at": { "type": "string" }
+        }
+      },
+      "DownloadURL": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "short-lived signed GET URL" },
+          "filename": { "type": "string", "description": "suggested download file name" },
+          "expires_at": { "type": "string" }
+        }
+      },
+      "Share": {
+        "type": "object",
+        "description": "The backend returns one opaque `id` that is both the management handle and the access token. The CLI splits it into share_id (revoke) and share_token (access/download) via x-octo-response-fields so a future token rotation cannot silently break callers.",
+        "properties": {
+          "share_id": { "type": "string", "description": "share record id; pass to share revoke" },
+          "share_token": { "type": "string", "description": "access token embedded in the share URL. Equal to share_id today — do not rely on that." },
+          "drive_file_id": { "type": "string", "description": "shared drive file node id, decimal string" },
+          "creator_uid": { "type": "string" },
+          "permission": { "type": "string", "enum": ["view", "download"] },
+          "expires_at": { "type": "string" },
+          "password_set": { "type": "boolean", "description": "true when a password is required; the password itself is never returned" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "ShareAccess": {
+        "type": "object",
+        "properties": {
+          "permission": { "type": "string", "enum": ["view", "download"] },
+          "expires_at": { "type": "string" },
+          "file_id": { "type": "string", "description": "shared file node id, decimal string" },
+          "file_name": { "type": "string" },
+          "file_size": { "type": "integer" },
+          "content_type": { "type": "string" },
+          "ref_id": { "type": "string", "description": "object-storage key; callers normally do not need it" }
+        }
+      },
+      "ShareDownload": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "object-storage download URL, released only after this authenticated endpoint validated identity + token + password" },
+          "filename": { "type": "string" },
+          "content_type": { "type": "string" }
+        }
+      },
+      "Invite": {
+        "type": "object",
+        "description": "invite_id and invite_token are deliberately distinct names: revoke takes the id, accept takes the token. The backend field names (id / token) are aliased by x-octo-response-fields.",
+        "properties": {
+          "invite_id": { "type": "string", "description": "invite record id; pass to invite revoke" },
+          "drive_space_id": { "type": "string", "description": "target shared drive space id" },
+          "role": { "$ref": "#/components/schemas/Role" },
+          "invite_token": { "type": "string", "description": "invite token; pass to invite accept. Treat as a secret." },
+          "expires_at": { "type": "string" },
+          "creator_uid": { "type": "string" },
+          "created_at": { "type": "string" }
+        }
+      },
+      "TransferResult": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "drive node id, decimal string; usable directly with file / download / share commands" },
+          "space_id": { "type": "string" },
+          "parent_id": { "type": "string", "description": "decimal string" },
+          "name": { "type": "string" },
+          "type": { "type": "string", "enum": ["blob"] },
+          "ref_id": { "type": "string" },
+          "size": { "type": "integer" },
+          "content_type": { "type": "string" },
+          "source": { "type": "string", "enum": ["im-transfer"] },
+          "owner_uid": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" },
+          "idempotent": { "type": "boolean", "description": "true when a pre-existing row was returned instead of a new one" }
+        }
+      }
+    }
+  }
+}

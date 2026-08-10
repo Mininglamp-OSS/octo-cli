@@ -1,0 +1,275 @@
+package cmd
+
+import (
+	"encoding/json"
+	"fmt"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+)
+
+// prepareUploadResponse is the subset of the prepare-upload reply the composite
+// needs. file_id stays a json.Number so a uint64 above 2^53 is never rounded.
+type prepareUploadResponse struct {
+	FileID             json.Number `json:"file_id"`
+	UploadURL          string      `json:"upload_url"`
+	ObjectPath         string      `json:"object_path"`
+	ContentType        string      `json:"content_type"`
+	ContentDisposition string      `json:"content_disposition"`
+	MaxFileSize        int64       `json:"max_file_size"`
+	ExpiresAt          string      `json:"expires_at"`
+}
+
+// newDriveUploadFileCmd builds `octo-cli drive upload file <local-path>`.
+func newDriveUploadFileCmd(f *cmdutil.Factory) *cobra.Command {
+	var spaceID, parentID, name, contentType string
+	cmd := &cobra.Command{
+		Use:   "file <local-path>",
+		Short: "Upload a local file into a drive space (prepare + PUT + confirm)",
+		Long: `Upload a local file into a drive space.
+
+Runs the full three-step sequence: prepare-upload to create a pending file and
+get a presigned PUT, the PUT itself, then confirm-upload. The PUT goes out on a
+separate HTTP client that carries no Octo credential and no space header — the
+presigned URL is its own authorisation. If the PUT or the confirm fails, the
+pending file is cancelled on a best-effort basis and the error reports both the
+file id and the cancel outcome, so no half-uploaded row is left behind silently.
+
+--dry-run stops after describing the prepare request and the local file: no URL
+is fetched, nothing is uploaded, and no pending row is created.
+
+Underlying operations: drive.upload.prepare, drive.upload.confirm, drive.upload.cancel.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDriveUploadFile(cmd, f, args[0], driveUploadOpts{
+				spaceID:     spaceID,
+				parentID:    parentID,
+				name:        name,
+				contentType: contentType,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&spaceID, "space-id", "", "destination drive space id (required)")
+	cmd.Flags().StringVar(&parentID, "parent-id", "0", "destination folder id (decimal uint64 id, max "+output.MaxUint64Decimal+"); 0 is the space root")
+	cmd.Flags().StringVar(&name, "name", "", "file name in the drive; defaults to the local base name")
+	cmd.Flags().StringVar(&contentType, "content-type", "", "MIME type; detected from the file extension when omitted")
+	_ = cmd.MarkFlagRequired("space-id") //nolint:errcheck // static flag name
+	return cmd
+}
+
+type driveUploadOpts struct {
+	spaceID     string
+	parentID    string
+	name        string
+	contentType string
+}
+
+// runDriveUploadFile is the orchestrator. Each failure branch returns a distinct
+// structured CLI error, which is why the branch count is high.
+//
+//nolint:gocyclo // one linear upload sequence; every branch is a separate covered failure mode
+func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string, o driveUploadOpts) error {
+	info, statErr := os.Stat(localPath)
+	if statErr != nil {
+		return failErr(f, output.ErrValidation(fmt.Sprintf("<local-path>: %v", statErr), "check the path and permissions"))
+	}
+	if !info.Mode().IsRegular() {
+		return failErr(f, output.ErrValidation("<local-path> must point to a regular file", "pass a local file, not a directory or device"))
+	}
+	if info.Size() <= 0 {
+		return failErr(f, output.ErrValidation("<local-path> is empty", "the backend signs an exact byte count; upload a non-empty file"))
+	}
+	parent, perr := output.ParseUint64Decimal("--parent-id", o.parentID)
+	if perr != nil {
+		return failErr(f, perr)
+	}
+	name := o.name
+	if name == "" {
+		name = filepath.Base(localPath)
+	}
+	ct := o.contentType
+	if ct == "" {
+		ct = detectContentType(localPath)
+	}
+	size := uint64(info.Size())
+
+	prepareBody := map[string]any{
+		"space_id":     o.spaceID,
+		"parent_id":    output.Uint64JSONNumber(parent),
+		"name":         name,
+		"size":         output.Uint64JSONNumber(size),
+		"content_type": ct,
+	}
+
+	if f.Globals != nil && f.Globals.DryRun {
+		return emitJSON(f, map[string]any{
+			"dry_run":      true,
+			"method":       http.MethodPost,
+			"operation":    "drive.upload.prepare",
+			"path":         "{mount}/files/prepare-upload",
+			"body":         prepareBody,
+			"local_path":   localPath,
+			"local_size":   fmt.Sprintf("%d", size),
+			"content_type": ct,
+			"note":         "dry run stops here: no presigned URL is fetched, no bytes are uploaded, no pending file is created",
+		})
+	}
+
+	mount, err := service.MountForOperation(f, "drive.upload.prepare")
+	if err != nil {
+		return failErr(f, err)
+	}
+	cli, err := f.Client()
+	if err != nil {
+		return failErr(f, err)
+	}
+
+	raw, err := cli.Do(cmd.Context(), &client.Request{
+		Method:              http.MethodPost,
+		Path:                mount + "/files/prepare-upload",
+		Body:                prepareBody,
+		SuppressSpaceHeader: true,
+	})
+	if err != nil {
+		return failErr(f, err)
+	}
+	var prepared prepareUploadResponse
+	if derr := decodeLossless(raw, &prepared); derr != nil {
+		return failErr(f, derr)
+	}
+	fileID := prepared.FileID.String()
+	if fileID == "" || fileID == "0" {
+		return failErr(f, output.ErrWithHint("internal", "RESPONSE_DECODE",
+			"prepare-upload did not return a file_id", "report the backend response"))
+	}
+
+	// From here on a pending row exists: every failure path must try to cancel it.
+	if _, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL); uerr != nil {
+		return failErr(f, withCancel(cmd, f, cli, mount, fileID, uerr))
+	}
+	progressf(f, "uploading %d bytes to object storage", size)
+	if perr := putObject(cmd, localPath, int64(size), &prepared); perr != nil {
+		return failErr(f, withCancel(cmd, f, cli, mount, fileID, perr))
+	}
+	progressf(f, "upload complete; confirming file %s", fileID)
+
+	confirmed, err := cli.Do(cmd.Context(), &client.Request{
+		Method:              http.MethodPost,
+		Path:                mount + "/files/" + fileID + "/confirm-upload",
+		Body:                map[string]any{"actual_size": output.Uint64JSONNumber(size)},
+		SuppressSpaceHeader: true,
+	})
+	if err != nil {
+		return failErr(f, withCancel(cmd, f, cli, mount, fileID, err))
+	}
+
+	normalized, nerr := output.NormalizeResponse(confirmed, nil, []string{"id", "parent_id"})
+	if nerr != nil {
+		return failErr(f, output.ErrWithHint("internal", "RESPONSE_NORMALIZE", nerr.Error(), ""))
+	}
+	notice, merr := json.Marshal(map[string]any{
+		"uploaded_bytes": fmt.Sprintf("%d", size),
+		"object_path":    prepared.ObjectPath,
+	})
+	if merr != nil {
+		return failErr(f, merr)
+	}
+	return f.EmitSuccessWithMeta(normalized, output.EnvelopeMeta{Notice: notice})
+}
+
+// putObject streams the local file to the presigned URL. The request echoes the
+// Content-Type (and Content-Disposition when the backend set one) and sends an
+// exact Content-Length, all of which the storage gateway signed — omitting or
+// changing any of them makes it reject the upload with 403. No Authorization or
+// X-Space-Id is set: the caller's Octo credential must never reach storage.
+func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepareUploadResponse) *output.ExitError {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return output.ErrValidation(fmt.Sprintf("<local-path>: %v", err), "check the path and permissions")
+	}
+	defer file.Close() //nolint:errcheck // read-only handle
+
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPut, prepared.UploadURL, file)
+	if err != nil {
+		return output.ErrNetwork(err.Error(), "invalid upload request")
+	}
+	req.ContentLength = size
+	if prepared.ContentType != "" {
+		req.Header.Set("Content-Type", prepared.ContentType)
+	}
+	if prepared.ContentDisposition != "" {
+		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
+	}
+
+	resp, err := transferClient().Do(req)
+	if err != nil {
+		return output.ErrNetwork(fmt.Sprintf("upload: %v", err), "check network access to object storage")
+	}
+	defer resp.Body.Close() //nolint:errcheck // best-effort close
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return output.ErrWithHint("api_error", "UPLOAD_FAILED",
+			fmt.Sprintf("object storage returned status %d", resp.StatusCode),
+			"the presigned URL may have expired or the echoed headers/size did not match; retry the upload")
+	}
+	return nil
+}
+
+// withCancel attaches a best-effort cancel-upload to a failure so the pending
+// row does not linger. The original error stays authoritative; the cancel
+// outcome is reported alongside it as detail, including when the cancel itself
+// failed — an operator needs to know a pending row may still exist.
+func withCancel(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, mount, fileID string, cause error) error {
+	ee := output.AsExitError(cause)
+	if ee == nil {
+		ee = output.ErrWithHint("internal", "UPLOAD_FAILED", cause.Error(), "")
+	}
+	cancelResult := "cancelled"
+	if _, err := cli.Do(cmd.Context(), &client.Request{
+		Method:              http.MethodPost,
+		Path:                mount + "/files/" + fileID + "/cancel-upload",
+		SuppressSpaceHeader: true,
+	}); err != nil {
+		cancelResult = "cancel_failed: " + err.Error()
+	}
+	progressf(f, "upload failed for file %s (%s)", fileID, cancelResult)
+
+	detail, merr := json.Marshal(map[string]any{
+		"file_id":       fileID,
+		"pending_file":  cancelResult,
+		"cause":         ee.Message,
+		"cause_code":    ee.Code,
+		"backend_error": rawJSONOrNull(ee.Detail),
+	})
+	if merr == nil {
+		ee.Detail = detail
+	}
+	if cancelResult != "cancelled" {
+		ee.Hint = strings.TrimSpace(ee.Hint + " The pending file could not be cancelled — run `octo-cli drive upload cancel " + fileID + "`.")
+	}
+	return ee
+}
+
+func rawJSONOrNull(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
+}
+
+// detectContentType guesses a MIME type from the file extension, falling back to
+// the generic binary type the storage gateway accepts.
+func detectContentType(path string) string {
+	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}

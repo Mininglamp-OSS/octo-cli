@@ -8,6 +8,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli drive` domain** (45 commands) — network drive over octo-drive:
+  spaces and members, folder/file tree and `browse`, blob registration,
+  two-phase upload and signed download, online-document mounts, share links,
+  invites, and IM-attachment transfer. 39 leaves are generated from the new
+  `drive.json` spec (42 operations); six are hand-written because they are not a
+  single request or take an argument shape the engine cannot express:
+  `upload file` (prepare → presigned PUT → confirm, with best-effort cancel on
+  failure), `download file` and `share download` (signed URL → atomic local
+  write), `share create` (branches on blob vs mounted document),
+  `share blob-create` (positional file id), and `share access`. Ships with the
+  `octo-drive` Skill. There is deliberately no `drive org` subtree — the
+  product's member picker is a frontend filter over the space roster, not a
+  backend search.
+  - **Dual identity, one command surface.** A `uk_*` user API key acts as the
+    real person and routes to `/v1/user/drive/*`; `bf_*` / `app_*` act as the bot
+    and route to `/v1/bot/drive/*`. The routing is spec metadata, not code, so the
+    command tree is identical either way. A bot must still be added as a member of
+    a shared space, exactly like a person.
+  - **Share hand-over is the `share_url` and nothing else.** `share access` /
+    `share download` take the whole link, parse it under strict same-origin rules,
+    and call the configured API with the token they extracted — the link's host is
+    never contacted. Both sides require a credential; there is no anonymous share
+    surface. A document link is never downloadable.
+  - **Lossless uint64 ids.** Drive file ids exceed both `float64`'s exact range
+    and Go's `int`, so they are decimal strings on the CLI surface (validated in
+    `[0, 2^64-1]`, sent as JSON integers, returned as decimal strings) and can be
+    piped verbatim from one command into the next.
+  - Presigned object-storage transfers run on a separate HTTP client that carries
+    no Octo credential and no space header.
+- **`OCTO_TOKEN`** — a preferred token variable accepting any of the three token
+  kinds (`app_*`, `bf_*`, `uk_*`). Resolution order is now stored profile →
+  `OCTO_TOKEN` → `OCTO_BOT_TOKEN`; `OCTO_BOT_TOKEN` keeps working exactly as
+  before, so a setup that never sets `OCTO_TOKEN` is unaffected. The success
+  envelope's `identity.source` names the variable actually used
+  (`env:OCTO_TOKEN` or `env:OCTO_BOT_TOKEN`).
+- **Generic spec extensions**, all opt-in with omit-means-unchanged semantics:
+  `x-octo-allowed-token-kinds` (local credential-kind gate →
+  `TOKEN_KIND_NOT_ALLOWED`, `validation`/exit 2, matching the existing
+  message-search gate), `x-octo-mount-by-token-kind` (per-kind server mount,
+  applied at the single path-assembly site in `cmd/service/run.go`),
+  `x-octo-response-fields` (rename/duplicate response keys, so a backend DTO's
+  ambiguous `id` can surface as `share_id` + `share_token`),
+  `x-octo-lossless-id-fields` (uint64 response ids as decimal strings), and
+  `x-octo-secret` (mask a value in `--verbose` / `--dry-run` without changing the
+  wire). No pre-existing domain declares any of them.
 - **`octo-cli docs search`** — permission-scoped full-text search across online
   documents, sheets, boards, and mounted HTML documents registered in docs-backend
   via `POST /v1/bot/docs/search`. Supports repeatable `--doc-type` filters, manual
@@ -66,6 +111,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **Spec `enum` values are now enforced locally, before the request.** Enums were
+  only rendered into `--help`; the value itself went to the backend unchecked, so
+  `drive im-transfer create --im-channel-type 9` was forwarded despite the spec
+  declaring `[1, 2, 5]`, and `-1` failed only as a backend decode error that
+  leaked an internal struct name. The generic engine now rejects an out-of-set
+  value with `ENUM_NOT_ALLOWED` (`validation`, exit 2, zero HTTP) and a hint
+  listing the accepted values. Applies to every domain, on request-body fields
+  (including nested and array-item enums, and values supplied through `--data`)
+  and on query parameters alike. Comparison is by canonical form, so a value is
+  accepted whether it arrives as an `int` flag, a `--data` JSON number, or a
+  `json.Number` uint64. Only flags the caller actually set are checked, so an
+  omitted optional enum field is untouched. Structural violations keep their
+  existing `VALIDATION_ERROR` envelope. A non-scalar (object / array / null)
+  against a scalar enum is rejected too, closing the last path by which a
+  malformed value reached the backend and came back as an internal decode error.
+  Because a spec enum narrower than the backend's real vocabulary would now
+  refuse a call that used to work, `drive.doc.mount`'s `source` enum was
+  corrected from `["user-mount"]` to `["user-mount", "docs-sync"]` (octo-drive's
+  `docref.allowedMountSources` accepts both), and a regression test pins the
+  drive enums against their backend allow-lists.
+- **A path parameter may now declare `x-octo-flag`** to add an optional flag
+  alternative to its positional slot. base64url ids legitimately start with `-`
+  (about one in 64), which cobra parses as a flag before the command runs, so
+  `drive share revoke -Ab3…` failed with "unknown shorthand flag" unless the
+  caller knew to write `-- -Ab3…`. `share_id`, `invite_id` and `invite_token` now
+  also accept `--share-id` / `--invite-id` / `--invite-token`; the `--` separator
+  still works, positional parsing is unchanged, and supplying both forms for one
+  slot is a validation error rather than a silent winner. Operations whose path
+  params declare no `x-octo-flag` keep `cobra.ExactArgs`. A flag-parse failure on
+  such a command now carries a hint naming both escapes. An empty flag value is
+  refused, so `--share-id "$UNSET"` cannot address the collection URL.
 - **Generated service commands now reject incomplete JSON bodies locally** —
   request-schema `required` fields and nested `minItems` constraints are
   validated after merging `--data` with promoted body flags, before any HTTP
@@ -77,6 +153,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   install an `octo-cli` binary, and all commands are invoked as
   `octo-cli <command>`. **Breaking:** scripts, aliases, and shell completions
   that call `octo` must switch to `octo-cli`.
+
+### Fixed
+- **Documented that `drive blob create` now verifies the object.** octo-drive's
+  low-level register path used to take "this object already exists" on trust, so
+  `blob create --object-path does/not/exist.txt` returned a confirmed row that
+  browsed and shared fine and only 404'd on download. The backend now probes
+  storage and rejects an unknown key with `invalid_argument`, and rejects a
+  `--size` that conflicts with the stored object (`--size 0` for a non-empty
+  object included — 0 is a stated count, not an omission). Spec description,
+  design doc and skill say so, and all three now note that a register-path row
+  carries no persisted download URL — `share download` on one is `not_found`, so
+  `upload file` is the command for a shareable blob — and that an inconclusive
+  probe (storage unreachable) surfaces as a retryable 500 rather than
+  `invalid_argument`.
+- **Corrected the `drive` role contract in schema, docs and skill.** The shared
+  `Role` description claimed "super_admin and custom cannot be granted through
+  member add / invite create", which is wrong for `custom`: octo-drive accepts it
+  on `member add` / `member set-role` (it is the lowest rank, below
+  `preview_only`) and rejects it only on `invite create`. Grantability differs per
+  surface, so the schema, `docs/octo-cli-design.md` and the `octo-drive` skill now
+  carry an explicit per-surface matrix instead of one blanket sentence.
+  `super_admin` is never grantable — it is bound to the creator at space creation.
+- **Corrected `im_channel_type`'s documented consequence.** The schema, design doc
+  and skill all said a wrong value composes a different idempotency source key and
+  transfers the same attachment twice. octo-drive keys idempotency on (target
+  space, `type=blob`, object path), not on `source_key`; the channel type selects
+  the route the message is read through, and a wrong-but-accepted value resolves
+  the same attachment and replays the same row. The unsupported duplicate-transfer
+  claim is removed; the field stays required.
+- **uint64 precision in output and `--dry-run`.** The envelope re-parse and the
+  dry-run body echo both went through a plain `json.Unmarshal`, so any integer
+  above 2^53 was rounded to a `float64` before reaching stdout — a drive file id
+  would have been reported as a different number than the one actually sent. Both
+  now decode with `json.Decoder.UseNumber`. Affects every domain; `--jq`,
+  `--format table` and `--format csv` render the exact literal.
+- **octo-drive error codes are now mapped.** octo-drive replies with
+  `{"error":"<code>","message":"..."}` — the code is a bare string, not the nested
+  object the matters family uses, and the text is under `message` rather than
+  `msg` — so `ParseBackendError` matched neither existing layer and fell back to a
+  raw status dump. A third parse layer recognises that shape and maps the
+  lowercase codes (`permission_denied`, `password_required`, `wrong_password`,
+  `share_expired`, `not_found`, `conflict`, `invalid_argument`, `unauthorized`,
+  `auth_unavailable`, `internal`) to CLI taxonomy and hints. A lowercase code and
+  its uppercase counterpart classify identically — an agent branches on the CLI
+  taxonomy and exit code, never on which backend answered — so only the hint
+  differs. Free-text `error` values are not promoted to codes, and the uppercase
+  mapping plus every unknown-code fallback are unchanged.
 
 ## [0.5.0] — 2026-05-28
 

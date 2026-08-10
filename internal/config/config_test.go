@@ -19,6 +19,7 @@ func TestValidate_OK(t *testing.T) {
 }
 
 func TestLoad_Defaults(t *testing.T) {
+	t.Setenv(EnvToken, "")
 	t.Setenv(EnvBotToken, "")
 	t.Setenv(EnvAPIBaseURL, "")
 	t.Setenv(EnvFormat, "")
@@ -35,6 +36,9 @@ func TestLoad_Defaults(t *testing.T) {
 
 func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvAPIBaseURL, "http://api.example")
+	// EnvToken outranks EnvBotToken, so it must be cleared for this case to
+	// exercise the EnvBotToken path rather than an exported real token.
+	t.Setenv(EnvToken, "")
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
@@ -62,4 +66,51 @@ func TestServiceURL_Unified(t *testing.T) {
 			t.Errorf("ServiceURL(%q) = %q, want API base URL", svc, got)
 		}
 	}
+}
+
+// OCTO_TOKEN is the high-priority token slot: it wins over OCTO_BOT_TOKEN, so a
+// real-person user API key can be supplied for one command without disturbing an
+// existing bot setup. An existing setup that never sets it is unaffected.
+func TestLoad_TokenPrecedence(t *testing.T) {
+	cases := []struct {
+		name, octoToken, botToken, want string
+	}{
+		{"only the legacy variable", "", "bf_bot", "bf_bot"},
+		{"only the new variable", "uk_person", "", "uk_person"},
+		{"both set: the new one wins", "uk_person", "bf_bot", "uk_person"},
+		{"a blank new variable does not shadow", "   ", "bf_bot", "bf_bot"},
+		{"neither set", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(EnvToken, tc.octoToken)
+			t.Setenv(EnvBotToken, tc.botToken)
+			if got := Load().BotToken; got != tc.want {
+				t.Errorf("BotToken = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The auth gate's message must name both variables, or an operator who only set
+// OCTO_TOKEN gets told to set a variable they already decided against.
+func TestValidate_MessageNamesBothTokenVars(t *testing.T) {
+	err := (&Config{}).Validate()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{EnvToken, EnvBotToken} {
+		if !contains(err.Error(), want) {
+			t.Errorf("Validate message %q should name %s", err.Error(), want)
+		}
+	}
+}
+
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }

@@ -144,21 +144,33 @@ type ParamInfo struct {
 	In          string      `json:"in"`
 	Required    bool        `json:"required,omitempty"`
 	Type        string      `json:"type,omitempty"`
+	Format      string      `json:"format,omitempty"`
 	Items       *SchemaInfo `json:"items,omitempty"`
 	Description string      `json:"description,omitempty"`
 	Default     any         `json:"default,omitempty"`
 	Enum        []any       `json:"enum,omitempty"`
-	// String constraints are exposed as schema metadata for callers; request
-	// validation remains the responsibility of the service backend.
+	// String constraints are exposed as schema metadata for callers; enforcing
+	// them remains the service backend's job. Enum is the exception: the CLI
+	// checks a query parameter's enum before sending (see buildQuery).
 	MinLength int    `json:"min_length,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
 	Pattern   string `json:"pattern,omitempty"`
+	// Secret records the x-octo-secret extension. A secret parameter's value is
+	// masked in --verbose traces and --dry-run output (share/invite tokens,
+	// share passwords) so a credential-equivalent value never lands in a log.
+	Secret bool `json:"secret,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag
 	// extension on the parameter. It lets a spec expose a header/query param
 	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
 	// clean, first-class flag name (e.g. `base-version`) without a hard-coded
 	// carve-out in the engine. Empty when the spec does not set it, in which
 	// case the engine derives the flag from Name.
+	//
+	// On a `"in": "path"` parameter it means something slightly different: the
+	// param stays positional, and the flag becomes an OPTIONAL alternative way
+	// to supply it. That is the escape hatch for a value cobra cannot accept
+	// positionally at all — a base64url id starting with "-" is parsed as a flag
+	// before the command runs (see cmd/service.pathFlag).
 	FlagName string `json:"flag_name,omitempty"`
 }
 
@@ -176,7 +188,8 @@ type SchemaInfo struct {
 	Format      string                `json:"format,omitempty"`
 	Description string                `json:"description,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
-	// validator currently enforces required and MinItems only.
+	// validator enforces Required, MinItems and Enum; the rest (MinLength,
+	// MaxLength, MaxItems, Pattern) are descriptive only and left to the backend.
 	MinLength int    `json:"min_length,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
 	MinItems  int    `json:"min_items,omitempty"`
@@ -190,6 +203,10 @@ type SchemaInfo struct {
 	// so the CLI can honour a caller-facing flag without diverging from the
 	// byte-exact backend contract. Empty means "derive from the property name".
 	FlagName string `json:"flag_name,omitempty"`
+	// Secret records the x-octo-secret extension on a request-body property,
+	// mirroring ParamInfo.Secret. Its value is masked in --verbose traces and
+	// --dry-run output.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // PaginationInfo captures the `x-octo-pagination` extension. It tells the
@@ -240,6 +257,30 @@ type OperationDetail struct {
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	// AllowedTokenKinds captures x-octo-allowed-token-kinds (spec top level or
+	// per-operation override). When non-empty the CLI checks the active
+	// credential's kind against the list before sending, failing locally with
+	// TOKEN_KIND_NOT_ALLOWED (validation / exit 2) instead of relying on a
+	// backend 401. Empty means "no local gate" — the historical behaviour for
+	// every domain that does not declare it.
+	AllowedTokenKinds []string `json:"allowed_token_kinds,omitempty"`
+	// MountByTokenKind captures x-octo-mount-by-token-kind: a token-kind →
+	// server mount-prefix table. When non-empty, the operation's own path must
+	// begin with exactly one of the table's values (the mount the spec paths are
+	// written against); that prefix is swapped for the mount matching the active
+	// credential's kind. Empty leaves the spec path byte-identical.
+	MountByTokenKind map[string]string `json:"mount_by_token_kind,omitempty"`
+	// ResponseFieldAliases captures x-octo-response-fields: source key →
+	// target keys. The CLI renames (one target) or duplicates (several) the
+	// value in the response before emitting it, so a backend DTO with a bare
+	// `id` can surface as the unambiguous `share_id` + `share_token` an Agent
+	// needs. Paths use the same syntax as LosslessIDFields.
+	ResponseFieldAliases map[string][]string `json:"response_field_aliases,omitempty"`
+	// LosslessIDFields captures x-octo-lossless-id-fields: response paths whose
+	// uint64 ids are emitted as decimal strings so values above 2^53 survive an
+	// Agent's JSON parser. Applied after ResponseFieldAliases, so paths name
+	// post-alias keys.
+	LosslessIDFields []string `json:"lossless_id_fields,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -354,6 +395,16 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	// Identity routing is declared at the spec top level (every operation in a
+	// domain shares one mount table) but an operation may narrow the allowed
+	// kinds. Both default to absent → no gate, no rewrite.
+	d.AllowedTokenKinds = stringSliceOf(doc["x-octo-allowed-token-kinds"])
+	if opKinds := stringSliceOf(op["x-octo-allowed-token-kinds"]); len(opKinds) > 0 {
+		d.AllowedTokenKinds = opKinds
+	}
+	d.MountByTokenKind = stringMapOf(doc["x-octo-mount-by-token-kind"])
+	d.ResponseFieldAliases = stringSliceMapOf(op["x-octo-response-fields"])
+	d.LosslessIDFields = stringSliceOf(op["x-octo-lossless-id-fields"])
 	if d.BinaryResponse {
 		if resps, ok := op["responses"].(map[string]any); ok {
 			d.BinaryBody = hasSuccessBody(doc, resps)
@@ -372,9 +423,11 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 				Required:    boolOf(pm["required"]),
 				Description: stringOf(pm["description"]),
 				FlagName:    stringOf(pm["x-octo-flag"]),
+				Secret:      truthy(pm["x-octo-secret"]),
 			}
 			if sch, ok := pm["schema"].(map[string]any); ok {
 				pi.Type = stringOf(sch["type"])
+				pi.Format = stringOf(sch["format"])
 				pi.Default = sch["default"]
 				if items, ok := sch["items"].(map[string]any); ok {
 					resolved := resolveSchema(doc, items)
@@ -549,6 +602,7 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 		Format:      stringOf(s["format"]),
 		Description: stringOf(s["description"]),
 		FlagName:    stringOf(s["x-octo-flag"]),
+		Secret:      truthy(s["x-octo-secret"]),
 		MinLength:   intOf(s["minLength"]),
 		MaxLength:   intOf(s["maxLength"]),
 		MinItems:    intOf(s["minItems"]),
@@ -618,6 +672,73 @@ func boolOf(v any) bool {
 func intOf(v any) int {
 	n, _ := v.(float64)
 	return int(n)
+}
+
+// stringSliceOf reads a JSON array of strings, ignoring non-string entries.
+// A missing or wrongly-typed value yields nil, which every consumer treats as
+// "extension not declared".
+func stringSliceOf(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		if s, ok := x.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stringMapOf reads a JSON object of string→string. Non-string values are
+// dropped rather than coerced, so a malformed table degrades to "not declared"
+// for that key instead of producing a bogus path.
+func stringMapOf(v any) map[string]string {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(obj))
+	for k, x := range obj {
+		if s, ok := x.(string); ok && s != "" {
+			out[k] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stringSliceMapOf reads a JSON object of string→[]string. A scalar string
+// value is accepted as a one-element list so a simple rename can be written
+// without array syntax.
+func stringSliceMapOf(v any) map[string][]string {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]string, len(obj))
+	for k, x := range obj {
+		switch t := x.(type) {
+		case string:
+			if t != "" {
+				out[k] = []string{t}
+			}
+		case []any:
+			if targets := stringSliceOf(t); len(targets) > 0 {
+				out[k] = targets
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // truthy accepts a JSON value that may be a boolean `true` or the string

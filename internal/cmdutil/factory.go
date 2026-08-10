@@ -297,9 +297,16 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	if err := output.WriteSuccess(&envBuf, raw, meta); err != nil {
 		return err
 	}
-	// Re-parse into any so Format/ApplyJQ can work with it.
+	// Re-parse into any so Format/ApplyJQ can work with it. UseNumber keeps every
+	// integer at its exact decimal text: a plain unmarshal would turn a uint64 id
+	// above 2^53 into a rounded float64, silently corrupting it on the way to
+	// stdout even when the backend and the transport got it right. gojq handles
+	// json.Number for arithmetic, comparison and tostring, and the table/csv
+	// renderer prints it verbatim.
 	var envelope any
-	if err := json.Unmarshal(envBuf.Bytes(), &envelope); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(envBuf.Bytes()))
+	dec.UseNumber()
+	if err := dec.Decode(&envelope); err != nil {
 		return fmt.Errorf("re-parse envelope: %w", err)
 	}
 
@@ -349,10 +356,11 @@ func WrapCLIError(err error) error {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lower, "octo_bot_token"),
+	case strings.Contains(lower, "octo_token"),
+		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
-		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an app_* or bf_* token")
+		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, or uk_* token")
 	case strings.Contains(lower, "unknown flag"),
 		strings.Contains(lower, "unknown command"),
 		strings.Contains(lower, "unknown subcommand"),

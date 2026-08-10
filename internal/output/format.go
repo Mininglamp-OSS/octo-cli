@@ -172,6 +172,10 @@ func renderCell(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
+	case json.Number:
+		// A decoder using UseNumber yields these; render the literal text so a
+		// uint64 id keeps every digit.
+		return val.String()
 	case float64:
 		if val == float64(int64(val)) {
 			return fmt.Sprintf("%d", int64(val))

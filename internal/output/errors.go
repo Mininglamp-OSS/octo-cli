@@ -86,13 +86,21 @@ func ErrNetwork(msg, hint string) *ExitError {
 
 // --- backend error mapping ---
 
-// backendErrorMapping maps matters error codes to CLI taxonomy + hint. See
+// backendErrorMapping maps backend error codes to CLI taxonomy + hint. See
 // docs/architecture-design.md §4.3.
+//
+// Two code conventions coexist because two backend families do: the matters /
+// dmworkim family emits SCREAMING_SNAKE codes, octo-drive emits lowercase
+// snake_case ones. Both are looked up in this single table, and a code and its
+// cross-family counterpart carry the **same** Type — an agent must be able to
+// branch on the CLI taxonomy and exit code without first working out which
+// backend answered. Only the hint differs, so it can name the domain's own
+// remedy. Codes not present here fall back to status-based inference, unchanged.
 var backendErrorMapping = map[string]struct {
 	Type string
 	Hint string
 }{
-	"UNAUTHORIZED":         {"auth_error", "check OCTO_BOT_TOKEN; bot may be unpublished"},
+	"UNAUTHORIZED":         {"auth_error", "check OCTO_TOKEN / OCTO_BOT_TOKEN; bot may be unpublished"},
 	"AUTH_UNAVAILABLE":     {"network", "auth service unreachable; retry later"},
 	"VALIDATION_ERROR":     {"validation", "check params with `octo-cli schema <op>`"},
 	"MATTER_NOT_FOUND":     {"api_error", "verify ID with `octo-cli matters list`"},
@@ -108,11 +116,28 @@ var backendErrorMapping = map[string]struct {
 	"CONFLICT":             {"validation", "resource state conflicts; re-read and retry"},
 	"PRECONDITION_FAILED":  {"validation", "base version stale; re-read to get the current base version, then retry"},
 	"UNPROCESSABLE_ENTITY": {"validation", "request understood but semantically invalid; check field shapes"},
+
+	// octo-drive lowercase codes (drive spec §7.2). Each shares its Type with
+	// the uppercase counterpart above: conflict/CONFLICT and
+	// invalid_argument/VALIDATION_ERROR are both validation (exit 2),
+	// not_found/NOT_FOUND both api_error, unauthorized/UNAUTHORIZED both
+	// auth_error (exit 3).
+	"unauthorized":      {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
+	"auth_unavailable":  {"network", "auth service unreachable; retry later"},
+	"permission_denied": {"permission", "caller lacks the required drive space role"},
+	"password_required": {"permission", "pass --password for this share"},
+	"wrong_password":    {"permission", "verify the share password"},
+	"share_expired":     {"permission", "request a new share"},
+	"not_found":         {"api_error", "verify the id/token and that the space is accessible"},
+	"conflict":          {"validation", "drive state conflicts; re-read and retry"},
+	"invalid_argument":  {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
+	"internal":          {"api_error", "internal server error; retry or report"},
 }
 
 // ParseBackendError converts an HTTP response body (and status) to an *ExitError.
-// It tries matters envelope first, then dmworkim {msg,status}, falling back to a
-// raw dump. The status code is used as a signal when the body is unparseable.
+// It tries the matters envelope first, then the octo-drive {error,message}
+// shape, then dmworkim {msg,status}, falling back to a raw dump. The status
+// code is used as a signal when the body is unparseable.
 func ParseBackendError(status int, body []byte) *ExitError {
 	// Layer 1: matters envelope {"error":{"code":"...","message":"...","details":{...}}}
 	var mEnv struct {
@@ -123,23 +148,30 @@ func ParseBackendError(status int, body []byte) *ExitError {
 		} `json:"error"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &mEnv) == nil && mEnv.Error.Code != "" {
-		typ := "api_error"
-		hint := ""
-		if m, ok := backendErrorMapping[mEnv.Error.Code]; ok {
-			typ = m.Type
-			hint = m.Hint
-		}
-		e := &ExitError{
-			Type:    typ,
-			Code:    mEnv.Error.Code,
-			Message: mEnv.Error.Message,
-			Hint:    hint,
-			Detail:  json.RawMessage(body),
-		}
-		return e
+		// Unmapped matters codes keep their historical api_error / no-hint
+		// classification.
+		return newBackendError(mEnv.Error.Code, mEnv.Error.Message, "api_error", "", body)
 	}
 
-	// Layer 2: dmworkim {"msg":"...","status":400}
+	// Layer 2: octo-drive envelope {"error":"not_found","message":"..."} — the
+	// code is a bare string rather than a nested object, and the human text is
+	// under "message" (not "msg"). Only snake_case identifiers are treated as
+	// codes; free-text `error` values (octo-drive's space middleware emits
+	// "missing X-Space-Id", "invalid token", …) fall through to the raw
+	// fallback below, exactly as they did before this layer existed.
+	var dvEnv struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if len(body) > 0 && json.Unmarshal(body, &dvEnv) == nil && looksLikeErrorCode(dvEnv.Error) {
+		msg := dvEnv.Message
+		if msg == "" {
+			msg = dvEnv.Error
+		}
+		return newBackendError(dvEnv.Error, msg, typeFromStatus(status), hintFromStatus(status), body)
+	}
+
+	// Layer 3: dmworkim {"msg":"...","status":400}
 	var dEnv struct {
 		Msg    string `json:"msg"`
 		Status int    `json:"status"`
@@ -165,6 +197,45 @@ func ParseBackendError(status int, body []byte) *ExitError {
 		Message: msg,
 		Hint:    hintFromStatus(status),
 	}
+}
+
+// newBackendError builds the ExitError for a backend-supplied code. A code
+// present in backendErrorMapping supplies the taxonomy and hint; an unmapped
+// code keeps its literal code and takes the caller-supplied fallback taxonomy,
+// which differs per envelope family so no existing classification shifts.
+func newBackendError(code, message, fallbackType, fallbackHint string, body []byte) *ExitError {
+	typ, hint := fallbackType, fallbackHint
+	if m, ok := backendErrorMapping[code]; ok {
+		typ, hint = m.Type, m.Hint
+	}
+	return &ExitError{
+		Type:    typ,
+		Code:    code,
+		Message: message,
+		Hint:    hint,
+		Detail:  json.RawMessage(body),
+	}
+}
+
+// looksLikeErrorCode reports whether s is a lowercase snake_case identifier,
+// the shape octo-drive uses for machine-readable codes. Anything else (empty,
+// spaces, mixed case, punctuation) is human prose and must not be promoted to
+// an ExitError.Code.
+func looksLikeErrorCode(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func typeFromStatus(status int) string {

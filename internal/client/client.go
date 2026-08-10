@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -72,6 +73,44 @@ type Request struct {
 	// server-side). The default (false) preserves the historical behaviour of
 	// sending X-Space-Id whenever the credential has a space.
 	SuppressSpaceHeader bool
+	// SecretValues holds literal values that must never be written to a log:
+	// share tokens, invite tokens, and share passwords, declared in the spec via
+	// x-octo-secret. Every occurrence is replaced with a mask in --verbose
+	// traces and --dry-run output, whether it appears in the URL path or the
+	// request body. The values still go on the wire unchanged.
+	SecretValues []string
+}
+
+// secretMask replaces a redacted value in verbose / dry-run output. It is a
+// fixed string so the secret's length is not revealed either.
+const secretMask = "***REDACTED***"
+
+// redactSecrets masks every non-empty SecretValues entry found in s. Values are
+// masked longest-first so a secret that contains another as a substring cannot
+// leave a fragment behind.
+func redactSecrets(s string, secrets []string) string {
+	if s == "" || len(secrets) == 0 {
+		return s
+	}
+	ordered := make([]string, 0, len(secrets))
+	for _, v := range secrets {
+		if v != "" {
+			ordered = append(ordered, v)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
+	for _, v := range ordered {
+		s = strings.ReplaceAll(s, v, secretMask)
+		// A secret embedded in a URL path arrives percent-encoded; mask that
+		// form too so `--verbose` on `invite accept <token>` stays clean.
+		if esc := url.PathEscape(v); esc != v {
+			s = strings.ReplaceAll(s, esc, secretMask)
+		}
+		if esc := url.QueryEscape(v); esc != v {
+			s = strings.ReplaceAll(s, esc, secretMask)
+		}
+	}
+	return s
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.
@@ -158,14 +197,14 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	}
 
 	if c.options.DryRun {
-		return c.renderDryRun(req.Method, u, req.Headers, bodyBytes, req.SuppressSpaceHeader)
+		return c.renderDryRun(req, u, bodyBytes)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, req.Headers, bodyBytes, contentType, req.BinaryResponse, req.OutputPath, req.SuppressSpaceHeader)
+	return c.doWithRetry(ctx, req, u, bodyBytes, contentType)
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -189,7 +228,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, outputPath, suppressSpaceHeader)
+		body, err := c.attempt(ctx, req, urlStr, body, contentType)
 		if err == nil {
 			return body, nil
 		}
@@ -203,13 +242,13 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, method, urlStr, reader)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, urlStr, reader)
 	if err != nil {
 		return nil, output.ErrNetwork(err.Error(), "invalid request")
 	}
@@ -217,19 +256,19 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	if c.cred != nil && c.cred.Token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.cred.Token)
 	}
-	if c.cred != nil && c.cred.SpaceID != "" && !suppressSpaceHeader {
+	if c.cred != nil && c.cred.SpaceID != "" && !req.SuppressSpaceHeader {
 		httpReq.Header.Set("X-Space-Id", c.cred.SpaceID)
 	}
 	if body != nil && contentType != "" {
 		httpReq.Header.Set("Content-Type", contentType)
 	}
-	for k, v := range headers {
+	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
 	}
 
-	c.verbosef("%s %s", method, urlStr)
+	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
 	if c.options.Verbose && len(body) > 0 {
-		c.verbosef("request body: %s", truncate(string(body), 1024))
+		c.verbosef("request body: %s", truncate(redactSecrets(string(body), req.SecretValues), 1024))
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -261,7 +300,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 	// handling (file.download). Any other endpoint returning 3xx is treated
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		if binaryResp {
+		if req.BinaryResponse {
 			loc := resp.Header.Get("Location")
 			env := map[string]any{
 				"url":    loc,
@@ -281,7 +320,7 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// Binary/redirect opt-in: don't try to parse as JSON, just describe.
-		if binaryResp {
+		if req.BinaryResponse {
 			env := map[string]any{
 				"status":       resp.StatusCode,
 				"content_type": resp.Header.Get("Content-Type"),
@@ -297,14 +336,14 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 			// write. A mid-write failure (disk full, I/O error, cancellation)
 			// therefore never leaves a truncated/empty file, and never clobbers
 			// an existing good copy at outputPath — the rename is all-or-nothing.
-			if outputPath != "" {
-				if err := writeFileAtomic(outputPath, respBody, 0o644); err != nil {
+			if req.OutputPath != "" {
+				if err := writeFileAtomic(req.OutputPath, respBody, 0o644); err != nil {
 					return nil, output.ErrValidation(
-						fmt.Sprintf("write output %q: %v", outputPath, err),
+						fmt.Sprintf("write output %q: %v", req.OutputPath, err),
 						"check the path is writable and the directory exists",
 					)
 				}
-				env["output"] = outputPath
+				env["output"] = req.OutputPath
 			}
 			return json.Marshal(env)
 		}
@@ -363,27 +402,35 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 
 // renderDryRun writes a human-readable request description and returns a
 // synthetic success body containing the same payload for envelope rendering.
-func (c *Client) renderDryRun(method, urlStr string, headers map[string]string, body []byte, suppressSpaceHeader bool) ([]byte, error) {
+// Spec-declared secrets (share/invite tokens, share passwords) are masked in
+// both the URL and the body — a dry run must be safe to paste into a ticket.
+func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte, error) {
 	var bodyField any
 	if len(body) > 0 {
-		if err := json.Unmarshal(body, &bodyField); err != nil {
-			bodyField = string(body)
+		redacted := redactSecrets(string(body), req.SecretValues)
+		// UseNumber so a uint64 id in the echoed body is shown at full precision;
+		// a plain unmarshal would round it and make --dry-run misreport what the
+		// request actually carries.
+		dec := json.NewDecoder(strings.NewReader(redacted))
+		dec.UseNumber()
+		if err := dec.Decode(&bodyField); err != nil {
+			bodyField = redacted
 		}
 	}
 	hdr := map[string]string{}
 	if c.cred != nil && c.cred.Token != "" {
 		hdr["Authorization"] = "Bearer " + credential.MaskToken(c.cred.Token)
 	}
-	if c.cred != nil && c.cred.SpaceID != "" && !suppressSpaceHeader {
+	if c.cred != nil && c.cred.SpaceID != "" && !req.SuppressSpaceHeader {
 		hdr["X-Space-Id"] = c.cred.SpaceID
 	}
-	for k, v := range headers {
-		hdr[k] = v
+	for k, v := range req.Headers {
+		hdr[k] = redactSecrets(v, req.SecretValues)
 	}
 	out := map[string]any{
 		"dry_run": true,
-		"method":  method,
-		"url":     urlStr,
+		"method":  req.Method,
+		"url":     redactSecrets(urlStr, req.SecretValues),
 		"headers": hdr,
 	}
 	if bodyField != nil {

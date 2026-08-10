@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -139,8 +140,20 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	cmd := &cobra.Command{
 		Use:   usage,
 		Short: d.Summary,
-		Long:  buildLongDesc(d),
-		Args:  cobra.ExactArgs(len(rt.pathParams)),
+	}
+
+	// Path flags must register before every other kind so they win a name
+	// collision, and before Args is decided so the arity can relax.
+	registerPathFlags(cmd, rt, d)
+	cmd.Long = buildLongDesc(d, rt)
+	if len(rt.pathFlags) > 0 {
+		// A flagged path param may arrive as a flag instead of a positional, so
+		// the exact count is no longer knowable here. runOperation reports the
+		// precise "supply <x> or --x" error.
+		cmd.Args = cobra.MaximumNArgs(len(rt.pathParams))
+		cmd.SetFlagErrorFunc(leadingDashFlagError(rt))
+	} else {
+		cmd.Args = cobra.ExactArgs(len(rt.pathParams))
 	}
 
 	registerQueryFlags(cmd, rt, d)
@@ -175,7 +188,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	return cmd
 }
 
-func buildLongDesc(d *registry.OperationDetail) string {
+func buildLongDesc(d *registry.OperationDetail, rt *operationRuntime) string {
 	var b strings.Builder
 	if d.Summary != "" {
 		b.WriteString(d.Summary)
@@ -188,7 +201,43 @@ func buildLongDesc(d *registry.OperationDetail) string {
 	if d.Pagination != nil {
 		b.WriteString("\n\nThis operation is paginated. Pass --page-all to walk all pages.")
 	}
+	for _, pf := range rt.pathFlags {
+		fmt.Fprintf(&b, "\n\n<%s> may also be given as --%s. Use the flag when the value "+
+			"starts with \"-\" (base64url ids do), otherwise it is parsed as a flag:\n"+
+			"  octo-cli %s --%s -Ab3cD…\n"+
+			"  octo-cli %s -- -Ab3cD…",
+			strings.ReplaceAll(pf.paramName, "_", "-"), pf.flagName,
+			commandPathFor(d), pf.flagName, commandPathFor(d))
+	}
 	return b.String()
+}
+
+// commandPathFor renders the user-facing command words for an operation id,
+// for use in help examples ("drive share revoke").
+func commandPathFor(d *registry.OperationDetail) string {
+	segs := strings.Split(d.ID, ".")
+	for i := range segs {
+		segs[i] = strings.ReplaceAll(segs[i], "_", "-")
+	}
+	return strings.Join(segs, " ")
+}
+
+// leadingDashFlagError rewrites cobra's raw flag-parse failure for commands
+// that accept a flaggable positional id, because the overwhelmingly common
+// cause is a base64url id starting with "-" being read as a flag. The original
+// error is preserved; only an actionable hint is added, naming the flag forms
+// this operation actually has.
+func leadingDashFlagError(rt *operationRuntime) func(*cobra.Command, error) error {
+	names := make([]string, 0, len(rt.pathFlags))
+	for _, pf := range rt.pathFlags {
+		names = append(names, "--"+pf.flagName)
+	}
+	return func(cmd *cobra.Command, err error) error {
+		return output.ErrWithHint("validation", "INVALID_FLAG", err.Error(),
+			fmt.Sprintf("if this is an id starting with \"-\", pass it as %s, "+
+				"or put it after a \"--\" separator: %s -- <id>",
+				strings.Join(names, " / "), cmd.CommandPath()))
+	}
 }
 
 // extractPathParams returns the names of {placeholder} segments in path

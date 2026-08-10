@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,45 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
+
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. Tests here build their fixtures with t.Setenv or an injected
+// Config, and any ambient OCTO_ variable can outrank or redirect that fixture:
+// OCTO_BOT_ID selects a stored credential profile, OCTO_TOKEN outranks
+// OCTO_BOT_TOKEN, OCTO_FORMAT reshapes the output the assertions read.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX
+// (cmd/service/run.go) is read straight from the environment with no config
+// constant behind it, so it is exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config
+// dir and a developer's stored profiles leak back in. Tests that need their own
+// store still override it with t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "octo-cmd-test")
+	if err != nil {
+		panic(err)
+	}
+	sweepOctoEnv()
+	os.Setenv("OCTO_CONFIG_DIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// sweepOctoEnv unsets every OCTO_-prefixed variable in the process environment.
+// os.Environ returns a snapshot, so unsetting while ranging over it is safe.
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
+}
 
 // newTestFactoryWithReg returns a TestFactory with the real embedded registry
 // wired in — needed for any test that touches service commands or schema.
