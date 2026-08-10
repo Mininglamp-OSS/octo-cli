@@ -348,8 +348,13 @@ Notes:
   cannot interleave. Publication is a hard link when `--overwrite` is absent,
   which fails with `EEXIST` atomically and in the same directory, so
   `--overwrite=false` is a guarantee rather than a narrowed check-then-rename
-  window; with `--overwrite` it is a rename, because unconditional replacement is
-  what the caller asked for. The mode is set explicitly — an existing target keeps
+  window — except on a filesystem without hard links or across a device boundary,
+  where it falls back to `os.Rename`, which replaces unconditionally; with
+  `--overwrite` it is a rename by design, because unconditional replacement is what
+  the caller asked for. After publishing, the destination is compared with the
+  descriptor's own identity, so a swap winning the one remaining syscall window is
+  reported as an error rather than as a success whose `sha256` describes different
+  bytes. The mode is set explicitly — an existing target keeps
   its own, a fresh one gets `0600` — so a download neither leaves the mode to the
   temp file's default nor silently tightens a destination the caller had widened.
 - Share passwords, share tokens, `share_id` and invite tokens are marked

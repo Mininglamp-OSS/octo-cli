@@ -118,6 +118,34 @@ Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`,
 - External deps limited to cobra, gojq, `golang.org/x/term` (hidden token prompt in `octo-cli auth login`), and the standard library.
 - All text in English.
 
+## Test Discipline
+
+A test that passes is not evidence until it has failed. Write the assertion first,
+run it against the unfixed code, and require it to fail **for the reason you
+predicted** before writing the fix. If it passes before the fix, or fails for a
+different reason, the assertion is wrong — fix the assertion, not the schedule.
+
+This is not a preference. Assertions written after the code is already correct pass
+whether or not they check anything, and this repo has produced several: a
+`strings.EqualFold` comparison that ignored the case difference it existed to catch;
+a chmod-target check satisfied by a `SameFile` guard three lines earlier; a
+post-publication identity check satisfied by the pre-publication one. Each was found
+later by mutation, which only tells you a test is weak once the bug is gone.
+
+- **Predict the failure text**, then check the run matches it. "It failed" is not
+  the bar; "it failed because the resolved address was never inspected" is.
+- **Isolate the primitive.** If the property is about function X, call X directly.
+  A path that reaches X through three earlier guards tests the earliest one.
+- **Never assert on a substring you did not copy from the code.** Two of the above
+  were checks for text nothing emits.
+- **Mutation is the audit, not the proof.** Break the fix, confirm the test goes red,
+  restore from a per-file `cp` backup — not `git checkout`, which silently does
+  nothing for untracked files and takes unrelated edits with it when it does work.
+
+Security boundaries additionally need a test in each direction: the unsafe input is
+refused *and* the legitimate one still works. A guard with only the first half gets
+widened by the next person who trips over it.
+
 ## Build & Test
 
 ```bash
