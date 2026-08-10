@@ -111,6 +111,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **An unknown subcommand no longer echoes the word it did not recognise.** Every
+  service domain's parent command now reports
+  `unknown subcommand for "octo-cli drive share"; available: access, blob-create, create, download, list, revoke`
+  instead of `unknown subcommand "<word>" for "octo-cli drive share"`. The common way
+  to land there is an omitted verb rather than a mistyped one — `drive share <token>`
+  instead of `drive share revoke <token>` — which put a share token into an error the
+  caller never asked to see; listing the real subcommands is also more useful for an
+  actual typo. Exit-code classification is unchanged (still `validation`, exit 2).
 - **Spec `enum` values are now enforced locally, before the request.** Enums were
   only rendered into `--help`; the value itself went to the backend unchecked, so
   `drive im-transfer create --im-channel-type 9` was forwarded despite the spec

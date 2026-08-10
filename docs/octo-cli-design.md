@@ -320,11 +320,29 @@ Notes:
 - The presigned PUT/GET runs on a separate HTTP client with **no** Octo
   credential and no space header. A GET follows redirects (storage gateways use
   them) but every hop is re-validated against the same https-or-loopback-http
-  rule as the first, and a hop may not land on the local machine (in any spelling
-  a resolver would accept, and any scheme) unless the configured Octo origin is
-  itself loopback — the initial URL comes from the
-  trusted backend and may legitimately name an internal host, but a hop the
-  storage host chooses may not point at the caller's own machine. A **PUT does not
+  rule as the first. **No connection may land on the local machine** — the initial
+  one or any hop, in any spelling a resolver would accept, under any scheme — unless
+  the configured Octo origin is itself loopback. The decision is made on the resolved
+  address rather than on how the host is written, and the connection then goes to the
+  address that was checked, so a second lookup cannot answer differently in between.
+  Other internal ranges stay reachable; only the caller's own machine does not. The
+  consequence to know is that a deployment with a remote Octo origin whose object
+  storage resolves to the caller's own machine will not transfer — pointing
+  `OCTO_API_BASE_URL` at loopback is what re-enables the whole local setup.
+
+  A configured HTTP(S) proxy is honoured: transfers still traverse it, because a
+  network that can only reach object storage through a proxy is a normal deployment
+  and refusing to proxy would make the CLI unusable there. The target is classified
+  before the request is handed over, in the transport's proxy selector rather than in
+  its dialer — the dialer is only ever told the proxy's address on that path, so a
+  dialer-only check would be judging the wrong machine. Under a proxy the address
+  cannot be pinned the way it is on the direct path, since the proxy makes the
+  connection; the proxy is the operator's own component, and a proxy on the local
+  machine is therefore not refused. The two conditions report differently on purpose:
+  a presigned URL pointing at this machine is `UNSAFE_PRESIGNED_URL` and asks for the
+  storage endpoint to be reported, while a connection that arrives here without the
+  URL naming it is `TRANSFER_REDIRECTED_LOCALLY` and points at the local proxy
+  configuration. A **PUT does not
   follow redirects at all**: Go rewrites a PUT into a bodiless GET on 301/302/303,
   so a storage host answering 2xx after such a hop would report a successful upload
   with nothing written, and the caller would then confirm a drive row pointing at an

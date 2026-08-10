@@ -123,8 +123,13 @@ func findChild(parent *cobra.Command, name string) *cobra.Command {
 // both safe and more useful for a typo than quoting the wrong word back.
 func rejectUnknownSubcommand(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return fmt.Errorf("unknown subcommand for %q; available: %s",
-			cmd.CommandPath(), strings.Join(childCommandNames(cmd), ", "))
+		if names := childCommandNames(cmd); len(names) > 0 {
+			return fmt.Errorf("unknown subcommand for %q; available: %s",
+				cmd.CommandPath(), strings.Join(names, ", "))
+		}
+		// A parent whose children are all hidden would otherwise render
+		// "available: " with nothing after it.
+		return fmt.Errorf("unknown subcommand for %q", cmd.CommandPath())
 	}
 	return cmd.Help()
 }
