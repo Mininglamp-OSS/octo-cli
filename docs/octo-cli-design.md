@@ -352,15 +352,20 @@ Notes:
   what the caller asked for. The mode is set explicitly — an existing target keeps
   its own, a fresh one gets `0600` — so a download neither leaves the mode to the
   temp file's default nor silently tightens a destination the caller had widened.
-- Share passwords, share tokens and invite tokens are marked `x-octo-secret`:
-  they go on the wire unchanged but are masked in `--verbose` and `--dry-run`
-  output, and in the default error envelope on **both** of its paths — the
-  transport error (whose `*url.Error` embeds the request URL) and the backend
+- Share passwords, share tokens, `share_id` and invite tokens are marked
+  `x-octo-secret`: they go on the wire unchanged but are masked in `--verbose` and
+  `--dry-run` output, and in the default error envelope on **both** of its paths —
+  the transport error (whose `*url.Error` embeds the request URL) and the backend
   error body (which may echo the value it was given, and for these operations the
-  id *is* the secret). Masking is structural on both sides: the value is walked and
-  matching leaves replaced, on the request side before marshalling and on the
-  response side after parsing, so a password containing `"`, `\` or a newline is
-  masked whatever spelling the producer chose, and the response stays parseable so
+  id *is* the secret). `share_id` is on that list because the backend returns one
+  opaque id that is both the management handle and the access token, so `share
+  revoke`'s path parameter is the bearer token; `invite_id` is deliberately **not**,
+  because an Invite has genuinely distinct id and token fields and masking the id
+  would hide a value callers need to read. Masking is structural on both sides: the
+  value is walked and matching leaves replaced, on the request side before
+  marshalling and on the response side after parsing, so a password containing `"`,
+  `\` or a newline is masked whatever spelling the producer chose, and the response
+  stays parseable so
   the backend's machine-readable `code` survives redaction. Object keys are never
   rewritten. A secret shorter than eight characters is masked only where it appears
   as a whole token, because substring-masking a one-character value rewrites

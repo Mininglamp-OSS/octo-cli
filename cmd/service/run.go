@@ -248,9 +248,21 @@ func rejectDotSegment(label, value string) *output.ExitError {
 		"pass the id value; a dot segment would retarget the request at a different resource")
 }
 
-// collectSecrets gathers the literal values of every x-octo-secret parameter or
-// body field the user supplied, so the transport can mask them in verbose and
-// dry-run output. Returns nil when the operation declares no secrets.
+// collectSecrets gathers the literal values of every x-octo-secret path
+// parameter, query flag, header flag and *promoted* body flag the user supplied,
+// so the transport can mask them in verbose and dry-run output. Returns nil when
+// the operation declares no secrets.
+//
+// It reads flag values only, never --data. A secret body property supplied
+// through --data is therefore NOT collected, and would reach the trace unmasked.
+// That is unreachable today rather than fixed: the only three operations
+// declaring a secret body property (drive.share.blob-create / access / download,
+// all `password`) have their generated leaves detached in favour of hand-written
+// composites that pass SecretValues explicitly.
+// TestSecrets_EverySecretBodyPropertyBelongsToADetachedLeaf holds that invariant,
+// so the first generated leaf to declare one fails the build — at which point
+// this has to walk the merged body instead, which is an engine-level change
+// rather than a comment.
 func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues []string) []string {
 	var secrets []string
 	add := func(v string) {
