@@ -217,12 +217,24 @@ func jsonDetail(body []byte) json.RawMessage {
 // IsErrorCodeShaped reports whether s has the shape of a machine-readable error
 // code — lower-case alphanumerics and underscores.
 //
-// Exported for the transport's response redaction: the code is a closed
-// vocabulary the caller branches on, so masking it destroys the CLI's own error
-// contract while protecting nothing. Redaction uses this to leave a code-shaped
-// value alone.
+// Shape alone is not evidence that a value *is* a code: a caller-supplied id can be
+// all lower-case too. Use IsKnownErrorCode when the question is whether a value may
+// be exempted from redaction.
 func IsErrorCodeShaped(s string) bool {
 	return looksLikeErrorCode(s)
+}
+
+// IsKnownErrorCode reports whether s is a code this CLI recognises — that is, one
+// present in the backend error mapping.
+//
+// This is the strong form of the question, and the one the transport's response
+// redaction asks. Membership in a closed, enumerated vocabulary is something a
+// caller-supplied id cannot acquire, which is what makes it safe to leave such a
+// value unmasked in the code position: the CLI prints these codes on every failure
+// of their kind, so nothing is disclosed by not masking one.
+func IsKnownErrorCode(s string) bool {
+	_, ok := backendErrorMapping[s]
+	return ok
 }
 
 // newBackendError builds the ExitError for a backend-supplied code. A code

@@ -666,3 +666,118 @@ func TestBackendError_FallbackCarriesDetail(t *testing.T) {
 		})
 	}
 }
+
+// Round-9 P2-1. The code-position exemption added in round 8 was unbounded: any
+// value shaped like a code survived unmasked in the code position, so a
+// caller-supplied id that happens to be all lower-case
+// (`drive share revoke lowercasesecretid` against a backend echoing it as the code)
+// reached stderr verbatim.
+//
+// The tension the review identified is real and is why this is a rule rather than a
+// patch: exempting the code position protects the error contract, bounding the
+// exemption protects the secret, and the `not_found` case sits exactly where the
+// two conflict — there the secret *is* a valid code. The rule below resolves it by
+// asking whether the value is a code the CLI *recognises*, which no caller-supplied
+// id can become.
+//
+//  1. a recognised code (present in backendErrorMapping) is never masked, even when
+//     it equals a declared secret — the value is drawn from a closed vocabulary the
+//     CLI prints on every such failure, so leaving it discloses nothing, while
+//     masking it destroys the distinction the caller branches on;
+//  2. an unrecognised value in the code position that equals a declared secret IS
+//     masked — nothing vouches for it, so the secret wins;
+//  3. an unrecognised value that is not a declared secret is left alone, so a code
+//     the backend adds tomorrow still reaches the caller.
+func TestBackendError_CodeExemptionFollowsTheRule(t *testing.T) {
+	cases := []struct {
+		name       string
+		code       string // what the backend puts in the code position
+		secret     string // the declared secret for the request
+		absent     string // what must not survive; defaults to code
+		wantMasked bool
+		clause     string
+	}{
+		{
+			name: "clause 1: a recognised code equal to the secret stays",
+			code: "not_found", secret: "not_found", wantMasked: false,
+			clause: "recognised codes are a closed vocabulary; masking breaks the contract and hides nothing",
+		},
+		{
+			name: "clause 1: a recognised code unrelated to the secret stays",
+			code: "wrong_password", secret: "hunter2hunter2", wantMasked: false,
+			clause: "recognised code",
+		},
+		{
+			name: "clause 2: an unrecognised code equal to the secret is masked",
+			code: "lowercasesecretid", secret: "lowercasesecretid", wantMasked: true,
+			clause: "nothing vouches for this value, so the secret wins",
+		},
+		{
+			name: "clause 2: an unrecognised snake_case id equal to the secret is masked",
+			code: "abc_123_def_456", secret: "abc_123_def_456", wantMasked: true,
+			clause: "shape alone is not evidence",
+		},
+		{
+			name: "clause 3: an unrecognised code unrelated to the secret stays",
+			code: "quota_exhausted", secret: "hunter2hunter2", wantMasked: false,
+			clause: "a code the backend adds tomorrow must still reach the caller",
+		},
+		{
+			// The gate that admits a value to the rule at all. Without it every clause
+			// below is unreachable for a value like this: it is not a recognised code
+			// and it is not equal to the secret, so clause 3 would exempt it verbatim
+			// and the token inside would reach the caller in full.
+			name: "shape gate: a sentence embedding the share token is not a code",
+			code: "share token -Ab3cD_ef7Gh9jK is revoked", secret: "-Ab3cD_ef7Gh9jK",
+			absent: "-Ab3cD_ef7Gh9jK", wantMasked: true,
+			clause: "a code is a single identifier; a prose message carrying a token is not one, and must go through masking",
+		},
+		{
+			name: "shape gate: a base64url token in the code position is masked",
+			code: "-Ab3cD_ef7Gh9jK", secret: "-Ab3cD_ef7Gh9jK", wantMasked: true,
+			clause: "mixed case and base64url punctuation are not code shape, so a token can never be vouched for",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"` + tc.code + `","message":"something went wrong"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + tc.secret,
+				SecretValues: []string{tc.secret},
+			})
+			if err == nil {
+				t.Fatal("expected a backend error")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			visible := ee.Code + " " + string(ee.Detail)
+			if tc.wantMasked {
+				absent := tc.absent
+				if absent == "" {
+					absent = tc.code
+				}
+				if strings.Contains(visible, absent) {
+					t.Errorf("%q survived in the code position but nothing vouches for it (%s):\ncode=%q detail=%s",
+						absent, tc.clause, ee.Code, ee.Detail)
+				}
+				return
+			}
+			if ee.Code != tc.code {
+				t.Errorf("code = %q, want %q — %s", ee.Code, tc.code, tc.clause)
+			}
+		})
+	}
+}

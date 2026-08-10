@@ -251,18 +251,37 @@ func redactResponseBody(b []byte, secrets []string) []byte {
 //
 // The code is what a caller branches on — "wrong password, retry" versus "no
 // permission, stop" — and it lives in a *value*, not a key: the drive envelope is
-// {"error":"wrong_password"}, the matters envelope {"error":{"code":…}}. Masking
-// it made the value fail looksLikeErrorCode, so parsing fell through to a generic
-// status-derived code and the caller lost the distinction. Any secret long enough
-// to appear anywhere in the code, or short enough to be one of its
-// underscore-delimited words, triggered that: `password`, `wrong`, `not`, `found`.
+// {"error":"wrong_password"}, the matters envelope {"error":{"code":…}}. Masking it
+// made the value fail looksLikeErrorCode, so parsing fell through to a generic
+// status-derived code and the caller lost the distinction.
 //
-// The exemption is narrow and safe. It applies only to the code position, and only
-// when the value is already code-shaped — lower-case alphanumerics and
-// underscores. A share or invite token is base64url, so it carries upper-case
-// characters or "-" and never qualifies. A value that does qualify is being
-// reported as an error code, which is a closed vocabulary the CLI prints on every
-// such failure anyway, so nothing is disclosed by leaving it.
+// # The exemption rule
+//
+// Two goals collide here, and the resolution is stated rather than assumed:
+// exempting the code position protects the error contract, while bounding the
+// exemption protects the secret. They genuinely conflict in one case — a share id
+// that happens to be spelled `not_found`, where the secret *is* a valid code — so
+// the rule decides by asking whether the value is a code this CLI **recognises**,
+// which is a property no caller-supplied id can acquire:
+//
+//  1. A recognised code (present in the backend error mapping) is never masked,
+//     even when it equals a declared secret. The vocabulary is closed and the CLI
+//     prints these codes on every failure of their kind, so leaving one discloses
+//     nothing an attacker could not already predict — while masking it destroys the
+//     distinction the caller branches on.
+//  2. An unrecognised value in the code position that equals a declared secret IS
+//     masked. Nothing vouches for it, so the secret wins. This is the case that
+//     shape alone used to let through: `lowercasesecretid` looks exactly like a code
+//     and is not one.
+//  3. An unrecognised value that is not a declared secret is left alone, so a code
+//     the backend adds tomorrow still reaches the caller instead of being masked for
+//     being unfamiliar.
+//
+// Why a real token never reaches clause 1 or 3 by accident: Octo share and invite
+// tokens are base64url, so they carry upper-case characters or "-", and
+// IsErrorCodeShaped admits only lower-case alphanumerics and underscores. A token
+// therefore fails the shape gate before the vocabulary question is asked. Clause 2
+// exists for the residue — a value that passes the shape gate without being a code.
 func redactErrorEnvelope(v any, secrets []string) any {
 	obj, ok := v.(map[string]any)
 	if !ok {
@@ -271,7 +290,7 @@ func redactErrorEnvelope(v any, secrets []string) any {
 	out := make(map[string]any, len(obj))
 	for key, val := range obj {
 		switch {
-		case isCodeBearingKey(key) && isExemptCode(val):
+		case isCodeBearingKey(key) && isExemptCode(val, secrets):
 			out[key] = val
 		case key == "error":
 			// The matters envelope nests {"code":…,"message":…} under "error";
@@ -290,11 +309,21 @@ func isCodeBearingKey(key string) bool {
 	return key == "code" || key == "error"
 }
 
-// isExemptCode reports whether val is a code-shaped string, and so safe to leave
-// unmasked in the code position.
-func isExemptCode(val any) bool {
+// isExemptCode applies the three-clause rule documented on redactErrorEnvelope.
+func isExemptCode(val any, secrets []string) bool {
 	s, ok := val.(string)
-	return ok && output.IsErrorCodeShaped(s)
+	if !ok || !output.IsErrorCodeShaped(s) {
+		return false
+	}
+	if output.IsKnownErrorCode(s) {
+		return true // clause 1
+	}
+	for _, secret := range secrets {
+		if secret != "" && s == secret {
+			return false // clause 2
+		}
+	}
+	return true // clause 3
 }
 
 // redactBodyKeysAndValues is redactBodyValue plus key masking, for a body whose
