@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,12 +111,22 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		"content_type": ct,
 	}
 
+	// Identity resolution and the allowed-token-kinds gate come first, before the
+	// dry-run branch: a generated leaf routes and gates before it describes
+	// itself, so a composite that answered --dry-run with an unusable credential
+	// would report a request the caller can never make. An unsupported kind is
+	// TOKEN_KIND_NOT_ALLOWED / exit 2 here as it is there.
+	mount, err := service.MountForOperation(f, "drive.upload.prepare")
+	if err != nil {
+		return failErr(f, err)
+	}
+
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
 			"dry_run":      true,
 			"method":       http.MethodPost,
 			"operation":    "drive.upload.prepare",
-			"path":         "{mount}/files/prepare-upload",
+			"path":         mount + "/files/prepare-upload",
 			"body":         prepareBody,
 			"local_path":   localPath,
 			"local_size":   fmt.Sprintf("%d", size),
@@ -124,10 +135,6 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		})
 	}
 
-	mount, err := service.MountForOperation(f, "drive.upload.prepare")
-	if err != nil {
-		return failErr(f, err)
-	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
@@ -153,11 +160,12 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	}
 
 	// From here on a pending row exists: every failure path must try to cancel it.
-	if _, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL); uerr != nil {
+	uploadURL, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL)
+	if uerr != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, uerr))
 	}
 	progressf(f, "uploading %d bytes to object storage", size)
-	if perr := putObject(cmd, localPath, int64(size), &prepared); perr != nil {
+	if perr := putObject(cmd, localPath, int64(size), &prepared, uploadURL); perr != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, perr))
 	}
 	progressf(f, "upload complete; confirming file %s", fileID)
@@ -191,7 +199,10 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 // exact Content-Length, all of which the storage gateway signed — omitting or
 // changing any of them makes it reject the upload with 403. No Authorization or
 // X-Space-Id is set: the caller's Octo credential must never reach storage.
-func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepareUploadResponse) *output.ExitError {
+//
+// A transport failure is reported through transferNetworkError, which names the
+// host but never the URL: the presigned signature is in the query string.
+func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepareUploadResponse, target *url.URL) *output.ExitError {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return output.ErrValidation(fmt.Sprintf("<local-path>: %v", err), "check the path and permissions")
@@ -200,7 +211,7 @@ func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepa
 
 	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPut, prepared.UploadURL, file)
 	if err != nil {
-		return output.ErrNetwork(err.Error(), "invalid upload request")
+		return transferNetworkError("upload", target, err)
 	}
 	req.ContentLength = size
 	if prepared.ContentType != "" {
@@ -210,9 +221,9 @@ func putObject(cmd *cobra.Command, localPath string, size int64, prepared *prepa
 		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
 	}
 
-	resp, err := transferClient().Do(req)
+	resp, err := transferClient("upload_url").Do(req)
 	if err != nil {
-		return output.ErrNetwork(fmt.Sprintf("upload: %v", err), "check network access to object storage")
+		return transferNetworkError("upload", target, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

@@ -62,22 +62,27 @@ func runDriveDownloadFile(cmd *cobra.Command, f *cmdutil.Factory, fileID, output
 		return failErr(f, err)
 	}
 
+	// Identity resolution and the allowed-token-kinds gate run before the dry-run
+	// branch, matching the generated leaves: a credential of the wrong kind must
+	// fail with TOKEN_KIND_NOT_ALLOWED rather than have --dry-run describe a
+	// request it could never send.
+	mount, err := service.MountForOperation(f, "drive.download.url")
+	if err != nil {
+		return failErr(f, err)
+	}
+
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
 			"dry_run":   true,
 			"method":    http.MethodGet,
 			"operation": "drive.download.url",
-			"path":      "{mount}/files/" + fileID + "/download",
+			"path":      mount + "/files/" + fileID + "/download",
 			"output":    outputPath,
 			"overwrite": overwrite,
 			"note":      "dry run stops here: no signed URL is fetched and nothing is written to disk",
 		})
 	}
 
-	mount, err := service.MountForOperation(f, "drive.download.url")
-	if err != nil {
-		return failErr(f, err)
-	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)

@@ -137,14 +137,23 @@ func assertSameOrigin(u, origin *url.URL) *output.ExitError {
 }
 
 // assertShareIDSegment enforces that a link's id segment is a single opaque
-// token: one path segment, non-empty, and limited to the characters Octo ids
-// use. Anything else (a slash, a dot-dot, whitespace) is a malformed link.
+// token: one path segment, non-empty, not a dot segment, and limited to the
+// characters Octo ids use. Anything else (a slash, a dot-dot, whitespace) is a
+// malformed link.
+//
+// The dot check is explicit because "." is a legal character *inside* an id and
+// url.PathEscape does not escape it, so a segment that is exactly "." or ".."
+// would reach the URL as a real dot segment — see rejectDotSegments in
+// cmd/service for why that matters on a DELETE.
 func assertShareIDSegment(what, seg string) *output.ExitError {
 	if seg == "" {
 		return invalidShareURL("the " + what + " is missing from the link")
 	}
 	if strings.Contains(seg, "/") {
 		return invalidShareURL("the link has extra path segments after the " + what)
+	}
+	if seg == "." || seg == ".." {
+		return invalidShareURL(fmt.Sprintf("the %s must be an id, not the path segment %q", what, seg))
 	}
 	for i := 0; i < len(seg); i++ {
 		c := seg[i]

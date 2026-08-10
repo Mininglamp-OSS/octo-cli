@@ -3,7 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -72,25 +75,99 @@ type shareCreateOpts struct {
 	permission       string
 	expiresInSeconds int
 	password         string
+	passwordFile     string
 }
 
 func addShareCreateFlags(cmd *cobra.Command, o *shareCreateOpts) {
 	cmd.Flags().StringVar(&o.permission, "permission", "download", "what the receiver may do: view or download (blob shares only)")
 	cmd.Flags().IntVar(&o.expiresInSeconds, "expires-in-seconds", 0, "share lifetime; 0 uses the backend default of 7 days (blob shares only)")
-	cmd.Flags().StringVar(&o.password, "password", "", "optional share password; hand it over out of band, never inside the URL (blob shares only)")
+	cmd.Flags().StringVar(&o.password, "password", "", "optional share password; hand it over out of band, never inside the URL (blob shares only). Visible in ps/argv — prefer --password-file")
+	addSharePasswordFileFlag(cmd, &o.passwordFile)
+	cmd.MarkFlagsMutuallyExclusive("password", "password-file")
 }
 
-func (o shareCreateOpts) body(fileID uint64) map[string]any {
+// addSharePasswordFileFlag registers the non-argv route for a share password,
+// mirroring what `auth login` already offers for a bot token (--token-file /
+// --with-token, "never from the command line"). A share password is what gates
+// access to shared bytes, and on argv it is readable from ps and /proc and lands
+// in shell history for the process lifetime. --password stays supported for
+// interactive use and backwards compatibility.
+func addSharePasswordFileFlag(cmd *cobra.Command, target *string) {
+	cmd.Flags().StringVar(target, "password-file", "",
+		"read the share password from this file, or from stdin when the path is \"-\"; keeps it off argv")
+}
+
+// resolveSharePassword returns the effective password: the --password value, or
+// the contents of --password-file with one trailing newline removed.
+//
+// Only the trailing line terminator is stripped, not all surrounding whitespace
+// as readToken does for a bot token: a token's charset excludes spaces, while a
+// password may legitimately start or end with one, and trimming it would turn a
+// correct password into a silent authentication failure.
+func resolveSharePassword(f *cmdutil.Factory, password, passwordFile string) (string, *output.ExitError) {
+	if passwordFile == "" {
+		return password, nil
+	}
+	var raw []byte
+	var err error
+	if passwordFile == "-" {
+		raw, err = io.ReadAll(f.IOStreams.In)
+	} else {
+		raw, err = os.ReadFile(passwordFile)
+	}
+	if err != nil {
+		return "", output.ErrValidation(
+			fmt.Sprintf("--password-file: %v", err),
+			"check the path, or pass \"-\" to read the password from stdin")
+	}
+	return strings.TrimRight(string(raw), "\r\n"), nil
+}
+
+func (o shareCreateOpts) body(fileID uint64, password string) map[string]any {
 	body := map[string]any{
 		"file_id":            output.Uint64JSONNumber(fileID),
 		"permission":         o.permission,
 		"expires_in_seconds": o.expiresInSeconds,
 	}
-	if o.password != "" {
-		body["password"] = o.password
+	if password != "" {
+		body["password"] = password
 	}
 	return body
 }
+
+// shareCreateFlagLabels maps the share-create body fields back to the flags that
+// set them, so a spec-enum rejection names --permission rather than the JSON key.
+var shareCreateFlagLabels = map[string]string{
+	"permission":         "permission",
+	"expires_in_seconds": "expires-in-seconds",
+	"password":           "password",
+}
+
+// prepareBlobShare runs everything that must happen before a share request is
+// described or sent: the password is loaded, the body is checked against the
+// drive.share.blob-create schema (so --permission is held to the spec's enum
+// with zero HTTP, exactly as the generated leaf this command replaced was), and
+// the credential is resolved and gated for that operation.
+//
+// It returns the assembled body and the resolved mount.
+func prepareBlobShare(f *cmdutil.Factory, o shareCreateOpts, fileID uint64) (map[string]any, string, error) {
+	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
+	if perr != nil {
+		return nil, "", perr
+	}
+	body := o.body(fileID, password)
+	if verr := service.ValidateRequestBody(f, driveShareCreateOp, body, shareCreateFlagLabels); verr != nil {
+		return nil, "", verr
+	}
+	mount, err := service.MountForOperation(f, driveShareCreateOp)
+	if err != nil {
+		return nil, "", err
+	}
+	return body, mount, nil
+}
+
+// driveShareCreateOp is the spec operation both share-create surfaces post to.
+const driveShareCreateOp = "drive.share.blob-create"
 
 // --- drive share create ---
 
@@ -139,28 +216,35 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 	if oerr != nil {
 		return failErr(f, oerr)
 	}
+	// Spec-enum check on --permission and the credential gate both run here,
+	// before the dry-run branch and before the node lookup, so an out-of-enum
+	// value or an incompatible credential costs zero HTTP on either branch.
+	shareBody, shareMount, err := prepareBlobShare(f, o, id)
+	if err != nil {
+		return failErr(f, err)
+	}
+	lookupMount, err := service.MountForOperation(f, "drive.file.get")
+	if err != nil {
+		return failErr(f, err)
+	}
 
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
 			"dry_run":    true,
-			"operations": []string{"drive.file.get", "drive.share.blob-create"},
-			"lookup":     map[string]any{"method": http.MethodGet, "path": "{mount}/files/" + fileID},
-			"blob_share": map[string]any{"method": http.MethodPost, "path": "{mount}/shares", "body": redactedShareBody(o, id)},
+			"operations": []string{"drive.file.get", driveShareCreateOp},
+			"lookup":     map[string]any{"method": http.MethodGet, "path": lookupMount + "/files/" + fileID},
+			"blob_share": map[string]any{"method": http.MethodPost, "path": shareMount + "/shares", "body": redactedShareBody(shareBody)},
 			"note":       "dry run stops here: the node is not looked up and no share is created",
 		})
 	}
 
-	mount, err := service.MountForOperation(f, "drive.file.get")
-	if err != nil {
-		return failErr(f, err)
-	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
 	}
 	raw, err := cli.Do(cmd.Context(), &client.Request{
 		Method:              http.MethodGet,
-		Path:                mount + "/files/" + fileID,
+		Path:                lookupMount + "/files/" + fileID,
 		SuppressSpaceHeader: true,
 	})
 	if err != nil {
@@ -183,6 +267,14 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 			return failErr(f, output.ErrWithHint("internal", "RESPONSE_DECODE",
 				"the document mount returned no ref_id (doc id)", "report the backend response"))
 		}
+		// The doc id comes from the backend, and buildDocShareURL concatenates it
+		// into the path. Hold it to the same charset the consuming side enforces
+		// (assertShareIDSegment, used by `share access`) so this command cannot
+		// hand out a link its own parser would refuse — a `?`, `#`, space or slash
+		// in a ref_id would otherwise produce a structurally different URL.
+		if verr := assertShareIDSegment("document id", docID); verr != nil {
+			return failErr(f, verr)
+		}
 		return emitJSON(f, shareTarget{
 			Kind:         shareKindDoc,
 			ShareURL:     buildDocShareURL(origin, docID, entry.DocSpaceID),
@@ -195,7 +287,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 		})
 
 	case shareKindBlob:
-		share, serr := createBlobShare(cmd, f, cli, id, o)
+		share, serr := createBlobShare(cmd, f, cli, shareMount, shareBody)
 		if serr != nil {
 			return failErr(f, serr)
 		}
@@ -255,20 +347,27 @@ func runDriveShareBlobCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID stri
 	if perr != nil {
 		return failErr(f, perr)
 	}
+	// Spec-enum check and credential gate before the dry-run branch: this command
+	// replaced the generated drive.share.blob-create leaf, so it has to enforce
+	// the same contract the leaf did rather than a weaker hand-written one.
+	body, mount, err := prepareBlobShare(f, o, id)
+	if err != nil {
+		return failErr(f, err)
+	}
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
 			"dry_run":   true,
 			"method":    http.MethodPost,
-			"operation": "drive.share.blob-create",
-			"path":      "{mount}/shares",
-			"body":      redactedShareBody(o, id),
+			"operation": driveShareCreateOp,
+			"path":      mount + "/shares",
+			"body":      redactedShareBody(body),
 		})
 	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
 	}
-	share, serr := createBlobShare(cmd, f, cli, id, o)
+	share, serr := createBlobShare(cmd, f, cli, mount, body)
 	if serr != nil {
 		return failErr(f, serr)
 	}
@@ -285,19 +384,17 @@ func runDriveShareBlobCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID stri
 	})
 }
 
-// createBlobShare posts the share record. The password is marked as a secret so
-// it is masked in verbose traces.
-func createBlobShare(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, fileID uint64, o shareCreateOpts) (*shareResponse, error) {
-	mount, err := service.MountForOperation(f, "drive.share.blob-create")
-	if err != nil {
-		return nil, err
-	}
+// createBlobShare posts the share record against an already-gated mount with an
+// already-validated body. The password is marked as a secret so it is masked in
+// verbose traces.
+func createBlobShare(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, mount string, body map[string]any) (*shareResponse, error) {
+	password, _ := body["password"].(string)
 	raw, err := cli.Do(cmd.Context(), &client.Request{
 		Method:              http.MethodPost,
 		Path:                mount + "/shares",
-		Body:                o.body(fileID),
+		Body:                body,
 		SuppressSpaceHeader: true,
-		SecretValues:        secretList(o.password),
+		SecretValues:        secretList(password),
 	})
 	if err != nil {
 		return nil, err
@@ -317,7 +414,7 @@ func createBlobShare(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client,
 
 // newDriveShareAccessCmd builds `octo-cli drive share access <share-url>`.
 func newDriveShareAccessCmd(f *cmdutil.Factory) *cobra.Command {
-	var password string
+	var o sharePasswordOpts
 	cmd := &cobra.Command{
 		Use:   "access <share-url>",
 		Short: "Resolve a share link to its target (requires a credential)",
@@ -340,14 +437,14 @@ still needs an Octo login and an existing docs permission.
 Underlying operation: drive.share.access.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDriveShareAccess(cmd, f, args[0], password)
+			return runDriveShareAccess(cmd, f, args[0], o)
 		},
 	}
-	cmd.Flags().StringVar(&password, "password", "", "share password, for a password-protected blob share")
+	addSharePasswordFlags(cmd, &o)
 	return cmd
 }
 
-func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL, password string) error {
+func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string, o sharePasswordOpts) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return failErr(f, err)
@@ -355,6 +452,17 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL, passw
 	parsed, perr := parseShareURL(cfg, shareURL)
 	if perr != nil {
 		return failErr(f, perr)
+	}
+	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
+	if perr != nil {
+		return failErr(f, perr)
+	}
+	// The credential gate runs before the document branch below, which succeeds
+	// locally: without this, `share access <doc-link>` returned a resolved target
+	// on a credential kind that is not allowed to touch drive at all.
+	mount, err := service.MountForOperation(f, "drive.share.access")
+	if err != nil {
+		return failErr(f, err)
 	}
 
 	// A document link carries its own target; there is nothing to ask the
@@ -372,19 +480,18 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL, passw
 
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
-			"dry_run":      true,
-			"method":       http.MethodPost,
-			"operation":    "drive.share.access",
-			"path":         "{mount}/shares/***REDACTED***/access",
+			"dry_run":   true,
+			"method":    http.MethodPost,
+			"operation": "drive.share.access",
+			// share_url is the argument the caller passed in, so echoing it
+			// discloses nothing new; the path is masked because the token inside it
+			// is what a leaked dry-run description would hand over.
+			"path":         mount + "/shares/***REDACTED***/access",
 			"share_url":    parsed.canonical,
 			"password_set": password != "",
 		})
 	}
 
-	mount, err := service.MountForOperation(f, "drive.share.access")
-	if err != nil {
-		return failErr(f, err)
-	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
@@ -420,7 +527,8 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL, passw
 
 // newDriveShareDownloadCmd builds `octo-cli drive share download <share-url>`.
 func newDriveShareDownloadCmd(f *cmdutil.Factory) *cobra.Command {
-	var outputPath, password string
+	var outputPath string
+	var o sharePasswordOpts
 	var overwrite bool
 	cmd := &cobra.Command{
 		Use:   "download <share-url>",
@@ -441,17 +549,17 @@ destination is refused unless --overwrite is set.
 Underlying operation: drive.share.download.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDriveShareDownload(cmd, f, args[0], outputPath, password, overwrite)
+			return runDriveShareDownload(cmd, f, args[0], outputPath, o, overwrite)
 		},
 	}
 	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "destination file path (required)")
-	cmd.Flags().StringVar(&password, "password", "", "share password, for a password-protected blob share")
+	addSharePasswordFlags(cmd, &o)
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "replace the destination file if it already exists")
 	_ = cmd.MarkFlagRequired("output") //nolint:errcheck // static flag name
 	return cmd
 }
 
-func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, outputPath, password string, overwrite bool) error {
+func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, outputPath string, o sharePasswordOpts, overwrite bool) error {
 	cfg, err := f.Config()
 	if err != nil {
 		return failErr(f, err)
@@ -471,13 +579,24 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 	if werr := assertWritableTarget(outputPath, overwrite); werr != nil {
 		return failErr(f, werr)
 	}
+	password, perr := resolveSharePassword(f, o.password, o.passwordFile)
+	if perr != nil {
+		return failErr(f, perr)
+	}
+	// Credential resolution and the allowed-token-kinds gate precede the dry-run
+	// description, so --dry-run cannot describe a request the active credential
+	// is not allowed to make.
+	mount, err := service.MountForOperation(f, "drive.share.download")
+	if err != nil {
+		return failErr(f, err)
+	}
 
 	if f.Globals != nil && f.Globals.DryRun {
 		return emitJSON(f, map[string]any{
 			"dry_run":      true,
 			"method":       http.MethodPost,
 			"operation":    "drive.share.download",
-			"path":         "{mount}/shares/***REDACTED***/download",
+			"path":         mount + "/shares/***REDACTED***/download",
 			"share_url":    parsed.canonical,
 			"output":       outputPath,
 			"overwrite":    overwrite,
@@ -486,10 +605,6 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 		})
 	}
 
-	mount, err := service.MountForOperation(f, "drive.share.download")
-	if err != nil {
-		return failErr(f, err)
-	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
@@ -525,6 +640,20 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 
 // --- shared helpers ---
 
+// sharePasswordOpts is the password surface of the two commands that consume a
+// share link. Both accept the value on argv (--password) or off it
+// (--password-file), the latter mirroring `auth login --token-file`.
+type sharePasswordOpts struct {
+	password     string
+	passwordFile string
+}
+
+func addSharePasswordFlags(cmd *cobra.Command, o *sharePasswordOpts) {
+	cmd.Flags().StringVar(&o.password, "password", "", "share password, for a password-protected blob share. Visible in ps/argv — prefer --password-file")
+	addSharePasswordFileFlag(cmd, &o.passwordFile)
+	cmd.MarkFlagsMutuallyExclusive("password", "password-file")
+}
+
 // passwordBody returns the optional password body, or nil so no body is sent
 // when there is no password (the backend treats an empty body as "no password").
 func passwordBody(password string) any {
@@ -546,13 +675,17 @@ func secretList(values ...string) []string {
 	return out
 }
 
-// redactedShareBody renders the share-create body for --dry-run with the
-// password replaced by a boolean, so a dry run is safe to paste anywhere.
-func redactedShareBody(o shareCreateOpts, fileID uint64) map[string]any {
-	body := o.body(fileID)
-	if _, ok := body["password"]; ok {
-		delete(body, "password")
-		body["password_set"] = true
+// redactedShareBody renders a share-create body for --dry-run with the password
+// replaced by a boolean, so a dry run is safe to paste anywhere. The input map is
+// left untouched — it is the body that goes on the wire.
+func redactedShareBody(body map[string]any) map[string]any {
+	out := make(map[string]any, len(body))
+	for k, v := range body {
+		out[k] = v
 	}
-	return body
+	if _, ok := out["password"]; ok {
+		delete(out, "password")
+		out["password_set"] = true
+	}
+	return out
 }

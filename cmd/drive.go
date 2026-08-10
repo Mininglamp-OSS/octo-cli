@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -23,6 +24,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -73,17 +75,35 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // PUT/GET. It is deliberately separate from the API client so a caller
 // credential can never reach the storage endpoint: the presigned URL already
 // carries its own authorisation, and forwarding an Octo token to a third-party
-// host would leak it. Redirects are followed (storage gateways use them) but
-// nothing else is inherited.
-func transferClient() *http.Client {
-	return &http.Client{Timeout: transferTimeout}
+// host would leak it. Nothing else is inherited either.
+//
+// Redirects are followed (storage gateways use them) but every hop is
+// re-validated by assertSafeTransferTarget, so the https-or-loopback-http rule
+// holds for the destination that actually serves the bytes and not merely for
+// the first URL the backend handed over. An unsafe hop fails the transfer rather
+// than downgrading it, and the 10-hop cap Go's default policy applies is kept.
+func transferClient(field string) *http.Client {
+	return &http.Client{
+		Timeout: transferTimeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxTransferRedirects {
+				return fmt.Errorf("stopped after %d redirects", maxTransferRedirects)
+			}
+			if err := assertSafeTransferTarget(field, req.URL); err != nil {
+				return err
+			}
+			return nil
+		},
+	}
 }
 
-// assertSafeTransferURL rejects a presigned URL that is not safe to fetch.
-// Only absolute http(s) URLs are allowed, plain http only for loopback hosts so
-// local development works without weakening production. Embedded credentials
-// are refused outright — a userinfo component would be silently sent to the
-// host and can also be used to disguise the real target.
+// maxTransferRedirects mirrors the cap Go's default redirect policy applies.
+// Setting CheckRedirect replaces that policy wholesale, so the cap has to be
+// restated or a redirect loop would run until the transfer timeout.
+const maxTransferRedirects = 10
+
+// assertSafeTransferURL rejects a presigned URL that is not safe to fetch, and
+// returns it parsed for the caller.
 func assertSafeTransferURL(field, raw string) (*url.URL, *output.ExitError) {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -91,13 +111,26 @@ func assertSafeTransferURL(field, raw string) (*url.URL, *output.ExitError) {
 			fmt.Sprintf("%s is not a valid URL: %v", field, err),
 			"the backend returned an unusable presigned URL; report it")
 	}
-	if u.Host == "" || !u.IsAbs() {
-		return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+	if serr := assertSafeTransferTarget(field, u); serr != nil {
+		return nil, serr
+	}
+	return u, nil
+}
+
+// assertSafeTransferTarget holds the transfer safety rules for an already-parsed
+// URL, so the initial presigned URL and every redirect hop are judged by exactly
+// the same code. Only absolute http(s) URLs are allowed, plain http only for
+// loopback hosts so local development works without weakening production.
+// Embedded credentials are refused outright — a userinfo component would be
+// silently sent to the host and can also be used to disguise the real target.
+func assertSafeTransferTarget(field string, u *url.URL) *output.ExitError {
+	if u == nil || u.Host == "" || !u.IsAbs() {
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 			fmt.Sprintf("%s must be an absolute URL", field),
 			"the backend returned an unusable presigned URL; report it")
 	}
 	if u.User != nil {
-		return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 			fmt.Sprintf("%s must not embed credentials", field),
 			"the backend returned an unusable presigned URL; report it")
 	}
@@ -105,16 +138,55 @@ func assertSafeTransferURL(field, raw string) (*url.URL, *output.ExitError) {
 	case "https":
 	case "http":
 		if !isLoopbackHost(u.Hostname()) {
-			return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+			return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 				fmt.Sprintf("%s uses plain http on a non-loopback host", field),
 				"object storage must be https outside local development")
 		}
 	default:
-		return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 			fmt.Sprintf("%s uses unsupported scheme %q", field, u.Scheme),
 			"only http (loopback) and https are fetched")
 	}
-	return u, nil
+	return nil
+}
+
+// transferNetworkError reports an object-storage transfer failure without
+// printing the URL.
+//
+// A presigned URL's signature lives in its query string, which makes the whole
+// URL a short-lived bearer credential for that object — and *url.Error.Error()
+// embeds it, so formatting the error straight into an envelope publishes it on
+// stderr with no --verbose needed. The host is the part that carries the
+// diagnostic value ("can I reach storage at all"), and the unwrapped cause keeps
+// the actual reason (connection refused, TLS failure, timeout).
+//
+// A rejection raised by our own CheckRedirect arrives wrapped in *url.Error;
+// that ExitError is returned as-is so an unsafe redirect keeps reporting
+// UNSAFE_PRESIGNED_URL rather than being reclassified as a network fault.
+func transferNetworkError(op string, u *url.URL, err error) *output.ExitError {
+	cause := unwrapTransferError(err)
+	if ee := output.AsExitError(cause); ee != nil {
+		return ee
+	}
+	host := "object storage"
+	if u != nil && u.Host != "" {
+		host = strconv.Quote(u.Host)
+	}
+	return output.ErrNetwork(
+		fmt.Sprintf("%s against %s failed: %v", op, host, cause),
+		"check network access to object storage")
+}
+
+// unwrapTransferError strips the *url.Error wrappers whose Error() would print
+// the presigned URL, leaving the cause that actually describes the failure.
+func unwrapTransferError(err error) error {
+	for {
+		var ue *url.Error
+		if !errors.As(err, &ue) || ue.Err == nil {
+			return err
+		}
+		err = ue.Err
+	}
 }
 
 func isLoopbackHost(host string) bool {
@@ -138,14 +210,14 @@ type downloadResult struct {
 	ShareURL string `json:"share_url,omitempty"`
 }
 
-// fetchToFile downloads rawURL into target. The bytes land in a sibling
-// "<target>.part" first, are fsync'd, and only then renamed over target, so an
-// interrupted transfer never leaves a truncated file that looks complete and
-// never clobbers an existing good copy. The partial file is removed on any
-// failure. Unless overwrite is set, an existing target is refused before a
-// single byte is fetched.
+// fetchToFile downloads rawURL into target. The bytes land in a randomly-named
+// sibling "<base>.<random>.part" first, are fsync'd, and only then renamed over
+// target, so an interrupted transfer never leaves a truncated file that looks
+// complete. The partial file is removed on any failure. Unless overwrite is set,
+// an existing target is refused before a single byte is fetched.
 func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target string, overwrite bool) (*downloadResult, *output.ExitError) {
-	if _, err := assertSafeTransferURL(field, rawURL); err != nil {
+	u, err := assertSafeTransferURL(field, rawURL)
+	if err != nil {
 		return nil, err
 	}
 	if target == "" {
@@ -155,13 +227,13 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodGet, rawURL, http.NoBody)
-	if err != nil {
-		return nil, output.ErrNetwork(err.Error(), "invalid download request")
+	req, rerr := http.NewRequestWithContext(cmd.Context(), http.MethodGet, rawURL, http.NoBody)
+	if rerr != nil {
+		return nil, transferNetworkError("download", u, rerr)
 	}
-	resp, err := transferClient().Do(req)
-	if err != nil {
-		return nil, output.ErrNetwork(fmt.Sprintf("download: %v", err), "check network access to object storage")
+	resp, rerr := transferClient(field).Do(req)
+	if rerr != nil {
+		return nil, transferNetworkError("download", u, rerr)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -170,12 +242,18 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 			"the signed URL may have expired; re-run the command to get a fresh one")
 	}
 
-	partPath := target + ".part"
-	part, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return nil, output.ErrValidation(fmt.Sprintf("create %q: %v", partPath, err),
+	// A random part file, created O_EXCL by os.CreateTemp, rather than a
+	// predictable "<target>.part": the fixed name could be pre-created as a
+	// symlink by anyone able to write the destination directory (truncating
+	// whatever it pointed at with downloaded bytes — assertWritableTarget Lstats
+	// target, never the part file), and two concurrent downloads to the same
+	// destination would interleave into one file.
+	part, oerr := os.CreateTemp(filepath.Dir(target), filepath.Base(target)+".*.part")
+	if oerr != nil {
+		return nil, output.ErrValidation(fmt.Sprintf("create a partial file next to %q: %v", target, oerr),
 			"check the destination directory exists and is writable")
 	}
+	partPath := part.Name()
 	cleanup := func() { _ = os.Remove(partPath) } //nolint:errcheck // best-effort cleanup
 
 	hasher := sha256.New()
@@ -183,19 +261,26 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	if copyErr != nil {
 		_ = part.Close() //nolint:errcheck // already returning the copy error
 		cleanup()
-		return nil, output.ErrNetwork(fmt.Sprintf("download: %v", copyErr), "transfer interrupted; the partial file was removed")
+		ee := transferNetworkError("download", u, copyErr)
+		ee.Hint = "transfer interrupted; the partial file was removed"
+		return nil, ee
 	}
 	if err := part.Sync(); err != nil {
 		_ = part.Close() //nolint:errcheck // already returning the sync error
 		cleanup()
-		return nil, output.ErrValidation(fmt.Sprintf("flush %q: %v", partPath, err), "check available disk space")
+		return nil, output.ErrValidation(fmt.Sprintf("flush the partial file for %q: %v", target, err), "check available disk space")
 	}
 	if err := part.Close(); err != nil {
 		cleanup()
-		return nil, output.ErrValidation(fmt.Sprintf("close %q: %v", partPath, err), "")
+		return nil, output.ErrValidation(fmt.Sprintf("close the partial file for %q: %v", target, err), "")
 	}
-	// Re-check just before the rename: --overwrite=false must not clobber a file
-	// that appeared while the transfer was running.
+	// Re-check just before the rename so --overwrite=false does not clobber a
+	// file that appeared while the transfer was running. This narrows the window
+	// but cannot close it: POSIX rename replaces unconditionally, so a file
+	// created between this check and the rename below is still replaced.
+	// --overwrite=false is therefore best-effort against a concurrent writer,
+	// which is the right trade for a CLI — the alternative (linkat/O_EXCL) would
+	// lose atomic replacement.
 	if err := assertWritableTarget(target, overwrite); err != nil {
 		cleanup()
 		return nil, err
