@@ -1,194 +1,149 @@
 ---
 name: octo-html
 version: 0.1.0
-description: HTML docs domain (octo-doc) — publish and govern self-contained interactive HTML documents, list/get/versions, author drafts, per-doc share codes, media assets, inline comments, and the agent element read/replace + reply paths. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
+description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
-# octo-html — HTML documents (octo-doc): publish, versions, drafts, share, assets, comments, agent element edit
+# octo-html — interactive HTML documents
 
-> **This is NOT the `octo-docs` domain.** `octo-cli docs …` talks to the CRDT/Yjs
-> collaborative docs-backend (live rich-text/sheet/board over websockets).
-> `octo-cli html …` talks to **octo-doc** — the self-hosted, prompt-native
-> *interactive HTML document* service. A doc here is a full self-contained HTML
-> page, published as an **immutable version** at `/d/<doc_id>/v/<n>`, with anchored
-> inline comments. An agent authors by publishing HTML, and edits by **replacing a
-> single stamped artifact** (located by its content-hash `aid`) which republishes
-> a new version. Pick the domain that matches the backend you are pointed at.
+> **This is NOT the `octo-docs` body-editing domain.** `octo-cli html …` talks
+> to **octo-doc**, where a document is a self-contained HTML page published as
+> immutable versions. `octo-cli docs …` talks to the separate CRDT/Yjs backend.
 
-All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the `{data}/{error}` envelope.
+All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the standard
+`{ok, identity, data, ...}` success envelope.
 
-**Document identifier contract has two modes:**
+## Document-reference contract
 
-- **Mounted (`group`, `space`, or `thread`):** the first `publish` synchronously
-  registers the document and returns canonical `doc_id`. Save it. Repeating the
-  human-readable alias resolves to the same document and `doc_id`; every
-  non-publish command uses `doc_id`.
-- **Unmounted/empty mount (legacy compatibility):** publish does not register
-  the document and returns an empty or absent `doc_id`. Keep using its legacy
-  slug for non-publish commands.
+- **Canonical create has no document reference.** Omit `slug`, include a fresh
+  `idempotency_key`, and provide `html`. A display name belongs in `meta.title`;
+  it is metadata, not identity.
+- **Save `data.slug` from the response.** New documents always return
+  `data.doc_id` and `data.slug`, with `data.slug == data.doc_id`, whether mounted
+  or unmounted. Use `data.slug` for every later operation.
+- **Legacy documents keep their old reference.** For an old document, use its
+  legacy slug wherever this skill says `<doc-ref>`.
+- **No alias identity and no same-name republish.** Creating again with the same
+  `meta.title` creates a different document. To publish another version, supply
+  the saved `data.slug` in the server's legacy-named `slug` field.
+- Do not infer a mode from `mount_type`, `registered`, `status`, or whether
+  `data.doc_id` is non-empty. `registered` and `status` report operational state,
+  not identity.
 
-Query and JSON-body fields remain named `slug` because that is the server wire
-contract; put the mode-appropriate identifier in them. Path help displays
-`<doc-id>`, but accepts a legacy unmounted document's slug. The CLI does not
-persist either identifier for you.
+Query and JSON-body fields remain named `slug` for wire compatibility. Put the
+saved document reference in them. Path help displays `<doc-ref>`, and old legacy
+slugs are accepted. The CLI does not persist the reference.
+
+**Minimum rollout dependency:** this contract requires the canonical-create
+server changes in octo-docs-backend#166 and octo-docs-html#33 to be merged and
+deployed before this CLI is released.
 
 ## Auth & space
 
-- Authenticate with a bot token via a stored profile (`--profile` / `--bot-id`)
-  or `OCTO_BOT_TOKEN`, sent as `Authorization: Bearer`. Confirm with
-  `octo-cli config show`.
-- **Do not pass a space flag.** octo-doc resolves identity/space server-side
-  (via the reverse-proxy trust headers on the fusion deploy); the CLI does not
-  send a client space header.
-- Write operations (`publish`, `draft`, `share`, `rm`, `asset add/rm`, `reply`,
-  `element replace`) require the author/write capability. Reads (`list`, `get`,
-  `versions`, `asset ls`, `comment list`, `element get`) need at least a reader
-  capability (the doc's share code) — the CLI surfaces the backend's 401/403
-  envelopes unchanged.
+- Authenticate with a stored bot profile (`--profile` / `--bot-id`) or
+  `OCTO_BOT_TOKEN`; confirm the selected identity with `octo-cli config show`.
+- Do not pass `--space`. octo-doc resolves identity and space server-side.
+- Write operations require author/write capability. Reads need at least reader
+  capability; backend failures are normalized into the CLI's
+  `{ok:false,error:{type,code,message,hint,detail}}` envelope.
 
-## 1. Document lifecycle
+## 1. Create and publish
 
 ```bash
-# First mounted publish synchronously registers the document. Save response.doc_id.
-# --data is a JSON object.
-# mount_type is OPTIONAL in the spec but STRONGLY RECOMMENDED (see the
-# sidebar-registration note below); include it on every publish that should
-# appear in the file sidebar.
-octo-cli html publish --data '{"slug":"runbook","html":"<html><body><h1>Runbook</h1></body></html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
-#   → { doc_id, alias, slug, version, url, size, aids, merged_comments }
+# Canonical create: no --slug. idempotency_key makes retries safe.
+octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html>","idempotency_key":"create-runbook-001","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
+# → data: { doc_id, slug, version, url, share_url, size, aids,
+#           merged_comments, registered, status }
+# Save data.slug; for this new document data.slug == data.doc_id.
 
-# Register the doc into the file sidebar: pass a non-empty mount_type on first
-# publish. 'group' (+ group_no), 'space', and 'thread' (+ thread_id) are all
-# registered. Missing/empty mount_type selects legacy unregistered mode: the
-# response has empty/no doc_id and all later commands use the original slug.
-# Repeating the alias selects the same document and returns the same doc_id.
-# A later mounted publish may alternatively put doc_id in the wire field slug.
-octo-cli html publish --data '{"slug":"<doc_id>","html":"<html>...</html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
+# Unmounted creation follows the same identity contract and also gets doc_id.
+octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","idempotency_key":"create-private-001","meta":{"title":"Private draft"}}'
 
-# List documents (owner-scoped index).
+# Publish a later immutable version. Keep the wire field name `slug` and omit
+# idempotency_key. An unknown legacy slug is rejected; it cannot create a doc.
+octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
+
+# List, inspect, list versions, and soft-delete.
 octo-cli html list
-
-# Fetch one document's metadata (slug, title, latest version, timestamps).
-octo-cli html get <doc_id>
-
-# List a document's versions.
-octo-cli html versions <doc_id>
-
-# Soft-delete a document (author-only).
-octo-cli html rm <doc_id>
+octo-cli html get <doc-ref>
+octo-cli html versions <doc-ref>
+octo-cli html rm <doc-ref>
 ```
+
+Mounts (`group`, `space`, or `thread`) control placement/registration only. For
+`group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
+document-reference format.
 
 ## 2. Author drafts
 
-A draft is the author-only working slot; it does not mint an immutable version
+A draft is an author-only working slot and does not mint an immutable version
 until promoted.
 
 ```bash
-# Save the draft HTML.
-octo-cli html draft save <doc_id> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
+# Create a canonical draft without a document reference. Save response data.slug.
+octo-cli html draft create --html '<html><body><h1>WIP</h1></body></html>' --idempotency-key draft-runbook-001
 
-# Promote the draft to an immutable version.
-octo-cli html draft promote <doc_id>        # → { slug, version, url }
+octo-cli html draft save <doc-ref> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
+octo-cli html draft promote <doc-ref>
 ```
 
-## 3. Sharing
+## 3. Sharing and grants
 
 ```bash
-# Mint / rotate the per-doc read+comment share code (author-only).
-octo-cli html share <doc_id>                 # → { code, url }
+# Mint/rotate or revoke a bearer share code.
+octo-cli html share <doc-ref>
+octo-cli html unshare <doc-ref>
 
-# Revoke the share code.
-octo-cli html unshare <doc_id>
-```
-
-## 3b. Per-uid access grants (author-only)
-
-Grant a SPECIFIC uid reader access — precise, per-user authorization, unlike the
-share code (which is a bearer secret anyone holding can use). A granted uid
-resolves to a reader capability on subsequent requests with NO share code needed;
-this is how an author lets a named bot/user read+comment a private doc. All three
-are author-only (only the doc creator can grant/revoke/list).
-
-```bash
-# Grant a uid reader access (upsert by uid). role defaults to 'reader'.
-# Either individual flags or --data JSON work; flags override --data.
-octo-cli html grant add <doc_id> --uid <uid> --role reader
-octo-cli html grant add <doc_id> --data '{"uid":"<uid>","role":"reader"}'
-#   → { slug, uid, role }
-
-# List a doc's grants (uid + role).
-octo-cli html grant list <doc_id>
-
-# Revoke a uid's grant. The creator cannot be removed (409 conflict).
-octo-cli html grant rm <doc_id> <uid>
+# Grant/list/revoke named-reader access.
+octo-cli html grant add <doc-ref> --uid <uid> --role reader
+octo-cli html grant list <doc-ref>
+octo-cli html grant rm <doc-ref> <uid>
 ```
 
 ## 4. Media assets
 
 ```bash
-# List a document's assets (reader).
-octo-cli html asset ls <doc_id>
-
-# Upload an asset (author). Multipart form-data (field "file"); pass a local path.
-octo-cli html asset add <doc_id> --file ./chart.png
-
-# Delete an asset by its sha256 (author).
-octo-cli html asset rm <doc_id> <sha256>
+octo-cli html asset ls <doc-ref>
+octo-cli html asset add <doc-ref> --file ./chart.png
+octo-cli html asset rm <doc-ref> <sha256>
 ```
 
 ## 5. Comments
 
-Comments anchor to highlighted text or to a stamped artifact (by `aid`). They
-survive edits and re-anchor across versions; an artifact that is genuinely
-replaced goes `lost` rather than silently re-attaching.
+The wire parameter remains `slug`; pass the saved document reference.
 
 ```bash
-# List a document's comments. --version accepts a number or 'all'.
-octo-cli html comment list --slug <doc_id> [--version all]
-
-# Create a comment. Omit anchor for an unanchored comment.
-octo-cli html comment add --data '{"slug":"<doc_id>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
+octo-cli html comment list --slug <doc-ref> [--version all]
+octo-cli html comment add --data '{"slug":"<doc-ref>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
 ```
 
-## 6. Agent element edit (read / replace) + reply
-
-This is the core "agent edits the HTML" path. An agent reads one artifact by its
-stamped `data-odoc-aid`, replaces it, and the server republishes a new version
-(re-stamping aids and reconciling comment anchors).
+## 6. Agent element edit and reply
 
 ```bash
-# Read one artifact's current outer HTML by aid (version 0 or omitted = latest).
-octo-cli html element get --data '{"slug":"<doc_id>","aid":"<content-hash>"}'
-#   → { aid, tag, html }
+# Read one stamped artifact (version 0 or omitted means latest).
+octo-cli html element get --data '{"slug":"<doc-ref>","aid":"<content-hash>"}'
 
-# Replace that artifact and republish. new_html MUST be exactly ONE top-level
-# element and free of <script>/<style>, inline on*= handlers, and javascript:
-# URLs (the backend rejects otherwise). base_version 0/omitted = latest.
-octo-cli html element replace --data '{"slug":"<doc_id>","aid":"<content-hash>","new_html":"<section>updated body</section>"}'
-#   → { slug, version, url }
+# Replace exactly one safe top-level element and publish a new version.
+octo-cli html element replace --data '{"slug":"<doc-ref>","aid":"<content-hash>","new_html":"<section>updated body</section>"}'
 
-# Reply to a comment thread as the agent (identity odoc-agent) with a verdict.
-# status ∈ applied | partial | question (rendered as ✅/🟡/❓ on the parent).
-octo-cli html reply --data '{"slug":"<doc_id>","parent_id":"<comment-root-id>","text":"Done, updated the section.","status":"applied"}'
+# Reply to a comment thread with an optional applied/partial/question verdict.
+octo-cli html reply --data '{"slug":"<doc-ref>","parent_id":"<comment-root-id>","text":"Done.","status":"applied"}'
 ```
 
-**Editing discipline (keep comment anchors alive).** Each `element replace`
-republishes and re-stamps every aid, then reconciles anchors. To minimise
-comments going `lost`: change an element's *content* only, avoid changing its tag
-type or the nearest heading, and prefer narrow single-artifact edits over broad
-rewrites.
+To preserve comment anchors, prefer narrow element replacements; avoid changing
+an element's tag or nearby heading unless necessary.
 
 ## Errors
 
-The CLI surfaces the backend envelope unchanged. Common cases:
-- `401 / 403` — missing or insufficient capability (need write token / share code).
-- `404` — slug or aid not found.
-- element replace rejects a fragment that is not exactly one safe top-level
-  element (multi-element, `<script>`, `on*=`, `javascript:`).
+- `401 / 403` — missing or insufficient capability.
+- `404` — document reference (canonical doc_id or legacy slug), comment, or aid
+  not found.
+- Element replacement rejects multiple top-level elements, scripts/styles,
+  inline event handlers, and `javascript:` URLs.
 
 ## Schema lookup
 

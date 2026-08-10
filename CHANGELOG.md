@@ -66,12 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
-- **`octo-cli html` now documents both identifier modes** — a first publish
-  mounted to a group, space, or thread synchronously registers and returns a
-  canonical `doc_id`; later non-publish operations use it. An unmounted or
-  empty-mount publish remains unregistered legacy compatibility, returns an
-  empty/no `doc_id`, and continues to use its slug. Query/body wire keys remain
-  `slug`; path argument help now says `doc-id` without changing request paths.
+- **`octo-cli html` adopts canonical create and document references** — create
+  omits `slug`, includes `idempotency_key`, and returns `data.doc_id` plus
+  `data.slug == data.doc_id`, whether mounted or unmounted. Every later operation
+  uses `data.slug`; old documents retain their legacy slug as that reference.
+  Display names are metadata, not aliases, and same-name republish is unsupported.
+  Query/body wire keys remain `slug`; path argument help now says `doc-ref` without
+  changing request paths. Group, space, and thread mounts are all registered.
+  Republish requires the saved `slug` and omits `idempotency_key`; unknown legacy
+  slugs are rejected and cannot create. `html draft create` provides the canonical
+  no-reference draft flow (`POST /docs/draft`) with an idempotency key.
+  **Minimum rollout dependency:** release only after the canonical-create changes
+  in octo-docs-backend#166 and octo-docs-html#33 are merged and deployed.
 - **Generated service commands now reject incomplete JSON bodies locally** —
   request-schema `required` fields and nested `minItems` constraints are
   validated after merging `--data` with promoted body flags, before any HTTP

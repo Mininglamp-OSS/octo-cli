@@ -67,6 +67,34 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	}
 }
 
+func TestOctoHTMLSkillCanonicalCreateContract(t *testing.T) {
+	b, err := FS.ReadFile("octo-html/SKILL.md")
+	if err != nil {
+		t.Fatalf("octo-html/SKILL.md not embedded: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"idempotency_key",
+		"data.doc_id",
+		"data.slug",
+		"data.slug == data.doc_id",
+		"legacy",
+		"octo-docs-html#33",
+		"octo-docs-backend#166",
+		"html draft create",
+		"unknown legacy slug",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("octo-html skill missing canonical-create contract %q", want)
+		}
+	}
+	for _, stale := range []string{"human-readable alias", "Repeating the alias", "empty or absent `doc_id`", "response.doc_id"} {
+		if strings.Contains(content, stale) {
+			t.Errorf("octo-html skill retains stale identity guidance %q", stale)
+		}
+	}
+}
+
 func TestOctoSummarySkillEmbedded(t *testing.T) {
 	b, err := FS.ReadFile("octo-summary/SKILL.md")
 	if err != nil {

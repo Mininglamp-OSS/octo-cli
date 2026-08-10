@@ -72,6 +72,9 @@ type Request struct {
 	// server-side). The default (false) preserves the historical behaviour of
 	// sending X-Space-Id whenever the credential has a space.
 	SuppressSpaceHeader bool
+	// ResponseUnwrap is interpreted by the generated command layer after the
+	// transport returns a successful JSON response.
+	ResponseUnwrap string
 }
 
 // Client is the REST client. Created via New; invoked by command layer via Do.

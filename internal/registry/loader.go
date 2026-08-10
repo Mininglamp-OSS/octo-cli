@@ -206,6 +206,15 @@ type PaginationInfo struct {
 	RejectCursorRepeats bool   `json:"reject_cursor_repeats,omitempty"`
 }
 
+// BodyVariant declares one valid conditional request-body shape. OpenAPI 3
+// cannot make conditionally-required fields globally required, so this generic
+// extension supplies required/forbidden sets to generated command validation.
+type BodyVariant struct {
+	Name      string   `json:"name,omitempty"`
+	Required  []string `json:"required,omitempty"`
+	Forbidden []string `json:"forbidden,omitempty"`
+}
+
 // OperationDetail is the expanded view of a single operation returned by
 // GetOperation. It embeds OperationInfo for identity/summary and adds every
 // piece of metadata the service engine needs to build a complete cobra
@@ -239,7 +248,11 @@ type OperationDetail struct {
 	// `elements[]` entry missing a valid fractional-index `index` before it is
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
-	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	ValidateElementsIndex bool          `json:"validate_elements_index,omitempty"`
+	BodyVariants          []BodyVariant `json:"body_variants,omitempty"`
+	// ResponseUnwrap is a dot-separated successful-response field path selected
+	// before the standard CLI envelope is emitted.
+	ResponseUnwrap string `json:"response_unwrap,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -336,7 +349,7 @@ func walkOperations(doc map[string]any, fn func(path, method string, op map[stri
 	}
 }
 
-func buildDetail(service string, doc map[string]any, pathStr, method string, op map[string]any) *OperationDetail {
+func buildDetail(service string, doc map[string]any, pathStr, method string, op map[string]any) *OperationDetail { //nolint:gocyclo // projection necessarily branches across independent OpenAPI extensions
 	d := &OperationDetail{
 		OperationInfo: OperationInfo{
 			ID:      stringOf(op["operationId"]),
@@ -354,6 +367,23 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	d.ResponseUnwrap = stringOf(op["x-octo-response-unwrap"])
+	if d.ResponseUnwrap == "" {
+		d.ResponseUnwrap = stringOf(doc["x-octo-response-unwrap"])
+	}
+	if variants, ok := op["x-octo-body-variants"].([]any); ok {
+		for _, raw := range variants {
+			variant, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.BodyVariants = append(d.BodyVariants, BodyVariant{
+				Name:      stringOf(variant["name"]),
+				Required:  stringsOf(variant["required"]),
+				Forbidden: stringsOf(variant["forbidden"]),
+			})
+		}
+	}
 	if d.BinaryResponse {
 		if resps, ok := op["responses"].(map[string]any); ok {
 			d.BinaryBody = hasSuccessBody(doc, resps)
@@ -618,6 +648,17 @@ func boolOf(v any) bool {
 func intOf(v any) int {
 	n, _ := v.(float64)
 	return int(n)
+}
+
+func stringsOf(v any) []string {
+	values, _ := v.([]any)
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if s, ok := value.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // truthy accepts a JSON value that may be a boolean `true` or the string

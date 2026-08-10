@@ -141,15 +141,15 @@ func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{"data":{}}`))
 	})
 
 	get := findCmd(findCmd(root, "html"), "get")
 	if get == nil {
 		t.Fatal("missing html get")
 	}
-	if get.Use != "get <doc-id>" {
-		t.Fatalf("html get Use = %q, want %q", get.Use, "get <doc-id>")
+	if get.Use != "get <doc-ref>" {
+		t.Fatalf("html get Use = %q, want %q", get.Use, "get <doc-ref>")
 	}
 	root.SetArgs([]string{"html", "get", "doc/canonical"})
 	if err := root.Execute(); err != nil {
@@ -157,6 +157,18 @@ func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
 	}
 	if gotPath != "/docs-html/v1/docs/doc%2Fcanonical" {
 		t.Errorf("get path = %q", gotPath)
+	}
+
+	gotBody = nil
+	root.SetArgs([]string{"html", "publish", "--html", "<h1>new</h1>", "--idempotency-key", "create-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("canonical html create: %v", err)
+	}
+	if gotBody["html"] != "<h1>new</h1>" || gotBody["idempotency_key"] != "create-1" {
+		t.Errorf("canonical create body = %#v", gotBody)
+	}
+	if _, hasSlug := gotBody["slug"]; hasSlug {
+		t.Errorf("canonical create body must omit slug: %#v", gotBody)
 	}
 
 	root.SetArgs([]string{"html", "comment", "list", "--slug", "doc-1"})
@@ -173,6 +185,64 @@ func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
 	}
 	if gotBody["slug"] != "doc-1" {
 		t.Errorf("element body = %#v, wire key must remain slug", gotBody)
+	}
+}
+
+func TestHTMLPublishConditionalValidationAndResponseUnwrap(t *testing.T) {
+	var hits int
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1","status":"published"}}`))
+	})
+
+	invalid := [][]string{
+		{"html", "publish", "--html", "new"},
+		{"html", "publish", "--html", "new", "--slug", "legacy-unknown", "--idempotency-key", "bad"},
+	}
+	for _, args := range invalid {
+		root.SetArgs(args)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("%v unexpectedly succeeded", args)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("invalid publishes reached backend %d time(s)", hits)
+	}
+
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1","status":"published"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "new", "--slug", "doc-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("republish existing: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["slug"] != "doc-1" || data["doc_id"] != "doc-1" || data["data"] != nil {
+		t.Errorf("CLI response was not unwrapped: %s", tf.Out.String())
+	}
+}
+
+func TestHTMLCanonicalDraftCreate(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-draft","doc_id":"doc-draft"}}`))
+	})
+	root.SetArgs([]string{"html", "draft", "create", "--html", "<h1>wip</h1>", "--idempotency-key", "draft-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("draft create: %v", err)
+	}
+	if gotPath != "/docs-html/v1/docs/draft" || gotBody["idempotency_key"] != "draft-1" {
+		t.Errorf("draft create request: path=%q body=%#v", gotPath, gotBody)
 	}
 }
 

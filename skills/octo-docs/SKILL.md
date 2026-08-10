@@ -24,7 +24,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 | Read/edit a **spreadsheet** (`doc_type: sheet`): cells, formulas, styles, column widths / row heights (dims), floating **images**, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
-| Continue from a searchable **HTML document** (`doc_type: html`): resolve its canonical ID, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
+| Continue from a searchable **HTML document** (`doc_type: html`): resolve its document reference, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
 | Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload) | **`common.md`** |
 
 > The first four split by `doc_type` (what kind of document you're handling);
@@ -34,13 +34,13 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
 Pick by `doc_type`: a **doc** body → `doc.md`; a **sheet** → `sheet.md`; a
 **board** → `board.md`; an **html** result → the separate `octo-html` skill.
-Using the wrong surface returns `409 unsupported_doc_type`. Mounted HTML
-documents use the canonical `doc_id` returned by synchronous first-publish
-registration for all non-publish operations. For a mounted search result, run
-`docs get <docId>` and use its `octoDocSlug` value as that canonical identifier
+Using the wrong surface returns `409 unsupported_doc_type`. For an HTML search
+result, run `docs get <docId>` and use its `octoDocSlug` value as the document reference
 with `html get <octoDocSlug>` (or another `html` command). Do not retry HTML through `docs content`,
 `docs sheet`, or `docs scene`.
 `docs get <docId>` reports the `doc_type`, your role, and `octoDocSlug` for HTML.
+That value is the canonical `doc_id` for new documents and the retained legacy
+slug for old documents; callers do not infer the distinction from mount state.
 
 ## Auth & space
 
@@ -101,7 +101,7 @@ Pagination depends on the endpoint's response contract:
 link-card are out of scope here. Body editing is limited to `doc_type: doc`
 incremental block ops (`doc.md`), `doc_type: sheet` cell/dims/drawings batches
 (`sheet.md`), and `doc_type: board` scene batches (`board.md`). `doc_type: html`
-belongs to the separate `html` domain, uses canonical `doc_id` when mounted, and
+belongs to the separate `html` domain, uses its returned document reference, and
 is published as
 immutable versions; it cannot be read or edited through these three body
 surfaces. The document outline is not editable through the CLI.

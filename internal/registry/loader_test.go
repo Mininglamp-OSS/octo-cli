@@ -44,7 +44,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"bot":         6,
 		"event":       2,
 		"docs":        32,
-		"html":        20,
+		"html":        21,
 		"marketplace": 25,
 		"summary":     4,
 	}
@@ -116,22 +116,59 @@ func TestHTMLDocIDContract(t *testing.T) {
 	if !ok || publish.RequestBody == nil || publish.ResponseSchema == nil {
 		t.Fatal("html.publish schemas not found")
 	}
-	if got := publish.RequestBody.Properties["slug"].Description; !strings.Contains(got, "alias") || !strings.Contains(got, "same doc_id") || !strings.Contains(got, "legacy slug") {
-		t.Errorf("publish slug description = %q, want alias idempotency and optional canonical-ID guidance", got)
+	if got := publish.RequestBody.Required; !reflect.DeepEqual(got, []string{"html"}) {
+		t.Errorf("publish OpenAPI required = %v, want only globally-required html", got)
 	}
-	for _, name := range []string{"doc_id", "alias", "slug"} {
+	for _, name := range []string{"slug", "idempotency_key"} {
+		if _, ok := publish.RequestBody.Properties[name]; !ok {
+			t.Errorf("publish request missing %q", name)
+		}
+	}
+	if got := publish.RequestBody.Properties["slug"].Description; !strings.Contains(got, "Omit") || !strings.Contains(got, "data.slug") || !strings.Contains(got, "legacy") {
+		t.Errorf("publish slug description = %q, want explicit create/republish doc-ref guidance", got)
+	}
+	for _, name := range []string{"doc_id", "slug", "registered", "status", "share_url"} {
 		if _, ok := publish.ResponseSchema.Properties[name]; !ok {
 			t.Errorf("publish response missing %q", name)
 		}
 	}
-	if got := publish.ResponseSchema.Properties["doc_id"].Description; !strings.Contains(got, "non-publish") {
-		t.Errorf("publish doc_id description = %q, want non-publish-command guidance", got)
+	if got := publish.ResponseSchema.Required; !reflect.DeepEqual(got, []string{"doc_id", "slug"}) {
+		t.Errorf("publish response required = %v, want canonical document references", got)
 	}
-	if got := publish.RequestBody.Properties["mount_type"].Description; !strings.Contains(got, "synchronously") || !strings.Contains(got, "'group', 'space', and 'thread'") || !strings.Contains(got, "legacy") {
-		t.Errorf("publish mount_type description = %q, want all mount types registered and empty-mount legacy semantics", got)
+	if _, ok := publish.ResponseSchema.Properties["alias"]; ok {
+		t.Error("publish response must not expose alias identity")
 	}
-	if got := publish.RequestBody.Properties["thread_id"].Description; strings.Contains(got, "not registered") {
-		t.Errorf("publish thread_id description retains stale unregistered semantics: %q", got)
+	if got := publish.ResponseSchema.Properties["slug"].Description; !strings.Contains(got, "equal to doc_id") || !strings.Contains(got, "data.slug") {
+		t.Errorf("publish slug description = %q, want canonical response doc-ref guidance", got)
+	}
+	if got := publish.RequestBody.Properties["mount_type"].Description; strings.Contains(got, "mode") || strings.Contains(got, "legacy") {
+		t.Errorf("publish mount_type description must not infer identity mode: %q", got)
+	}
+	if got := publish.ResponseUnwrap; got != "data" {
+		t.Errorf("publish response unwrap = %q, want data", got)
+	}
+	if len(publish.BodyVariants) != 2 {
+		t.Fatalf("publish body variants = %#v, want create and republish", publish.BodyVariants)
+	}
+	if !reflect.DeepEqual(publish.BodyVariants[0].Required, []string{"html", "idempotency_key"}) || !reflect.DeepEqual(publish.BodyVariants[0].Forbidden, []string{"slug"}) {
+		t.Errorf("publish create variant = %#v", publish.BodyVariants[0])
+	}
+	if !reflect.DeepEqual(publish.BodyVariants[1].Required, []string{"html", "slug"}) || !reflect.DeepEqual(publish.BodyVariants[1].Forbidden, []string{"idempotency_key"}) {
+		t.Errorf("publish republish variant = %#v", publish.BodyVariants[1])
+	}
+
+	draftCreate, ok := r.GetOperation("html.draft.create")
+	if !ok || draftCreate.RequestBody == nil {
+		t.Fatal("canonical html.draft.create operation not found")
+	}
+	if draftCreate.Method != "POST" || draftCreate.Path != "/docs-html/v1/docs/draft" {
+		t.Errorf("draft create wire operation = %s %s", draftCreate.Method, draftCreate.Path)
+	}
+	if got := draftCreate.RequestBody.Required; !reflect.DeepEqual(got, []string{"html", "idempotency_key"}) {
+		t.Errorf("draft create required = %v", got)
+	}
+	if _, hasRef := draftCreate.RequestBody.Properties["slug"]; hasRef {
+		t.Error("canonical draft create must not accept slug")
 	}
 
 	for _, op := range r.ListOperations("html") {
@@ -152,6 +189,20 @@ func TestHTMLDocIDContract(t *testing.T) {
 				t.Errorf("%s slug body description = %q, want wire-name and legacy guidance", op.ID, slug.Description)
 			}
 		}
+	}
+
+	docsGet, ok := r.GetOperation("docs.get")
+	if !ok || docsGet.ResponseSchema == nil {
+		t.Fatal("docs.get response schema not found")
+	}
+	if got := docsGet.ResponseSchema.Properties["octoDocSlug"].Description; !strings.Contains(got, "document reference") || !strings.Contains(got, "canonical") || !strings.Contains(got, "legacy") {
+		t.Errorf("docs.get octoDocSlug description = %q, want canonical/legacy doc-ref semantics", got)
+	}
+
+	htmlInfo, _ := r.GetSpec("html")["info"].(map[string]any)
+	description, _ := htmlInfo["description"].(string)
+	if !strings.Contains(description, "{ok, identity, data, ...}") || strings.Contains(description, "{data}/{error}") {
+		t.Errorf("html spec envelope description = %q, want actual CLI success envelope", description)
 	}
 }
 

@@ -54,6 +54,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// x-octo-space-header:false. An omitted flag keeps the default
 		// behaviour of sending the header when the credential has a space.
 		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
+		ResponseUnwrap:      d.ResponseUnwrap,
 	}
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
@@ -187,11 +188,37 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 	if err := validateRequiredBodyFields(rt, base); err != nil {
 		return nil, err
 	}
+	if err := validateBodyVariants(rt, base); err != nil {
+		return nil, err
+	}
 
 	if len(base) == 0 {
 		return nil, nil
 	}
 	return base, nil
+}
+
+func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
+	if rt.detail == nil || len(rt.detail.BodyVariants) == 0 {
+		return nil
+	}
+	for _, variant := range rt.detail.BodyVariants {
+		valid := true
+		for _, name := range variant.Required {
+			if value, exists := body[name]; !exists || value == nil {
+				valid = false
+			}
+		}
+		for _, name := range variant.Forbidden {
+			if value, exists := body[name]; exists && value != nil {
+				valid = false
+			}
+		}
+		if valid {
+			return nil
+		}
+	}
+	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug and with idempotency_key, or republish an existing slug without idempotency_key")
 }
 
 // applyBodyFlags merges body-flag values (--foo, --bar) into base, following the
@@ -336,7 +363,26 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, req *client.Request) erro
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	if req.ResponseUnwrap != "" && (f.Globals == nil || !f.Globals.DryRun) {
+		body, err = unwrapResponse(body, req.ResponseUnwrap)
+		if err != nil {
+			unwrapErr := output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), "backend response did not match its operation spec")
+			_ = f.EmitError(unwrapErr) //nolint:errcheck // best-effort emit before returning err
+			return unwrapErr
+		}
+	}
 	return f.EmitSuccess(body)
+}
+
+func unwrapResponse(body []byte, path string) ([]byte, error) {
+	raw, found, err := rawValueAtPath(body, path)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("response is missing unwrap field %q", path)
+	}
+	return raw, nil
 }
 
 // --- pagination ---

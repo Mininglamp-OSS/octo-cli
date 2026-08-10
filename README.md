@@ -137,11 +137,11 @@ octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
-# Mounted HTML documents registered in docs-backend use the same search endpoint.
-# Resolve a hit's canonical HTML identifier with docs get, then continue in the separate html domain.
+# HTML documents registered in docs-backend use the same search endpoint.
+# Resolve a hit's HTML document reference with docs get, then continue in the separate html domain.
 octo-cli docs search --keyword "interactive roadmap" --doc-type html --page-all
 octo-cli docs get html-doc-id              # returns octoDocSlug for HTML documents
-octo-cli html get html-document-doc-id
+octo-cli html get <octoDocSlug>
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
 octo-cli docs sheet get sheet-9                      # whole sheet + base version token
@@ -161,18 +161,22 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.
-octo-cli html publish --slug launch --html '<h1>hi</h1>' --mount-type group --group-no <group_no> \
-  --data '{"meta":{"title":"Launch page"}}'   # title lives in meta.title; slug+html required
-# A mounted first publish synchronously registers: save publish.data.doc_id and
-# use it for every non-publish operation. An unmounted/empty-mount legacy publish
-# returns empty/no doc_id and remains addressed by its original slug.
+# Canonical create has no doc reference: omit --slug and supply an idempotency key.
+octo-cli html publish --html '<h1>hi</h1>' --idempotency-key create-launch-1 \
+  --mount-type group --group-no <group_no> --data '{"meta":{"title":"Launch page"}}'
+# Save data.slug from the publish response. For a new document data.slug == data.doc_id, mounted or
+# unmounted. Every later operation uses data.slug. Old documents keep their legacy
+# slug as data.slug; do not infer this from mount_type or doc_id being non-empty.
+# To republish, pass --slug <doc-ref> and omit --idempotency-key. An unknown
+# legacy slug is rejected and cannot create a document.
 octo-cli html list
-octo-cli html versions <doc_id>
-octo-cli html draft save <doc_id> --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote <doc_id>
-octo-cli html share <doc_id>                                        # mint a reader share code
-octo-cli html grant add <doc_id> --data '{"uid":"u-1"}'             # per-uid authorization
-octo-cli html element get --slug <doc_id> --aid <content-hash>      # wire flag remains named slug
-octo-cli html element replace --slug <doc_id> --aid <content-hash> --new-html '<p>new</p>'
+octo-cli html versions <doc-ref>
+octo-cli html draft create --html '<h1>wip</h1>' --idempotency-key draft-launch-1
+octo-cli html draft save <doc-ref> --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote <doc-ref>
+octo-cli html share <doc-ref>                                        # mint a reader share code
+octo-cli html grant add <doc-ref> --data '{"uid":"u-1"}'             # per-uid authorization
+octo-cli html element get --slug <doc-ref> --aid <content-hash>      # wire flag remains named slug
+octo-cli html element replace --slug <doc-ref> --aid <content-hash> --new-html '<p>new</p>'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains
