@@ -108,10 +108,63 @@ func redactSecrets(s string, secrets []string) string {
 	sort.Slice(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
 	for _, v := range ordered {
 		for _, form := range secretForms(v) {
-			s = strings.ReplaceAll(s, form, secretMask)
+			s = replaceSecretForm(s, form)
 		}
 	}
 	return s
+}
+
+// shortSecretRunes is the length below which a secret is masked only where it
+// appears as a whole token rather than anywhere at all.
+//
+// Substring masking is right for anything long enough that a match means
+// something. For a very short value it inverts: a one-character password is a
+// substring of almost every message, so masking every occurrence rewrites text
+// that has nothing to do with the secret — including a backend's own error code —
+// while protecting a value that carries almost no secrecy to begin with. Eight is
+// chosen so a token-length value keeps unconditional masking and a
+// keyboard-mashed password does not shred the response it appears in.
+const shortSecretRunes = 8
+
+// replaceSecretForm masks one encoded spelling of a secret in s.
+//
+// A long form is replaced everywhere. A short one is replaced only where it is
+// delimited by non-alphanumeric characters (or the ends of the string), so a
+// genuine echo — `"password":"abc123"`, or `bad password abc123 for share` — is
+// still caught while the letters of an unrelated word are not.
+func replaceSecretForm(s, form string) string {
+	if form == "" {
+		return s
+	}
+	if len([]rune(form)) >= shortSecretRunes {
+		return strings.ReplaceAll(s, form, secretMask)
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if strings.HasPrefix(s[i:], form) && isTokenBoundary(s, i, i+len(form)) {
+			b.WriteString(secretMask)
+			i += len(form)
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// isTokenBoundary reports whether s[start:end] is delimited by something other
+// than an alphanumeric character on both sides, which is what distinguishes a
+// value echoed back from the same letters occurring inside an unrelated word.
+func isTokenBoundary(s string, start, end int) bool {
+	return !isWordByte(s, start-1) && !isWordByte(s, end)
+}
+
+func isWordByte(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	c := s[i]
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 // secretForms lists the encodings of v that could appear in text destined for a
@@ -159,11 +212,32 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 	return redactSecrets(string(marshalled), req.SecretValues)
 }
 
-// redactSecretBytes is redactSecrets over a byte slice, returning the input
-// untouched when there is nothing to mask so the common path allocates nothing.
-func redactSecretBytes(b []byte, secrets []string) []byte {
+// redactResponseBody masks secrets in a backend error body before it is parsed.
+//
+// The masking is structural for the same reason the request side is: a textual
+// substitution over the encoded bytes is both too broad and too narrow. Too
+// broad, because it is unanchored — a one-character or punctuation password
+// rewrites the body's own syntax, and ParseBackendError then cannot read the
+// backend's `code`, so an agent branching on it silently degrades to the generic
+// status code and loses `detail`. Too narrow, because the encoded spelling is
+// only guessable for a Go producer: a backend that writes `\/` for a slash
+// defeats a substitution built from json.Marshal's spelling.
+//
+// Parsing first and walking the decoded values fixes both. Object keys are left
+// alone — they carry the response contract, never a secret — which is what keeps
+// the body parseable. A body that is not JSON has no structure to walk and falls
+// back to text substitution.
+func redactResponseBody(b []byte, secrets []string) []byte {
 	if len(b) == 0 || len(secrets) == 0 {
 		return b
+	}
+	var parsed any
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	if err := dec.Decode(&parsed); err == nil {
+		if buf, merr := json.Marshal(redactBodyValue(parsed, secrets)); merr == nil {
+			return buf
+		}
 	}
 	return []byte(redactSecrets(string(b), secrets))
 }
@@ -464,7 +538,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	ee := output.ParseBackendError(resp.StatusCode, redactSecretBytes(respBody, req.SecretValues))
+	ee := output.ParseBackendError(resp.StatusCode, redactResponseBody(respBody, req.SecretValues))
 
 	if isRetryableStatus(resp.StatusCode) {
 		re := &retryableErr{ExitError: ee}
