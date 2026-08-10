@@ -99,12 +99,13 @@ func addSharePasswordFileFlag(cmd *cobra.Command, target *string) {
 }
 
 // resolveSharePassword returns the effective password: the --password value, or
-// the contents of --password-file with one trailing newline removed.
+// the contents of --password-file with the trailing line terminator removed.
 //
-// Only the trailing line terminator is stripped, not all surrounding whitespace
-// as readToken does for a bot token: a token's charset excludes spaces, while a
-// password may legitimately start or end with one, and trimming it would turn a
-// correct password into a silent authentication failure.
+// Only the final line terminator is stripped — one "\n" and the "\r" that may
+// precede it — not all surrounding whitespace as readToken does for a bot token:
+// a token's charset excludes spaces, while a password may legitimately start or
+// end with one, and trimming it would turn a correct password into a silent
+// authentication failure.
 func resolveSharePassword(f *cmdutil.Factory, password, passwordFile string) (string, *output.ExitError) {
 	if passwordFile == "" {
 		return password, nil
@@ -121,7 +122,7 @@ func resolveSharePassword(f *cmdutil.Factory, password, passwordFile string) (st
 			fmt.Sprintf("--password-file: %v", err),
 			"check the path, or pass \"-\" to read the password from stdin")
 	}
-	return strings.TrimRight(string(raw), "\r\n"), nil
+	return strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r"), nil
 }
 
 func (o shareCreateOpts) body(fileID uint64, password string) map[string]any {
@@ -264,6 +265,13 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 		share, serr := createBlobShare(cmd, f, cli, shareMount, shareBody)
 		if serr != nil {
 			return failErr(f, serr)
+		}
+		// The share id is backend data going straight into the link's path, the
+		// same situation as the document branch's ref_id: hold it to the charset
+		// the consuming side enforces so this command cannot emit a share_url that
+		// `share access` would then refuse.
+		if verr := assertShareIDSegment("share token", share.ID); verr != nil {
+			return failErr(f, verr)
 		}
 		return emitJSON(f, shareTarget{
 			Kind:         shareKindBlob,
@@ -551,9 +559,9 @@ Only a blob share is downloadable. A document link fails locally with
 NOT_DOWNLOADABLE before any request goes out — open it with ` + "`drive share access`" + `
 or in a browser instead.
 
-The bytes are written to "<output>.part" and renamed into place only after a
-complete transfer, on an HTTP client that carries no Octo credential. An existing
-destination is refused unless --overwrite is set.
+The bytes are written to a randomly-named partial file next to the destination and
+renamed into place only after a complete transfer, on an HTTP client that carries
+no Octo credential. An existing destination is refused unless --overwrite is set.
 
 Underlying operation: drive.share.download.`,
 		Args: cobra.ExactArgs(1),

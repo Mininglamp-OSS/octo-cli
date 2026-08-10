@@ -163,7 +163,7 @@ octo-cli drive file copy   "$FILE" --parent-id "$FOLDER"
 
 If `pending_file` is not `cancelled`, run `octo-cli drive upload cancel <file-id>` yourself.
 
-`drive download file` and `drive share download` write to `<output>.part`, fsync, then rename — an interrupted transfer never leaves a truncated file. **An existing destination is refused** unless you pass `--overwrite`. The result carries a `sha256` you can verify.
+`drive download file` and `drive share download` write to a randomly-named partial file next to the destination, fsync, then rename — an interrupted transfer never leaves a truncated file, and a pre-created symlink at a guessable path cannot redirect the write. **An existing destination is refused** unless you pass `--overwrite`. The result carries a `sha256` you can verify.
 
 The low-level steps stay available (`upload prepare|confirm|cancel`, `download url`) if you need to drive the transfer yourself.
 

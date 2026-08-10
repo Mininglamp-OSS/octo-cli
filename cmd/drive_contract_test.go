@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
@@ -492,6 +494,73 @@ func TestDriveShareCreate_DocRefIDMustRoundTrip(t *testing.T) {
 			ee := output.AsExitError(err)
 			if ee == nil || ee.Code != "INVALID_SHARE_URL" {
 				t.Errorf("error: got %v, want INVALID_SHARE_URL", err)
+			}
+		})
+	}
+}
+
+// TestDriveShareCreate_BlobShareIDMustRoundTrip is the blob-branch counterpart:
+// share.ID is backend data concatenated into the link path, exactly like the
+// document branch's ref_id, so the same charset check applies. Without it the
+// command could hand out a share_url that its own parseShareURL then refuses.
+func TestDriveShareCreate_BlobShareIDMustRoundTrip(t *testing.T) {
+	for _, shareID := range []string{"tok?x=1", "tok#frag", "tok 1", "tok/sub", ".."} {
+		t.Run(shareID, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/v1/bot/drive/files/77":
+					_, _ = w.Write([]byte(`{"id":77,"type":"blob","name":"c.pdf","size":42,"content_type":"application/pdf"}`))
+				default:
+					body, _ := json.Marshal(map[string]any{
+						"id": shareID, "file_id": 77, "permission": "download",
+					})
+					_, _ = w.Write(body)
+				}
+			}, nil)
+
+			err := env.run("drive", "share", "create", "77")
+			if err == nil {
+				t.Fatalf("expected a fail-closed error for share id %q", shareID)
+			}
+			if ee := output.AsExitError(err); ee == nil || ee.Code != "INVALID_SHARE_URL" {
+				t.Errorf("error: got %v, want INVALID_SHARE_URL", err)
+			}
+		})
+	}
+}
+
+// TestDriveShareCreate_EmittedLinksRoundTrip is the positive companion for both
+// branches: whatever share_url this command emits must be accepted by the parser
+// the receiver uses.
+func TestDriveShareCreate_EmittedLinksRoundTrip(t *testing.T) {
+	cases := []struct {
+		name    string
+		entry   string
+		shareID string
+	}{
+		{"blob", `{"id":77,"type":"blob","name":"c.pdf","size":42,"content_type":"application/pdf"}`, "tok-9"},
+		{"blob with a base64url id starting with a dash", `{"id":77,"type":"blob","name":"c.pdf","size":42}`, "-Ab3cD_x"},
+		{"doc", `{"id":5,"type":"doc","ref_id":"doc-1","doc_space_id":"space-1","name":"n"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/bot/drive/shares" {
+					_, _ = w.Write([]byte(`{"id":"` + tc.shareID + `","file_id":77,"permission":"download"}`))
+					return
+				}
+				_, _ = w.Write([]byte(tc.entry))
+			}, nil)
+
+			if err := env.run("drive", "share", "create", "77"); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			shareURL, ok := env.data(t)["share_url"].(string)
+			if !ok || shareURL == "" {
+				t.Fatalf("no share_url emitted: %v", env.data(t))
+			}
+			if _, perr := parseShareURL(&config.Config{APIBaseURL: env.api.URL}, shareURL); perr != nil {
+				t.Errorf("the emitted share_url %q is not accepted by share access: %v", shareURL, perr)
 			}
 		})
 	}

@@ -320,11 +320,20 @@ Notes:
   credential and no space header. Redirects are followed (storage gateways use
   them) but every hop is re-validated against the same https-or-loopback-http
   rule as the first, so an accepted presigned URL cannot redirect the transfer to
-  an unsafe destination. A failed `upload file` cancels the pending row and
-  reports `file_id` + the cancel outcome in the error detail. A transport failure
-  names the storage host and the cause but never the URL — the presigned
-  signature is in the query string, which makes the whole URL a short-lived
-  bearer credential for the object.
+  an unsafe destination, and the `Referer` header Go would fill in from the
+  previous hop's full URL is dropped — a presigned URL carries its signature in
+  the query string, so forwarding it would hand object read (GET) or write (PUT)
+  access to a host that has no use for it. The plain-http exception is additionally
+  gated on the configured Octo origin being loopback: it exists for local
+  development, and against a remote origin it would otherwise let a storage host
+  redirect the transfer at a service on the caller's own machine. A failed
+  `upload file` cancels the pending row and reports `file_id` + the cancel outcome
+  in the error detail. A transport failure names the storage host and the cause but
+  never the URL, and neither does a URL-parse failure.
+- `upload file` opens the local file once and keeps the descriptor: the size it
+  stats is what the backend signs, so re-opening by path after the prepare
+  round-trip would let a replacement at that path be uploaded under the previous
+  file's signed `Content-Length`.
 - `download file` / `share download` write a randomly-named `<base>.<rand>.part`
   created `O_EXCL` in the destination directory, fsync, then rename; an existing
   destination is refused unless `--overwrite` is passed. The name is random
@@ -335,12 +344,19 @@ Notes:
   unconditionally.
 - Share passwords, share tokens and invite tokens are marked `x-octo-secret`:
   they go on the wire unchanged but are masked in `--verbose` and `--dry-run`
-  output, and in the default error envelope. Body masking is structural — the
-  body value is walked and matching leaves replaced *before* marshalling — so a
-  password containing `"`, `\` or a newline is masked in the form it would
-  actually be logged. A password may also be supplied off argv with
-  `--password-file <path>` (or `-` for stdin), mirroring `auth login
-  --token-file`.
+  output, and in the default error envelope on **both** of its paths — the
+  transport error (whose `*url.Error` embeds the request URL) and the backend
+  error body (which may echo the value it was given, and for these operations the
+  id *is* the secret). Body masking is structural — the body value is walked and
+  matching leaves replaced *before* marshalling — so a password containing `"`,
+  `\` or a newline is masked in the form it would actually be logged; a body shape
+  the walk does not recognise is rendered and text-masked rather than passed
+  through. A password may also be supplied off argv with `--password-file <path>`
+  (or `-` for stdin), mirroring `auth login --token-file`.
+- Both sides of a share link agree by construction: an id the CLI puts into a
+  `share_url` (a blob share token or a mounted document's `doc_id`) is held to the
+  same charset `share access` enforces on the way in, so the command cannot emit a
+  link its own parser would refuse.
 - **base64url ids may start with `-`**, which cobra parses as a flag before the
   command runs. The three affected path params (`share_id`, `invite_id`,
   `invite_token`) declare `x-octo-flag`, so each also accepts a flag form —
