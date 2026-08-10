@@ -25,7 +25,7 @@
                   "items": {
                     "type": "object",
                     "properties": {
-                      "slug": { "type": "string" },
+                      "slug": { "type": "string", "description": "Canonical doc_id for a mounted document; legacy slug for an unmounted document." },
                       "title": { "type": "string" },
                       "latest": { "type": "integer" },
                       "updated": { "type": "string" }
@@ -40,7 +40,7 @@
       "post": {
         "operationId": "html.publish",
         "summary": "Publish an HTML document (creates or bumps a version)",
-        "description": "Publish a self-contained HTML document under a slug. Requires the write token (Bearer). A new slug creates the document; an existing slug appends a new immutable version. The server stamps commentable artifacts and reconciles existing comment anchors.",
+        "description": "Publish a self-contained HTML document. With a group, space, or thread mount, the first publish synchronously registers the document and returns its canonical doc_id; repeating the alias resolves to that same document and doc_id. Later publishes may pass the canonical doc_id in slug. Without a mount (or with an empty mount), compatibility behavior is unchanged: the document is not registered, remains addressed by its legacy slug, and returns no usable doc_id. Use doc_id for non-publish operations on registered documents and the legacy slug for unregistered documents. Requires the write token (Bearer). The server stamps commentable artifacts and reconciles existing comment anchors.",
         "x-octo-risk": "write",
         "requestBody": {
           "required": true,
@@ -50,7 +50,7 @@
                 "type": "object",
                 "required": ["slug", "html"],
                 "properties": {
-                  "slug": { "type": "string", "description": "stable document slug" },
+                  "slug": { "type": "string", "description": "Human-readable alias on the first mounted publish. Reusing the alias resolves to the same document and returns the same doc_id; a later mounted publish may instead pass that canonical ID. In unmounted/empty-mount compatibility mode this remains the legacy slug and no usable doc_id is returned." },
                   "html": { "type": "string", "description": "the full self-contained HTML document body" },
                   "version": { "type": "integer", "description": "optional explicit version; omit to auto-increment" },
                   "meta": {
@@ -63,10 +63,10 @@
                   "mount_type": {
                     "type": "string",
                     "enum": ["group", "space", "thread"],
-                    "description": "where this doc is mounted; forwarded to docs-backend so the HTML doc is registered into the file sidebar. Omit to skip registration (default). 'group'/'space' register; 'thread' is accepted but not registered (thread mounts are intentionally skipped by the backend)."
+                    "description": "Mount used to synchronously register the first publish in docs-backend and the file sidebar; 'group', 'space', and 'thread' are supported. Omit or leave empty only for legacy unregistered, slug-addressed compatibility; that mode returns no usable doc_id."
                   },
                   "group_no": { "type": "string", "description": "group number; supply when mount_type=group" },
-                  "thread_id": { "type": "string", "description": "thread id when mount_type=thread (mount context only; thread mounts are not registered)" }
+                  "thread_id": { "type": "string", "description": "thread id; supply when mount_type=thread" }
                 }
               }
             }
@@ -80,7 +80,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string" },
+                    "doc_id": { "type": "string", "description": "Canonical document identifier returned for mounted documents; pass it to every non-publish HTML command. Empty or absent in legacy unmounted mode." },
+                    "alias": { "type": "string", "description": "Human-readable alias requested on first mounted publish; may be absent in legacy mode." },
+                    "slug": { "type": "string", "description": "Compatibility value equal to doc_id for mounted documents, or the legacy slug for unmounted documents." },
                     "version": { "type": "integer" },
                     "url": { "type": "string" },
                     "size": { "type": "integer" },
@@ -94,14 +96,14 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}": {
+    "/docs-html/v1/docs/{doc_id}": {
       "get": {
         "operationId": "html.get",
         "summary": "Fetch one document's metadata (needs reader)",
-        "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /docs-html/v1/docs/{slug} — added to octo-doc to back this command.",
+        "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /docs-html/v1/docs/{doc_id} — added to octo-doc to back this command.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -111,7 +113,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string" },
+                    "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                     "title": { "type": "string" },
                     "latest": { "type": "integer" },
                     "created": { "type": "string" },
@@ -129,20 +131,20 @@
         "description": "Soft-delete a document. Requires the write token / doc author credential.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": { "description": "Deleted" }
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/versions": {
+    "/docs-html/v1/docs/{doc_id}/versions": {
       "get": {
         "operationId": "html.versions",
         "summary": "List a document's versions (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -165,14 +167,14 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/draft": {
+    "/docs-html/v1/docs/{doc_id}/draft": {
       "put": {
         "operationId": "html.draft.save",
         "summary": "Save the author draft (author-only)",
         "description": "Write the author-only draft slot for a slug. Does not mint an immutable version until promoted.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": true,
@@ -193,13 +195,13 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/draft/promote": {
+    "/docs-html/v1/docs/{doc_id}/draft/promote": {
       "post": {
         "operationId": "html.draft.promote",
         "summary": "Promote the author draft to an immutable version (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -209,7 +211,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string" },
+                    "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                     "version": { "type": "integer" },
                     "url": { "type": "string" }
                   }
@@ -220,13 +222,13 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/share": {
+    "/docs-html/v1/docs/{doc_id}/share": {
       "post": {
         "operationId": "html.share",
         "summary": "Mint / rotate a per-doc read+comment share code (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -250,21 +252,21 @@
         "summary": "Revoke the per-doc share code (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": { "description": "Revoked" }
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/grants": {
+    "/docs-html/v1/docs/{doc_id}/grants": {
       "get": {
         "operationId": "html.grant.list",
         "summary": "List a document's per-uid access grants (author-only)",
         "description": "List the uids granted access to this document and their role. Author-only (only the doc creator can view grants).",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -292,7 +294,7 @@
         "description": "Grant a specific uid access to this document (upsert by uid). role defaults to 'reader' (read published versions + comment/react). Only the doc creator (author) can grant. The granted uid resolves to a reader capability on subsequent requests — no share code needed.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": true,
@@ -314,14 +316,14 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/grants/{uid}": {
+    "/docs-html/v1/docs/{doc_id}/grants/{uid}": {
       "delete": {
         "operationId": "html.grant.rm",
         "summary": "Revoke a uid's access grant (author-only)",
         "description": "Revoke a uid's grant on this document. Author-only. The doc creator cannot be removed (they own the doc) — attempting to returns a conflict.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } },
           { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
@@ -329,13 +331,13 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/assets": {
+    "/docs-html/v1/docs/{doc_id}/assets": {
       "get": {
         "operationId": "html.asset.ls",
         "summary": "List a document's media assets (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
@@ -366,7 +368,7 @@
         "x-octo-risk": "write",
         "x-octo-multipart": true,
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } }
         ],
         "requestBody": {
           "required": true,
@@ -400,13 +402,13 @@
         }
       }
     },
-    "/docs-html/v1/docs/{slug}/assets/{sha256}": {
+    "/docs-html/v1/docs/{doc_id}/assets/{sha256}": {
       "delete": {
         "operationId": "html.asset.rm",
         "summary": "Delete a media asset (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "slug", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "doc_id", "in": "path", "required": true, "description": "Canonical doc_id returned by a mounted publish; use the legacy slug for an unmounted document.", "schema": { "type": "string" } },
           { "name": "sha256", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
         "responses": {
@@ -421,7 +423,7 @@
         "description": "List comments for a document. The slug is passed as a query parameter.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "slug", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "slug", "in": "query", "required": true, "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility.", "schema": { "type": "string" } },
           { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" }
         ],
         "responses": {
@@ -441,7 +443,7 @@
                 "type": "object",
                 "required": ["slug", "text"],
                 "properties": {
-                  "slug": { "type": "string" },
+                  "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                   "text": { "type": "string", "description": "comment body" },
                   "anchor": {
                     "type": "object",
@@ -471,7 +473,7 @@
                 "type": "object",
                 "required": ["slug", "parent_id", "text"],
                 "properties": {
-                  "slug": { "type": "string" },
+                  "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                   "parent_id": { "type": "string", "description": "the comment thread root id being replied to" },
                   "text": { "type": "string", "description": "reply body" },
                   "status": { "type": "string", "enum": ["applied", "partial", "question"], "description": "optional verdict rendered on the parent" },
@@ -500,7 +502,7 @@
                 "type": "object",
                 "required": ["slug", "aid"],
                 "properties": {
-                  "slug": { "type": "string" },
+                  "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                   "version": { "type": "integer", "description": "version to read; 0 or omitted = latest" },
                   "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" }
                 }
@@ -541,7 +543,7 @@
                 "type": "object",
                 "required": ["slug", "aid", "new_html"],
                 "properties": {
-                  "slug": { "type": "string" },
+                  "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                   "base_version": { "type": "integer", "description": "version whose aid to locate; 0 or omitted = latest" },
                   "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" },
                   "new_html": { "type": "string", "description": "replacement single top-level element" }
@@ -558,7 +560,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string" },
+                    "slug": { "type": "string", "description": "Canonical doc_id for a mounted document, or the legacy slug for an unmounted document. The wire name remains slug for server compatibility." },
                     "version": { "type": "integer" },
                     "url": { "type": "string" }
                   }

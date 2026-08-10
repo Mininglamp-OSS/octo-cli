@@ -14,12 +14,27 @@ metadata:
 > collaborative docs-backend (live rich-text/sheet/board over websockets).
 > `octo-cli html …` talks to **octo-doc** — the self-hosted, prompt-native
 > *interactive HTML document* service. A doc here is a full self-contained HTML
-> page, published as an **immutable version** at `/d/<slug>/v/<n>`, with anchored
+> page, published as an **immutable version** at `/d/<doc_id>/v/<n>`, with anchored
 > inline comments. An agent authors by publishing HTML, and edits by **replacing a
 > single stamped artifact** (located by its content-hash `aid`) which republishes
 > a new version. Pick the domain that matches the backend you are pointed at.
 
 All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the `{data}/{error}` envelope.
+
+**Document identifier contract has two modes:**
+
+- **Mounted (`group`, `space`, or `thread`):** the first `publish` synchronously
+  registers the document and returns canonical `doc_id`. Save it. Repeating the
+  human-readable alias resolves to the same document and `doc_id`; every
+  non-publish command uses `doc_id`.
+- **Unmounted/empty mount (legacy compatibility):** publish does not register
+  the document and returns an empty or absent `doc_id`. Keep using its legacy
+  slug for non-publish commands.
+
+Query and JSON-body fields remain named `slug` because that is the server wire
+contract; put the mode-appropriate identifier in them. Path help displays
+`<doc-id>`, but accepts a legacy unmounted document's slug. The CLI does not
+persist either identifier for you.
 
 ## Auth & space
 
@@ -38,34 +53,33 @@ All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the `{data}/{er
 ## 1. Document lifecycle
 
 ```bash
-# Publish a self-contained HTML document under a slug. New slug = create;
-# existing slug = append a new immutable version. --data is a JSON object.
+# First mounted publish synchronously registers the document. Save response.doc_id.
+# --data is a JSON object.
 # mount_type is OPTIONAL in the spec but STRONGLY RECOMMENDED (see the
 # sidebar-registration note below); include it on every publish that should
 # appear in the file sidebar.
 octo-cli html publish --data '{"slug":"runbook","html":"<html><body><h1>Runbook</h1></body></html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
-#   → { slug, version, url, size, aids, merged_comments }
+#   → { doc_id, alias, slug, version, url, size, aids, merged_comments }
 
-# Register the doc into the file sidebar: pass mount_type (non-empty) on every
-# publish that should be visible there. Omitting it is valid per the spec, but
-# WITHOUT mount_type the backend skips docs-backend registration, so the HTML
-# never shows up in the sidebar file list — this is the #1 "my doc didn't
-# appear" gotcha. Pass 'group' (+ group_no) or 'space'; 'thread' is accepted but
-# intentionally NOT registered. If you want sidebar visibility, treat a
-# missing/empty mount_type as the cause, not a valid default.
-octo-cli html publish --data '{"slug":"runbook","html":"<html>...</html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
+# Register the doc into the file sidebar: pass a non-empty mount_type on first
+# publish. 'group' (+ group_no), 'space', and 'thread' (+ thread_id) are all
+# registered. Missing/empty mount_type selects legacy unregistered mode: the
+# response has empty/no doc_id and all later commands use the original slug.
+# Repeating the alias selects the same document and returns the same doc_id.
+# A later mounted publish may alternatively put doc_id in the wire field slug.
+octo-cli html publish --data '{"slug":"<doc_id>","html":"<html>...</html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
 
 # List documents (owner-scoped index).
 octo-cli html list
 
 # Fetch one document's metadata (slug, title, latest version, timestamps).
-octo-cli html get <slug>
+octo-cli html get <doc_id>
 
 # List a document's versions.
-octo-cli html versions <slug>
+octo-cli html versions <doc_id>
 
 # Soft-delete a document (author-only).
-octo-cli html rm <slug>
+octo-cli html rm <doc_id>
 ```
 
 ## 2. Author drafts
@@ -75,20 +89,20 @@ until promoted.
 
 ```bash
 # Save the draft HTML.
-octo-cli html draft save <slug> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
+octo-cli html draft save <doc_id> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
 
 # Promote the draft to an immutable version.
-octo-cli html draft promote <slug>          # → { slug, version, url }
+octo-cli html draft promote <doc_id>        # → { slug, version, url }
 ```
 
 ## 3. Sharing
 
 ```bash
 # Mint / rotate the per-doc read+comment share code (author-only).
-octo-cli html share <slug>                   # → { code, url }
+octo-cli html share <doc_id>                 # → { code, url }
 
 # Revoke the share code.
-octo-cli html unshare <slug>
+octo-cli html unshare <doc_id>
 ```
 
 ## 3b. Per-uid access grants (author-only)
@@ -102,28 +116,28 @@ are author-only (only the doc creator can grant/revoke/list).
 ```bash
 # Grant a uid reader access (upsert by uid). role defaults to 'reader'.
 # Either individual flags or --data JSON work; flags override --data.
-octo-cli html grant add <slug> --uid <uid> --role reader
-octo-cli html grant add <slug> --data '{"uid":"<uid>","role":"reader"}'
+octo-cli html grant add <doc_id> --uid <uid> --role reader
+octo-cli html grant add <doc_id> --data '{"uid":"<uid>","role":"reader"}'
 #   → { slug, uid, role }
 
 # List a doc's grants (uid + role).
-octo-cli html grant list <slug>
+octo-cli html grant list <doc_id>
 
 # Revoke a uid's grant. The creator cannot be removed (409 conflict).
-octo-cli html grant rm <slug> <uid>
+octo-cli html grant rm <doc_id> <uid>
 ```
 
 ## 4. Media assets
 
 ```bash
 # List a document's assets (reader).
-octo-cli html asset ls <slug>
+octo-cli html asset ls <doc_id>
 
 # Upload an asset (author). Multipart form-data (field "file"); pass a local path.
-octo-cli html asset add <slug> --file ./chart.png
+octo-cli html asset add <doc_id> --file ./chart.png
 
 # Delete an asset by its sha256 (author).
-octo-cli html asset rm <slug> <sha256>
+octo-cli html asset rm <doc_id> <sha256>
 ```
 
 ## 5. Comments
@@ -134,10 +148,10 @@ replaced goes `lost` rather than silently re-attaching.
 
 ```bash
 # List a document's comments. --version accepts a number or 'all'.
-octo-cli html comment list --slug <slug> [--version all]
+octo-cli html comment list --slug <doc_id> [--version all]
 
 # Create a comment. Omit anchor for an unanchored comment.
-octo-cli html comment add --data '{"slug":"runbook","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
+octo-cli html comment add --data '{"slug":"<doc_id>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
 ```
 
 ## 6. Agent element edit (read / replace) + reply
@@ -148,18 +162,18 @@ stamped `data-odoc-aid`, replaces it, and the server republishes a new version
 
 ```bash
 # Read one artifact's current outer HTML by aid (version 0 or omitted = latest).
-octo-cli html element get --data '{"slug":"runbook","aid":"<content-hash>"}'
+octo-cli html element get --data '{"slug":"<doc_id>","aid":"<content-hash>"}'
 #   → { aid, tag, html }
 
 # Replace that artifact and republish. new_html MUST be exactly ONE top-level
 # element and free of <script>/<style>, inline on*= handlers, and javascript:
 # URLs (the backend rejects otherwise). base_version 0/omitted = latest.
-octo-cli html element replace --data '{"slug":"runbook","aid":"<content-hash>","new_html":"<section>updated body</section>"}'
+octo-cli html element replace --data '{"slug":"<doc_id>","aid":"<content-hash>","new_html":"<section>updated body</section>"}'
 #   → { slug, version, url }
 
 # Reply to a comment thread as the agent (identity odoc-agent) with a verdict.
 # status ∈ applied | partial | question (rendered as ✅/🟡/❓ on the parent).
-octo-cli html reply --data '{"slug":"runbook","parent_id":"<comment-root-id>","text":"Done, updated the section.","status":"applied"}'
+octo-cli html reply --data '{"slug":"<doc_id>","parent_id":"<comment-root-id>","text":"Done, updated the section.","status":"applied"}'
 ```
 
 **Editing discipline (keep comment anchors alive).** Each `element replace`

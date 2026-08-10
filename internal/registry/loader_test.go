@@ -110,6 +110,51 @@ func TestHTMLOperationsUseDocsHTMLGatewayPrefix(t *testing.T) {
 	}
 }
 
+func TestHTMLDocIDContract(t *testing.T) {
+	r := MustNew()
+	publish, ok := r.GetOperation("html.publish")
+	if !ok || publish.RequestBody == nil || publish.ResponseSchema == nil {
+		t.Fatal("html.publish schemas not found")
+	}
+	if got := publish.RequestBody.Properties["slug"].Description; !strings.Contains(got, "alias") || !strings.Contains(got, "same doc_id") || !strings.Contains(got, "legacy slug") {
+		t.Errorf("publish slug description = %q, want alias idempotency and optional canonical-ID guidance", got)
+	}
+	for _, name := range []string{"doc_id", "alias", "slug"} {
+		if _, ok := publish.ResponseSchema.Properties[name]; !ok {
+			t.Errorf("publish response missing %q", name)
+		}
+	}
+	if got := publish.ResponseSchema.Properties["doc_id"].Description; !strings.Contains(got, "non-publish") {
+		t.Errorf("publish doc_id description = %q, want non-publish-command guidance", got)
+	}
+	if got := publish.RequestBody.Properties["mount_type"].Description; !strings.Contains(got, "synchronously") || !strings.Contains(got, "'group', 'space', and 'thread'") || !strings.Contains(got, "legacy") {
+		t.Errorf("publish mount_type description = %q, want all mount types registered and empty-mount legacy semantics", got)
+	}
+	if got := publish.RequestBody.Properties["thread_id"].Description; strings.Contains(got, "not registered") {
+		t.Errorf("publish thread_id description retains stale unregistered semantics: %q", got)
+	}
+
+	for _, op := range r.ListOperations("html") {
+		detail, _ := r.GetOperation(op.ID)
+		for _, p := range detail.Parameters {
+			if p.In == "path" && p.Name == "slug" {
+				t.Errorf("%s path parameter must be named doc_id", op.ID)
+			}
+			if p.In == "path" && p.Name == "doc_id" && !strings.Contains(p.Description, "legacy") {
+				t.Errorf("%s doc_id parameter description = %q, want legacy-slug exception", op.ID, p.Description)
+			}
+			if p.In == "query" && p.Name == "slug" && (!strings.Contains(p.Description, "wire name") || !strings.Contains(p.Description, "legacy")) {
+				t.Errorf("%s slug query description = %q, want wire-name and legacy guidance", op.ID, p.Description)
+			}
+		}
+		if detail.RequestBody != nil {
+			if slug, ok := detail.RequestBody.Properties["slug"]; ok && op.ID != "html.publish" && (!strings.Contains(slug.Description, "wire name") || !strings.Contains(slug.Description, "legacy")) {
+				t.Errorf("%s slug body description = %q, want wire-name and legacy guidance", op.ID, slug.Description)
+			}
+		}
+	}
+}
+
 func TestGetOperationMatterList_Pagination(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("matter.list")

@@ -138,10 +138,10 @@ octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Mounted HTML documents registered in docs-backend use the same search endpoint.
-# Resolve a hit's slug with docs get, then continue in the separate html domain.
+# Resolve a hit's canonical HTML identifier with docs get, then continue in the separate html domain.
 octo-cli docs search --keyword "interactive roadmap" --doc-type html --page-all
 octo-cli docs get html-doc-id              # returns octoDocSlug for HTML documents
-octo-cli html get html-document-slug
+octo-cli html get html-document-doc-id
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
 octo-cli docs sheet get sheet-9                      # whole sheet + base version token
@@ -163,13 +163,16 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 # interactive HTML as immutable versions, then edit a single stamped artifact.
 octo-cli html publish --slug launch --html '<h1>hi</h1>' --mount-type group --group-no <group_no> \
   --data '{"meta":{"title":"Launch page"}}'   # title lives in meta.title; slug+html required
+# A mounted first publish synchronously registers: save publish.data.doc_id and
+# use it for every non-publish operation. An unmounted/empty-mount legacy publish
+# returns empty/no doc_id and remains addressed by its original slug.
 octo-cli html list
-octo-cli html versions my-slug
-octo-cli html draft save my-slug --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote my-slug
-octo-cli html share my-slug                                        # mint a reader share code
-octo-cli html grant add my-slug --data '{"uid":"u-1"}'             # per-uid authorization
-octo-cli html element get --slug my-slug --aid <content-hash>      # read one stamped artifact (slug is a flag)
-octo-cli html element replace --slug my-slug --aid <content-hash> --new-html '<p>new</p>'
+octo-cli html versions <doc_id>
+octo-cli html draft save <doc_id> --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote <doc_id>
+octo-cli html share <doc_id>                                        # mint a reader share code
+octo-cli html grant add <doc_id> --data '{"uid":"u-1"}'             # per-uid authorization
+octo-cli html element get --slug <doc_id> --aid <content-hash>      # wire flag remains named slug
+octo-cli html element replace --slug <doc_id> --aid <content-hash> --new-html '<p>new</p>'
 
 # Discover the API — fully offline, specs are embedded.
 octo-cli schema --list              # all operations across all domains

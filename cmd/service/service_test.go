@@ -132,6 +132,50 @@ func TestRegisterServiceCommands_PreservesForeignOperationDomain(t *testing.T) {
 
 // --- operation execution (matter.list) ---
 
+func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
+	var gotPath, gotQuery string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.EscapedPath(), r.URL.RawQuery
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	})
+
+	get := findCmd(findCmd(root, "html"), "get")
+	if get == nil {
+		t.Fatal("missing html get")
+	}
+	if get.Use != "get <doc-id>" {
+		t.Fatalf("html get Use = %q, want %q", get.Use, "get <doc-id>")
+	}
+	root.SetArgs([]string{"html", "get", "doc/canonical"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("html get: %v", err)
+	}
+	if gotPath != "/docs-html/v1/docs/doc%2Fcanonical" {
+		t.Errorf("get path = %q", gotPath)
+	}
+
+	root.SetArgs([]string{"html", "comment", "list", "--slug", "doc-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("comment list: %v", err)
+	}
+	if gotQuery != "slug=doc-1" {
+		t.Errorf("comment query = %q, wire key must remain slug", gotQuery)
+	}
+
+	root.SetArgs([]string{"html", "element", "get", "--slug", "doc-1", "--aid", "a1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("element get: %v", err)
+	}
+	if gotBody["slug"] != "doc-1" {
+		t.Errorf("element body = %#v, wire key must remain slug", gotBody)
+	}
+}
+
 func TestMatterList_QueryParamsFromFlags(t *testing.T) {
 	var gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
