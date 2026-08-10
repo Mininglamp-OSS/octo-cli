@@ -59,7 +59,7 @@
     },
     {
       "name": "autopilots",
-      "description": "Autopilots operations."
+      "description": "Scheduled and event-driven task or direct-execution dispatch."
     }
   ],
   "servers": [
@@ -5729,7 +5729,7 @@
     "/fleet/api/v1/autopilots": {
       "get": {
         "summary": "List autopilots",
-        "description": "List autopilots in the authenticated workspace.",
+        "description": "Returns one workspace-scoped page of autopilots.",
         "tags": [
           "autopilots"
         ],
@@ -5744,7 +5744,6 @@
           {
             "name": "status",
             "in": "query",
-            "required": false,
             "schema": {
               "type": "string"
             }
@@ -5770,36 +5769,19 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Collection"
+            "$ref": "#/components/responses/AutopilotCollection"
           }
         }
       },
       "post": {
         "summary": "Create autopilot",
-        "description": "Create autopilot in the authenticated workspace.",
+        "description": "Creates an autopilot using public task and execution vocabulary.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.create",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/AutopilotCreate"
         },
         "responses": {
           "400": {
@@ -5821,7 +5803,7 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotResource"
           }
         }
       },
@@ -5832,24 +5814,17 @@
       ]
     },
     "/fleet/api/v1/autopilots/{autopilot_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ],
       "get": {
         "summary": "Get autopilot",
-        "description": "Get autopilot in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.get",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -5870,37 +5845,18 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotResource"
           }
         }
       },
       "patch": {
         "summary": "Update autopilot",
-        "description": "Update autopilot in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.update",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/AutopilotUpdate"
         },
         "responses": {
           "400": {
@@ -5922,28 +5878,16 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotResource"
           }
         }
       },
       "delete": {
         "summary": "Delete autopilot",
-        "description": "Delete autopilot in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.delete",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -5964,45 +5908,23 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/Empty"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/trigger": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/trigger": {
+      ],
       "post": {
-        "summary": "Trigger autopilot",
-        "description": "Trigger autopilot in the authenticated workspace.",
+        "summary": "Trigger autopilot manually",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.trigger",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6023,35 +5945,25 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotRunResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/runs": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/runs": {
+      ],
       "get": {
         "summary": "List autopilot runs",
-        "description": "List autopilot runs in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.run.list",
         "parameters": [
           {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
             "$ref": "#/components/parameters/Page"
           },
           {
@@ -6078,44 +5990,23 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Collection"
+            "$ref": "#/components/responses/AutopilotRunCollection"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/runs/{autopilot_run_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/runs/{autopilot_run_id}": {
+      ],
       "get": {
         "summary": "Get autopilot run",
-        "description": "Get autopilot run in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.run.get",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6136,35 +6027,25 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotRunResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries": {
+      ],
       "get": {
-        "summary": "List autopilot deliveries",
-        "description": "List autopilot deliveries in the authenticated workspace.",
+        "summary": "List autopilot webhook deliveries",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.delivery.list",
         "parameters": [
           {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
             "$ref": "#/components/parameters/Page"
           },
           {
@@ -6191,44 +6072,23 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Collection"
+            "$ref": "#/components/responses/AutopilotDeliveryCollection"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}": {
+      ],
       "get": {
-        "summary": "Get autopilot delivery",
-        "description": "Get autopilot delivery in the authenticated workspace.",
+        "summary": "Get autopilot webhook delivery",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.delivery.get",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_delivery_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6249,44 +6109,23 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotDeliveryResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}/replay": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}/replay": {
+      ],
       "post": {
-        "summary": "Replay autopilot delivery",
-        "description": "Replay autopilot delivery in the authenticated workspace.",
+        "summary": "Replay autopilot webhook delivery",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.delivery.replay",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_delivery_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6307,44 +6146,25 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotDeliveryResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/triggers": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/triggers": {
+      ],
       "post": {
         "summary": "Create autopilot trigger",
-        "description": "Create autopilot trigger in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.create",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/AutopilotTriggerCreate"
         },
         "responses": {
           "400": {
@@ -6366,53 +6186,25 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotTriggerResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}": {
+      ],
       "patch": {
         "summary": "Update autopilot trigger",
-        "description": "Update autopilot trigger in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.update",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_trigger_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/AutopilotTriggerUpdate"
         },
         "responses": {
           "400": {
@@ -6434,37 +6226,16 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotTriggerResource"
           }
         }
       },
       "delete": {
         "summary": "Delete autopilot trigger",
-        "description": "Delete autopilot trigger in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.delete",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_trigger_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6485,44 +6256,23 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/Empty"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/rotate_webhook_token": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/rotate_webhook_token": {
+      ],
       "post": {
         "summary": "Rotate autopilot webhook token",
-        "description": "Rotate autopilot webhook token in the authenticated workspace.",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.webhook_token.rotate",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_trigger_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6543,53 +6293,25 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotTriggerResource"
           }
         }
-      },
+      }
+    },
+    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/signing_secret": {
       "parameters": [
         {
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
-      ]
-    },
-    "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/signing_secret": {
+      ],
       "put": {
-        "summary": "Set autopilot signing secret",
-        "description": "Set autopilot signing secret in the authenticated workspace.",
+        "summary": "Set or clear autopilot webhook signing secret",
         "tags": [
           "autopilots"
         ],
         "operationId": "autopilot.signing_secret.set",
-        "parameters": [
-          {
-            "name": "autopilot_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "autopilot_trigger_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/AutopilotSigningSecret"
         },
         "responses": {
           "400": {
@@ -6611,15 +6333,10 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Resource"
+            "$ref": "#/components/responses/AutopilotTriggerResource"
           }
         }
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
+      }
     },
     "/fleet/api/v1/tasks/{task_id}/expert_team_evaluation": {
       "post": {
@@ -6795,6 +6512,46 @@
           "type": "string",
           "format": "uuid"
         }
+      },
+      "AutopilotRunID": {
+        "name": "autopilot_run_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable autopilot-run identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "AutopilotID": {
+        "name": "autopilot_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable autopilot identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "AutopilotDeliveryID": {
+        "name": "autopilot_delivery_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable webhook-delivery identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "AutopilotTriggerID": {
+        "name": "autopilot_trigger_id",
+        "in": "path",
+        "required": true,
+        "description": "Stable autopilot-trigger identifier.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
       }
     },
     "requestBodies": {
@@ -6953,10 +6710,14 @@
               ],
               "oneOf": [
                 {
-                  "required": ["runtime_id"]
+                  "required": [
+                    "runtime_id"
+                  ]
                 },
                 {
-                  "required": ["runtime_ref"]
+                  "required": [
+                    "runtime_ref"
+                  ]
                 }
               ],
               "properties": {
@@ -7058,6 +6819,56 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ExpertTeamMemberTarget"
+            }
+          }
+        }
+      },
+      "AutopilotCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotCreateRequest"
+            }
+          }
+        }
+      },
+      "AutopilotUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotUpdateRequest"
+            }
+          }
+        }
+      },
+      "AutopilotTriggerCreate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotTriggerCreateRequest"
+            }
+          }
+        }
+      },
+      "AutopilotTriggerUpdate": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotTriggerUpdateRequest"
+            }
+          }
+        }
+      },
+      "AutopilotSigningSecret": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotSigningSecretRequest"
             }
           }
         }
@@ -7180,6 +6991,76 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotResource": {
+        "description": "Autopilot returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotCollection": {
+        "description": "Paginated autopilot collection.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotCollectionEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotRunResource": {
+        "description": "Autopilot run returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotRunEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotRunCollection": {
+        "description": "Paginated autopilot-run collection.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotRunCollectionEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotTriggerResource": {
+        "description": "Autopilot trigger returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotTriggerEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotDeliveryResource": {
+        "description": "Autopilot webhook delivery returned successfully.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotDeliveryEnvelope"
+            }
+          }
+        }
+      },
+      "AutopilotDeliveryCollection": {
+        "description": "Paginated autopilot-delivery collection.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AutopilotDeliveryCollectionEnvelope"
             }
           }
         }
@@ -7364,10 +7245,16 @@
             "minLength": 1
           },
           "description": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "context": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "settings": {
             "type": "object",
@@ -7384,7 +7271,10 @@
             "type": "string"
           },
           "avatar_url": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "created_at": {
             "type": "string",
@@ -7458,7 +7348,14 @@
             "format": "uuid"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "task_created",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ]
           },
           "priority": {
             "type": "string"
@@ -7566,10 +7463,14 @@
         ],
         "oneOf": [
           {
-            "required": ["runtime_id"]
+            "required": [
+              "runtime_id"
+            ]
           },
           {
-            "required": ["runtime_ref"]
+            "required": [
+              "runtime_ref"
+            ]
           }
         ],
         "properties": {
@@ -7594,7 +7495,10 @@
         "type": "object",
         "minProperties": 1,
         "not": {
-          "required": ["runtime_id", "runtime_ref"]
+          "required": [
+            "runtime_id",
+            "runtime_ref"
+          ]
         },
         "properties": {
           "name": {
@@ -7693,7 +7597,10 @@
             "additionalProperties": true
           },
           "last_seen_at": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           },
           "available_workspace_ids": {
@@ -7802,6 +7709,777 @@
           "comment_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "AutopilotDispatchMode": {
+        "type": "string",
+        "description": "Whether the autopilot creates a task or starts an execution directly.",
+        "enum": [
+          "create_task",
+          "direct_execution"
+        ]
+      },
+      "AutopilotCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "assignee_id",
+          "dispatch_mode"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team"
+            ],
+            "default": "expert"
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispatch_mode": {
+            "$ref": "#/components/schemas/AutopilotDispatchMode"
+          },
+          "task_title_template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AutopilotUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team"
+            ]
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ]
+          },
+          "dispatch_mode": {
+            "$ref": "#/components/schemas/AutopilotDispatchMode"
+          },
+          "task_title_template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Autopilot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "autopilot_id",
+          "workspace_id",
+          "title",
+          "assignee_type",
+          "assignee_id",
+          "status",
+          "dispatch_mode",
+          "created_by_type",
+          "created_by_id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "autopilot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team"
+            ]
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "dispatch_mode": {
+            "$ref": "#/components/schemas/AutopilotDispatchMode"
+          },
+          "task_title_template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_by_type": {
+            "type": "string",
+            "enum": [
+              "member",
+              "expert",
+              "expert_team"
+            ]
+          },
+          "created_by_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "trigger_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "schedule",
+                "webhook"
+              ]
+            }
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_run_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutopilotTrigger"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEventFilter": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event"
+        ],
+        "properties": {
+          "event": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "AutopilotTriggerCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "schedule",
+              "webhook"
+            ]
+          },
+          "cron_expression": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "generic",
+              "github"
+            ]
+          },
+          "event_filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEventFilter"
+            }
+          }
+        }
+      },
+      "AutopilotTriggerUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron_expression": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "event_filters": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/WebhookEventFilter"
+            }
+          }
+        }
+      },
+      "AutopilotSigningSecretRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signing_secret"
+        ],
+        "properties": {
+          "signing_secret": {
+            "type": "string",
+            "writeOnly": true,
+            "anyOf": [
+              {
+                "const": ""
+              },
+              {
+                "minLength": 16
+              }
+            ]
+          }
+        }
+      },
+      "AutopilotTrigger": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "autopilot_trigger_id",
+          "autopilot_id",
+          "kind",
+          "enabled",
+          "has_signing_secret",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "autopilot_trigger_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "autopilot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "schedule",
+              "webhook"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron_expression": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "webhook_token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "readOnly": true
+          },
+          "webhook_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "webhook_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri"
+          },
+          "provider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "generic",
+              "github",
+              null
+            ]
+          },
+          "has_signing_secret": {
+            "type": "boolean"
+          },
+          "signing_secret_hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_fired_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "event_filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookEventFilter"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AutopilotRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "autopilot_run_id",
+          "autopilot_id",
+          "source",
+          "status",
+          "triggered_at",
+          "created_at"
+        ],
+        "properties": {
+          "autopilot_run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "autopilot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "autopilot_trigger_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "execution_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "triggered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger_payload": {
+          },
+          "result": {
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AutopilotDelivery": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "autopilot_delivery_id",
+          "workspace_id",
+          "autopilot_id",
+          "autopilot_trigger_id",
+          "provider",
+          "event",
+          "signature_status",
+          "status",
+          "attempt_count",
+          "received_at",
+          "last_attempt_at",
+          "created_at"
+        ],
+        "properties": {
+          "autopilot_delivery_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "autopilot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "autopilot_trigger_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "dedupe_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "dedupe_source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signature_status": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "response_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "autopilot_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "replayed_from_autopilot_delivery_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_attempt_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "selected_headers": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "raw_body": {
+            "type": "string"
+          },
+          "response_body": {
+            "type": "string"
+          }
+        }
+      },
+      "AutopilotEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Autopilot"
+          }
+        }
+      },
+      "AutopilotCollectionEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Autopilot"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/OffsetPagination"
+          }
+        }
+      },
+      "AutopilotRunEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AutopilotRun"
+          }
+        }
+      },
+      "AutopilotRunCollectionEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutopilotRun"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/OffsetPagination"
+          }
+        }
+      },
+      "AutopilotTriggerEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AutopilotTrigger"
+          }
+        }
+      },
+      "AutopilotDeliveryEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AutopilotDelivery"
+          }
+        }
+      },
+      "AutopilotDeliveryCollectionEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "data",
+          "pagination"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutopilotDelivery"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/OffsetPagination"
           }
         }
       }
