@@ -407,7 +407,7 @@ func TestTransferClient_CheckRedirectPolicy(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			policy := transferClient("url", tc.loopbackAPI).CheckRedirect
+			policy := transferClient("url", tc.loopbackAPI, nil).CheckRedirect
 			if policy == nil {
 				t.Fatal("the transfer client must set a redirect policy")
 			}
@@ -428,7 +428,7 @@ func TestTransferClient_CheckRedirectPolicy(t *testing.T) {
 	}
 
 	t.Run("the hop cap is restated", func(t *testing.T) {
-		policy := transferClient("url", false).CheckRedirect
+		policy := transferClient("url", false, nil).CheckRedirect
 		via := make([]*http.Request, maxTransferRedirects)
 		for i := range via {
 			via[i] = hop(http.MethodGet, "https://storage.example.com/obj")
@@ -439,7 +439,7 @@ func TestTransferClient_CheckRedirectPolicy(t *testing.T) {
 	})
 
 	t.Run("Referer is dropped before the hop is judged", func(t *testing.T) {
-		policy := transferClient("url", false).CheckRedirect
+		policy := transferClient("url", false, nil).CheckRedirect
 		next := hop(http.MethodGet, "https://storage.example.com/real-obj")
 		next.Header.Set("Referer", "https://storage.example.com/obj?X-Amz-Signature=SUPERSECRET")
 		_ = policy(next, []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")})
@@ -520,7 +520,7 @@ func TestAssertNumericHostIsAnIP(t *testing.T) {
 // consequence: every spelling of the local machine is refused as a redirect target
 // under a remote origin, not just the three the first version happened to catch.
 func TestTransferClient_LoopbackHopSpellingsAreAllRefused(t *testing.T) {
-	policy := transferClient("url", false).CheckRedirect
+	policy := transferClient("url", false, nil).CheckRedirect
 	previous, err := http.NewRequest(http.MethodGet, "https://storage.example.com/obj", http.NoBody)
 	if err != nil {
 		t.Fatal(err)

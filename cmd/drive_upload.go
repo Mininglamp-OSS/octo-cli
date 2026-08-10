@@ -247,7 +247,7 @@ func putObject(cmd *cobra.Command, file *os.File, size int64, prepared *prepareU
 		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
 	}
 
-	resp, err := transferClient("upload_url", loopbackAPI).Do(req)
+	resp, err := transferClient("upload_url", loopbackAPI, nil).Do(req)
 	if err != nil {
 		return transferNetworkError("upload", target, err)
 	}

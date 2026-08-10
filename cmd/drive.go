@@ -14,6 +14,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -73,6 +74,105 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 
 // --- transport for object storage ---
 
+// hostResolver answers "where does this name point". It is a parameter rather than
+// a package-level variable so the transfer dialer keeps no mutable global state:
+// production passes nil and gets the system resolver, and a test passes a table.
+//
+// A test seam is needed here and cannot be a public DNS name. The wildcard-DNS
+// names usually cited for this (127.0.0.1.nip.io, localtest.me) resolve to loopback
+// only where nothing intercepts them, and resolvers that rewrite unknown or
+// loopback-pointing answers are common enough that a test built on them can quietly
+// stop asserting anything while still passing.
+type hostResolver func(ctx context.Context, host string) ([]net.IP, error)
+
+// systemHostResolver resolves through the system resolver.
+func systemHostResolver(ctx context.Context, host string) ([]net.IP, error) {
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
+	}
+	return ips, nil
+}
+
+// transferDialer decides whether a transfer connection may be made, on the
+// evidence of where the name actually points rather than how it is spelled.
+//
+// The string rules in assertSafeTransferTarget stay as a cheap pre-filter — they
+// are correct, only incomplete. What they cannot do is classify a name: a hostname
+// that is not an IP literal tells them nothing, so an attacker who points a domain
+// they own at 127.0.0.1 and obtains an ordinary publicly-trusted certificate for it
+// walks through every notation rule, because the notation is legitimate. Judging the
+// resolved address is truthful by construction, so no future spelling can outflank
+// it.
+type transferDialer struct {
+	field       string
+	loopbackAPI bool
+	resolve     hostResolver
+	dial        func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// DialContext resolves addr, refuses any answer that names the local machine when
+// the configured Octo origin is not itself local, and then dials **the address it
+// validated** rather than the name.
+//
+// Dialing the validated address is what makes this rebinding-safe: handing the name
+// back to the dialer would let a resolver answer differently the second time, so the
+// address checked and the address connected to would not be the same one.
+func (d transferDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, rerr := d.resolveTarget(ctx, host)
+	if rerr != nil {
+		return nil, rerr
+	}
+	if !d.loopbackAPI {
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsUnspecified() {
+				return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+					fmt.Sprintf("%s resolves to the local machine, which is not reachable object storage", d.field),
+					"the storage endpoint pointed the transfer at this machine; report it")
+			}
+		}
+	}
+	var lastErr error
+	for _, ip := range ips {
+		conn, derr := d.dial(ctx, network, net.JoinHostPort(ip.String(), port))
+		if derr == nil {
+			return conn, nil
+		}
+		lastErr = derr
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no address for %q", host)
+	}
+	return nil, lastErr
+}
+
+// resolveTarget returns the addresses addr's host names. An IP literal is used as
+// given; anything else goes through the resolver, and a name that cannot be
+// resolved fails rather than being handed to the dialer as a name — otherwise an
+// unresolvable host would slip past the check and be resolved again inside the
+// dial.
+func (d transferDialer) resolveTarget(ctx context.Context, host string) ([]net.IP, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IP{ip}, nil
+	}
+	ips, err := d.resolve(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for %q", host)
+	}
+	return ips, nil
+}
+
 // transferClient is the HTTP client used for presigned object-storage
 // PUT/GET. It is deliberately separate from the API client so a caller
 // credential can never reach the storage endpoint: the presigned URL already
@@ -109,9 +209,25 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // under a remote origin, whatever its scheme — the initial URL comes from the
 // trusted backend and may legitimately name an internal host, but a hop chosen by
 // the storage host may not.
-func transferClient(field string, loopbackAPI bool) *http.Client {
+// resolve may be nil, meaning the system resolver.
+func transferClient(field string, loopbackAPI bool, resolve hostResolver) *http.Client {
+	if resolve == nil {
+		resolve = systemHostResolver
+	}
+	// The dialer is where the loopback rule is actually enforced, on the resolved
+	// address. The CheckRedirect string rules below stay as a cheap pre-filter that
+	// rejects the obvious spellings before a lookup happens.
+	guard := transferDialer{
+		field:       field,
+		loopbackAPI: loopbackAPI,
+		resolve:     resolve,
+		dial:        (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = guard.DialContext
 	return &http.Client{
-		Timeout: transferTimeout,
+		Timeout:   transferTimeout,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			req.Header.Del("Referer")
 			if len(via) >= maxTransferRedirects {
@@ -367,7 +483,7 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}
-	resp, rerr := transferClient(field, loopbackAPI).Do(req)
+	resp, rerr := transferClient(field, loopbackAPI, nil).Do(req)
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}
@@ -481,7 +597,7 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 		switch err := os.Link(partPath, target); {
 		case err == nil:
 			_ = os.Remove(partPath) //nolint:errcheck // best-effort cleanup of the link source
-			return nil
+			return assertPublishedFileMatches(target, created)
 		case errors.Is(err, os.ErrExist):
 			return output.ErrWithHint("validation", "FILE_EXISTS",
 				fmt.Sprintf("%q already exists", target),
@@ -492,6 +608,33 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 	}
 	if err := os.Rename(partPath, target); err != nil {
 		return output.ErrValidation(fmt.Sprintf("finalise %q: %v", target, err), "")
+	}
+	return assertPublishedFileMatches(target, created)
+}
+
+// assertPublishedFileMatches confirms the destination now holds the file this
+// transfer wrote.
+//
+// The Lstat in assertPartFileUnchanged narrows the swap window to a single syscall
+// but cannot close it: os.Link and os.Rename act on whatever the part path resolves
+// to at the moment they run, and on Linux linking or renaming a symlink publishes the
+// symlink. Closing the window itself would need linkat on the retained descriptor via
+// /proc/self/fd/N, which is Linux-only; refusing to *report success* is portable and
+// removes the harm that mattered — a caller reading back "its" file and getting
+// someone else's, under an envelope carrying a path and sha256 that describe
+// different bytes.
+func assertPublishedFileMatches(target string, created os.FileInfo) *output.ExitError {
+	if created == nil {
+		return output.ErrValidation("the published file was not identified before publication", "")
+	}
+	now, err := os.Lstat(target)
+	if err != nil {
+		return output.ErrValidation(fmt.Sprintf("verify the published file: %v", err), "")
+	}
+	if !now.Mode().IsRegular() || !os.SameFile(now, created) {
+		return output.ErrWithHint("validation", "PARTIAL_FILE_REPLACED",
+			"the destination does not hold the file this download wrote",
+			"another process wrote to the destination directory mid-download; re-run, and prefer a directory only you can write")
 	}
 	return nil
 }
