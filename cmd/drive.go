@@ -113,8 +113,8 @@ func systemHostResolver(ctx context.Context, host string) ([]net.IPAddr, error) 
 	return net.DefaultResolver.LookupIPAddr(ctx, host)
 }
 
-// transferDialer decides whether a transfer connection may be made, on the
-// evidence of where the name actually points rather than how it is spelled.
+// transferGuard decides whether a transfer connection may be made, on the evidence
+// of where the name actually points rather than how it is spelled.
 //
 // The string rules in assertSafeTransferTarget stay as a cheap pre-filter — they
 // are correct, only incomplete. What they cannot do is classify a name: a hostname
@@ -123,12 +123,56 @@ func systemHostResolver(ctx context.Context, host string) ([]net.IPAddr, error) 
 // walks through every notation rule, because the notation is legitimate. Judging the
 // resolved address is truthful by construction, so no future spelling can outflank
 // it.
+//
+// # The paths, enumerated
+//
+// Three consecutive rounds of review each found a defect in a transport path that the
+// previous round's fix had not considered — a loopback rule that judged spelling, then
+// a rule that judged the proxy instead of the target, then a lookup that made a
+// proxy-only network unusable. Every one was "the path we were looking at is now
+// correct, and the set of paths was never enumerated". So the set is enumerated here,
+// and any change to this file should be checked against every row rather than the row
+// that prompted it.
+//
+// The transport calls Proxy for every request and DialContext for every new
+// connection. Whether a proxy is selected decides who resolves the target, which
+// decides what can be classified and what can be pinned:
+//
+//	# | configuration                      | resolves target | classifies it        | dials                | resolution failure
+//	--+------------------------------------+-----------------+----------------------+----------------------+--------------------
+//	1 | direct, remote Octo origin         | this guard      | this guard, on the   | the validated        | fatal (fail closed)
+//	  |                                    |                 | resolved addresses   | address, pinned      |
+//	2 | direct, loopback Octo origin       | this guard, in  | nobody — the rule is | the validated        | fatal
+//	  |                                    | DialContext     | off by configuration | address, pinned      |
+//	3 | proxied, target locally resolvable | the proxy       | this guard, on its   | the proxy's address, | n/a
+//	  |                                    | (advisory: us)  | own local answer     | as given             |
+//	4 | proxied, target NOT locally        | the proxy only  | nobody — unclassified| the proxy's address, | NOT fatal: allowed,
+//	  | resolvable                         |                 | (pre-filter only)    | as given             | noted, --verbose
+//	5 | proxied, loopback Octo origin      | the proxy only  | nobody — rule off    | the proxy's address  | n/a
+//	6 | redirect hop                       | as 1-5 for the new URL, after the CheckRedirect string pre-filter
+//
+// Row 4 is the one that cost a round. A proxy-only network — tightened egress with no
+// external resolver, or a split-horizon name only the proxy's resolver can answer —
+// is ordinary, and "CONNECT host:port" exists precisely so the proxy resolves the
+// name. Insisting on a local lookup there fails a transfer that would have worked, for
+// an answer nobody needs.
+//
+// What is given up in rows 3-5, stated rather than implied: the guard cannot pin an
+// address it does not dial. The proxy performs its own resolution and its own
+// connection, so between our classification and the proxy's lookup the answer may
+// differ — the rebinding window the direct path closes stays open on the proxy path.
+// What stands in for it is that the proxy is the operator's own component, the string
+// pre-filter still rejects every literal local spelling before any of this, and the
+// connection terminates at the proxy rather than at a service on this machine.
 type transferGuard struct {
 	field       string
 	loopbackAPI bool
 	resolve     hostResolver
 	dial        func(ctx context.Context, network, addr string) (net.Conn, error)
 	proxy       func(*http.Request) (*url.URL, error)
+	// note reports a decision an operator would want to see under --verbose. nil is
+	// a no-op, so a guard built for a unit test needs no wiring.
+	note func(format string, args ...any)
 
 	// mu guards the two records below. Both are written by Proxy and read by
 	// DialContext, which the transport may call from a different goroutine.
@@ -170,22 +214,91 @@ func newTransferGuard(field string, loopbackAPI bool, resolve hostResolver) *tra
 // Refusing here also refuses before the transport opens anything, which is the same
 // guarantee the dialer gives on the direct path.
 func (g *transferGuard) Proxy(req *http.Request) (*url.URL, error) {
-	host := req.URL.Hostname()
-	ips, err := g.resolveAndRefuseLocal(req.Context(), host, g.targetIsLocalError)
-	if err != nil {
-		return nil, err
-	}
-	g.remember(host, ips)
-
+	// The order of these three steps is the fix for round 11, and each step depends on
+	// the one before it:
+	//
+	//  1. ask who will make the connection, because that decides whose job it is to
+	//     resolve the target (rows 3-5 of the table above: the proxy's);
+	//  2. ask whether the rule is switched on at all, because with a loopback Octo
+	//     origin nothing is classified and a lookup here is pure cost (rows 2 and 5);
+	//  3. only then resolve — and treat a failure as fatal exactly when this guard is
+	//     the resolver, which is to say when no proxy was selected (row 1 vs row 4).
+	//
+	// Resolving first, as this did, made a proxy-only network fail on a lookup that
+	// nothing needed and nobody could have satisfied.
 	proxyURL, perr := g.proxy(req)
 	if perr != nil {
-		return nil, output.ErrWithHint("validation", "INVALID_PROXY", perr.Error(),
-			"check http_proxy / https_proxy / all_proxy in this environment")
+		return nil, invalidProxyError(perr)
 	}
 	if proxyURL != nil {
 		g.rememberProxy(proxyURL.Hostname())
 	}
+	if g.loopbackAPI {
+		return proxyURL, nil
+	}
+
+	host := req.URL.Hostname()
+	ips, rerr := g.resolveTarget(req.Context(), host)
+	if rerr != nil {
+		if proxyURL != nil {
+			// Row 4. The proxy resolves the target — that is what CONNECT host:port
+			// is for — so a name we cannot resolve is not evidence of anything. It is
+			// the ordinary shape of tightened egress with no external resolver, and of
+			// a split-horizon name only the proxy's resolver answers. Unclassified is
+			// narrower than the invariant claims, so it is said out loud rather than
+			// passed over.
+			g.notef("%s host %q was not classified locally: %v — the proxy resolves it, "+
+				"and the local-machine rule cannot be applied to an address this CLI never sees",
+				g.field, host, rerr)
+			return proxyURL, nil
+		}
+		// Row 1. No proxy: this guard is the resolver, and a name it cannot resolve
+		// must not be handed onward to be resolved again inside the dial.
+		return nil, rerr
+	}
+	if cerr := g.refuseLocalAddresses(ips, g.targetIsLocalError); cerr != nil {
+		// A lookup that *succeeded* and says "local" is refused on every path,
+		// proxied or not. The leniency above is about not knowing, never about
+		// knowing and allowing.
+		return nil, cerr
+	}
+	g.remember(host, ips)
 	return proxyURL, nil
+}
+
+// invalidProxyError reports an unusable proxy configuration without repeating the
+// value that produced it.
+//
+// The selector's error text can carry the raw environment value — x/net/http/httpproxy
+// formats it into "invalid proxy address %q" — and a proxy URL is commonly
+// http://user:password@host:port, since enterprise TLS-inspection and paid egress
+// proxies routinely carry basic auth. Passing that text through would put the user's
+// proxy credential into the structured error on stderr, unconditionally and without
+// --verbose. That is the same defect class as the share-token leaks fixed earlier in
+// this PR, with the user's own credential rather than the backend's.
+//
+// So nothing derived from the value is included. The caller knows which variables to
+// look at, and is told why the value is not shown.
+func invalidProxyError(cause error) *output.ExitError {
+	_ = cause // deliberately not surfaced: it can embed the raw proxy URL
+	return output.ErrWithHint("validation", "INVALID_PROXY",
+		"the proxy configuration in this environment could not be used",
+		"check http_proxy / https_proxy / all_proxy: the value must be a URL such as "+
+			"http://proxy.example:3128. It is not repeated here because a proxy URL often "+
+			"carries credentials")
+}
+
+// verboseNoter adapts progressf to the guard's note sink, so a decision the guard
+// makes is visible on the same --verbose stream as the rest of the transfer.
+func verboseNoter(f *cmdutil.Factory) func(string, ...any) {
+	return func(format string, args ...any) { progressf(f, format, args...) }
+}
+
+// notef reports a decision under --verbose, if the caller wired a sink.
+func (g *transferGuard) notef(format string, args ...any) {
+	if g.note != nil {
+		g.note(format, args...)
+	}
 }
 
 // DialContext opens the connection, and is the only hook that can bind the address
@@ -234,15 +347,28 @@ func (g *transferGuard) resolveAndRefuseLocal(ctx context.Context, host string, 
 	if err != nil {
 		return nil, err
 	}
+	if cerr := g.refuseLocalAddresses(ips, mkErr); cerr != nil {
+		return nil, cerr
+	}
+	return ips, nil
+}
+
+// refuseLocalAddresses is the classification itself, split out so Proxy can decide
+// separately what a *failure to resolve* means without also loosening what a
+// successful answer means.
+//
+// Every answer is checked, not just the first: a name with one remote and one local
+// address must be refused, or the outcome is decided by resolver ordering.
+func (g *transferGuard) refuseLocalAddresses(ips []net.IPAddr, mkErr func() *output.ExitError) *output.ExitError {
 	if g.loopbackAPI {
-		return ips, nil
+		return nil
 	}
 	for _, ip := range ips {
 		if ip.IP.IsLoopback() || ip.IP.IsUnspecified() {
-			return nil, mkErr()
+			return mkErr()
 		}
 	}
-	return ips, nil
+	return nil
 }
 
 // targetIsLocalError reports a presigned URL whose own host is this machine. The
@@ -270,7 +396,7 @@ func (g *transferGuard) connectionRedirectedLocallyError() *output.ExitError {
 func (g *transferGuard) dialAddrs(ctx context.Context, network, host string, ips []net.IPAddr, port string) (net.Conn, error) {
 	var lastErr error
 	for i := range ips {
-		attemptCtx, cancel := g.attemptContext(ctx, len(ips))
+		attemptCtx, cancel := g.attemptContext(ctx, len(ips)-i)
 		conn, derr := g.dial(attemptCtx, network, net.JoinHostPort(ips[i].String(), port))
 		// The context governs the dial, not the connection it returns, so releasing
 		// it here is correct either way and is what stops the timer leaking.
@@ -288,8 +414,14 @@ func (g *transferGuard) dialAddrs(ctx context.Context, network, host string, ips
 
 // attemptContext caps one address attempt when there is another to fall back to.
 // See transferDialAttemptTimeout for why a single answer keeps the full budget.
-func (g *transferGuard) attemptContext(ctx context.Context, addresses int) (context.Context, context.CancelFunc) {
-	if addresses < 2 {
+//
+// remaining counts this attempt and the ones after it, not the whole answer set. The
+// rule is "cap an attempt only if failing it still leaves somewhere to go", and passing
+// the total made the *last* attempt carry a deadline too — so a multi-address name
+// could fail on a bound that existed for a fallback it no longer had. The comment
+// already said this; the code now does.
+func (g *transferGuard) attemptContext(ctx context.Context, remaining int) (context.Context, context.CancelFunc) {
+	if remaining < 2 {
 		return context.WithCancel(ctx)
 	}
 	// A real deadline rather than a timer that cancels: net.Dialer reads the
@@ -394,8 +526,10 @@ func (g *transferGuard) resolveTarget(ctx context.Context, host string) ([]net.I
 // before the request is handed over.
 //
 // resolve may be nil, meaning the system resolver.
-func transferClient(field string, loopbackAPI bool, resolve hostResolver) *http.Client {
-	return transferClientWithGuard(newTransferGuard(field, loopbackAPI, resolve))
+func transferClient(field string, loopbackAPI bool, resolve hostResolver, note func(string, ...any)) *http.Client {
+	guard := newTransferGuard(field, loopbackAPI, resolve)
+	guard.note = note
+	return transferClientWithGuard(guard)
 }
 
 // transferClientWithGuard is the constructor a test can hand a guard with its own
@@ -680,7 +814,7 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}
-	resp, rerr := transferClient(field, loopbackAPI, nil).Do(req)
+	resp, rerr := transferClient(field, loopbackAPI, nil, verboseNoter(f)).Do(req)
 	if rerr != nil {
 		return nil, transferNetworkError("download", u, rerr)
 	}

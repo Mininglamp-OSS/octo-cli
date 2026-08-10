@@ -234,7 +234,7 @@ func TestTransferClient_GuardIsWiredIntoTheTransport(t *testing.T) {
 	})
 
 	t.Run("a name on loopback is refused under a remote origin", func(t *testing.T) {
-		c := transferClient("url", false, resolve)
+		c := transferClient("url", false, resolve, nil)
 		req, err := http.NewRequest(http.MethodGet, "https://"+host+"/obj", http.NoBody)
 		if err != nil {
 			t.Fatal(err)
@@ -250,7 +250,7 @@ func TestTransferClient_GuardIsWiredIntoTheTransport(t *testing.T) {
 	})
 
 	t.Run("the guard is present at all", func(t *testing.T) {
-		c := transferClient("url", false, resolve)
+		c := transferClient("url", false, resolve, nil)
 		tr, ok := c.Transport.(*http.Transport)
 		if !ok {
 			t.Fatalf("transport is %T, want *http.Transport carrying the dial guard", c.Transport)
@@ -404,13 +404,16 @@ func TestTransferDial_CapsEachAttemptOnlyWhenThereIsAFallback(t *testing.T) {
 		"one.example.invalid": {"203.0.113.12"},
 	}
 
+	// The rule is per attempt, not per name: an attempt is capped while failing it
+	// still leaves an address to try. An earlier version of this test asserted that
+	// every attempt of a multi-address name carried a deadline, which encoded the
+	// off-by-one it was meant to catch — the final attempt has no fallback.
 	for _, tc := range []struct {
-		host         string
-		wantDeadline bool
-		why          string
+		host          string
+		wantDeadlines []bool
 	}{
-		{"two.example.invalid", true, "with a second address to try, a stalled first attempt must not hold the whole budget"},
-		{"one.example.invalid", false, "with a single address there is nothing to fall back to, and shortening the budget would only turn a slow connection into a failure"},
+		{"two.example.invalid", []bool{true, false}},
+		{"one.example.invalid", []bool{false}},
 	} {
 		t.Run(tc.host, func(t *testing.T) {
 			var deadlines []bool
@@ -423,12 +426,18 @@ func TestTransferDial_CapsEachAttemptOnlyWhenThereIsAFallback(t *testing.T) {
 			if _, err := attemptTransfer(t, d, "https://"+tc.host+"/obj"); err == nil {
 				t.Fatal("the stub dial always fails, so an error is expected")
 			}
-			if len(deadlines) == 0 {
-				t.Fatal("nothing was dialled")
+			if len(deadlines) != len(tc.wantDeadlines) {
+				t.Fatalf("attempted %d addresses, want %d", len(deadlines), len(tc.wantDeadlines))
 			}
-			for i, got := range deadlines {
-				if got != tc.wantDeadline {
-					t.Errorf("attempt %d carried a deadline = %v, want %v — %s", i, got, tc.wantDeadline, tc.why)
+			for i, want := range tc.wantDeadlines {
+				if deadlines[i] == want {
+					continue
+				}
+				if want {
+					t.Errorf("attempt %d has a fallback after it, so a stall must not hold the whole budget", i)
+				} else {
+					t.Errorf("attempt %d is the last one; capping it can only turn a slow but working "+
+						"connection into a failure", i)
 				}
 			}
 		})
@@ -504,5 +513,36 @@ func TestAssertPublishedFileMatches_RejectsAnInPlaceRewrite(t *testing.T) {
 			"size and modification time are what distinguish them")
 	} else if ee.Code != "PARTIAL_FILE_REPLACED" {
 		t.Errorf("code = %q, want PARTIAL_FILE_REPLACED", ee.Code)
+	}
+}
+
+// TestTransferDial_TheLastAttemptKeepsTheFullBudget is round-11 suggestion 4. The rule
+// is "cap an attempt only while failing it still leaves somewhere to go", and passing
+// the total address count instead of the number remaining capped the final attempt as
+// well — the one with no fallback, which is exactly the case the exemption exists for.
+func TestTransferDial_TheLastAttemptKeepsTheFullBudget(t *testing.T) {
+	table := map[string][]string{"three.example.invalid": {"203.0.113.10", "203.0.113.11", "203.0.113.12"}}
+	var deadlines []bool
+	d := newTestTransferDialer(t, false, table)
+	d.dial = func(ctx context.Context, _, addr string) (net.Conn, error) {
+		_, ok := ctx.Deadline()
+		deadlines = append(deadlines, ok)
+		return nil, errors.New("stub dial reached " + addr)
+	}
+
+	if _, err := attemptTransfer(t, d, "https://three.example.invalid/obj"); err == nil {
+		t.Fatal("the stub dial always fails, so an error is expected")
+	}
+	if len(deadlines) != 3 {
+		t.Fatalf("attempted %d addresses, want 3", len(deadlines))
+	}
+	for i, got := range deadlines[:2] {
+		if !got {
+			t.Errorf("attempt %d has a fallback after it and should be capped", i)
+		}
+	}
+	if deadlines[2] {
+		t.Error("the last attempt has nothing to fall back to, so capping it can only turn a slow " +
+			"but working connection into a failure")
 	}
 }

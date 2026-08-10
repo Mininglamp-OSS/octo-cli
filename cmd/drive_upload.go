@@ -189,7 +189,7 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, uerr))
 	}
 	progressf(f, "uploading %d bytes to object storage", size)
-	if perr := putObject(cmd, file, int64(size), &prepared, uploadURL, loopbackAPI); perr != nil {
+	if perr := putObject(cmd, f, file, int64(size), &prepared, uploadURL, loopbackAPI); perr != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, perr))
 	}
 	progressf(f, "upload complete; confirming file %s", fileID)
@@ -231,7 +231,7 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 //
 // A transport failure is reported through transferNetworkError, which names the
 // host but never the URL: the presigned signature is in the query string.
-func putObject(cmd *cobra.Command, file *os.File, size int64, prepared *prepareUploadResponse, target *url.URL, loopbackAPI bool) *output.ExitError {
+func putObject(cmd *cobra.Command, f *cmdutil.Factory, file *os.File, size int64, prepared *prepareUploadResponse, target *url.URL, loopbackAPI bool) *output.ExitError {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return output.ErrValidation(fmt.Sprintf("<local-path>: %v", err), "check the path and permissions")
 	}
@@ -247,7 +247,7 @@ func putObject(cmd *cobra.Command, file *os.File, size int64, prepared *prepareU
 		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
 	}
 
-	resp, err := transferClient("upload_url", loopbackAPI, nil).Do(req)
+	resp, err := transferClient("upload_url", loopbackAPI, nil, verboseNoter(f)).Do(req)
 	if err != nil {
 		return transferNetworkError("upload", target, err)
 	}

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ import (
 // through a proxy — enterprise egress and offshore networks are exactly that shape.
 // Nothing may quietly take that back.
 func TestTransferClient_KeepsProxySupport(t *testing.T) {
-	tr, ok := transferClient("download_url", false, nil).Transport.(*http.Transport)
+	tr, ok := transferClient("download_url", false, nil, nil).Transport.(*http.Transport)
 	if !ok {
 		t.Fatalf("transport is %T, want *http.Transport", tr)
 	}
@@ -264,4 +265,219 @@ func newTestTransferGuard(t *testing.T, loopbackAPI bool, resolve hostResolver) 
 		return nil, errors.New("stub dial reached " + addr)
 	}
 	return g
+}
+
+// --- Round-11 P1: the proxy path must not depend on a local lookup ---
+//
+// Round 10 put the target classification in Proxy, which was the right place, but
+// resolved *before* asking whether a proxy was selected and treated a resolution
+// failure as fatal. http.Transport never resolves the target when it proxies —
+// "CONNECT host:port" exists so the proxy resolves it — so a proxy-only network
+// (tightened egress with no external resolver, or a split-horizon name only the
+// proxy's resolver answers) had all three transfer commands fail on a lookup nobody
+// needed, while the API client kept working because it does not pre-resolve.
+//
+// These cases are one per row of the path table on transferGuard: row 4 (the
+// regression), row 1 unchanged, row 3 still classified, row 2/5 not paying for a
+// discarded lookup.
+
+// newProxyServer starts a local server that answers any proxied request 200.
+func newProxyServer(t *testing.T) (srv *httptest.Server, requests *[]string) {
+	t.Helper()
+	var seen []string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.String())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("object-bytes"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
+// failingResolver answers nothing, like a host with no external DNS.
+func failingResolver(t *testing.T, resolved *[]string) hostResolver {
+	t.Helper()
+	return func(_ context.Context, host string) ([]net.IPAddr, error) {
+		*resolved = append(*resolved, host)
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+}
+
+// TestTransferProxy_UnresolvableTargetStillTransfersThroughTheProxy is row 4: the
+// half of "we support proxy-only deployments" that was missing.
+//
+// TestTransferClient_KeepsProxySupport only asserted Proxy != nil, which covers the
+// variant where outbound TCP is blocked but public DNS still answers. It says nothing
+// about the variant where the proxy is also the resolver — and in that variant the
+// claim the comment makes was false.
+func TestTransferProxy_UnresolvableTargetStillTransfersThroughTheProxy(t *testing.T) {
+	const target = "storage.internal.example.invalid"
+	proxy, proxied := newProxyServer(t)
+
+	var resolved []string
+	g := newTransferGuard("download_url", false, failingResolver(t, &resolved))
+	g.proxy = fixedProxy(t, proxy.URL)
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/obj", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, derr := transferClientWithGuard(g).Do(req)
+	if derr != nil {
+		t.Fatalf("the proxy resolves the target, so a local lookup failure must not fail the transfer: %v", derr)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(*proxied) == 0 {
+		t.Error("the request never reached the proxy")
+	}
+}
+
+// TestTransferProxy_UnclassifiedTargetIsReportedUnderVerbose keeps the previous case
+// honest. Allowing an unclassified target is a deliberate narrowing of the invariant,
+// so it has to be visible to an operator rather than silent.
+func TestTransferProxy_UnclassifiedTargetIsReportedUnderVerbose(t *testing.T) {
+	const target = "storage.internal.example.invalid"
+	proxy, _ := newProxyServer(t)
+
+	var resolved, notes []string
+	g := newTransferGuard("download_url", false, failingResolver(t, &resolved))
+	g.proxy = fixedProxy(t, proxy.URL)
+	g.note = func(format string, args ...any) {
+		notes = append(notes, fmt.Sprintf(format, args...))
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+target+"/obj", http.NoBody)
+	resp, derr := transferClientWithGuard(g).Do(req)
+	if derr != nil {
+		t.Fatalf("transfer: %v", derr)
+	}
+	defer resp.Body.Close()
+
+	joined := strings.Join(notes, "\n")
+	if !strings.Contains(joined, target) {
+		t.Errorf("--verbose should name the host that went unclassified; notes = %q", joined)
+	}
+	if !strings.Contains(joined, "not classified") {
+		t.Errorf("--verbose should say the target was not classified; notes = %q", joined)
+	}
+}
+
+// TestTransferProxy_DirectPathStillFailsClosedOnAResolutionFailure is row 1, and the
+// boundary of the change: leniency is conditional on a proxy having been selected. With
+// no proxy this guard *is* the resolver, so a name it cannot resolve must not be
+// handed onward — that is round 9's property and it stays.
+func TestTransferProxy_DirectPathStillFailsClosedOnAResolutionFailure(t *testing.T) {
+	var resolved, dialled []string
+	g := newTransferGuard("download_url", false, failingResolver(t, &resolved))
+	g.proxy = func(*http.Request) (*url.URL, error) { return nil, nil } // no proxy
+	g.dial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		dialled = append(dialled, addr)
+		return nil, errors.New("stub dial reached " + addr)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "https://nothing-here.example.invalid/obj", http.NoBody)
+	if _, err := g.Proxy(req); err == nil {
+		t.Error("with no proxy selected, a name this guard cannot resolve must fail rather than be handed onward")
+	}
+	if len(dialled) > 0 {
+		t.Errorf("nothing should have been dialled, got %v", dialled)
+	}
+}
+
+// TestTransferProxy_AResolvableTargetIsStillClassifiedUnderAProxy is row 3. Leniency
+// applies to a *failure to resolve*, never to an answer that says "local": when the
+// lookup succeeds, the rule is enforced exactly as before.
+func TestTransferProxy_AResolvableTargetIsStillClassifiedUnderAProxy(t *testing.T) {
+	const target = "storage-evil.example.invalid"
+	g := newTestTransferGuard(t, false, stubIPAddrResolver(t, map[string][]string{
+		target: {"127.0.0.1"},
+	}))
+	g.proxy = fixedProxy(t, "http://proxy.example:8080")
+
+	req, _ := http.NewRequest(http.MethodGet, "https://"+target+"/obj", http.NoBody)
+	_, err := g.Proxy(req)
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "UNSAFE_PRESIGNED_URL" {
+		t.Fatalf("a target that resolves to the local machine must still be refused under a proxy, got %v", err)
+	}
+}
+
+// TestTransferProxy_LoopbackOriginDoesNotPayForADiscardedLookup is rows 2 and 5. With
+// the rule switched off by configuration there is nothing to classify, so resolving in
+// Proxy buys nothing — and on a proxy-only network it was another way to fail.
+func TestTransferProxy_LoopbackOriginDoesNotPayForADiscardedLookup(t *testing.T) {
+	var resolved []string
+	g := newTransferGuard("download_url", true, failingResolver(t, &resolved))
+	g.proxy = fixedProxy(t, "http://proxy.example:8080")
+
+	req, _ := http.NewRequest(http.MethodGet, "https://storage.example.invalid/obj", http.NoBody)
+	if _, err := g.Proxy(req); err != nil {
+		t.Fatalf("a loopback origin classifies nothing and must not fail here: %v", err)
+	}
+	if len(resolved) > 0 {
+		t.Errorf("Proxy resolved %v with the rule switched off; the answer is discarded, so the lookup is pure cost "+
+			"and one more way to fail on a network without external DNS", resolved)
+	}
+}
+
+// TestTransferProxy_InvalidProxyNeverEchoesTheRawValue is the credential assertion.
+//
+// The selector's error text can carry the raw environment value: x/net/httpproxy's
+// parseProxy formats it with %q into "invalid proxy address %q", and a proxy URL is
+// commonly http://user:password@host:port — enterprise TLS-inspection and paid egress
+// proxies routinely carry basic auth. Passing that text through put the user's proxy
+// password into the structured error on stderr, with no --verbose required. Same defect
+// class as the share-token leaks earlier in this PR, with the user's credential instead
+// of the backend's.
+func TestTransferProxy_InvalidProxyNeverEchoesTheRawValue(t *testing.T) {
+	const password = "s3cr3t-pass"
+	const raw = "http://alice:" + password + "@proxy.example:3128\x7f"
+
+	g := newTestTransferGuard(t, false, stubIPAddrResolver(t, map[string][]string{
+		"storage-ok.example.invalid": {"203.0.113.9"},
+	}))
+	g.proxy = func(*http.Request) (*url.URL, error) {
+		// Verbatim shape of x/net/http/httpproxy.parseProxy's error.
+		return nil, fmt.Errorf("invalid proxy address %q: parse error", raw)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "https://storage-ok.example.invalid/obj", http.NoBody)
+	_, err := g.Proxy(req)
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("a bad proxy configuration should be a structured error, got %v", err)
+	}
+	visible := ee.Code + " " + ee.Message + " " + ee.Hint + " " + string(ee.Detail)
+	if strings.Contains(visible, password) {
+		t.Errorf("the proxy password reached the error envelope: %s", visible)
+	}
+	if strings.Contains(visible, "alice") {
+		t.Errorf("the proxy userinfo reached the error envelope: %s", visible)
+	}
+	if !strings.Contains(strings.ToLower(visible), "proxy") {
+		t.Errorf("the diagnostic must still say what went wrong: %s", visible)
+	}
+}
+
+// TestTransferProxy_SelectedProxyHostIsNamedWithoutCredentials is the other half: a
+// proxy URL that parses may be named in diagnostics, but only by host.
+func TestTransferProxy_SelectedProxyHostIsNamedWithoutCredentials(t *testing.T) {
+	g := newTestTransferGuard(t, false, stubIPAddrResolver(t, map[string][]string{
+		"storage-ok.example.invalid": {"203.0.113.9"},
+	}))
+	g.proxy = fixedProxy(t, "http://alice:s3cr3t-pass@proxy.example:3128")
+
+	req, _ := http.NewRequest(http.MethodGet, "https://storage-ok.example.invalid/obj", http.NoBody)
+	if _, err := g.Proxy(req); err != nil {
+		t.Fatalf("a valid proxy must be accepted: %v", err)
+	}
+	// The recorded key is what any later diagnostic would use.
+	for host := range g.proxies {
+		if strings.Contains(host, "s3cr3t-pass") || strings.Contains(host, "alice") {
+			t.Errorf("the recorded proxy identity carries credentials: %q", host)
+		}
+	}
 }
