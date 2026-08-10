@@ -320,8 +320,9 @@ Notes:
 - The presigned PUT/GET runs on a separate HTTP client with **no** Octo
   credential and no space header. A GET follows redirects (storage gateways use
   them) but every hop is re-validated against the same https-or-loopback-http
-  rule as the first, and a hop may not land on a loopback host unless the
-  configured Octo origin is itself loopback — the initial URL comes from the
+  rule as the first, and a hop may not land on the local machine (in any spelling
+  a resolver would accept, and any scheme) unless the configured Octo origin is
+  itself loopback — the initial URL comes from the
   trusted backend and may legitimately name an internal host, but a hop the
   storage host chooses may not point at the caller's own machine. A **PUT does not
   follow redirects at all**: Go rewrites a PUT into a bodiless GET on 301/302/303,
@@ -340,24 +341,33 @@ Notes:
   round-trip would let a replacement at that path be uploaded under the previous
   file's signed `Content-Length`.
 - `download file` / `share download` write a randomly-named `<base>.<rand>.part`
-  created `O_EXCL` in the destination directory, fsync, then rename; an existing
+  created `O_EXCL` in the destination directory, fsync, then publish; an existing
   destination is refused unless `--overwrite` is passed. The name is random
   rather than `<output>.part` so a pre-created symlink at a predictable path
   cannot redirect the write, and two concurrent downloads to one destination
-  cannot interleave. `--overwrite=false` remains best-effort against a file that
-  appears inside the check-to-rename window: POSIX rename replaces
-  unconditionally.
+  cannot interleave. Publication is a hard link when `--overwrite` is absent,
+  which fails with `EEXIST` atomically and in the same directory, so
+  `--overwrite=false` is a guarantee rather than a narrowed check-then-rename
+  window; with `--overwrite` it is a rename, because unconditional replacement is
+  what the caller asked for. The mode is set explicitly — an existing target keeps
+  its own, a fresh one gets `0600` — so a download neither leaves the mode to the
+  temp file's default nor silently tightens a destination the caller had widened.
 - Share passwords, share tokens and invite tokens are marked `x-octo-secret`:
   they go on the wire unchanged but are masked in `--verbose` and `--dry-run`
   output, and in the default error envelope on **both** of its paths — the
   transport error (whose `*url.Error` embeds the request URL) and the backend
   error body (which may echo the value it was given, and for these operations the
-  id *is* the secret). Body masking is structural — the body value is walked and
-  matching leaves replaced *before* marshalling — so a password containing `"`,
-  `\` or a newline is masked in the form it would actually be logged; a body shape
-  the walk does not recognise is rendered and text-masked rather than passed
-  through. A password may also be supplied off argv with `--password-file <path>`
-  (or `-` for stdin), mirroring `auth login --token-file`.
+  id *is* the secret). Masking is structural on both sides: the value is walked and
+  matching leaves replaced, on the request side before marshalling and on the
+  response side after parsing, so a password containing `"`, `\` or a newline is
+  masked whatever spelling the producer chose, and the response stays parseable so
+  the backend's machine-readable `code` survives redaction. Object keys are never
+  rewritten. A secret shorter than eight characters is masked only where it appears
+  as a whole token, because substring-masking a one-character value rewrites
+  unrelated text without protecting anything. A body shape the walk does not
+  recognise is rendered and text-masked rather than passed through. A password may
+  also be supplied off argv with `--password-file <path>` (or `-` for stdin),
+  mirroring `auth login --token-file`.
 - Both sides of a share link agree by construction: an id the CLI puts into a
   `share_url` (a blob share token or a mounted document's `doc_id`) is held to the
   same charset `share access` enforces on the way in, so the command cannot emit a
