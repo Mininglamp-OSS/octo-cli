@@ -697,7 +697,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		err := publishDownload(part, target, false, mustLstat(t, part))
+		err := publishDownload(part, target, false, mustLstat(t, part), nil)
 		if err == nil {
 			t.Fatal("publishing over an existing target without --overwrite must fail")
 		}
@@ -724,7 +724,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := publishDownload(part, target, true, mustLstat(t, part)); err != nil {
+		if err := publishDownload(part, target, true, mustLstat(t, part), nil); err != nil {
 			t.Fatalf("publishing with --overwrite must succeed: %v", err)
 		}
 		got, rerr := os.ReadFile(target)
@@ -744,7 +744,7 @@ func TestPublishDownload_NoOverwriteIsAtomic(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := publishDownload(part, target, false, mustLstat(t, part)); err != nil {
+		if err := publishDownload(part, target, false, mustLstat(t, part), nil); err != nil {
 			t.Fatalf("publishing to a fresh target must succeed: %v", err)
 		}
 		got, rerr := os.ReadFile(target)
@@ -788,7 +788,7 @@ func TestPublishDownload_DoesNotChmodThroughASymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	err := publishDownload(part, target, false, symlinkPartInfo(t, victim))
+	err := publishDownload(part, target, false, symlinkPartInfo(t, victim), nil)
 	if err == nil {
 		t.Error("publishing a part path that is no longer the file we created must fail closed")
 	}
@@ -826,7 +826,7 @@ func TestPublishDownload_DoesNotPublishASwappedPartFile(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	if err := publishDownload(part, target, true, symlinkPartInfo(t, victim)); err == nil {
+	if err := publishDownload(part, target, true, symlinkPartInfo(t, victim), nil); err == nil {
 		t.Error("publishing a swapped part path must fail rather than report success")
 	}
 	if fi, lerr := os.Lstat(target); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
@@ -844,7 +844,7 @@ func TestPublishDownload_HappyPathsStillWork(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "out.bin")
 		part, info := mustCreatePartFor(t, dir, "payload", target)
-		if err := publishDownload(part, target, false, info); err != nil {
+		if err := publishDownload(part, target, false, info, nil); err != nil {
 			t.Fatalf("publish: %v", err)
 		}
 		assertFileContents(t, target, "payload")
@@ -861,7 +861,7 @@ func TestPublishDownload_HappyPathsStillWork(t *testing.T) {
 			t.Fatal(err)
 		}
 		part, info := mustCreatePartFor(t, dir, "new", target)
-		if err := publishDownload(part, target, true, info); err != nil {
+		if err := publishDownload(part, target, true, info, nil); err != nil {
 			t.Fatalf("publish: %v", err)
 		}
 		assertFileContents(t, target, "new")

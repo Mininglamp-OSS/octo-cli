@@ -1,0 +1,267 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+)
+
+// Round-10 P1. The transfer transport was built with Clone(), which preserves
+// Proxy: http.ProxyFromEnvironment. When the transport picks a proxy, DialContext is
+// handed the *proxy's* host:port — for plain HTTP and for the CONNECT tunnel alike —
+// and the presigned URL's host never reaches it. So the round-9 guard, which is
+// truthful about whatever address it is given, was classifying the wrong machine:
+//
+//   - false positive: a proxy on the local machine (an ordinary debugging or
+//     TLS-inspection setup) was refused as though object storage had pointed the
+//     transfer at the caller, breaking all three transfer commands and telling the
+//     user to report a backend bug;
+//   - false negative: with any proxy set, the target was never resolved and never
+//     classified, so the invariant the docstring states was not enforced at all.
+//
+// The fix splits the two questions across the two hooks that can answer them. Proxy
+// receives the *request*, so it is the only place that knows the target when a proxy
+// is in play; DialContext receives the *connection*, so it is the only place that can
+// bind the address that was validated to the socket that opens.
+//
+// The proxy is injected rather than set in the environment. http.ProxyFromEnvironment
+// memoises the environment in a package-level sync.Once, so the *first* call anywhere
+// in the test binary fixes the answer for every later one: a t.Setenv-based proxy test
+// asserts whatever the first test to touch a transport happened to see, and flips
+// meaning when test order changes. The package's TestMain sweeps the proxy family so
+// no ambient value leaks in, and the cases below inject g.proxy for determinism —
+// the same reason the resolver is injected.
+
+// TestTransferClient_KeepsProxySupport is the other half of choosing to wrap Proxy
+// rather than set it to nil. Setting it to nil would make the guard's claim true by
+// construction, at the price of every deployment that can only reach object storage
+// through a proxy — enterprise egress and offshore networks are exactly that shape.
+// Nothing may quietly take that back.
+func TestTransferClient_KeepsProxySupport(t *testing.T) {
+	tr, ok := transferClient("download_url", false, nil).Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport is %T, want *http.Transport", tr)
+	}
+	if tr.Proxy == nil {
+		t.Error("Proxy is nil, so a deployment that can only reach storage through a proxy can no longer transfer")
+	}
+	// The clone-from-global hazard: a TLS dial hook would take precedence over
+	// DialContext for https and bypass the guard entirely.
+	if tr.DialTLSContext != nil || tr.DialTLS != nil { //nolint:staticcheck // DialTLS is deprecated but a non-nil value would still be honoured
+		t.Error("a TLS dial hook is set, which would bypass DialContext for https transfers")
+	}
+}
+
+// fixedProxy selects the same proxy for every request.
+func fixedProxy(t *testing.T, rawURL string) func(*http.Request) (*url.URL, error) {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(*http.Request) (*url.URL, error) { return u, nil }
+}
+
+// TestTransferProxy_ClassifiesTheTargetNotTheProxy is the false-negative half: with a
+// proxy configured, the presigned target must still be resolved and classified.
+//
+// Before the fix this passed the request to the proxy without ever looking at the
+// target, so the assertion is not "an error came back" — a bogus proxy address
+// produces one of those too. It is "the guard resolved the target host, and the
+// refusal names the target".
+func TestTransferProxy_ClassifiesTheTargetNotTheProxy(t *testing.T) {
+	const target = "storage-evil.example.invalid"
+
+	var resolved []string
+	resolve := func(_ context.Context, host string) ([]net.IPAddr, error) {
+		resolved = append(resolved, host)
+		switch host {
+		case target:
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+		case "proxy.example":
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.7")}}, nil
+		}
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+
+	g := newTestTransferGuard(t, false, resolve)
+	g.proxy = fixedProxy(t, "http://proxy.example:8080")
+
+	req, err := http.NewRequest(http.MethodGet, "https://"+target+"/obj", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, derr := transferClientWithGuard(g).Do(req)
+	if derr == nil {
+		_ = resp.Body.Close()
+		t.Fatal("a target on the local machine was allowed through because a proxy was configured")
+	}
+
+	var sawTarget bool
+	for _, h := range resolved {
+		if h == target {
+			sawTarget = true
+		}
+	}
+	if !sawTarget {
+		t.Errorf("the guard never resolved the target %q (it resolved %v), so the invariant is not enforced "+
+			"under a proxy — an error alone does not show it was", target, resolved)
+	}
+	if !strings.Contains(derr.Error(), "UNSAFE_PRESIGNED_URL") {
+		t.Errorf("the refusal should be the target rule, not an incidental proxy failure, got %v", derr)
+	}
+}
+
+// TestTransferProxy_LoopbackProxyWithRemoteTargetIsNotRefused is the regression lock
+// for the false positive. A proxy on the local machine is the operator's own
+// configuration and is not the storage host, so the storage rule does not apply to
+// it. The transfer must complete.
+//
+// The proxy here is a real local server, so this exercises the whole path rather
+// than only the guard's decision.
+func TestTransferProxy_LoopbackProxyWithRemoteTargetIsNotRefused(t *testing.T) {
+	const target = "storage-ok.example.invalid"
+
+	var proxied []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxied = append(proxied, r.URL.String())
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("object-bytes"))
+	}))
+	defer proxy.Close()
+
+	g := newTransferGuard("download_url", false, stubIPAddrResolver(t, map[string][]string{
+		target: {"203.0.113.9"},
+	}))
+	g.proxy = fixedProxy(t, proxy.URL)
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+target+"/obj", http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, derr := transferClientWithGuard(g).Do(req)
+	if derr != nil {
+		if ee := output.AsExitError(derr); ee != nil && ee.Code == "UNSAFE_PRESIGNED_URL" {
+			t.Fatalf("a proxy on the local machine is not the storage host and must not be refused as one: %v", derr)
+		}
+		t.Fatalf("transfer through a local proxy failed: %v", derr)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(proxied) == 0 {
+		t.Error("the request did not reach the proxy, so the proxy is not being used")
+	}
+}
+
+// TestTransferProxy_ErrorsAttributeTheRightMachine pins the distinction the previous
+// single message destroyed. Both conditions put a connection on the local machine,
+// but they have opposite causes and opposite remedies, and a user whose only mistake
+// is a local proxy must not be told to file a backend bug.
+func TestTransferProxy_ErrorsAttributeTheRightMachine(t *testing.T) {
+	resolve := stubIPAddrResolver(t, map[string][]string{
+		"storage-evil.example.invalid": {"127.0.0.1"},
+		"elsewhere.example.invalid":    {"127.0.0.1"},
+	})
+
+	t.Run("the presigned target is the local machine: the backend is at fault", func(t *testing.T) {
+		g := newTestTransferGuard(t, false, resolve)
+		req, _ := http.NewRequest(http.MethodGet, "https://storage-evil.example.invalid/obj", http.NoBody)
+		_, err := g.Proxy(req)
+		ee := output.AsExitError(err)
+		if ee == nil || ee.Code != "UNSAFE_PRESIGNED_URL" {
+			t.Fatalf("err = %v, want UNSAFE_PRESIGNED_URL", err)
+		}
+		if !strings.Contains(ee.Hint, "report") {
+			t.Errorf("the storage endpoint chose this address, so the hint should ask for it to be reported; hint = %q", ee.Hint)
+		}
+		if strings.Contains(strings.ToLower(ee.Hint), "proxy") {
+			t.Errorf("this is not a proxy problem and the hint must not suggest it is; hint = %q", ee.Hint)
+		}
+	})
+
+	t.Run("something local redirected the connection: the environment is at fault", func(t *testing.T) {
+		g := newTestTransferGuard(t, false, resolve)
+		// A host the request never named and no proxy selected — the shape a
+		// connection takes when something in the environment reroutes it.
+		_, err := g.DialContext(context.Background(), "tcp", "elsewhere.example.invalid:443")
+		ee := output.AsExitError(err)
+		if ee == nil {
+			t.Fatalf("err = %v, want a structured error", err)
+		}
+		if ee.Code == "UNSAFE_PRESIGNED_URL" {
+			t.Error("this is not the presigned target, so it must not be reported as one")
+		}
+		if strings.Contains(ee.Hint, "report") {
+			t.Errorf("the backend did not choose this address and must not be blamed for it; hint = %q", ee.Hint)
+		}
+		if !strings.Contains(strings.ToLower(ee.Hint), "proxy") {
+			t.Errorf("the remedy is in the local proxy configuration, so the hint should say so; hint = %q", ee.Hint)
+		}
+	})
+}
+
+// TestTransferProxy_SelectedProxyOnLoopbackIsDialledNotClassified isolates the
+// dialer's half of the rule from the transport, so the allow direction is pinned even
+// if the wiring changes.
+func TestTransferProxy_SelectedProxyOnLoopbackIsDialledNotClassified(t *testing.T) {
+	const target = "storage-ok.example.invalid"
+	resolve := stubIPAddrResolver(t, map[string][]string{target: {"203.0.113.9"}})
+
+	g := newTestTransferGuard(t, false, resolve)
+	g.proxy = fixedProxy(t, "http://127.0.0.1:3128")
+
+	req, _ := http.NewRequest(http.MethodGet, "https://"+target+"/obj", http.NoBody)
+	p, err := g.Proxy(req)
+	if err != nil {
+		t.Fatalf("a remote target with a local proxy must be allowed: %v", err)
+	}
+	if p == nil {
+		t.Fatal("the proxy selection was dropped")
+	}
+
+	if _, derr := g.DialContext(context.Background(), "tcp", "127.0.0.1:3128"); derr != nil {
+		if ee := output.AsExitError(derr); ee != nil && ee.Code == "UNSAFE_PRESIGNED_URL" {
+			t.Fatalf("the selected proxy must be dialled, not classified as storage: %v", derr)
+		}
+	}
+}
+
+// stubIPAddrResolver maps names to addresses deterministically.
+func stubIPAddrResolver(t *testing.T, table map[string][]string) hostResolver {
+	t.Helper()
+	return func(_ context.Context, host string) ([]net.IPAddr, error) {
+		addrs, ok := table[host]
+		if !ok {
+			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+		}
+		out := make([]net.IPAddr, 0, len(addrs))
+		for _, a := range addrs {
+			ip := net.ParseIP(a)
+			if ip == nil {
+				t.Fatalf("stub table has a bad address %q for %q", a, host)
+			}
+			out = append(out, net.IPAddr{IP: ip})
+		}
+		return out, nil
+	}
+}
+
+// newTestTransferGuard builds the guard with the dial step stubbed, so no test in
+// this file opens a socket to a target.
+func newTestTransferGuard(t *testing.T, loopbackAPI bool, resolve hostResolver) *transferGuard {
+	t.Helper()
+	g := newTransferGuard("download_url", loopbackAPI, resolve)
+	g.dial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		return nil, errors.New("stub dial reached " + addr)
+	}
+	return g
+}

@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -41,6 +42,24 @@ import (
 // far longer than the API timeout: a presigned PUT/GET moves the whole file,
 // while every drive metadata call is a small JSON round-trip.
 const transferTimeout = 30 * time.Minute
+
+// transferDialTimeout bounds one TCP connection attempt.
+const transferDialTimeout = 30 * time.Second
+
+// transferDialAttemptTimeout caps a single address attempt when a name resolved to
+// more than one address.
+//
+// net.Dialer given a *name* races the address families (Happy Eyeballs, RFC 6555)
+// with a short fallback delay. This guard resolves first and dials addresses itself,
+// which is what makes the check and the connection agree on one address — but it
+// gives up that race, so a black-holed AAAA answer ahead of a working A answer would
+// otherwise stall for the whole dial budget before the address that works is tried.
+// Capping each attempt recovers most of the property while keeping the guarantee.
+//
+// It applies only when there is another address to fall back to: with a single
+// answer, shortening the budget would turn a slow-but-working connection into a
+// failure for no benefit.
+const transferDialAttemptTimeout = 10 * time.Second
 
 // registerDriveCmds attaches the hand-written drive leaves after the
 // metadata-driven tree exists, so they can hang off the generated `drive
@@ -83,19 +102,15 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // only where nothing intercepts them, and resolvers that rewrite unknown or
 // loopback-pointing answers are common enough that a test built on them can quietly
 // stop asserting anything while still passing.
-type hostResolver func(ctx context.Context, host string) ([]net.IP, error)
+type hostResolver func(ctx context.Context, host string) ([]net.IPAddr, error)
 
 // systemHostResolver resolves through the system resolver.
-func systemHostResolver(ctx context.Context, host string) ([]net.IP, error) {
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	ips := make([]net.IP, 0, len(addrs))
-	for _, a := range addrs {
-		ips = append(ips, a.IP)
-	}
-	return ips, nil
+//
+// The answers keep their Zone: a scoped link-local address (fe80::1%eth0) is a
+// different destination from the same address without the zone, and dropping the
+// identifier makes it undiallable.
+func systemHostResolver(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return net.DefaultResolver.LookupIPAddr(ctx, host)
 }
 
 // transferDialer decides whether a transfer connection may be made, on the
@@ -108,41 +123,158 @@ func systemHostResolver(ctx context.Context, host string) ([]net.IP, error) {
 // walks through every notation rule, because the notation is legitimate. Judging the
 // resolved address is truthful by construction, so no future spelling can outflank
 // it.
-type transferDialer struct {
+type transferGuard struct {
 	field       string
 	loopbackAPI bool
 	resolve     hostResolver
 	dial        func(ctx context.Context, network, addr string) (net.Conn, error)
+	proxy       func(*http.Request) (*url.URL, error)
+
+	// mu guards the two records below. Both are written by Proxy and read by
+	// DialContext, which the transport may call from a different goroutine.
+	mu sync.Mutex
+	// validated maps a target host to the addresses Proxy classified for it, so the
+	// dial uses the answers that were checked instead of resolving a second time.
+	validated map[string][]net.IPAddr
+	// proxies records the hosts of proxies the selector chose, so the dialer can
+	// tell "the machine the URL names" from "the machine the operator routes through".
+	proxies map[string]bool
 }
 
-// DialContext resolves addr, refuses any answer that names the local machine when
-// the configured Octo origin is not itself local, and then dials **the address it
-// validated** rather than the name.
+// newTransferGuard builds the guard for one transfer client. resolve may be nil,
+// meaning the system resolver.
+func newTransferGuard(field string, loopbackAPI bool, resolve hostResolver) *transferGuard {
+	if resolve == nil {
+		resolve = systemHostResolver
+	}
+	return &transferGuard{
+		field:       field,
+		loopbackAPI: loopbackAPI,
+		resolve:     resolve,
+		dial:        (&net.Dialer{Timeout: transferDialTimeout, KeepAlive: 30 * time.Second}).DialContext,
+		proxy:       http.ProxyFromEnvironment,
+		validated:   map[string][]net.IPAddr{},
+		proxies:     map[string]bool{},
+	}
+}
+
+// Proxy is the transport's proxy selector, and it is where the target is classified.
 //
-// Dialing the validated address is what makes this rebinding-safe: handing the name
-// back to the dialer would let a resolver answer differently the second time, so the
-// address checked and the address connected to would not be the same one.
-func (d transferDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+// It has to be here. When the transport selects a proxy, DialContext is handed the
+// *proxy's* address — for a plain-HTTP request and for the CONNECT tunnel alike — and
+// the URL's own host never reaches it. A dialer-only guard therefore judged whichever
+// machine the connection happened to go to, which under a configured proxy is not the
+// machine the rule is about. Proxy receives the *http.Request, so it always sees the
+// real target, whether or not a proxy ends up being used.
+//
+// Refusing here also refuses before the transport opens anything, which is the same
+// guarantee the dialer gives on the direct path.
+func (g *transferGuard) Proxy(req *http.Request) (*url.URL, error) {
+	host := req.URL.Hostname()
+	ips, err := g.resolveAndRefuseLocal(req.Context(), host, g.targetIsLocalError)
+	if err != nil {
+		return nil, err
+	}
+	g.remember(host, ips)
+
+	proxyURL, perr := g.proxy(req)
+	if perr != nil {
+		return nil, output.ErrWithHint("validation", "INVALID_PROXY", perr.Error(),
+			"check http_proxy / https_proxy / all_proxy in this environment")
+	}
+	if proxyURL != nil {
+		g.rememberProxy(proxyURL.Hostname())
+	}
+	return proxyURL, nil
+}
+
+// DialContext opens the connection, and is the only hook that can bind the address
+// that was checked to the socket that gets opened.
+//
+// Three cases, and which one applies is decided by what Proxy recorded rather than by
+// guessing from the address:
+//
+//   - the target on the direct path: dial one of the addresses Proxy validated for it.
+//     Re-resolving here instead would let a resolver answer differently between the
+//     check and the connection, which is the whole point of dialing an address.
+//   - a proxy the selector chose: dial it as given. A proxy on the local machine is an
+//     ordinary debugging or TLS-inspection setup, it is the operator's own
+//     configuration rather than a host named by the backend, and the storage rule does
+//     not apply to it. Refusing it here is what broke every transfer for those users.
+//   - anything else: nobody classified this host, so classify it now and fail closed
+//     if it is local — but attribute it to the environment, because the backend did
+//     not choose it. In a correctly wired transport this case does not arise; it is
+//     the fail-closed default rather than a reachable configuration.
+func (g *transferGuard) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	ips, rerr := d.resolveTarget(ctx, host)
+	if ips := g.validatedFor(host); len(ips) > 0 {
+		return g.dialAddrs(ctx, network, host, ips, port)
+	}
+	if g.isSelectedProxy(host) {
+		return g.dial(ctx, network, addr)
+	}
+	ips, rerr := g.resolveAndRefuseLocal(ctx, host, g.connectionRedirectedLocallyError)
 	if rerr != nil {
 		return nil, rerr
 	}
-	if !d.loopbackAPI {
-		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsUnspecified() {
-				return nil, output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
-					fmt.Sprintf("%s resolves to the local machine, which is not reachable object storage", d.field),
-					"the storage endpoint pointed the transfer at this machine; report it")
-			}
+	return g.dialAddrs(ctx, network, host, ips, port)
+}
+
+// resolveAndRefuseLocal resolves host and refuses when any answer names the local
+// machine, unless the configured Octo origin is itself local — the exception that
+// keeps local development working.
+//
+// Every answer is checked, not just the first: a name with one remote and one local
+// address must be refused, or the guard is decided by resolver ordering.
+func (g *transferGuard) resolveAndRefuseLocal(ctx context.Context, host string, mkErr func() *output.ExitError) ([]net.IPAddr, error) {
+	ips, err := g.resolveTarget(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if g.loopbackAPI {
+		return ips, nil
+	}
+	for _, ip := range ips {
+		if ip.IP.IsLoopback() || ip.IP.IsUnspecified() {
+			return nil, mkErr()
 		}
 	}
+	return ips, nil
+}
+
+// targetIsLocalError reports a presigned URL whose own host is this machine. The
+// backend chose that host, so the remedy is upstream.
+func (g *transferGuard) targetIsLocalError() *output.ExitError {
+	return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+		fmt.Sprintf("%s resolves to the local machine, which is not reachable object storage", g.field),
+		"the storage endpoint pointed the transfer at this machine; report it")
+}
+
+// connectionRedirectedLocallyError reports a connection that landed on this machine
+// without the URL naming it. Nothing upstream chose this, so the hint points at the
+// local configuration that can.
+//
+// Keeping this distinct from targetIsLocalError is not cosmetic. One message for both
+// told every user with a local proxy that object storage had attacked them, which is
+// both wrong and unactionable.
+func (g *transferGuard) connectionRedirectedLocallyError() *output.ExitError {
+	return output.ErrWithHint("validation", "TRANSFER_REDIRECTED_LOCALLY",
+		fmt.Sprintf("the connection for %s was directed to the local machine, which is not the host that URL names", g.field),
+		"something in this environment is rerouting the transfer; check http_proxy / https_proxy / all_proxy and no_proxy")
+}
+
+// dialAddrs tries each validated address in turn.
+func (g *transferGuard) dialAddrs(ctx context.Context, network, host string, ips []net.IPAddr, port string) (net.Conn, error) {
 	var lastErr error
-	for _, ip := range ips {
-		conn, derr := d.dial(ctx, network, net.JoinHostPort(ip.String(), port))
+	for i := range ips {
+		attemptCtx, cancel := g.attemptContext(ctx, len(ips))
+		conn, derr := g.dial(attemptCtx, network, net.JoinHostPort(ips[i].String(), port))
+		// The context governs the dial, not the connection it returns, so releasing
+		// it here is correct either way and is what stops the timer leaking.
+		cancel()
 		if derr == nil {
 			return conn, nil
 		}
@@ -154,16 +286,51 @@ func (d transferDialer) DialContext(ctx context.Context, network, addr string) (
 	return nil, lastErr
 }
 
+// attemptContext caps one address attempt when there is another to fall back to.
+// See transferDialAttemptTimeout for why a single answer keeps the full budget.
+func (g *transferGuard) attemptContext(ctx context.Context, addresses int) (context.Context, context.CancelFunc) {
+	if addresses < 2 {
+		return context.WithCancel(ctx)
+	}
+	// A real deadline rather than a timer that cancels: net.Dialer reads the
+	// deadline, and anything inspecting the attempt can see the bound.
+	return context.WithTimeout(ctx, transferDialAttemptTimeout)
+}
+
+func (g *transferGuard) remember(host string, ips []net.IPAddr) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.validated[host] = ips
+}
+
+func (g *transferGuard) rememberProxy(host string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.proxies[host] = true
+}
+
+func (g *transferGuard) validatedFor(host string) []net.IPAddr {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.validated[host]
+}
+
+func (g *transferGuard) isSelectedProxy(host string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.proxies[host]
+}
+
 // resolveTarget returns the addresses addr's host names. An IP literal is used as
 // given; anything else goes through the resolver, and a name that cannot be
 // resolved fails rather than being handed to the dialer as a name — otherwise an
 // unresolvable host would slip past the check and be resolved again inside the
 // dial.
-func (d transferDialer) resolveTarget(ctx context.Context, host string) ([]net.IP, error) {
+func (g *transferGuard) resolveTarget(ctx context.Context, host string) ([]net.IPAddr, error) {
 	if ip := net.ParseIP(host); ip != nil {
-		return []net.IP{ip}, nil
+		return []net.IPAddr{{IP: ip}}, nil
 	}
-	ips, err := d.resolve(ctx, host)
+	ips, err := g.resolve(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -205,26 +372,56 @@ func (d transferDialer) resolveTarget(ctx context.Context, host string) ([]net.I
 // gates the plain-http exception: that exception exists so local development
 // works, and against a remote origin a cooperating storage host could otherwise
 // answer 302 http://127.0.0.1:<port>/… and steer the transfer at a service on
-// the caller's own machine. A redirect may not land on a loopback host at all
-// under a remote origin, whatever its scheme — the initial URL comes from the
-// trusted backend and may legitimately name an internal host, but a hop chosen by
-// the storage host may not.
+// the caller's own machine.
+//
+// The rule now covers **every** connection under a remote origin, the initial one as
+// well as each hop, whatever its scheme. That is wider than the rule this docstring
+// used to state: while the check lived in CheckRedirect it could only judge hops, and
+// the text said the initial URL "comes from the trusted backend and may legitimately
+// name an internal host". Deciding on the resolved address moved the check into the
+// connection path, so the initial URL is judged too. The consequence is worth stating
+// plainly rather than leaving to be discovered: a deployment whose Octo origin is
+// remote while its object storage resolves to the caller's own machine no longer
+// transfers. Private and other internal ranges are still allowed — only the local
+// machine is not — and pointing OCTO_API_BASE_URL at loopback restores the whole
+// local setup.
+//
+// Under a configured proxy the invariant holds in a narrower form, and the difference
+// is worth knowing: the target is resolved and classified locally in transferGuard.Proxy,
+// but the connection is made by the proxy, so the *address* cannot be pinned the way
+// the direct path pins it. What backs the rule there is that the operator chose the
+// proxy; what this guard adds is that a target naming the local machine is refused
+// before the request is handed over.
+//
 // resolve may be nil, meaning the system resolver.
 func transferClient(field string, loopbackAPI bool, resolve hostResolver) *http.Client {
-	if resolve == nil {
-		resolve = systemHostResolver
+	return transferClientWithGuard(newTransferGuard(field, loopbackAPI, resolve))
+}
+
+// transferClientWithGuard is the constructor a test can hand a guard with its own
+// seams to, so the proxy path is exercised through the real transport instead of
+// through the process-wide proxy environment. http.ProxyFromEnvironment memoises that
+// environment in a package-level sync.Once, so an env-based assertion silently depends
+// on which test in the binary ran first — it is not a usable seam.
+//
+// The transport is built field by field rather than cloned from
+// http.DefaultTransport. Clone() inherits whatever that package-level variable holds
+// at the time, which means a dependency setting DialTLSContext on it would have HTTPS
+// transfers use that hook and bypass this guard entirely, and a dependency replacing
+// http.DefaultTransport with another type would panic the type assertion on every
+// transfer. Neither is live today; constructing explicitly removes both futures and
+// leaves the TLS dial hooks nil by definition.
+func transferClientWithGuard(guard *transferGuard) *http.Client {
+	field, loopbackAPI := guard.field, guard.loopbackAPI
+	transport := &http.Transport{
+		Proxy:                 guard.Proxy,
+		DialContext:           guard.DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
-	// The dialer is where the loopback rule is actually enforced, on the resolved
-	// address. The CheckRedirect string rules below stay as a cheap pre-filter that
-	// rejects the obvious spellings before a lookup happens.
-	guard := transferDialer{
-		field:       field,
-		loopbackAPI: loopbackAPI,
-		resolve:     resolve,
-		dial:        (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.DialContext = guard.DialContext
 	return &http.Client{
 		Timeout:   transferTimeout,
 		Transport: transport,
@@ -533,7 +730,7 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		cleanup()
 		return nil, err
 	}
-	if err := publishDownload(partPath, target, overwrite, partInfo); err != nil {
+	if err := publishDownload(partPath, target, overwrite, partInfo, nil); err != nil {
 		cleanup()
 		return nil, err
 	}
@@ -589,9 +786,17 @@ func sealPartFile(part *os.File, target string) (os.FileInfo, *output.ExitError)
 // close and publication, this refuses instead of publishing a file the CLI never
 // wrote — the alternative being a success envelope whose path and sha256 describe
 // different files.
-func publishDownload(partPath, target string, overwrite bool, created os.FileInfo) *output.ExitError {
+// beforePublish is a test seam, nil in production, invoked between the
+// pre-publication check and the publication itself. It exists because the identity
+// comparison after publication is only reachable through that window: its own unit
+// test proves what the function does, and this parameter is what proves the function
+// is still called.
+func publishDownload(partPath, target string, overwrite bool, created os.FileInfo, beforePublish func()) *output.ExitError {
 	if err := assertPartFileUnchanged(partPath, created); err != nil {
 		return err
+	}
+	if beforePublish != nil {
+		beforePublish()
 	}
 	if !overwrite {
 		switch err := os.Link(partPath, target); {

@@ -37,12 +37,20 @@ import (
 // dir rather than be absent, or authstore falls back to the real user config
 // dir and a developer's stored profiles leak back in. Tests that need their own
 // store still override it with t.Setenv.
+//
+// The proxy family is swept for the same reason and is the second family that was
+// leaking in. An ambient https_proxy changes which machine the transfer transport
+// connects to, which is the exact property the transfer guard tests assert — so
+// those tests meant different things in different developers' shells, and one of
+// them passed for the wrong reason under a loopback-addressed proxy. Tests that want
+// a proxy now opt in with t.Setenv.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "octo-cmd-test")
 	if err != nil {
 		panic(err)
 	}
 	sweepOctoEnv()
+	sweepProxyEnv()
 	os.Setenv("OCTO_CONFIG_DIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
@@ -56,6 +64,15 @@ func sweepOctoEnv() {
 		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
 			os.Unsetenv(name)
 		}
+	}
+}
+
+// sweepProxyEnv unsets every variable net/http consults to pick a proxy, in both
+// the upper- and lower-case spellings ProxyFromEnvironment accepts.
+func sweepProxyEnv() {
+	for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"} {
+		os.Unsetenv(name)
+		os.Unsetenv(strings.ToLower(name))
 	}
 }
 

@@ -39,38 +39,55 @@ import (
 // rather than reach the network.
 
 // stubResolver maps names to addresses deterministically.
-func stubResolver(t *testing.T, table map[string][]string) func(context.Context, string) ([]net.IP, error) {
+func stubResolver(t *testing.T, table map[string][]string) hostResolver {
 	t.Helper()
-	return func(_ context.Context, host string) ([]net.IP, error) {
-		addrs, ok := table[host]
-		if !ok {
-			return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
-		}
-		ips := make([]net.IP, 0, len(addrs))
-		for _, a := range addrs {
-			ip := net.ParseIP(a)
-			if ip == nil {
-				t.Fatalf("stub table has a bad address %q for %q", a, host)
-			}
-			ips = append(ips, ip)
-		}
-		return ips, nil
-	}
+	return stubIPAddrResolver(t, table)
 }
 
 // newTestTransferDialer builds the dialer under test with both seams stubbed: the
 // resolver answers from table, and the dial step records the address it was handed
 // instead of opening a socket, so nothing in this file touches the network.
-func newTestTransferDialer(t *testing.T, loopbackAPI bool, table map[string][]string) transferDialer {
+func newTestTransferDialer(t *testing.T, loopbackAPI bool, table map[string][]string) *transferGuard {
 	t.Helper()
-	return transferDialer{
-		field:       "download_url",
-		loopbackAPI: loopbackAPI,
-		resolve:     stubResolver(t, table),
-		dial: func(_ context.Context, _, addr string) (net.Conn, error) {
-			return nil, fmt.Errorf("stub dial reached %s", addr)
-		},
+	if table == nil {
+		table = map[string][]string{}
 	}
+	g := newTransferGuard("download_url", loopbackAPI, stubResolver(t, table))
+	g.dial = func(_ context.Context, _, addr string) (net.Conn, error) {
+		return nil, fmt.Errorf("stub dial reached %s", addr)
+	}
+	return g
+}
+
+// attemptTransfer drives the guard in the order the transport does: Proxy first
+// (which is where the target is classified), then DialContext for the address the
+// transport would open. Tests below assert on the whole sequence rather than on
+// DialContext alone, because "which hook refuses" is an implementation detail and
+// calling only the dialer would miss a target that the selector already rejected.
+func attemptTransfer(t *testing.T, g *transferGuard, rawURL string) (dialled []string, err error) {
+	t.Helper()
+	req, rerr := http.NewRequest(http.MethodGet, rawURL, http.NoBody)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	inner := g.dial
+	g.dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialled = append(dialled, addr)
+		return inner(ctx, network, addr)
+	}
+	proxyURL, perr := g.Proxy(req)
+	if perr != nil {
+		return dialled, perr
+	}
+	target := req.URL.Host
+	if proxyURL != nil {
+		target = proxyURL.Host
+	}
+	if _, _, serr := net.SplitHostPort(target); serr != nil {
+		target = net.JoinHostPort(req.URL.Hostname(), "443")
+	}
+	_, derr := g.DialContext(context.Background(), "tcp", target)
+	return dialled, derr
 }
 
 // TestTransferDial_RefusesANameThatResolvesToLoopback is the P1 assertion.
@@ -110,7 +127,7 @@ func TestTransferDial_RefusesANameThatResolvesToLoopback(t *testing.T) {
 	for _, host := range refused {
 		t.Run("refused/"+host, func(t *testing.T) {
 			d := newTestTransferDialer(t, false, table)
-			_, err := d.DialContext(context.Background(), "tcp", net.JoinHostPort(host, "443"))
+			dialled, err := attemptTransfer(t, d, "https://"+host+"/obj")
 			if err == nil {
 				t.Fatalf("%s resolves to the local machine and must be refused", host)
 			}
@@ -118,22 +135,22 @@ func TestTransferDial_RefusesANameThatResolvesToLoopback(t *testing.T) {
 			if ee == nil || ee.Code != "UNSAFE_PRESIGNED_URL" {
 				t.Errorf("error: got %v, want UNSAFE_PRESIGNED_URL", err)
 			}
-			// The stub dial marker must be absent: refusing after connecting would
-			// still return an error, so "an error came back" is not the property.
-			if strings.Contains(err.Error(), "stub dial reached") {
-				t.Error("the dialer must refuse before connecting, but it dialled first")
+			// Nothing may have been dialled: refusing after connecting would still
+			// return an error, so "an error came back" is not the property.
+			if len(dialled) > 0 {
+				t.Errorf("must refuse before connecting, but dialled %v", dialled)
 			}
 		})
 	}
 	for _, host := range allowed {
 		t.Run("allowed/"+host, func(t *testing.T) {
 			d := newTestTransferDialer(t, false, table)
-			_, err := d.DialContext(context.Background(), "tcp", net.JoinHostPort(host, "443"))
-			if err == nil {
-				return // the stub dial succeeded, which is the pass condition
-			}
+			dialled, err := attemptTransfer(t, d, "https://"+host+"/obj")
 			if ee := output.AsExitError(err); ee != nil && ee.Code == "UNSAFE_PRESIGNED_URL" {
 				t.Errorf("%s is remote storage and must be dialled, got %v", host, err)
+			}
+			if len(dialled) == 0 {
+				t.Errorf("%s is remote storage and should have been dialled", host)
 			}
 		})
 	}
@@ -144,10 +161,12 @@ func TestTransferDial_RefusesANameThatResolvesToLoopback(t *testing.T) {
 func TestTransferDial_LocalOriginStillReachesLoopback(t *testing.T) {
 	table := map[string][]string{"storage-a.example.invalid": {"127.0.0.1"}}
 	d := newTestTransferDialer(t, true, table)
-	if _, err := d.DialContext(context.Background(), "tcp", "storage-a.example.invalid:443"); err != nil {
-		if ee := output.AsExitError(err); ee != nil && ee.Code == "UNSAFE_PRESIGNED_URL" {
-			t.Errorf("a loopback origin must still reach loopback storage: %v", err)
-		}
+	dialled, err := attemptTransfer(t, d, "https://storage-a.example.invalid/obj")
+	if ee := output.AsExitError(err); ee != nil && ee.Code == "UNSAFE_PRESIGNED_URL" {
+		t.Errorf("a loopback origin must still reach loopback storage: %v", err)
+	}
+	if len(dialled) == 0 {
+		t.Error("a loopback origin must still reach loopback storage, but nothing was dialled")
 	}
 }
 
@@ -159,13 +178,8 @@ func TestTransferDial_DialsTheAddressItValidated(t *testing.T) {
 	const host = "storage-ok.example.invalid"
 	table := map[string][]string{host: {"203.0.113.9"}}
 
-	var dialled []string
 	d := newTestTransferDialer(t, false, table)
-	d.dial = func(_ context.Context, _, addr string) (net.Conn, error) {
-		dialled = append(dialled, addr)
-		return nil, errors.New("stub dial")
-	}
-	_, _ = d.DialContext(context.Background(), "tcp", net.JoinHostPort(host, "443"))
+	dialled, _ := attemptTransfer(t, d, "https://"+host+"/obj")
 
 	if len(dialled) == 0 {
 		t.Fatal("nothing was dialled")
@@ -191,14 +205,8 @@ func TestTransferDial_DialsTheAddressItValidated(t *testing.T) {
 // straight to the dialer — because the dial then failed on its own and produced an
 // error that looked like the one being asserted.
 func TestTransferDial_UnresolvableNameFailsClosed(t *testing.T) {
-	var dialled []string
 	d := newTestTransferDialer(t, false, map[string][]string{})
-	d.dial = func(_ context.Context, _, addr string) (net.Conn, error) {
-		dialled = append(dialled, addr)
-		return nil, errors.New("stub dial")
-	}
-
-	_, err := d.DialContext(context.Background(), "tcp", "nothing-here.example.invalid:443")
+	dialled, err := attemptTransfer(t, d, "https://nothing-here.example.invalid/obj")
 	if err == nil {
 		t.Error("an unresolvable host must fail rather than be dialled by name")
 	}
@@ -318,4 +326,139 @@ func mustCreatePartInfo(t *testing.T, dir, contents string) os.FileInfo {
 	part, info := mustCreatePartFor(t, dir, contents, "")
 	_ = os.Remove(part)
 	return info
+}
+
+// Round-10 P2-3. assertPublishedFileMatches was well tested on its own but its two
+// call sites were not pinned: replacing both with `return nil` left the whole cmd
+// package green, so a refactor could drop the check the previous round added and no
+// test would notice. A function whose behaviour is asserted and whose wiring is not is
+// only half covered — and the half that ships is the wiring.
+//
+// Reaching it through publishDownload needs a seam, because the swap has to happen
+// after the pre-publication Lstat and before the link. beforePublish is that seam:
+// nil in production, and the test uses it to replace the part file between the two
+// steps — exactly the window the check exists to close.
+func TestPublishDownload_PinsThePublicationIdentityCheck(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+	partPath, created := mustCreatePartFor(t, dir, "the bytes we actually downloaded", "")
+
+	err := publishDownload(partPath, target, false, created, func() {
+		// Something replaces the part file after it was checked. os.Link acts on
+		// whatever the name resolves to now, so without the post-publication
+		// comparison the destination holds a file the CLI never wrote while the
+		// success envelope describes the one it did.
+		if rmErr := os.Remove(partPath); rmErr != nil {
+			t.Fatal(rmErr)
+		}
+		if wErr := os.WriteFile(partPath, []byte("substituted"), 0o600); wErr != nil {
+			t.Fatal(wErr)
+		}
+	})
+
+	if err == nil {
+		t.Fatal("the part file was replaced between the check and the publication, which must not be reported as success")
+	}
+	if err.Code != "PARTIAL_FILE_REPLACED" {
+		t.Errorf("code = %q, want PARTIAL_FILE_REPLACED (got %v)", err.Code, err)
+	}
+}
+
+// TestPublishDownload_HappyPathStillPublishes is the allow direction, so the seam
+// above cannot be satisfied by refusing everything.
+func TestPublishDownload_HappyPathStillPublishes(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+	partPath, created := mustCreatePartFor(t, dir, "payload", "")
+
+	if err := publishDownload(partPath, target, false, created, nil); err != nil {
+		t.Fatalf("an untouched part file must publish: %v", err)
+	}
+	got, rerr := os.ReadFile(target)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "payload" {
+		t.Errorf("target contents = %q, want %q", got, "payload")
+	}
+}
+
+// Round-10 P2-5. Resolving first and dialing addresses ourselves is what makes the
+// check and the connection agree, but it gives up the family race net.Dialer performs
+// when handed a name (Happy Eyeballs, RFC 6555). A black-holed address ahead of a
+// working one would then consume the whole dial budget before the working one is
+// tried, so each attempt is capped when there is something to fall back to.
+//
+// The assertion is on the deadline the attempt carries, not on elapsed time: a timing
+// test for a 10-second cap either takes 10 seconds or proves nothing, and "it finished
+// quickly" would pass just as well with no cap at all.
+func TestTransferDial_CapsEachAttemptOnlyWhenThereIsAFallback(t *testing.T) {
+	table := map[string][]string{
+		"two.example.invalid": {"203.0.113.10", "203.0.113.11"},
+		"one.example.invalid": {"203.0.113.12"},
+	}
+
+	for _, tc := range []struct {
+		host         string
+		wantDeadline bool
+		why          string
+	}{
+		{"two.example.invalid", true, "with a second address to try, a stalled first attempt must not hold the whole budget"},
+		{"one.example.invalid", false, "with a single address there is nothing to fall back to, and shortening the budget would only turn a slow connection into a failure"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			var deadlines []bool
+			d := newTestTransferDialer(t, false, table)
+			d.dial = func(ctx context.Context, _, addr string) (net.Conn, error) {
+				_, ok := ctx.Deadline()
+				deadlines = append(deadlines, ok)
+				return nil, errors.New("stub dial reached " + addr)
+			}
+			if _, err := attemptTransfer(t, d, "https://"+tc.host+"/obj"); err == nil {
+				t.Fatal("the stub dial always fails, so an error is expected")
+			}
+			if len(deadlines) == 0 {
+				t.Fatal("nothing was dialled")
+			}
+			for i, got := range deadlines {
+				if got != tc.wantDeadline {
+					t.Errorf("attempt %d carried a deadline = %v, want %v — %s", i, got, tc.wantDeadline, tc.why)
+				}
+			}
+		})
+	}
+}
+
+// TestTransferDial_TriesEveryAddressBeforeGivingUp is the other half: capping an
+// attempt is only useful if the next address is actually tried.
+func TestTransferDial_TriesEveryAddressBeforeGivingUp(t *testing.T) {
+	table := map[string][]string{"two.example.invalid": {"203.0.113.10", "203.0.113.11"}}
+	d := newTestTransferDialer(t, false, table)
+	dialled, _ := attemptTransfer(t, d, "https://two.example.invalid/obj")
+	if len(dialled) != 2 {
+		t.Errorf("dialled %v, want both addresses attempted", dialled)
+	}
+}
+
+// Round-10 P2-6. The resolver used to keep only net.IPAddr.IP and drop Zone, so a
+// scoped link-local target lost its interface identifier — and fe80::1 without a zone
+// is not the same destination as fe80::1%eth0, it is an undiallable one. Not a
+// realistic object-storage host, but the loss was silent, and the guard now dials the
+// address it resolved rather than the name, which is exactly where the zone has to
+// survive to matter.
+func TestTransferDial_KeepsTheIPv6Zone(t *testing.T) {
+	const host = "scoped.example.invalid"
+	d := newTestTransferDialer(t, false, nil)
+	d.resolve = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("2001:db8::1"), Zone: "eth0"}}, nil
+	}
+
+	dialled, _ := attemptTransfer(t, d, "https://"+host+"/obj")
+	if len(dialled) == 0 {
+		t.Fatal("nothing was dialled")
+	}
+	if !strings.Contains(dialled[0], "%eth0") {
+		t.Errorf("dialled %q, which has lost the zone — a scoped address without its "+
+			"interface identifier names a different (undiallable) destination", dialled[0])
+	}
 }
