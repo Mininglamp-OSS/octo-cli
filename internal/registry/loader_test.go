@@ -153,7 +153,13 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	if !ok || docType.Items == nil {
 		t.Fatal("docs.search docType item schema missing")
 	}
-	wantTypes := []any{"doc", "sheet", "board", "html"}
+	// html_ppt is a first-class document kind in octo-docs-backend's DOC_TYPES
+	// (src/db/docType.ts, "the SINGLE source of truth"), with its own
+	// /api/v1/ppt/** routes. It matters here because the CLI now enforces this
+	// enum locally: omitting a kind the backend accepts turns a working call into
+	// exit 2. cmd/service's requestSideVocabularies pins the same set with
+	// provenance.
+	wantTypes := []any{"doc", "sheet", "board", "html", "html_ppt"}
 	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
 		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}
