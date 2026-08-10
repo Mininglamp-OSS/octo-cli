@@ -82,6 +82,30 @@ type driveUploadOpts struct {
 //
 //nolint:gocyclo // one linear upload sequence; every branch is a separate covered failure mode
 func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string, o driveUploadOpts) error {
+	// Ask what the path is before opening it. Opening a FIFO for reading blocks
+	// until a writer appears, so `upload file <fifo>` used to hang here — before the
+	// size check, before credential resolution, and before the --dry-run branch that
+	// promises to touch nothing — which is also the opposite of the contract that a
+	// non-regular path is rejected locally.
+	//
+	// os.Stat, not os.Lstat: it follows symlinks, so the decision is made about what
+	// the path resolves to. A symlink to a regular file is still uploadable, as it
+	// was; a symlink to a FIFO is refused without being opened.
+	//
+	// This is the only caller-supplied path in the CLI that should refuse a FIFO, and
+	// the reason is specific rather than general: prepare-upload signs an exact byte
+	// count and putObject rewinds the descriptor before sending, and a FIFO reports
+	// Size()==0 and cannot Seek — so there is nothing here for a pipe to do. The other
+	// path-taking flags (--password-file, --token-file, --description-file, the
+	// multipart body) read to EOF and work correctly on a FIFO, which is what makes
+	// `--password-file <(get-secret)` a way to keep a secret out of argv. Refusing
+	// non-regular files there would remove that, so it is deliberately not done.
+	if probe, probeErr := os.Stat(localPath); probeErr != nil {
+		return failErr(f, output.ErrValidation(fmt.Sprintf("<local-path>: %v", probeErr), "check the path and permissions"))
+	} else if !probe.Mode().IsRegular() {
+		return failErr(f, output.ErrValidation("<local-path> must point to a regular file", "pass a local file, not a directory, device, or pipe"))
+	}
+
 	// Open once and keep the descriptor: the size below is what gets signed, and
 	// re-opening by path after the prepare round-trip would let a replacement at
 	// that path be uploaded under the previous file's signed Content-Length.
@@ -92,12 +116,18 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	}
 	defer file.Close() //nolint:errcheck // read-only handle
 
+	// The pre-check above is about not blocking; this one is the actual guarantee.
+	// The path could have been swapped between the two, so what gets uploaded is
+	// judged from the descriptor, never from the name. A swap to a FIFO in that window
+	// can still block the open — closing that would need O_NONBLOCK, which is not
+	// portable — but it requires write access to the directory and cannot get a
+	// non-regular file past this point.
 	info, statErr := file.Stat()
 	if statErr != nil {
 		return failErr(f, output.ErrValidation(fmt.Sprintf("<local-path>: %v", statErr), "check the path and permissions"))
 	}
 	if !info.Mode().IsRegular() {
-		return failErr(f, output.ErrValidation("<local-path> must point to a regular file", "pass a local file, not a directory or device"))
+		return failErr(f, output.ErrValidation("<local-path> must point to a regular file", "pass a local file, not a directory, device, or pipe"))
 	}
 	if info.Size() <= 0 {
 		return failErr(f, output.ErrValidation("<local-path> is empty", "the backend signs an exact byte count; upload a non-empty file"))

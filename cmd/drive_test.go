@@ -7,8 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -857,4 +860,97 @@ func containsStr(xs []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// TestDriveUploadFile_DoesNotBlockOnANonRegularPath is round-11's finding at
+// d3b80b7, in code this PR added.
+//
+// runDriveUploadFile opened the path before asking what kind of file it was, and
+// opening a FIFO for reading blocks until a writer appears. So `drive upload file
+// <fifo>` hung indefinitely — before the size check, before credential resolution,
+// and before the --dry-run branch that promises to touch nothing — which also
+// contradicts the command's own contract that a non-regular file is rejected locally.
+// Verified by hand at d3b80b7: the command had to be killed.
+//
+// The assertion is on *completing*, not on the error alone: the whole defect is that
+// no error ever arrives, so a test that only checked the code would hang rather than
+// fail, and a hanging test reports nothing useful.
+func TestDriveUploadFile_DoesNotBlockOnANonRegularPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no mkfifo on windows")
+	}
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("mkfifo unavailable: %v", err)
+	}
+	// A symlink to the FIFO: rejecting must be decided by what the path resolves to,
+	// or the check is bypassed by one indirection.
+	link := filepath.Join(dir, "link-to-pipe")
+	if err := os.Symlink(fifo, link); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, path string
+		dryRun     bool
+	}{
+		{"fifo", fifo, false},
+		{"fifo, dry run", fifo, true},
+		{"symlink to fifo", link, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var called bool
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			}, nil)
+			args := []string{"drive", "upload", "file", tc.path, "--space-id", "s1"}
+			if tc.dryRun {
+				args = append(args, "--dry-run")
+			}
+
+			done := make(chan error, 1)
+			go func() { done <- env.run(args...) }()
+
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("a non-regular file must be rejected locally")
+				}
+				if ee := output.AsExitError(err); ee == nil || ee.Type != "validation" {
+					t.Errorf("error = %v, want a validation error", err)
+				}
+				if called {
+					t.Error("no request may be sent when local validation fails")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("upload file blocked on a non-regular path: opening a FIFO for reading waits for " +
+					"a writer, so the command never reached the check that was supposed to reject it")
+			}
+		})
+	}
+}
+
+// TestDriveUploadFile_AcceptsASymlinkToARegularFile is the allow direction of the
+// check above, and it is not optional: the reject direction alone is satisfied by
+// refusing symlinks outright (os.Lstat would do that), which would break uploading
+// through a symlink — something that worked before and has no reason to stop. A guard
+// with only its refusing half gets loosened by the next person it blocks.
+func TestDriveUploadFile_AcceptsASymlinkToARegularFile(t *testing.T) {
+	dir := t.TempDir()
+	targetFile := filepath.Join(dir, "payload.bin")
+	if err := os.WriteFile(targetFile, []byte("some bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link-to-payload")
+	if err := os.Symlink(targetFile, link); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("--dry-run must not send a request, got %s %s", r.Method, r.URL.Path)
+	}, nil)
+	if err := env.run("drive", "upload", "file", link, "--space-id", "s1", "--dry-run"); err != nil {
+		t.Errorf("a symlink to a regular file must still be uploadable: %v", err)
+	}
 }
