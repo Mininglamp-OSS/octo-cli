@@ -737,6 +737,29 @@ func TestBackendError_CodeExemptionFollowsTheRule(t *testing.T) {
 			code: "-Ab3cD_ef7Gh9jK", secret: "-Ab3cD_ef7Gh9jK", wantMasked: true,
 			clause: "mixed case and base64url punctuation are not code shape, so a token can never be vouched for",
 		},
+		// Clause 2 originally compared for equality, which left the same value
+		// leaking whenever the backend wrapped it in code shape. The three rows
+		// below are all code-shaped, none equals the secret, and each carries it
+		// whole. The bound that matters is not "is this value the secret" but
+		// "would masking this value remove a secret from it".
+		{
+			name: "clause 2: a code that prefixes a recognised code onto the secret is masked",
+			code: "not_found_sharesecretid", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "code shape is trivially satisfied by wrapping the id, so equality is the wrong test",
+		},
+		{
+			name: "clause 2: a code that suffixes onto the secret is masked",
+			code: "sharesecretid_not_found", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "same value, other side",
+		},
+		{
+			name: "clause 2: a code that embeds the secret between segments is masked",
+			code: "share_sharesecretid_error", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "same value, in the middle",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -777,6 +800,47 @@ func TestBackendError_CodeExemptionFollowsTheRule(t *testing.T) {
 			}
 			if ee.Code != tc.code {
 				t.Errorf("code = %q, want %q — %s", ee.Code, tc.code, tc.clause)
+			}
+		})
+	}
+}
+
+// TestBackendError_CodePositionAgreesWithOtherCodeKeys is the property the leak
+// violated most visibly: the exemption applies to `error` and `code` at the top of an
+// envelope but not to a `code` nested in an array, so the *same content* was masked
+// under errors[].code and left intact under error. Two keys behaving differently for
+// identical bytes is how a leak survives review — each site looks defensible alone.
+func TestBackendError_CodePositionAgreesWithOtherCodeKeys(t *testing.T) {
+	const secret = "sharesecretid"
+	const value = "not_found_" + secret
+
+	for _, tc := range []struct{ name, body string }{
+		{"exempt position", `{"error":"` + value + `","message":"x"}`},
+		{"non-exempt position", `{"errors":[{"code":"` + value + `"}],"message":"x"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if visible := ee.Code + " " + string(ee.Detail); strings.Contains(visible, secret) {
+				t.Errorf("the secret survived in a %s:\ncode=%q detail=%s", tc.name, ee.Code, ee.Detail)
 			}
 		})
 	}

@@ -269,19 +269,28 @@ func redactResponseBody(b []byte, secrets []string) []byte {
 //     prints these codes on every failure of their kind, so leaving one discloses
 //     nothing an attacker could not already predict — while masking it destroys the
 //     distinction the caller branches on.
-//  2. An unrecognised value in the code position that equals a declared secret IS
-//     masked. Nothing vouches for it, so the secret wins. This is the case that
-//     shape alone used to let through: `lowercasesecretid` looks exactly like a code
-//     and is not one.
-//  3. An unrecognised value that is not a declared secret is left alone, so a code
-//     the backend adds tomorrow still reaches the caller instead of being masked for
+//  2. An unrecognised value in the code position from which masking would remove a
+//     declared secret IS masked. Nothing vouches for it, so the secret wins. This is
+//     the case that shape alone used to let through: `lowercasesecretid` looks
+//     exactly like a code and is not one.
+//  3. An unrecognised value that carries no secret is left alone, so a code the
+//     backend adds tomorrow still reaches the caller instead of being masked for
 //     being unfamiliar.
+//
+// Clause 2 asks "would masking take something out of this value", not "is this value
+// the secret". Equality was the wrong bound and had a trivial bypass: code shape is
+// satisfied by wrapping the id in more code shape, so `not_found_<id>`,
+// `<id>_not_found` and `share_<id>_error` all sailed through clause 3 carrying the
+// id whole. It was also inconsistent — the identical string under a key the
+// exemption does not recognise (errors[].code) was masked, so one envelope redacted
+// a value that another printed. Deferring to the masker makes the code position
+// agree with every other position by construction, which is the only version of this
+// that stays true as the masker grows token-boundary rules.
 //
 // Why a real token never reaches clause 1 or 3 by accident: Octo share and invite
 // tokens are base64url, so they carry upper-case characters or "-", and
 // IsErrorCodeShaped admits only lower-case alphanumerics and underscores. A token
-// therefore fails the shape gate before the vocabulary question is asked. Clause 2
-// exists for the residue — a value that passes the shape gate without being a code.
+// therefore fails the shape gate before the vocabulary question is asked.
 func redactErrorEnvelope(v any, secrets []string) any {
 	obj, ok := v.(map[string]any)
 	if !ok {
@@ -309,7 +318,8 @@ func isCodeBearingKey(key string) bool {
 	return key == "code" || key == "error"
 }
 
-// isExemptCode applies the three-clause rule documented on redactErrorEnvelope.
+// isExemptCode applies the shape gate and three-clause rule documented on
+// redactErrorEnvelope.
 func isExemptCode(val any, secrets []string) bool {
 	s, ok := val.(string)
 	if !ok || !output.IsErrorCodeShaped(s) {
@@ -318,10 +328,11 @@ func isExemptCode(val any, secrets []string) bool {
 	if output.IsKnownErrorCode(s) {
 		return true // clause 1
 	}
-	for _, secret := range secrets {
-		if secret != "" && s == secret {
-			return false // clause 2
-		}
+	// Clause 2: defer to the masker rather than compare. If redaction would change
+	// the value, the value carries a secret and is not exempt — whether it *is* the
+	// secret or merely contains it.
+	if redactSecrets(s, secrets) != s {
+		return false
 	}
 	return true // clause 3
 }
