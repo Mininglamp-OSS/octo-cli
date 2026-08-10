@@ -111,6 +111,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **A transfer may no longer connect to the local machine, on the first connection as
+  well as on a redirect hop.** The `https`-or-loopback-`http` rule is now decided on the
+  *resolved* address rather than on how the host is spelled, and the connection then goes
+  to the address that was checked, so a second lookup cannot answer differently in
+  between. Previously only redirect hops were judged and only by spelling, so a hostname
+  with an `A` record on `127.0.0.1` passed. Other internal ranges stay reachable — only
+  this machine does not. **Deployment consequence:** a remote `OCTO_API_BASE_URL` whose
+  object storage resolves to the caller's own machine will no longer transfer; point
+  `OCTO_API_BASE_URL` at loopback to restore the local setup. A configured HTTP(S) proxy
+  is still honoured, and a proxy on the local machine is not refused: it is not the
+  storage host. Where the proxy is also the only resolver, the target cannot be
+  classified locally and the transfer proceeds unclassified, reported under `--verbose`.
 - **An unknown subcommand no longer echoes the word it did not recognise.** Every
   service domain's parent command now reports
   `unknown subcommand for "octo-cli drive share"; available: access, blob-create, create, download, list, revoke`

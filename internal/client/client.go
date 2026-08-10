@@ -287,6 +287,16 @@ func redactResponseBody(b []byte, secrets []string) []byte {
 // agree with every other position by construction, which is the only version of this
 // that stays true as the masker grows token-boundary rules.
 //
+// What clause 2 does and does not reach, so the next reader does not have to derive
+// it: the question is delegated to the masker, so the exemption is exactly as strong
+// as masking is. Whatever the masker recognises — a whole value, an embedded
+// substring, a short secret at a token boundary — is refused the exemption. What the
+// masker cannot see, this cannot either: a secret the caller never declared in
+// SecretValues, and a value that carries the secret in some *transformed* form
+// (re-encoded, hashed, split across two fields) is not recognised by either, here or
+// anywhere else in the redaction path. That bound is a property of the masker, not of
+// this rule, which is the point of delegating rather than re-deciding.
+//
 // Why a real token never reaches clause 1 or 3 by accident: Octo share and invite
 // tokens are base64url, so they carry upper-case characters or "-", and
 // IsErrorCodeShaped admits only lower-case alphanumerics and underscores. A token

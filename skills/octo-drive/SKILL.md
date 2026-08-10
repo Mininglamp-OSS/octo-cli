@@ -203,7 +203,12 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 | `NOT_DOWNLOADABLE` | validation / 2 | a document link; use `share access` or a browser |
 | `INVALID_SHARE_URL` | validation / 2 | pass the `share_url` exactly as produced |
 | `MISSING_DOC_SPACE_ID` | validation / 2 | re-mount the document; never substitute the drive space id |
-| `UNSAFE_PRESIGNED_URL` | api_error / 1 | the backend returned an unusable URL; report it |
+| `UNSAFE_PRESIGNED_URL` | api_error / 1 | the backend returned an unusable URL, or one whose host resolves to this machine; report it |
+| `TRANSFER_REDIRECTED_LOCALLY` | validation / 2 | the transfer was rerouted to this machine but the URL does not name it; check `http_proxy` / `https_proxy` / `all_proxy` / `no_proxy` |
+| `INVALID_PROXY` | validation / 2 | the proxy value in this environment is not a usable URL. The value is never echoed, because a proxy URL often carries credentials |
+| `PARTIAL_FILE_REPLACED` | validation / 2 | something replaced the part file or the destination mid-download; nothing was published, re-run in a directory only you can write |
+| `UPLOAD_FAILED` | api_error / 1 | the presigned PUT was rejected or the confirm failed; the detail carries `file_id` and whether the pending row was cancelled |
+| `INVALID_FLAG` | validation / 2 | a positional id starting with `-` was parsed as a flag; pass it as the named flag or after `--` |
 
 ## 7. Destructive commands
 

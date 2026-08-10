@@ -335,14 +335,34 @@ Notes:
   and refusing to proxy would make the CLI unusable there. The target is classified
   before the request is handed over, in the transport's proxy selector rather than in
   its dialer — the dialer is only ever told the proxy's address on that path, so a
-  dialer-only check would be judging the wrong machine. Under a proxy the address
-  cannot be pinned the way it is on the direct path, since the proxy makes the
-  connection; the proxy is the operator's own component, and a proxy on the local
-  machine is therefore not refused. The two conditions report differently on purpose:
-  a presigned URL pointing at this machine is `UNSAFE_PRESIGNED_URL` and asks for the
-  storage endpoint to be reported, while a connection that arrives here without the
-  URL naming it is `TRANSFER_REDIRECTED_LOCALLY` and points at the local proxy
-  configuration. A **PUT does not
+  dialer-only check would be judging the wrong machine. The proxy is the operator's
+  own component, so a proxy on the local machine is not refused. The two conditions
+  report differently on purpose: a presigned URL pointing at this machine is
+  `UNSAFE_PRESIGNED_URL` and asks for the storage endpoint to be reported, while a
+  connection that arrives here without the URL naming it is
+  `TRANSFER_REDIRECTED_LOCALLY` and points at the local proxy configuration. A
+  malformed proxy value is `INVALID_PROXY`, which names the variables to check but
+  never repeats the value, because a proxy URL commonly carries credentials.
+
+  **Named limitation — the proxy path keeps a rebinding window the direct path
+  closes.** On the direct path the CLI resolves the host, classifies the answers, and
+  dials one of the addresses it checked, so the address judged and the address
+  connected to are the same one. Through a proxy it cannot be: the proxy performs its
+  own resolution and its own connection, so between the CLI's classification and the
+  proxy's lookup the answer may differ, and a name that classified as remote may be
+  connected to somewhere else. Nothing in the CLI can close that — it never sees the
+  address. What stands in for it is that the proxy is operator-chosen, that the string
+  pre-filter rejects every literal local spelling before any of this, and that the
+  connection terminates at the proxy rather than at a service on the caller's machine.
+  A second case falls under the same limitation: where the proxy is the only resolver
+  (tightened egress with no external DNS, or a split-horizon name), the CLI cannot
+  resolve the target at all, so it is not classified. That is reported under
+  `--verbose` rather than passed over, and it does not fail the transfer — insisting on
+  a local lookup there would break a deployment shape the proxy exists to serve.
+
+  `cmd/drive.go`'s `transferGuard` docstring carries the full path table (who resolves,
+  who classifies, what is dialled, and what a resolution failure means, per
+  configuration); it is the reference for changing any of this. A **PUT does not
   follow redirects at all**: Go rewrites a PUT into a bodiless GET on 301/302/303,
   so a storage host answering 2xx after such a hop would report a successful upload
   with nothing written, and the caller would then confirm a drive row pointing at an
