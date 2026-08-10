@@ -54,11 +54,14 @@ func Load() *Config {
 }
 
 // envToken returns the token from the highest-precedence variable that is set.
+// Both variables are trimmed, and symmetrically: an untrimmed OCTO_BOT_TOKEN
+// holding only whitespace would pass Validate here and then resolve to no
+// credential in credential.EnvProvider, which trims both.
 func envToken() string {
 	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
 		return v
 	}
-	return os.Getenv(EnvBotToken)
+	return strings.TrimSpace(os.Getenv(EnvBotToken))
 }
 
 // Validate checks required fields. Only the token is required at load time;

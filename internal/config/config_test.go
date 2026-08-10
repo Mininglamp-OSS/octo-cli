@@ -80,6 +80,14 @@ func TestLoad_TokenPrecedence(t *testing.T) {
 		{"both set: the new one wins", "uk_person", "bf_bot", "uk_person"},
 		{"a blank new variable does not shadow", "   ", "bf_bot", "bf_bot"},
 		{"neither set", "", "", ""},
+		// Both variables are trimmed, symmetrically. An untrimmed OCTO_BOT_TOKEN
+		// holding only whitespace used to pass Validate here and then resolve to no
+		// credential in credential.EnvProvider, which trims both — an auth failure
+		// two layers away from its cause.
+		{"a whitespace-only legacy variable is no credential", "", "   ", ""},
+		{"a whitespace-only legacy variable with a tab", "", "\t\n", ""},
+		{"surrounding whitespace is stripped from the legacy variable", "", "  bf_bot\n", "bf_bot"},
+		{"surrounding whitespace is stripped from the new variable", "  uk_person\n", "", "uk_person"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
