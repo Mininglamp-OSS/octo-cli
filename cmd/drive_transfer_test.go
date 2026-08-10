@@ -221,3 +221,222 @@ func retargetAPIOrigin(t *testing.T, env *driveTestEnv, apiOrigin string) {
 	env.tf = tf
 	env.root = NewRootCmd(tf.Factory)
 }
+
+// TestDriveUpload_MethodChangingRedirectFailsAndCancels is the upload half of
+// redirect handling, and the one that could lose data silently.
+//
+// Go rewrites a PUT into a bodiless GET on 301/302/303. With redirects followed
+// and no method guard, a storage host answering 2xx after such a hop made
+// putObject return nil — so the composite went on to call confirm-upload with the
+// local file size, producing a confirmed drive row pointing at an object that was
+// never written, reported to the caller as ok:true with a byte count. 307/308
+// preserve the method and fail on their own because an *os.File body cannot be
+// replayed, so before the fix the safe status codes errored and the unsafe ones
+// succeeded quietly.
+//
+// The upload must fail, and the pending row must be cancelled.
+func TestDriveUpload_MethodChangingRedirectFailsAndCancels(t *testing.T) {
+	for _, code := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			src := filepath.Join(t.TempDir(), "a.txt")
+			if err := os.WriteFile(src, []byte("payload-bytes"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// The endpoint a redirect would land on. It must never receive the
+			// transfer; if it does, it answers 2xx, which is exactly the silent
+			// success being guarded against.
+			var finalHits int
+			final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				finalHits++
+				w.WriteHeader(http.StatusOK)
+			}))
+			t.Cleanup(final.Close)
+
+			var cancelled, confirmed bool
+			var env *driveTestEnv
+			env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+					_, _ = w.Write([]byte(`{"file_id":7,"upload_url":"` + env.store.URL + `/obj"}`))
+				case strings.HasSuffix(r.URL.Path, "/cancel-upload"):
+					cancelled = true
+					_, _ = w.Write([]byte(`{}`))
+				case strings.HasSuffix(r.URL.Path, "/confirm-upload"):
+					confirmed = true
+					_, _ = w.Write([]byte(`{"id":7,"parent_id":0,"name":"a.txt"}`))
+				default:
+					_, _ = w.Write([]byte(`{}`))
+				}
+			}, func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, final.URL+"/real-obj", code)
+			})
+
+			err := env.run("drive", "upload", "file", src, "--space-id", "s1")
+			if err == nil {
+				t.Fatal("a redirected upload must fail rather than report success")
+			}
+			if confirmed {
+				t.Error("confirm-upload must not run: no bytes reached object storage")
+			}
+			if !cancelled {
+				t.Error("the pending row must be cancelled when the upload fails")
+			}
+			if finalHits != 0 {
+				t.Errorf("the redirect target received %d request(s); the transfer must not follow an upload redirect", finalHits)
+			}
+			if out := env.tf.Out.String(); strings.Contains(out, `"ok":true`) {
+				t.Errorf("a failed upload must not emit a success envelope: %s", out)
+			}
+		})
+	}
+}
+
+// TestDriveTransfer_RedirectToLoopbackRefusedUnderARemoteOrigin covers the
+// https half of the same steering concern. The initial presigned URL comes from
+// the trusted backend and may legitimately name an internal host, but a hop the
+// storage host chooses may not point at the caller's own machine.
+//
+// Deliberately not a private-range block: a self-hosted deployment can reasonably
+// run object storage on an internal https host, and refusing those would break it.
+func TestDriveTransfer_RedirectToLoopbackRefusedUnderARemoteOrigin(t *testing.T) {
+	var finalHits int
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		finalHits++
+		_, _ = w.Write([]byte("should-not-be-read"))
+	}))
+	t.Cleanup(final.Close)
+
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"url":"` + env.store.URL + `/obj"}`))
+	}, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/real-obj", http.StatusFound)
+	})
+	retargetAPIOrigin(t, env, "https://octo.example.invalid")
+
+	dest := filepath.Join(t.TempDir(), "out.bin")
+	err := env.run("drive", "download", "file", "1", "-o", dest)
+	if err == nil {
+		t.Fatal("expected the loopback redirect to be refused under a remote origin")
+	}
+	if ee := output.AsExitError(err); ee == nil || ee.Code != "UNSAFE_PRESIGNED_URL" {
+		t.Errorf("error: got %v, want UNSAFE_PRESIGNED_URL", err)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Error("nothing may be written when a redirect hop is refused")
+	}
+}
+
+// TestTransferClient_CheckRedirectPolicy exercises the redirect policy directly.
+//
+// Two of its rules cannot be reached through a live httptest server: refusing a
+// same-method redirect on a body-carrying request is shadowed by Go's own
+// inability to replay an *os.File (which fails first, with a less useful error),
+// and refusing an https hop onto a loopback host would need a TLS test server
+// whose self-signed certificate the transfer client rejects earlier. Driving the
+// closure is what gives those two rules a failing test rather than a comment.
+func TestTransferClient_CheckRedirectPolicy(t *testing.T) {
+	hop := func(method, rawURL string) *http.Request {
+		req, err := http.NewRequest(method, rawURL, http.NoBody)
+		if err != nil {
+			t.Fatalf("build %s %s: %v", method, rawURL, err)
+		}
+		return req
+	}
+
+	cases := []struct {
+		name        string
+		loopbackAPI bool
+		next        *http.Request
+		via         []*http.Request
+		wantErr     bool
+		wantCode    string
+	}{
+		{
+			name:    "a GET redirected to a GET on a safe host is followed",
+			next:    hop(http.MethodGet, "https://storage.example.com/real-obj"),
+			via:     []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")},
+			wantErr: false,
+		},
+		{
+			name:     "a PUT rewritten into a GET is refused",
+			next:     hop(http.MethodGet, "https://storage.example.com/real-obj"),
+			via:      []*http.Request{hop(http.MethodPut, "https://storage.example.com/obj")},
+			wantErr:  true,
+			wantCode: "UNSAFE_PRESIGNED_URL",
+		},
+		{
+			// 307/308 preserve the method, so the method-equality rule alone would
+			// let this through and leave the failure to Go's rewind error.
+			name:     "a PUT redirected as a PUT is refused",
+			next:     hop(http.MethodPut, "https://storage.example.com/real-obj"),
+			via:      []*http.Request{hop(http.MethodPut, "https://storage.example.com/obj")},
+			wantErr:  true,
+			wantCode: "UNSAFE_PRESIGNED_URL",
+		},
+		{
+			name:     "an https hop onto loopback is refused under a remote origin",
+			next:     hop(http.MethodGet, "https://127.0.0.1:9443/real-obj"),
+			via:      []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")},
+			wantErr:  true,
+			wantCode: "UNSAFE_PRESIGNED_URL",
+		},
+		{
+			name:        "an https hop onto loopback is allowed under a local origin",
+			loopbackAPI: true,
+			next:        hop(http.MethodGet, "https://127.0.0.1:9443/real-obj"),
+			via:         []*http.Request{hop(http.MethodGet, "https://127.0.0.1:9443/obj")},
+			wantErr:     false,
+		},
+		{
+			name:     "a hop onto a non-loopback plain-http host is refused",
+			next:     hop(http.MethodGet, "http://storage.example.com/real-obj"),
+			via:      []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")},
+			wantErr:  true,
+			wantCode: "UNSAFE_PRESIGNED_URL",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			policy := transferClient("url", tc.loopbackAPI).CheckRedirect
+			if policy == nil {
+				t.Fatal("the transfer client must set a redirect policy")
+			}
+			err := policy(tc.next, tc.via)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("hop should be followed, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("hop should be refused")
+			}
+			if ee := output.AsExitError(err); ee == nil || ee.Code != tc.wantCode {
+				t.Errorf("error: got %v, want code %s", err, tc.wantCode)
+			}
+		})
+	}
+
+	t.Run("the hop cap is restated", func(t *testing.T) {
+		policy := transferClient("url", false).CheckRedirect
+		via := make([]*http.Request, maxTransferRedirects)
+		for i := range via {
+			via[i] = hop(http.MethodGet, "https://storage.example.com/obj")
+		}
+		if err := policy(hop(http.MethodGet, "https://storage.example.com/next"), via); err == nil {
+			t.Errorf("a chain of %d hops must be stopped", maxTransferRedirects)
+		}
+	})
+
+	t.Run("Referer is dropped before the hop is judged", func(t *testing.T) {
+		policy := transferClient("url", false).CheckRedirect
+		next := hop(http.MethodGet, "https://storage.example.com/real-obj")
+		next.Header.Set("Referer", "https://storage.example.com/obj?X-Amz-Signature=SUPERSECRET")
+		_ = policy(next, []*http.Request{hop(http.MethodGet, "https://storage.example.com/obj")})
+		if got := next.Header.Get("Referer"); got != "" {
+			t.Errorf("Referer survived the policy: %q", got)
+		}
+	})
+}

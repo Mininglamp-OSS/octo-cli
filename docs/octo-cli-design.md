@@ -318,19 +318,23 @@ Notes:
   are different scopes. When a mount predates drive capturing `doc_space_id`,
   `share create` fails with `MISSING_DOC_SPACE_ID` rather than substituting.
 - The presigned PUT/GET runs on a separate HTTP client with **no** Octo
-  credential and no space header. Redirects are followed (storage gateways use
+  credential and no space header. A GET follows redirects (storage gateways use
   them) but every hop is re-validated against the same https-or-loopback-http
-  rule as the first, so an accepted presigned URL cannot redirect the transfer to
-  an unsafe destination, and the `Referer` header Go would fill in from the
-  previous hop's full URL is dropped — a presigned URL carries its signature in
-  the query string, so forwarding it would hand object read (GET) or write (PUT)
-  access to a host that has no use for it. The plain-http exception is additionally
-  gated on the configured Octo origin being loopback: it exists for local
-  development, and against a remote origin it would otherwise let a storage host
-  redirect the transfer at a service on the caller's own machine. A failed
-  `upload file` cancels the pending row and reports `file_id` + the cancel outcome
-  in the error detail. A transport failure names the storage host and the cause but
-  never the URL, and neither does a URL-parse failure.
+  rule as the first, and a hop may not land on a loopback host unless the
+  configured Octo origin is itself loopback — the initial URL comes from the
+  trusted backend and may legitimately name an internal host, but a hop the
+  storage host chooses may not point at the caller's own machine. A **PUT does not
+  follow redirects at all**: Go rewrites a PUT into a bodiless GET on 301/302/303,
+  so a storage host answering 2xx after such a hop would report a successful upload
+  with nothing written, and the caller would then confirm a drive row pointing at an
+  object that does not exist. Refusing is also simply correct — a presigned
+  signature is bound to its own URL and cannot be honoured at a different one. The
+  `Referer` header Go would fill in from the previous hop's full URL is dropped, since
+  a presigned URL carries its signature in the query string and forwarding it would
+  hand object read (GET) or write (PUT) access to a host that has no use for it. A
+  failed `upload file` cancels the pending row and reports `file_id` + the cancel
+  outcome in the error detail. A transport failure names the storage host and the
+  cause but never the URL, and neither does a URL-parse failure.
 - `upload file` opens the local file once and keeps the descriptor: the size it
   stats is what the backend signs, so re-opening by path after the prepare
   round-trip would let a replacement at that path be uploaded under the previous

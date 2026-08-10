@@ -77,11 +77,20 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // carries its own authorisation, and forwarding an Octo token to a third-party
 // host would leak it. Nothing else is inherited either.
 //
-// Redirects are followed (storage gateways use them) but every hop is
+// Redirects are followed for a GET (storage gateways use them) but every hop is
 // re-validated by assertSafeTransferTarget, so the https-or-loopback-http rule
 // holds for the destination that actually serves the bytes and not merely for
 // the first URL the backend handed over. An unsafe hop fails the transfer rather
 // than downgrading it, and the 10-hop cap Go's default policy applies is kept.
+//
+// A redirect that would change the method, or any redirect on a body-carrying
+// request, is refused. For 301/302/303 Go rewrites a PUT into a bodiless GET, so
+// a storage host answering 2xx after such a hop would report a successful upload
+// with nothing written — and the caller would then confirm a drive row pointing
+// at an object that does not exist. (307/308 preserve the method and fail on their
+// own, because an *os.File body cannot be replayed.) Refusing is not merely safe
+// but correct: a presigned signature is bound to the original URL and can never be
+// honoured at a different one, so there is no legitimate upload redirect to lose.
 //
 // The Referer header is dropped on every hop. Go fills it in from the previous
 // request's full URL, and for a presigned URL that includes the signature in the
@@ -94,7 +103,10 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 // gates the plain-http exception: that exception exists so local development
 // works, and against a remote origin a cooperating storage host could otherwise
 // answer 302 http://127.0.0.1:<port>/… and steer the transfer at a service on
-// the caller's own machine.
+// the caller's own machine. A redirect may not land on a loopback host at all
+// under a remote origin, whatever its scheme — the initial URL comes from the
+// trusted backend and may legitimately name an internal host, but a hop chosen by
+// the storage host may not.
 func transferClient(field string, loopbackAPI bool) *http.Client {
 	return &http.Client{
 		Timeout: transferTimeout,
@@ -103,12 +115,44 @@ func transferClient(field string, loopbackAPI bool) *http.Client {
 			if len(via) >= maxTransferRedirects {
 				return fmt.Errorf("stopped after %d redirects", maxTransferRedirects)
 			}
+			if err := assertRedirectKeepsTheRequest(field, req, via); err != nil {
+				return err
+			}
 			if err := assertSafeTransferTarget(field, req.URL, loopbackAPI); err != nil {
 				return err
+			}
+			if !loopbackAPI && isLoopbackHost(req.URL.Hostname()) {
+				return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+					fmt.Sprintf("%s redirected to a loopback host, which is not reachable object storage", field),
+					"the storage endpoint redirected the transfer at the local machine; report it")
 			}
 			return nil
 		},
 	}
+}
+
+// assertRedirectKeepsTheRequest refuses a redirect that would not carry the
+// original request. Go silently rewrites a PUT into a bodiless GET on 301/302/303,
+// which for an upload turns "the object was never written" into a 2xx the caller
+// reports as success.
+func assertRedirectKeepsTheRequest(field string, req *http.Request, via []*http.Request) *output.ExitError {
+	if len(via) == 0 {
+		return nil
+	}
+	previous := via[len(via)-1]
+	if req.Method != previous.Method {
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+			fmt.Sprintf("%s redirected a %s into a %s, which would not carry the request body",
+				field, previous.Method, req.Method),
+			"the storage endpoint answered with a method-changing redirect; report it")
+	}
+	if previous.Method != http.MethodGet && previous.Method != http.MethodHead {
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+			fmt.Sprintf("%s redirected a %s request; a presigned signature is bound to its own URL and cannot be honoured elsewhere",
+				field, previous.Method),
+			"the storage endpoint redirected an upload; report it")
+	}
+	return nil
 }
 
 // maxTransferRedirects mirrors the cap Go's default redirect policy applies.
