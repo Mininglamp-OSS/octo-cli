@@ -342,9 +342,14 @@ func TestDo_RedactsWriteOnlyJSONFields(t *testing.T) {
 	c.options.Verbose = true
 	c.options.ErrOut = &errBuf
 	body, err := c.Do(context.Background(), &Request{
-		Method:              http.MethodPut,
-		Path:                "/secret",
-		Body:                map[string]string{"signing_secret": "SUPERSECRET123456", "label": "safe"},
+		Method: http.MethodPut,
+		Path:   "/secret",
+		Body: map[string]any{
+			"signing_secret": "SUPERSECRET123456",
+			"label":          "safe",
+			"big":            json.Number("12345678901234567890"),
+			"nested":         map[string]any{"id": json.Number("9007199254740993")},
+		},
 		SensitiveJSONFields: []string{"signing_secret"},
 		Headers:             map[string]string{"authorization": "raw-secret"},
 	})
@@ -356,6 +361,23 @@ func TestDo_RedactsWriteOnlyJSONFields(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "[REDACTED]") || !strings.Contains(string(body), "***") {
 		t.Fatalf("dry-run did not redact fields and credential: %s", body)
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var dryRun map[string]any
+	if err := dec.Decode(&dryRun); err != nil {
+		t.Fatalf("decode dry-run body: %v", err)
+	}
+	dryRunBody, ok := dryRun["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("dry-run body = %#v, want object", dryRun["body"])
+	}
+	if got := dryRunBody["big"]; got != json.Number("12345678901234567890") {
+		t.Fatalf("dry-run big number = %v, want lossless value", got)
+	}
+	nested, ok := dryRunBody["nested"].(map[string]any)
+	if !ok || nested["id"] != json.Number("9007199254740993") {
+		t.Fatalf("dry-run nested number = %#v, want lossless value", dryRunBody["nested"])
 	}
 
 	c.options.DryRun = false

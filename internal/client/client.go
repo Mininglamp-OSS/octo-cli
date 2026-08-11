@@ -1139,7 +1139,9 @@ func redactJSONBody(body []byte, sensitiveFields []string) []byte {
 		return body
 	}
 	var value map[string]any
-	if err := json.Unmarshal(body, &value); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err != nil {
 		return body
 	}
 	for _, field := range sensitiveFields {

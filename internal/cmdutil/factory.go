@@ -213,13 +213,21 @@ func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
 	}
+	if strings.TrimSpace(os.Getenv(config.EnvToken)) != "" {
+		return nil, fmt.Errorf("%s=task does not allow %s; use the daemon-injected %s", config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
+	}
 
-	cred, err := credential.NewEnvProvider().Resolve()
+	provider := credential.NewEnvProvider()
+	provider.TokenVar = config.EnvBotToken
+	cred, err := provider.Resolve()
 	if err != nil {
 		return nil, err
 	}
 	if cred == nil {
 		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvBotToken)
+	}
+	if credential.TokenKind(cred.Token) != "loop_credential" {
+		return nil, fmt.Errorf("%s=task requires a Loop task credential in %s", config.EnvCredentialMode, config.EnvBotToken)
 	}
 	// Task credentials are server-bound; never forward a caller-selected Space
 	// context alongside them.

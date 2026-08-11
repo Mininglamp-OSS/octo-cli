@@ -158,12 +158,32 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Credential: %v", err)
 		}
-		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" {
+		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" ||
+			cred.Source != "env:"+config.EnvBotToken {
 			t.Fatalf("credential = %+v", cred)
 		}
 		identity, ok := f.identityValue().(map[string]any)
 		if !ok || identity["type"] != "agent_task" || identity["credential_kind"] != "agent_task" {
 			t.Fatalf("identity = %#v", identity)
+		}
+	})
+
+	t.Run("rejects generic token override", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvToken, "bf_human")
+		t.Setenv(config.EnvBotToken, "octo_loop_task")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), config.EnvToken) {
+			t.Fatalf("Credential error = %v, want %s rejection", err, config.EnvToken)
+		}
+	})
+
+	t.Run("rejects non-loop bot token", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "bf_human")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), "Loop task credential") {
+			t.Fatalf("Credential error = %v, want Loop credential rejection", err)
 		}
 	})
 
