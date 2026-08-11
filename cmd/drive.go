@@ -329,9 +329,14 @@ func invalidProxyError(cause error) *output.ExitError {
 	// a URL that would not parse versus net/http refusing to honour HTTP_PROXY in a CGI
 	// environment, which is a real and otherwise baffling case — and a type name cannot
 	// carry a password.
+	// The CGI case is detected from the condition rather than by matching the message
+	// text: net/http exports no sentinel for it, and its wording is not part of any
+	// contract, so a free-text match would silently stop distinguishing the two the
+	// first time that string is reworded. REQUEST_METHOD being set is exactly what puts
+	// net/http into CGI mode, so asking that is asking the real question.
 	detail := "the value could not be parsed as a proxy URL"
-	if cause != nil && strings.Contains(cause.Error(), "CGI environment") {
-		detail = "net/http refuses to use HTTP_PROXY when CGI environment variables are present"
+	if cause != nil && os.Getenv("REQUEST_METHOD") != "" {
+		detail = "HTTP_PROXY is ignored when REQUEST_METHOD is set, because that indicates a CGI environment"
 	}
 	return output.ErrWithHint("validation", "INVALID_PROXY",
 		"the proxy configuration in this environment could not be used: "+detail,
@@ -860,23 +865,78 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
-// assertNumericHostIsAnIP refuses a host made only of digits and dots that is
-// not a valid IP address. A zero-padded dotted quad such as 127.000.000.001 is
-// rejected by net.ParseIP but accepted by the resolver, so treating it as a name
-// would let it slip past the loopback rules above in whichever direction those
-// are being applied. No legitimate storage host is spelled that way, and
-// resolving it here would put a DNS lookup on a validation path.
+// assertNumericHostIsAnIP refuses a host that net.ParseIP rejects but a resolver would
+// still read as an address.
+//
+// The gap is inet_aton-style parsing, which every platform resolver still implements for
+// compatibility: each dot-separated label is read with strtoul semantics — decimal, a
+// leading 0 for octal, a leading 0x for hex — and fewer than four labels are accepted by
+// packing the last one into the remaining bytes. net.ParseIP implements none of that, so
+// 0177.0.0.1, 0x7f.0.0.1, 0x7f000001, 2130706433 and 127.1 all fail ParseIP while
+// resolving to 127.0.0.1.
+//
+// The previous rule asked whether the host was made of "digits and dots", which closed
+// the zero-padded notation and left every other base open: 0x7f.0.0.1 contains an "x", so
+// it was classified as an ordinary name. Rather than add the hex spelling — the next base
+// would then be the next round — the question is inverted to mirror what the resolver
+// itself does: **if ParseIP will not accept it, it must not be interpretable as a number
+// in any of strtoul's bases.**
+//
+// This is the same move as requiring a canonical ASCII host one dimension over: make the
+// set of accepted representations small enough that the guard and the resolver cannot
+// disagree, instead of teaching the guard one more representation.
+//
+// A label of hex *letters* is not a number — a number needs a 0x prefix or a leading
+// digit — so ordinary names keep working, including all-hex-letter labels like the .de
+// TLD, which a rule keyed on "contains hex characters" would have broken. A host whose
+// every label is numeric and which is not a valid IP is refused rather than resolved,
+// which also keeps DNS off the validation path.
 func assertNumericHostIsAnIP(field string, u *url.URL) *output.ExitError {
 	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if host == "" || net.ParseIP(host) != nil {
 		return nil
 	}
-	if strings.TrimFunc(host, func(r rune) bool { return r == '.' || (r >= '0' && r <= '9') }) != "" {
-		return nil // contains something other than digits and dots: a real name
+	for _, label := range strings.Split(host, ".") {
+		if !isNumericLabel(label) {
+			return nil // at least one label is not a number: a real name
+		}
 	}
 	return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 		fmt.Sprintf("%s has a numeric host %q that is not a valid IP address", field, u.Hostname()),
-		"a zero-padded or malformed numeric host is refused rather than resolved; report it")
+		"a host a resolver would read as a packed, octal, or hexadecimal address is refused "+
+			"rather than resolved; report it")
+}
+
+// isNumericLabel reports whether strtoul would read label as a number, which is what
+// decides whether a resolver may treat the host as an address rather than a name.
+//
+// Mirrors strtoul's base detection: "0x" prefix means hexadecimal, a leading "0" means
+// octal, anything else decimal. Octal digits are a subset of decimal ones, so a single
+// all-decimal-digits test covers both of the latter — and treating "09" as numeric even
+// though strtoul would reject it as octal is deliberate: refusing is the fail-closed
+// direction, and no storage host is spelled that way.
+func isNumericLabel(label string) bool {
+	if label == "" {
+		return false
+	}
+	if rest, ok := strings.CutPrefix(label, "0x"); ok {
+		if rest == "" {
+			return false
+		}
+		for i := 0; i < len(rest); i++ {
+			c := rest[i]
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+		return true
+	}
+	for i := 0; i < len(label); i++ {
+		if label[i] < '0' || label[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // --- local file writing ---
@@ -1024,6 +1084,14 @@ func sealPartFile(part *os.File, target string) (os.FileInfo, *output.ExitError)
 // test proves what the function does, and this parameter is what proves the function
 // is still called.
 func publishDownload(partPath, target string, overwrite bool, created os.FileInfo, beforePublish func()) *output.ExitError {
+	return publishDownloadWithLinker(partPath, target, overwrite, created, beforePublish, os.Link)
+}
+
+// publishDownloadWithLinker is publishDownload with the link step injectable, so a test
+// can exercise the no-hard-links fallback without needing a filesystem that lacks them.
+func publishDownloadWithLinker(partPath, target string, overwrite bool, created os.FileInfo,
+	beforePublish func(), link func(oldname, newname string) error,
+) *output.ExitError {
 	if err := assertPartFileUnchanged(partPath, created); err != nil {
 		return err
 	}
@@ -1031,7 +1099,7 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 		beforePublish()
 	}
 	if !overwrite {
-		switch err := os.Link(partPath, target); {
+		switch err := link(partPath, target); {
 		case err == nil:
 			_ = os.Remove(partPath) //nolint:errcheck // best-effort cleanup of the link source
 			return assertPublishedFileMatches(target, created)
@@ -1040,8 +1108,25 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 				fmt.Sprintf("%q already exists", target),
 				"pass --overwrite to replace it, or choose another path")
 		}
-		// Hard links unsupported (or cross-device): fall through to rename, which
-		// is what this did before and is still guarded by the re-check above.
+		// Hard links unavailable (no link support, or cross-device). Falling straight
+		// through to os.Rename used to silently turn --overwrite=false into overwrite,
+		// because rename replaces its destination unconditionally — so the refusal
+		// guarantee depended on which filesystem the download happened to land on.
+		//
+		// O_CREATE|O_EXCL restores it: the same atomic "already exists" refusal os.Link
+		// was providing, from a syscall every filesystem supports. The rename below then
+		// replaces this CLI's own placeholder rather than someone else's file, so the
+		// name is reserved for the whole window instead of being re-checked and hoped for.
+		placeholder, perr := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if perr != nil {
+			if errors.Is(perr, os.ErrExist) {
+				return output.ErrWithHint("validation", "FILE_EXISTS",
+					fmt.Sprintf("%q already exists", target),
+					"pass --overwrite to replace it, or choose another path")
+			}
+			return output.ErrValidation(fmt.Sprintf("reserve %q: %v", target, perr), "")
+		}
+		_ = placeholder.Close() //nolint:errcheck // nothing was written to it
 	}
 	if err := os.Rename(partPath, target); err != nil {
 		return output.ErrValidation(fmt.Sprintf("finalise %q: %v", target, err), "")

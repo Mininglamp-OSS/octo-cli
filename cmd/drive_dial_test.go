@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -544,5 +545,66 @@ func TestTransferDial_TheLastAttemptKeepsTheFullBudget(t *testing.T) {
 	if deadlines[2] {
 		t.Error("the last attempt has nothing to fall back to, so capping it can only turn a slow " +
 			"but working connection into a failure")
+	}
+}
+
+// TestPublishDownload_FallbackStillRefusesAnExistingTarget is round-13 P2-3.
+//
+// Without --overwrite the publication is a hard link, because os.Link fails with EEXIST
+// atomically and that is what makes "refuse an existing destination" a guarantee rather
+// than a check-then-act. But when os.Link fails for any *other* reason — a filesystem
+// without hard links, or a cross-device target — the code fell through to os.Rename, and
+// rename replaces the destination unconditionally. So on those filesystems
+// --overwrite=false silently became overwrite.
+//
+// The fallback now reserves the name with O_CREATE|O_EXCL first, which is the same atomic
+// refusal os.Link was providing, so the guarantee no longer depends on which filesystem
+// the download lands on. beforePublish is used to simulate the link failing, since a test
+// cannot portably mount a filesystem without hard links.
+func TestPublishDownload_FallbackStillRefusesAnExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+	if err := os.WriteFile(target, []byte("PRECIOUS EXISTING CONTENT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	partPath, created := mustCreatePartFor(t, dir, "downloaded bytes", "")
+
+	// linkUnavailable makes os.Link fail with something other than EEXIST, the way a
+	// filesystem without link support does.
+	err := publishDownloadWithLinker(partPath, target, false, created, nil,
+		func(string, string) error { return syscall.EPERM })
+
+	if err == nil {
+		t.Fatal("--overwrite=false must refuse an existing target even when hard links are unavailable")
+	}
+	if err.Code != "FILE_EXISTS" {
+		t.Errorf("code = %q, want FILE_EXISTS", err.Code)
+	}
+	got, rerr := os.ReadFile(target)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "PRECIOUS EXISTING CONTENT" {
+		t.Errorf("the existing file was replaced: %q", got)
+	}
+}
+
+// TestPublishDownload_FallbackPublishesToAFreeName is the allow direction: the reservation
+// must not block the ordinary case.
+func TestPublishDownload_FallbackPublishesToAFreeName(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+	partPath, created := mustCreatePartFor(t, dir, "downloaded bytes", "")
+
+	if err := publishDownloadWithLinker(partPath, target, false, created, nil,
+		func(string, string) error { return syscall.EPERM }); err != nil {
+		t.Fatalf("a free target must still be published on the fallback path: %v", err)
+	}
+	got, rerr := os.ReadFile(target)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(got) != "downloaded bytes" {
+		t.Errorf("target contents = %q", got)
 	}
 }

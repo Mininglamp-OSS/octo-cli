@@ -493,7 +493,7 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 				"dry_run":      true,
 				"operation":    "drive.share.access",
 				"kind":         shareKindDoc,
-				"share_url":    parsed.canonical,
+				"share_url":    redactedShareURL(parsed),
 				"doc_id":       parsed.docID,
 				"doc_space_id": parsed.docSpaceID,
 				"downloadable": false,
@@ -516,11 +516,11 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 			"dry_run":   true,
 			"method":    http.MethodPost,
 			"operation": "drive.share.access",
-			// share_url is the argument the caller passed in, so echoing it
-			// discloses nothing new; the path is masked because the token inside it
-			// is what a leaked dry-run description would hand over.
-			"path":         mount + "/shares/***REDACTED***/access",
-			"share_url":    parsed.canonical,
+			// Both the path and the link are masked. Masking one and printing the
+			// other made the envelope contradict itself, and this output is meant to
+			// be safe to paste into a ticket.
+			"path":         mount + "/shares/" + shareURLMask + "/access",
+			"share_url":    redactedShareURL(parsed),
 			"password_set": password != "",
 		})
 	}
@@ -610,8 +610,8 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 			"dry_run":      true,
 			"method":       http.MethodPost,
 			"operation":    "drive.share.download",
-			"path":         mount + "/shares/***REDACTED***/download",
-			"share_url":    parsed.canonical,
+			"path":         mount + "/shares/" + shareURLMask + "/download",
+			"share_url":    redactedShareURL(parsed),
 			"output":       outputPath,
 			"overwrite":    overwrite,
 			"password_set": password != "",

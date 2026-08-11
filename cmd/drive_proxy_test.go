@@ -662,3 +662,71 @@ func TestTransferTarget_RejectsANonCanonicalHost(t *testing.T) {
 		})
 	}
 }
+
+// --- Round-13 P2-4: the numeric-representation dimension ---
+//
+// assertNumericHostIsAnIP refused a host made of "digits and dots" that net.ParseIP
+// rejects. That closed the zero-padded notation and nothing else, because it decided
+// "is this numeric" by looking for decimal digits — so 0x7f.0.0.1 contains an "x", was
+// classified as an ordinary name, and passed. The resolver disagrees: inet_aton-style
+// parsing reads each label with strtoul, which accepts decimal, 0-prefixed octal and
+// 0x-prefixed hex, and accepts fewer than four labels by packing the last one.
+//
+// Round 12 closed the *spelling* dimension (IDNA) by making one representation the only
+// one accepted. This is the same shape one dimension over, so it is closed the same way:
+// a host that net.ParseIP does not accept must not be interpretable as a number at all.
+// The rule mirrors strtoul's bases rather than enumerating notations, which is what stops
+// the next base from being a fourteenth round.
+func TestTransferTarget_RefusesEveryNumericSpellingParseIPRejects(t *testing.T) {
+	refused := []string{
+		"127.000.000.001", // zero-padded — the only one the old rule caught
+		"0177.0.0.1",      // octal
+		"0x7f.0.0.1",      // hex label
+		"0x7f000001",      // single hex word
+		"2130706433",      // single decimal word
+		"127.1",           // two labels, packed
+		"0x7f.1",          // mixed hex and decimal
+		"017700000001",    // single octal word
+		"127.0.0.01",      // one padded label
+	}
+	for _, host := range refused {
+		t.Run("refused/"+host, func(t *testing.T) {
+			_, err := assertSafeTransferURL("download_url", "https://"+host+"/obj", false)
+			if err == nil {
+				t.Fatalf("%q is a numeric spelling net.ParseIP rejects, so the guard cannot classify it "+
+					"while the resolver still reads it as an address", host)
+			}
+			if err.Code != "UNSAFE_PRESIGNED_URL" {
+				t.Errorf("code = %q, want UNSAFE_PRESIGNED_URL", err.Code)
+			}
+		})
+	}
+
+	// The allow direction, which is what keeps this from being "refuse everything".
+	// Note storage.de and cafe.f: labels made only of hex *letters* are ordinary names,
+	// because a number needs a 0x prefix or a leading digit — a rule keyed on "contains
+	// hex characters" would have broken these.
+	allowed := []string{
+		"127.0.0.1",               // a valid IP is still a valid IP
+		"203.0.113.9",             //
+		"::1",                     // IPv6 literal
+		"storage.example.invalid", //
+		"storage.de",              // all-hex-letter TLD
+		"cafe.f",                  // all-hex-letter labels
+		"1storage.example",        // starts with a digit, not a number
+		"123.example",             // a numeric label next to a name
+	}
+	for _, host := range allowed {
+		t.Run("allowed/"+host, func(t *testing.T) {
+			bracketed := host
+			if strings.Contains(host, ":") {
+				bracketed = "[" + host + "]"
+			}
+			_, err := assertSafeTransferURL("download_url", "https://"+bracketed+"/obj", true)
+			if err != nil && err.Code == "UNSAFE_PRESIGNED_URL" &&
+				strings.Contains(err.Message, "numeric host") {
+				t.Errorf("%q is not a number and must be treated as a name: %v", host, err)
+			}
+		})
+	}
+}
