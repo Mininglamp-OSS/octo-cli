@@ -221,6 +221,12 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	if !reflect.DeepEqual(dispatch.Enum, []any{"create_task", "direct_execution"}) {
 		t.Fatalf("dispatch_mode enum = %#v", dispatch.Enum)
 	}
+	if create.RequestBody.AdditionalProperties == nil || *create.RequestBody.AdditionalProperties {
+		t.Fatalf("autopilot.create additionalProperties = %v, want false", create.RequestBody.AdditionalProperties)
+	}
+	if create.RequestBody.Properties["title"].Nullable || !create.RequestBody.Properties["description"].Nullable {
+		t.Fatalf("autopilot.create nullability was not preserved: %+v", create.RequestBody.Properties)
+	}
 	for _, legacy := range []string{"execution_mode", "issue_title_template"} {
 		if _, ok := create.RequestBody.Properties[legacy]; ok {
 			t.Errorf("autopilot.create exposes legacy field %q", legacy)
@@ -233,6 +239,9 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	}
 	if _, ok := update.RequestBody.Properties["dispatch_mode"]; !ok {
 		t.Fatalf("autopilot.update request = %+v", update.RequestBody.Properties)
+	}
+	if update.RequestBody.MinProperties != 1 {
+		t.Fatalf("autopilot.update minProperties = %d, want 1", update.RequestBody.MinProperties)
 	}
 
 	trigger, ok := r.GetOperation("autopilot.trigger")

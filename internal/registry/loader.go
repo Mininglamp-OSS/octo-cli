@@ -179,27 +179,31 @@ type ParamInfo struct {
 // references, nullable type unions, and composition constraints while leaving
 // an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
-	Type        string                `json:"type,omitempty"`
-	Required    []string              `json:"required,omitempty"`
-	Properties  map[string]SchemaInfo `json:"properties,omitempty"`
-	Items       *SchemaInfo           `json:"items,omitempty"`
-	OneOf       []SchemaInfo          `json:"one_of,omitempty"`
-	AnyOf       []SchemaInfo          `json:"any_of,omitempty"`
-	Enum        []any                 `json:"enum,omitempty"`
-	Const       any                   `json:"const,omitempty"`
-	Format      string                `json:"format,omitempty"`
-	Description string                `json:"description,omitempty"`
-	WriteOnly   bool                  `json:"write_only,omitempty"`
+	Type                 string                `json:"type,omitempty"`
+	Nullable             bool                  `json:"nullable,omitempty"`
+	Required             []string              `json:"required,omitempty"`
+	Properties           map[string]SchemaInfo `json:"properties,omitempty"`
+	AdditionalProperties *bool                 `json:"additional_properties,omitempty"`
+	Items                *SchemaInfo           `json:"items,omitempty"`
+	OneOf                []SchemaInfo          `json:"one_of,omitempty"`
+	AnyOf                []SchemaInfo          `json:"any_of,omitempty"`
+	Enum                 []any                 `json:"enum,omitempty"`
+	Const                any                   `json:"const,omitempty"`
+	Format               string                `json:"format,omitempty"`
+	Description          string                `json:"description,omitempty"`
+	WriteOnly            bool                  `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
 	// validator enforces Required, MinItems and Enum for every service. Loop
-	// Public API operations additionally enforce MinLength, MaxLength and
-	// MaxItems; Pattern remains descriptive and is left to the backend.
-	MinLength int    `json:"min_length,omitempty"`
-	MaxLength int    `json:"max_length,omitempty"`
-	MinItems  int    `json:"min_items,omitempty"`
-	MaxItems  int    `json:"max_items,omitempty"`
-	Pattern   string `json:"pattern,omitempty"`
-	Ref       string `json:"$ref,omitempty"`
+	// Public API operations additionally enforce nullability, closed-object and
+	// minimum-property constraints, MinLength, MaxLength and MaxItems. Pattern
+	// remains descriptive and is left to the backend.
+	MinLength     int    `json:"min_length,omitempty"`
+	MaxLength     int    `json:"max_length,omitempty"`
+	MinItems      int    `json:"min_items,omitempty"`
+	MaxItems      int    `json:"max_items,omitempty"`
+	MinProperties int    `json:"min_properties,omitempty"`
+	Pattern       string `json:"pattern,omitempty"`
+	Ref           string `json:"$ref,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag extension
 	// on a request-body property, mirroring ParamInfo.FlagName for query/header
 	// params. It lets a promoted body field expose a clean flag name (e.g.
@@ -682,18 +686,24 @@ func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, 
 }
 
 func schemaInfoFromNode(schema map[string]any) SchemaInfo {
+	typeName, nullable := schemaType(schema["type"])
 	info := SchemaInfo{
-		Type:        schemaType(schema["type"]),
-		Format:      stringOf(schema["format"]),
-		Description: stringOf(schema["description"]),
-		FlagName:    stringOf(schema["x-octo-flag"]),
-		Secret:      truthy(schema["x-octo-secret"]),
-		WriteOnly:   boolOf(schema["writeOnly"]),
-		MinLength:   intOf(schema["minLength"]),
-		MaxLength:   intOf(schema["maxLength"]),
-		MinItems:    intOf(schema["minItems"]),
-		MaxItems:    intOf(schema["maxItems"]),
-		Pattern:     stringOf(schema["pattern"]),
+		Type:          typeName,
+		Nullable:      nullable,
+		Format:        stringOf(schema["format"]),
+		Description:   stringOf(schema["description"]),
+		FlagName:      stringOf(schema["x-octo-flag"]),
+		Secret:        truthy(schema["x-octo-secret"]),
+		WriteOnly:     boolOf(schema["writeOnly"]),
+		MinLength:     intOf(schema["minLength"]),
+		MaxLength:     intOf(schema["maxLength"]),
+		MinItems:      intOf(schema["minItems"]),
+		MaxItems:      intOf(schema["maxItems"]),
+		MinProperties: intOf(schema["minProperties"]),
+		Pattern:       stringOf(schema["pattern"]),
+	}
+	if allowed, ok := schema["additionalProperties"].(bool); ok {
+		info.AdditionalProperties = &allowed
 	}
 	if value, ok := schema["const"]; ok {
 		info.Const = value
@@ -753,18 +763,24 @@ func appendSchemaItems(dst *SchemaInfo, doc map[string]any, value any, depth int
 	dst.Items = &resolved
 }
 
-func schemaType(value any) string {
+func schemaType(value any) (typeName string, nullable bool) {
 	if single, ok := value.(string); ok {
-		return single
+		return single, single == "null"
 	}
-	if union, ok := value.([]any); ok {
-		for _, candidate := range union {
-			if typ, ok := candidate.(string); ok && typ != "null" {
-				return typ
+	union, ok := value.([]any)
+	if !ok {
+		return "", false
+	}
+	for _, candidate := range union {
+		if typ, ok := candidate.(string); ok {
+			if typ == "null" {
+				nullable = true
+			} else if typeName == "" {
+				typeName = typ
 			}
 		}
 	}
-	return ""
+	return typeName, nullable
 }
 
 func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []SchemaInfo {
@@ -790,6 +806,7 @@ func mergeSchemaInfo(dst, src *SchemaInfo) {
 func mergeSchemaIdentity(dst, src *SchemaInfo) {
 	if dst.Type == "" {
 		dst.Type = src.Type
+		dst.Nullable = src.Nullable
 	}
 	if dst.Format == "" {
 		dst.Format = src.Format
@@ -816,6 +833,7 @@ func mergeSchemaCollections(dst, src *SchemaInfo) {
 			dst.Properties[name] = src.Properties[name]
 		}
 	}
+	mergeAdditionalProperties(dst, src)
 	if dst.Items == nil {
 		dst.Items = src.Items
 	}
@@ -823,6 +841,16 @@ func mergeSchemaCollections(dst, src *SchemaInfo) {
 	dst.AnyOf = append(dst.AnyOf, src.AnyOf...)
 	if len(dst.Enum) == 0 {
 		dst.Enum = src.Enum
+	}
+}
+
+func mergeAdditionalProperties(dst, src *SchemaInfo) {
+	if src.AdditionalProperties == nil {
+		return
+	}
+	if dst.AdditionalProperties == nil || !*src.AdditionalProperties {
+		allowed := *src.AdditionalProperties
+		dst.AdditionalProperties = &allowed
 	}
 }
 
@@ -838,6 +866,9 @@ func mergeSchemaConstraints(dst, src *SchemaInfo) {
 	}
 	if dst.MaxItems == 0 {
 		dst.MaxItems = src.MaxItems
+	}
+	if src.MinProperties > dst.MinProperties {
+		dst.MinProperties = src.MinProperties
 	}
 	if dst.Pattern == "" {
 		dst.Pattern = src.Pattern

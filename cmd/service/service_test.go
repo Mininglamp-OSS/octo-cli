@@ -994,6 +994,26 @@ func TestValidateRequiredBodyFields_PreservesLegacyConstraintHandling(t *testing
 	); err != nil {
 		t.Fatalf("legacy service string bounds must remain backend-enforced: %v", err)
 	}
+
+	additionalProperties := false
+	legacy := &registry.OperationDetail{
+		OperationInfo:       registry.OperationInfo{Service: "thread"},
+		RequestBodyRequired: true,
+		RequestBody: &registry.SchemaInfo{
+			Type:                 "object",
+			MinProperties:        2,
+			AdditionalProperties: &additionalProperties,
+			Properties: map[string]registry.SchemaInfo{
+				"title": {Type: "string"},
+			},
+		},
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: legacy},
+		map[string]any{"title": nil, "unknown": true},
+	); err != nil {
+		t.Fatalf("legacy object constraints must remain backend-enforced: %v", err)
+	}
 }
 
 func TestValidateRequiredBodyFields_AllowsNullableLoopFields(t *testing.T) {
@@ -1009,6 +1029,41 @@ func TestValidateRequiredBodyFields_AllowsNullableLoopFields(t *testing.T) {
 	}
 	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {
 		t.Fatalf("nullable Loop fields must be forwarded for clearing: %v", err)
+	}
+
+	unconstrained := &registry.OperationDetail{
+		OperationInfo:       registry.OperationInfo{Service: "loop"},
+		RequestBodyRequired: true,
+		RequestBody: &registry.SchemaInfo{
+			Type:       "object",
+			Properties: map[string]registry.SchemaInfo{"value": {}},
+		},
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: unconstrained},
+		map[string]any{"value": nil},
+	); err != nil {
+		t.Fatalf("an unconstrained Loop field must continue to allow null: %v", err)
+	}
+}
+
+func TestValidateRequiredBodyFields_EnforcesLoopObjectConstraints(t *testing.T) {
+	r := registry.MustNew()
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update request schema not found")
+	}
+
+	for name, body := range map[string]map[string]any{
+		"empty update":      {},
+		"unknown field":     {"unknown": true},
+		"non-nullable null": {"title": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err == nil {
+				t.Fatalf("body should fail Loop object validation: %#v", body)
+			}
+		})
 	}
 }
 
