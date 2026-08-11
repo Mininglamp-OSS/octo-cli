@@ -187,6 +187,22 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 	}
 }
 
+func TestLoopTaskUpdateIncludesReviewStatus(t *testing.T) {
+	r := MustNew()
+	update, ok := r.GetOperation("task.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("task.update typed request body not found")
+	}
+	status, ok := update.RequestBody.Properties["status"]
+	if !ok {
+		t.Fatalf("task.update status schema missing: %+v", update.RequestBody.Properties)
+	}
+	want := []any{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+	if !reflect.DeepEqual(status.Enum, want) {
+		t.Fatalf("task.update status enum = %#v, want %#v", status.Enum, want)
+	}
+}
+
 func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	r := MustNew()
 	create, ok := r.GetOperation("autopilot.create")

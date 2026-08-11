@@ -159,10 +159,12 @@ octo-cli loop task update <task-id> --workspace-id <ws> \
 ```
 
 Changing status is not cosmetic — it can start or stop work. In the standard
-Fleet workflow `backlog` parks an assigned task, moving out of `backlog` to an
-active status can trigger the assigned expert to run, and `done` / `cancelled`
-are terminal. Confirm the exact status values accepted by your workspace via the
-schema, since they are a product-level convention rather than a CLI enum.
+Fleet workflow `backlog` parks an assigned task, `in_progress` means work is in
+progress, and `in_review` means the work is awaiting review. Use `done` only
+after the work is accepted or no review is required; `done` and `cancelled` are
+terminal. Moving out of `backlog` to an active status can trigger the assigned
+expert to run. Confirm the exact status values accepted by your workspace via
+the schema.
 
 ## Dispatch and executions
 

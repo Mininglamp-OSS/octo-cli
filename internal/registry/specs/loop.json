@@ -7353,10 +7353,12 @@
               "backlog",
               "todo",
               "in_progress",
+              "in_review",
               "done",
               "blocked",
               "cancelled"
-            ]
+            ],
+            "description": "Move the Task to a lifecycle status. in_review means the work is awaiting review."
           },
           "priority": {
             "type": "string"
