@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
@@ -114,6 +115,50 @@ func redactSecrets(s string, secrets []string) string {
 	return s
 }
 
+// maskOrSuppressValue masks a value, and replaces it wholesale when masking left a
+// declared secret behind.
+//
+// The boundary rule in replaceSecretForm is right for prose and is deliberately kept: a
+// four-character password is a substring of half the English language, and masking every
+// occurrence of it shreds text that has nothing to do with the secret. But one constant
+// was being asked two different questions — "is this value distinctive enough to search
+// for globally" and "may this value be disclosed" — and the second one has no threshold.
+// A seven-character password echoed with one adjacent alphanumeric character
+// (`"bad password pw12345x"`) is not at a token boundary, so masking declined, and the
+// value went out in full.
+//
+// Splitting the two questions: masking keeps its boundary semantics, and if a secret is
+// still literally present afterwards the whole value is suppressed instead of published.
+// Suppressing the field costs a line of diagnostic text; publishing it costs the user
+// their password.
+func maskOrSuppressValue(v string, secrets []string) string {
+	masked := redactSecrets(v, secrets)
+	if containsAnySecret(masked, secrets) {
+		return secretMask
+	}
+	return masked
+}
+
+// containsAnySecret reports whether any declared secret is still literally present in s.
+// Deliberately a raw substring test with no boundary or length condition: the question
+// here is disclosure, not whether a match is meaningful enough to act on.
+func containsAnySecret(s string, secrets []string) bool {
+	if s == "" {
+		return false
+	}
+	for _, v := range secrets {
+		if v == "" {
+			continue
+		}
+		for _, form := range secretForms(v) {
+			if form != "" && strings.Contains(s, form) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // shortSecretRunes is the length below which a secret is masked only where it
 // appears as a whole token rather than anywhere at all.
 //
@@ -172,12 +217,38 @@ func isWordByte(s string, i int) bool {
 // (without its surrounding quotes).
 func secretForms(v string) []string {
 	forms := []string{v}
-	for _, enc := range []string{url.PathEscape(v), url.QueryEscape(v), jsonStringBody(v)} {
+	for _, enc := range []string{url.PathEscape(v), url.QueryEscape(v), jsonStringBody(v), asciiEscapedBody(v)} {
 		if enc != v && enc != "" {
 			forms = append(forms, enc)
 		}
 	}
 	return forms
+}
+
+// asciiEscapedBody returns v with every non-ASCII rune written as \uXXXX, which is what
+// a JSON encoder in ASCII-only mode produces — Python's json.dumps does this by default.
+//
+// Go's marshaller does not: it emits non-ASCII as UTF-8 and escapes only <, > and &, so
+// jsonStringBody never covers this spelling. On the JSON response path the difference is
+// invisible, because the body is parsed and the escape is decoded before the walk sees the
+// value. It matters on the non-JSON fallback, which substitutes over undecoded bytes — and
+// non-JSON error bodies are exactly the nginx and WAF pages that can echo a blocked
+// request's content.
+func asciiEscapedBody(v string) string {
+	var b strings.Builder
+	var nonASCII bool
+	for _, r := range v {
+		if r < utf8.RuneSelf {
+			b.WriteRune(r)
+			continue
+		}
+		nonASCII = true
+		fmt.Fprintf(&b, "\\u%04x", r)
+	}
+	if !nonASCII {
+		return "" // no different from the literal; the caller skips duplicates
+	}
+	return b.String()
 }
 
 // jsonStringBody returns v as json.Marshal would render it inside a JSON
@@ -406,10 +477,14 @@ func isExemptCode(val any, secrets []string) bool {
 	if output.IsKnownErrorCode(s) {
 		return true // clause 1
 	}
-	// Clause 2: defer to the masker rather than compare. If redaction would change
-	// the value, the value carries a secret and is not exempt — whether it *is* the
-	// secret or merely contains it.
-	if redactSecrets(s, secrets) != s {
+	// Clause 2: not exempt if the value carries a declared secret at all. Two tests,
+	// because they catch different things: containsAnySecret is a raw substring check,
+	// which is what a short secret needs since the masker's boundary rule would decline
+	// it; and "masking would change this" additionally catches an *encoded* spelling
+	// that is not present literally. Asking only the second question — which is what
+	// this used to do — let a short secret through, because the masker answering "no
+	// change" meant "not at a token boundary", not "no secret here".
+	if containsAnySecret(s, secrets) || redactSecrets(s, secrets) != s {
 		return false
 	}
 	return true // clause 3
@@ -454,7 +529,7 @@ func redactBodyKeysAndValues(v any, secrets []string) any {
 func redactBodyValue(v any, secrets []string) any {
 	switch t := v.(type) {
 	case string:
-		return redactSecrets(t, secrets)
+		return maskOrSuppressValue(t, secrets)
 	case json.Number:
 		return t
 	case bool, nil, int, int64, float64:

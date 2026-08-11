@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1002,5 +1003,143 @@ func TestResponseMask_CollidingKeysAreDeterministic(t *testing.T) {
 		if seen[i] != seen[0] {
 			t.Fatalf("redaction is not deterministic across runs:\n  %s\n  %s", seen[0], seen[i])
 		}
+	}
+}
+
+// TestBackendError_AShortSecretNeverSurvivesInTheCodePosition is round-14 P1-3.
+//
+// Two rules met and produced a leak neither intended. replaceSecretForm masks a secret
+// shorter than shortSecretRunes only at a token boundary, which is right for prose — a
+// four-character password is a substring of half the English language. isExemptCode's
+// clause 2 then asked the masker "would masking change this value", and read "no" as "this
+// value carries no secret". For a short password echoed with an adjacent alphanumeric
+// character, the masker says no because of the boundary rule, so clause 3 exempted the
+// value and printed it.
+//
+// One constant was deciding two different questions: "is this value distinctive enough to
+// search for globally" and "may this value be disclosed". They are separated now — the
+// boundary rule stays for prose, and a declared secret is never exempt in the code
+// position regardless of its length or of what the masker would do.
+//
+// The second failure is the contract: the password became ee.Code, so a caller branching
+// on the code got the user's password instead of FORBIDDEN. Suppressing the field restores
+// it, because redaction runs before ParseBackendError and the status-derived fallback then
+// supplies a real code.
+func TestBackendError_AShortSecretNeverSurvivesInTheCodePosition(t *testing.T) {
+	for _, password := range []string{"1234", "pin99", "abc123", "pw12345", "hunter22"} {
+		t.Run("password="+password, func(t *testing.T) {
+			// A trailing alphanumeric character is all it takes to defeat the boundary
+			// rule, and a backend echoing the value into its code does exactly that.
+			body := `{"code":"` + password + `x","message":"bad password ` + password + `x for share"}`
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/tok/access",
+				Body:         map[string]any{"password": password},
+				SecretValues: []string{password},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if strings.Contains(ee.Code, password) {
+				t.Errorf("the password became the machine-readable code: ee.Code = %q", ee.Code)
+			}
+			if strings.Contains(string(ee.Detail), password) {
+				t.Errorf("the password survived in the printed detail: %s", ee.Detail)
+			}
+			// The contract must be restored, not merely made non-secret: a caller
+			// branching on the code needs a real one.
+			if ee.Code == "" || ee.Code == secretMask {
+				t.Errorf("ee.Code = %q — suppressing the field must fall back to the status-derived code", ee.Code)
+			}
+		})
+	}
+}
+
+// TestBackendError_ARecognisedCodeIsStillExemptFromTheNewRule pins clause 1 against the
+// change above. The new rule must not swallow a recognised code that happens to equal a
+// declared secret: that vocabulary is closed and this CLI prints those codes on every
+// failure of their kind, so masking one hides nothing and destroys what callers branch on.
+// It is the reason clause 1 comes first.
+func TestBackendError_ARecognisedCodeIsStillExemptFromTheNewRule(t *testing.T) {
+	for _, secret := range []string{"not_found", "wrong_password"} {
+		t.Run("secret="+secret, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"` + secret + `","message":"x"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if ee.Code != secret {
+				t.Errorf("ee.Code = %q, want %q — a recognised code stays exempt (clause 1)", ee.Code, secret)
+			}
+		})
+	}
+}
+
+// TestSecretForms_ASCIIEscapedSpellingIsMasked is round-14's \uXXXX item. The reviewer
+// marked it "derived from reading, not reproduced", so this test is the reproduction and
+// the fix's lock at once.
+//
+// What I confirmed: secretForms generates the literal, url.PathEscape, url.QueryEscape and
+// Go's json.Marshal spelling. Go's marshaller emits non-ASCII as UTF-8 and only escapes
+// <, > and & — it never produces \uXXXX for a letter. Python's json.dumps does, by
+// default (ensure_ascii=True). On the JSON path this does not matter, because the body is
+// parsed and ä is decoded back to ä before the walk sees it. The gap is exactly the
+// non-JSON fallback, which is a plain text substitution over bytes that were never
+// decoded — and non-JSON error bodies are the nginx and WAF pages, which is where a
+// blocked request's content can get echoed.
+//
+// So: a real gap, narrower than it first looks (it needs a non-ASCII secret *and* a
+// non-JSON body), and cheap to close by adding the spelling to the form list.
+func TestSecretForms_ASCIIEscapedSpellingIsMasked(t *testing.T) {
+	for _, secret := range []string{"pässwörd", "naïve-pass", "日本語パス", "mixed-ä-1"} {
+		t.Run(secret, func(t *testing.T) {
+			// What a Python backend with ensure_ascii=True writes for this value.
+			var encoded strings.Builder
+			for _, r := range secret {
+				if r < 0x80 {
+					encoded.WriteRune(r)
+					continue
+				}
+				fmt.Fprintf(&encoded, "\\u%04x", r)
+			}
+			// A non-JSON error page echoing it: no structure to walk, so the client
+			// falls back to text substitution.
+			body := "<html><body>403 blocked: bad password " + encoded.String() + "</body></html>"
+
+			got := string(redactResponseBody([]byte(body), []string{secret}))
+			if strings.Contains(got, encoded.String()) {
+				t.Errorf("the ASCII-escaped spelling of the secret survived the text fallback:\n%s", got)
+			}
+			if strings.Contains(got, secret) {
+				t.Errorf("the literal spelling survived:\n%s", got)
+			}
+		})
 	}
 }
