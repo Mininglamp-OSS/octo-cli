@@ -176,3 +176,34 @@ func TestRedactedShareURL_MasksTheTokenPositionNotTheFirstMatch(t *testing.T) {
 		})
 	}
 }
+
+// TestShareRealRun_AlsoMasksTheToken is round-14's consistency item. Round 13 masked the
+// token in the --dry-run envelope on the stated grounds that the two justifications
+// ("mask it, a leaked description hands the share over" and "print it, the caller supplied
+// it") cannot both be right. The success envelopes were the surviving instance of the side
+// that argument rejected — which left the CLI in the state where its dry-run output was
+// safe to paste and its real output was not.
+//
+// Consequence recorded rather than discovered: a script reading .data.share_url out of
+// `share access` now gets the mask. It supplied the link, so it already has the value; the
+// output is no longer a place to recover it from.
+func TestShareRealRun_AlsoMasksTheToken(t *testing.T) {
+	const token = "Ab3cDeFgHiJkLmN0pQrS"
+
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"file_id":"7","file_name":"a.txt","file_size":"3","permission":"download"}}`))
+	}, nil)
+	link := env.api.URL + blobSharePathPrefix + token
+
+	if err := env.run("drive", "share", "access", link); err != nil {
+		t.Fatalf("share access: %v", err)
+	}
+	out := env.tf.Out.String()
+	if strings.Contains(out, token) {
+		t.Errorf("the share token appears in plaintext in the success envelope:\n%s", out)
+	}
+	if !strings.Contains(out, "share_url") {
+		t.Errorf("share_url was dropped rather than masked:\n%s", out)
+	}
+}

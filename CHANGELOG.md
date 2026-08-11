@@ -124,14 +124,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   storage host. Where the proxy is also the only resolver, the target cannot be
   classified locally and the transfer proceeds unclassified, reported under `--verbose`.
 - **A malformed command line no longer echoes the argument it could not parse.** pflag
-  and cobra quote the offending token in their own messages — `unknown flag: --<x>`,
-  `unknown shorthand flag: 'A' in -<x>`, `invalid argument "<x>" for …`, `unknown command
-  "<x>"` — and those went into the structured error on stderr verbatim. Because base64url
-  share and invite ids commonly start with `-`, a missing verb or a mistyped flag name put
-  an id there. These four categories now report what kind of error it was and point at
-  `--help`; the messages that carry only counts or flag names (`accepts N arg(s)`,
-  `required flag(s) "x" not set`) are unchanged, as is `unknown subcommand`, which lists
-  this CLI's own subcommand names rather than the argument.
+  and cobra quote the offending token in their own messages — `bad flag syntax: <x>`,
+  `unknown flag: --<x>`, `unknown shorthand flag: 'A' in -<x>`, `flag needs an argument:
+  <x>`, `invalid argument "<x>" for …`, `unknown command "<x>"` — and those went into the
+  structured error on stderr verbatim. Because base64url share and invite ids commonly
+  start with `-`, a missing verb or a mistyped flag name put an id there; `bad flag
+  syntax` additionally carries the whole token, so `---password=<value>` printed the
+  value. Rather than list the unsafe shapes, the rule is now default-deny: **any message
+  about flag parsing is reported by category unless it is on an explicit allowlist of
+  shapes that carry no caller value.** The allowlist is the ones carrying only counts or
+  flag names (`accepts N arg(s)`, `required flag(s) "x" not set`) plus `unknown
+  subcommand`, which lists this CLI's own subcommand names rather than the argument.
 - **`--dry-run` masks the token inside `share_url`.** `share access` and `share download`
   masked the token in the request `path` and printed the same token verbatim in
   `share_url` one field below. A dry-run description is meant to be safe to paste into a

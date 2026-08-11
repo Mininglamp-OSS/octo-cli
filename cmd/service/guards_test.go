@@ -297,3 +297,65 @@ func TestPathSegments_EmptyPathValueRejected(t *testing.T) {
 		})
 	}
 }
+
+// TestEnum_NoSecretFieldDeclaresAnEnum is round-14's extension of the tripwire above, and
+// the reviewer was right to upgrade his own earlier assessment of it.
+//
+// prepareBlobShare builds a request body containing the *real password* and hands it to
+// ValidateRequestBody, so checkEnum sees the plaintext — and this happens before any
+// SecretValues exist, because the value is being validated locally before a request is
+// built. checkEnum's message quotes the offending value. So the only thing standing
+// between that and an unconditional password echo on stderr is that `password` declares no
+// enum today, which one spec edit changes.
+//
+// The existing tripwire covered header and path parameters, where the gate does not run.
+// This is the other half: wherever the gate *does* run (query and body), no field the spec
+// marks secret may declare a vocabulary, because the diagnostic would quote it.
+func TestEnum_NoSecretFieldDeclaresAnEnum(t *testing.T) {
+	reg := registry.MustNew()
+	for _, svc := range reg.ListServices() {
+		for _, info := range reg.ListOperations(svc) {
+			d, ok := reg.GetOperation(info.ID)
+			if !ok {
+				continue
+			}
+			for i := range d.Parameters {
+				p := &d.Parameters[i]
+				if !p.Secret {
+					continue
+				}
+				if len(p.Enum) > 0 || (p.Items != nil && len(p.Items.Enum) > 0) {
+					t.Errorf("%s: %s param %q is x-octo-secret and declares an enum — the "+
+						"ENUM_NOT_ALLOWED message quotes the rejected value, and that check runs "+
+						"before any secret list exists", info.ID, p.In, p.Name)
+				}
+			}
+			if d.RequestBody != nil {
+				assertNoSecretEnum(t, info.ID, d.RequestBody, "")
+			}
+		}
+	}
+}
+
+// assertNoSecretEnum walks a request schema to any depth, because a secret nested inside an
+// object or an array item reaches the same validator.
+func assertNoSecretEnum(t *testing.T, opID string, schema *registry.SchemaInfo, path string) {
+	t.Helper()
+	for name := range schema.Properties {
+		prop := schema.Properties[name]
+		field := name
+		if path != "" {
+			field = path + "." + name
+		}
+		if prop.Secret && (len(prop.Enum) > 0 || (prop.Items != nil && len(prop.Items.Enum) > 0)) {
+			t.Errorf("%s: body property %q is x-octo-secret and declares an enum — the "+
+				"ENUM_NOT_ALLOWED message would quote the secret", opID, field)
+		}
+		if prop.Type == "object" {
+			assertNoSecretEnum(t, opID, &prop, field)
+		}
+		if prop.Items != nil && prop.Items.Type == "object" {
+			assertNoSecretEnum(t, opID, prop.Items, field+"[]")
+		}
+	}
+}

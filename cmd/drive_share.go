@@ -503,7 +503,7 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 		}
 		return emitJSON(f, shareTarget{
 			Kind:         shareKindDoc,
-			ShareURL:     parsed.canonical,
+			ShareURL:     redactedShareURL(parsed),
 			Downloadable: false,
 			DocID:        parsed.docID,
 			DocSpaceID:   parsed.docSpaceID,
@@ -545,7 +545,7 @@ func runDriveShareAccess(cmd *cobra.Command, f *cmdutil.Factory, shareURL string
 	}
 	return emitJSON(f, shareTarget{
 		Kind:         shareKindBlob,
-		ShareURL:     parsed.canonical,
+		ShareURL:     redactedShareURL(parsed),
 		Downloadable: access.Permission == "download",
 		DriveFileID:  access.FileID.String(),
 		Filename:     access.FileName,
@@ -648,7 +648,7 @@ func runDriveShareDownload(cmd *cobra.Command, f *cmdutil.Factory, shareURL, out
 	if signed.Filename != "" {
 		result.Filename = signed.Filename
 	}
-	result.ShareURL = parsed.canonical
+	result.ShareURL = redactedShareURL(parsed)
 	return emitJSON(f, result)
 }
 
