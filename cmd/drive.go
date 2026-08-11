@@ -1009,7 +1009,12 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 	// downloads: 204 wrote a 0-byte file and reported ok with the sha256 of nothing,
 	// and 206 wrote a truncation and reported ok with a sha256 that certifies the
 	// wrong bytes, which is worse than no checksum. The upload half of this command
-	// already refuses the same shape from the same untrusted host.
+	// applies the mirror of this rule — it admits only 200/201 and refuses the rest of
+	// the 2xx family as "stored, unconfirmed" (see putObject). That sentence used to
+	// claim the upload half "already refuses the same shape", which was not true when it
+	// was written: putObject accepted every 2xx, so a 202/204 PUT was confirmed as a
+	// stored object. It is true now, and it is stated here because a reader deciding
+	// whether the other half needs looking at relies on it.
 	if resp.StatusCode != http.StatusOK {
 		return nil, output.ErrWithHint("api_error", "DOWNLOAD_FAILED",
 			fmt.Sprintf("object storage returned status %d, not 200", resp.StatusCode),

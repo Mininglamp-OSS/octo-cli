@@ -282,7 +282,31 @@ func putObject(cmd *cobra.Command, f *cmdutil.Factory, file *os.File, size int64
 		return transferNetworkError("upload", target, err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	// Two distinct refusals, because a caller has to be able to tell them apart.
+	//
+	// A non-2xx is storage refusing the request — an expired signature, a header or size
+	// that did not match what was signed. That keeps UPLOAD_FAILED.
+	//
+	// A 2xx that is not 200 or 201 is worse than a refusal, because it looks like success
+	// while promising nothing. Accepting the whole family meant a `202 Accepted` (which an
+	// async storage front end plausibly does mean) or a `204 No Content` returned nil, the
+	// caller went on to confirm-upload with the local byte count, and the CLI emitted
+	// ok:true for a drive row pointing at an object that may never have been written. There
+	// is no post-PUT verification anywhere in this path — no ETag comparison, no size echo,
+	// no HEAD — so the status code is the only evidence the CLI has that the bytes landed,
+	// and only 200/201 are that evidence. 201 is admitted alongside 200 because a storage
+	// backend may legitimately answer either for a create.
+	//
+	// This is the mirror of the download half, which refuses anything but exactly 200
+	// (cmd/drive.go, fetchToFile) on the same reasoning: publishing an unverified result
+	// with a checksum over it is worse than failing, because a caller who checks the
+	// checksum concludes the transfer was sound.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return output.ErrWithHint("api_error", "UPLOAD_NOT_CONFIRMED",
+				fmt.Sprintf("object storage returned status %d, which does not confirm the object was stored", resp.StatusCode),
+				"only 200 or 201 is evidence the bytes landed; the pending row was cancelled, so re-run the upload")
+		}
 		return output.ErrWithHint("api_error", "UPLOAD_FAILED",
 			fmt.Sprintf("object storage returned status %d", resp.StatusCode),
 			"the presigned URL may have expired or the echoed headers/size did not match; retry the upload")

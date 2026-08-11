@@ -259,7 +259,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 
 	switch entry.Type {
 	case shareKindDoc:
-		return emitDocShareTarget(f, origin, &entry)
+		return emitDocShareBranch(cmd, f, origin, &entry)
 
 	case shareKindBlob:
 		share, serr := createBlobShare(cmd, f, cli, shareMount, shareBody)
@@ -291,6 +291,61 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 			fmt.Sprintf("a node of type %q cannot be shared", entry.Type),
 			"share an individual file or a mounted document, not a folder"))
 	}
+}
+
+// emitDocShareBranch is the document arm of `share create`: refuse the flags a document
+// cannot carry, then emit the link.
+//
+// Refuse rather than drop. prepareBlobShare has already loaded the password and built the
+// whole share body by this point, and this arm makes no request at all — so a supplied
+// --password / --password-file / --expires-in-seconds was silently discarded, and
+// `share create <doc-mount-id> --password-file pw` exited 0 with a share_url the operator then
+// handed over believing it was password-gated. It was not, and nothing in the envelope said so.
+//
+// The Long help does say "(blob shares only)", but help text is not a runtime control: once
+// the caller has actually passed the flag, the choices are refuse or warn, and the
+// MISSING_DOC_SPACE_ID path below already sets the precedent by failing closed rather than
+// substituting. Silently downgrading a security property is the defect class this command has
+// spent every round closing.
+//
+// Extracted from runDriveShareCreate to keep it under the complexity limit.
+func emitDocShareBranch(cmd *cobra.Command, f *cmdutil.Factory, origin *url.URL, entry *driveEntryResponse) error {
+	if verr := assertNoBlobOnlyFlags(cmd); verr != nil {
+		return failErr(f, verr)
+	}
+	return emitDocShareTarget(f, origin, entry)
+}
+
+// blobOnlyShareFlags are the share-create flags only a blob share can carry. A document link
+// is an entrance into the docs permission system, not a grant this command parameterises, so
+// there is nowhere for these to be applied.
+var blobOnlyShareFlags = []string{"password", "password-file", "expires-in-seconds"}
+
+// assertNoBlobOnlyFlags refuses a document share that was given a blob-only flag.
+//
+// The decision is on Changed, not on the value: `--expires-in-seconds 0` means "use the
+// backend default" and is a different statement from not passing the flag at all, so a
+// zero-value test would wave through a caller who said something explicit. --permission is
+// deliberately not on the list: it has a non-zero default so every invocation would trip it,
+// and the Long help already states that a document link is never downloadable.
+//
+// The flag names are reported, never their values — a refusal that exists to protect a
+// password must not echo it.
+func assertNoBlobOnlyFlags(cmd *cobra.Command) *output.ExitError {
+	var set []string
+	for _, name := range blobOnlyShareFlags {
+		if f := cmd.Flags().Lookup(name); f != nil && f.Changed {
+			set = append(set, "--"+name)
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return output.ErrWithHint("validation", "SHARE_FLAG_NOT_APPLICABLE",
+		fmt.Sprintf("this node is an online document, so %s cannot be applied", strings.Join(set, ", ")),
+		"a document link is an entrance, not a grant: access is decided by the docs permission "+
+			"system, not by a share password or an expiry. Re-run without those flags to get the "+
+			"document link, or share an uploaded file if you need a password-protected, expiring share")
 }
 
 // emitDocShareTarget renders the document branch of `share create`. A document
