@@ -653,65 +653,103 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 	if s == nil {
 		return SchemaInfo{}
 	}
-	if ref, ok := s["$ref"].(string); ok && ref != "" {
-		if depth < 3 {
-			if resolved := followRef(doc, ref); resolved != nil {
-				return resolveSchemaWithDepth(doc, resolved, depth+1)
-			}
-		}
-		return SchemaInfo{Ref: ref}
+	if resolved, ok := resolveSchemaReference(doc, s, depth); ok {
+		return resolved
 	}
 
-	info := SchemaInfo{
-		Type:        schemaType(s["type"]),
-		Format:      stringOf(s["format"]),
-		Description: stringOf(s["description"]),
-		FlagName:    stringOf(s["x-octo-flag"]),
-		Secret:      truthy(s["x-octo-secret"]),
-		WriteOnly:   boolOf(s["writeOnly"]),
-		MinLength:   intOf(s["minLength"]),
-		MaxLength:   intOf(s["maxLength"]),
-		MinItems:    intOf(s["minItems"]),
-		MaxItems:    intOf(s["maxItems"]),
-		Pattern:     stringOf(s["pattern"]),
-	}
-	if value, ok := s["const"]; ok {
-		info.Const = value
-	}
-	if allOf, ok := s["allOf"].([]any); ok {
-		for _, candidate := range allOf {
-			if sub, ok := candidate.(map[string]any); ok {
-				mergeSchemaInfo(&info, resolveSchemaWithDepth(doc, sub, depth+1))
-			}
-		}
-	}
-	if req, ok := s["required"].([]any); ok {
-		for _, x := range req {
-			if name, ok := x.(string); ok {
-				info.Required = appendUniqueStrings(info.Required, name)
-			}
-		}
-	}
-	if enum, ok := s["enum"].([]any); ok {
-		info.Enum = enum
-	}
-	if props, ok := s["properties"].(map[string]any); ok {
-		if info.Properties == nil {
-			info.Properties = map[string]SchemaInfo{}
-		}
-		for name, v := range props {
-			if sub, ok := v.(map[string]any); ok {
-				info.Properties[name] = resolveSchemaWithDepth(doc, sub, depth+1)
-			}
-		}
-	}
-	if items, ok := s["items"].(map[string]any); ok {
-		sub := resolveSchemaWithDepth(doc, items, depth+1)
-		info.Items = &sub
-	}
+	info := schemaInfoFromNode(s)
+	mergeAllOfSchemas(&info, doc, s["allOf"], depth)
+	appendSchemaRequired(&info, s["required"])
+	appendSchemaProperties(&info, doc, s["properties"], depth)
+	appendSchemaItems(&info, doc, s["items"], depth)
 	info.OneOf = resolveSchemaAlternatives(doc, s["oneOf"], depth)
 	info.AnyOf = resolveSchemaAlternatives(doc, s["anyOf"], depth)
 	return info
+}
+
+func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, bool) {
+	ref, ok := schema["$ref"].(string)
+	if !ok || ref == "" {
+		return SchemaInfo{}, false
+	}
+	if depth < 3 {
+		if resolved := followRef(doc, ref); resolved != nil {
+			return resolveSchemaWithDepth(doc, resolved, depth+1), true
+		}
+	}
+	return SchemaInfo{Ref: ref}, true
+}
+
+func schemaInfoFromNode(schema map[string]any) SchemaInfo {
+	info := SchemaInfo{
+		Type:        schemaType(schema["type"]),
+		Format:      stringOf(schema["format"]),
+		Description: stringOf(schema["description"]),
+		FlagName:    stringOf(schema["x-octo-flag"]),
+		Secret:      truthy(schema["x-octo-secret"]),
+		WriteOnly:   boolOf(schema["writeOnly"]),
+		MinLength:   intOf(schema["minLength"]),
+		MaxLength:   intOf(schema["maxLength"]),
+		MinItems:    intOf(schema["minItems"]),
+		MaxItems:    intOf(schema["maxItems"]),
+		Pattern:     stringOf(schema["pattern"]),
+	}
+	if value, ok := schema["const"]; ok {
+		info.Const = value
+	}
+	if enum, ok := schema["enum"].([]any); ok {
+		info.Enum = enum
+	}
+	return info
+}
+
+func mergeAllOfSchemas(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	allOf, ok := value.([]any)
+	if !ok {
+		return
+	}
+	for _, candidate := range allOf {
+		if sub, ok := candidate.(map[string]any); ok {
+			resolved := resolveSchemaWithDepth(doc, sub, depth+1)
+			mergeSchemaInfo(dst, &resolved)
+		}
+	}
+}
+
+func appendSchemaRequired(dst *SchemaInfo, value any) {
+	required, ok := value.([]any)
+	if !ok {
+		return
+	}
+	for _, candidate := range required {
+		if name, ok := candidate.(string); ok {
+			dst.Required = appendUniqueStrings(dst.Required, name)
+		}
+	}
+}
+
+func appendSchemaProperties(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	properties, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	if dst.Properties == nil {
+		dst.Properties = map[string]SchemaInfo{}
+	}
+	for name, candidate := range properties {
+		if sub, ok := candidate.(map[string]any); ok {
+			dst.Properties[name] = resolveSchemaWithDepth(doc, sub, depth+1)
+		}
+	}
+}
+
+func appendSchemaItems(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	items, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	resolved := resolveSchemaWithDepth(doc, items, depth+1)
+	dst.Items = &resolved
 }
 
 func schemaType(value any) string {
@@ -742,7 +780,13 @@ func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []Schem
 	return resolved
 }
 
-func mergeSchemaInfo(dst *SchemaInfo, src SchemaInfo) {
+func mergeSchemaInfo(dst, src *SchemaInfo) {
+	mergeSchemaIdentity(dst, src)
+	mergeSchemaCollections(dst, src)
+	mergeSchemaConstraints(dst, src)
+}
+
+func mergeSchemaIdentity(dst, src *SchemaInfo) {
 	if dst.Type == "" {
 		dst.Type = src.Type
 	}
@@ -756,13 +800,19 @@ func mergeSchemaInfo(dst *SchemaInfo, src SchemaInfo) {
 		dst.FlagName = src.FlagName
 	}
 	dst.WriteOnly = dst.WriteOnly || src.WriteOnly
+	if dst.Const == nil {
+		dst.Const = src.Const
+	}
+}
+
+func mergeSchemaCollections(dst, src *SchemaInfo) {
 	dst.Required = appendUniqueStrings(dst.Required, src.Required...)
 	if len(src.Properties) > 0 {
 		if dst.Properties == nil {
 			dst.Properties = map[string]SchemaInfo{}
 		}
-		for name, property := range src.Properties {
-			dst.Properties[name] = property
+		for name := range src.Properties {
+			dst.Properties[name] = src.Properties[name]
 		}
 	}
 	if dst.Items == nil {
@@ -773,9 +823,9 @@ func mergeSchemaInfo(dst *SchemaInfo, src SchemaInfo) {
 	if len(dst.Enum) == 0 {
 		dst.Enum = src.Enum
 	}
-	if dst.Const == nil {
-		dst.Const = src.Const
-	}
+}
+
+func mergeSchemaConstraints(dst, src *SchemaInfo) {
 	if dst.MinLength == 0 {
 		dst.MinLength = src.MinLength
 	}

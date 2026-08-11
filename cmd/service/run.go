@@ -668,31 +668,8 @@ type bodySchemaValidator struct {
 // closed set" without parsing the message; structural violations keep the
 // historical VALIDATION_ERROR envelope byte-for-byte.
 func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
-	if schema.Const != nil && !reflect.DeepEqual(schema.Const, value) {
-		return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
-	}
-	if len(schema.OneOf) > 0 {
-		matches := 0
-		for i := range schema.OneOf {
-			if v.validate(&schema.OneOf[i], value, path, flagName) == nil {
-				matches++
-			}
-		}
-		if matches != 1 {
-			return schemaError(fmt.Sprintf("field %s must match exactly one allowed schema", bodyPath(path)))
-		}
-	}
-	if len(schema.AnyOf) > 0 {
-		matched := false
-		for i := range schema.AnyOf {
-			if v.validate(&schema.AnyOf[i], value, path, flagName) == nil {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return schemaError(fmt.Sprintf("field %s must match at least one allowed schema", bodyPath(path)))
-		}
+	if err := v.validateComposition(schema, value, path, flagName); err != nil {
+		return err
 	}
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
@@ -713,32 +690,78 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
 	case "string":
-		text, ok := value.(string)
-		if !ok {
-			return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
-		}
-		if schema.MinLength > 0 && len(text) < schema.MinLength {
-			return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
-		}
-		if schema.MaxLength > 0 && len(text) > schema.MaxLength {
-			return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
-		}
+		return validateString(schema, value, path)
 	case "":
 		if len(schema.Required) > 0 || len(schema.Properties) > 0 {
 			return v.validateObject(schema, value, path)
 		}
 		if schema.MinLength > 0 || schema.MaxLength > 0 {
-			text, ok := value.(string)
-			if !ok {
-				return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
-			}
-			if schema.MinLength > 0 && len(text) < schema.MinLength {
-				return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
-			}
-			if schema.MaxLength > 0 && len(text) > schema.MaxLength {
-				return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
-			}
+			return validateString(schema, value, path)
 		}
+	}
+	return nil
+}
+
+func (v bodySchemaValidator) validateComposition(
+	schema *registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if schema.Const != nil && !reflect.DeepEqual(schema.Const, value) {
+		return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
+	}
+	if err := v.validateOneOf(schema.OneOf, value, path, flagName); err != nil {
+		return err
+	}
+	return v.validateAnyOf(schema.AnyOf, value, path, flagName)
+}
+
+func (v bodySchemaValidator) validateOneOf(
+	schemas []registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if len(schemas) == 0 {
+		return nil
+	}
+	matches := 0
+	for i := range schemas {
+		if v.validate(&schemas[i], value, path, flagName) == nil {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return schemaError(fmt.Sprintf("field %s must match exactly one allowed schema", bodyPath(path)))
+	}
+	return nil
+}
+
+func (v bodySchemaValidator) validateAnyOf(
+	schemas []registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if len(schemas) == 0 {
+		return nil
+	}
+	for i := range schemas {
+		if v.validate(&schemas[i], value, path, flagName) == nil {
+			return nil
+		}
+	}
+	return schemaError(fmt.Sprintf("field %s must match at least one allowed schema", bodyPath(path)))
+}
+
+func validateString(schema *registry.SchemaInfo, value any, path string) *output.ExitError {
+	text, ok := value.(string)
+	if !ok {
+		return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
+	}
+	if schema.MinLength > 0 && len(text) < schema.MinLength {
+		return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
+	}
+	if schema.MaxLength > 0 && len(text) > schema.MaxLength {
+		return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
 	}
 	return nil
 }
@@ -928,8 +951,8 @@ func writeOnlyBodyFields(schema *registry.SchemaInfo) []string {
 		return nil
 	}
 	var fields []string
-	for name, property := range schema.Properties {
-		if property.WriteOnly {
+	for name := range schema.Properties {
+		if schema.Properties[name].WriteOnly {
 			fields = append(fields, name)
 		}
 	}
