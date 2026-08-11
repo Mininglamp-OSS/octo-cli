@@ -47,7 +47,7 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 		// what let `--data '{"im_channel_type":[1]}'` reach the backend and come
 		// back as an internal decode error naming a server struct.
 		return output.ErrWithHint("validation", enumNotAllowed,
-			fmt.Sprintf("%s must be a single value from the accepted set, got %T", label, value),
+			fmt.Sprintf("%s must be a single value from the accepted set, got %s", label, jsonKindName(value)),
 			fmt.Sprintf("pass one of: %s", formatEnum(allowed)))
 	}
 	for _, a := range allowed {
@@ -56,6 +56,26 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 		}
 	}
 	return enumError(label, value, allowed)
+}
+
+// jsonKindName names the JSON kind of a rejected value, so the message an agent reads talks
+// about JSON rather than about Go. `%T` rendered a present null as "<nil>" and a decoded
+// object as "map[string]interface {}", neither of which appears anywhere in the input the
+// caller wrote.
+func jsonKindName(v any) string {
+	switch v.(type) {
+	case nil:
+		return "null"
+	case map[string]any:
+		return "an object"
+	case []any:
+		return "an array"
+	case string:
+		return "a string"
+	case bool:
+		return "a boolean"
+	}
+	return fmt.Sprintf("%T", v)
 }
 
 // canonicalEnumValue reduces a scalar to a type-tagged canonical string.

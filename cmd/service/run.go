@@ -598,6 +598,13 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 	if err := checkUint64Field(schema, value, path, flagName); err != nil {
 		return err
 	}
+	if value == nil {
+		// An explicit null has had its say from the two constraint checks above, which is
+		// where it must be caught. Descending further would report a shape error ("field
+		// x must be an object") for a value a backend may legitimately accept to clear an
+		// optional field — a wider contract change than the bypass calls for.
+		return nil
+	}
 	switch schema.Type {
 	case "object":
 		return v.validateObject(schema, value, path)
@@ -618,11 +625,22 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 // backend decode error naming a server struct. The message names the promoted
 // flag when there is one, which is the decimal-string surface a caller reaching
 // for a string actually wants.
+//
+// An explicit null is rejected on the same grounds, and is called out separately because it
+// used to be waved through here while validateObject also skipped it — so `--data
+// '{"parent_id":null}'` reached the wire, where Go decodes null into a scalar field as the
+// zero value, addressing folder 0. That is the documented root: a *valid* id pointing at a
+// place nobody named, which is the same harm the lossless-uint64 handling exists to prevent.
 func checkUint64Field(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
-	if schema.Format != uint64Format || value == nil {
+	if schema.Format != uint64Format {
 		return nil
 	}
 	label := enumFieldLabel(path, flagName)
+	if value == nil {
+		return output.ErrValidation(
+			fmt.Sprintf("%s must be a JSON integer uint64 id, got null", label),
+			"omit the field to take the backend default, or pass the id as a bare JSON number with digits only")
+	}
 	num, ok := value.(json.Number)
 	if !ok {
 		return output.ErrValidation(
@@ -649,7 +667,15 @@ func (v bodySchemaValidator) validateObject(schema *registry.SchemaInfo, value a
 		return schemaError(fmt.Sprintf("is missing required field(s): %s", strings.Join(missing, ", ")))
 	}
 	for name := range schema.Properties {
-		if child, exists := obj[name]; exists && child != nil {
+		// A property that is *present with value null* is walked too. Skipping it on
+		// `child != nil` meant an explicit null never reached checkEnum or
+		// checkUint64Field — the two gates this engine exists to apply — and was
+		// marshalled onto the wire unchanged, while the same field with an
+		// out-of-vocabulary or wrongly-typed value was correctly refused. checkEnum's own
+		// docstring already said a null "cannot match any member, so reject rather than
+		// forward"; it was simply never called. The required-field walk above treats a
+		// present null as missing, so both paths now refuse it, each in its own terms.
+		if child, exists := obj[name]; exists {
 			childSchema := schema.Properties[name]
 			// Only root-level fields have a promoted flag; a nested field of the
 			// same name is --data-only and must not borrow that flag's label.
