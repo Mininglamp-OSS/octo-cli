@@ -230,27 +230,38 @@ func TestHTMLPublishConditionalValidationAndResponseUnwrap(t *testing.T) {
 	}
 }
 
-func TestHTMLListOperationsPreservePaginationEnvelope(t *testing.T) {
+func TestHTMLListOperationsPreserveOffsetPaginationEnvelope(t *testing.T) {
 	tests := []struct {
-		name string
-		args []string
+		name        string
+		commandPath []string
+		args        []string
+		wantQuery   string
 	}{
-		{name: "documents", args: []string{"html", "list", "--cursor", "c1", "--limit", "7"}},
-		{name: "comments", args: []string{"html", "comment", "list", "--slug", "doc-1", "--cursor", "c1", "--limit", "7"}},
+		{name: "documents", commandPath: []string{"html", "list"}, args: []string{"html", "list"}},
+		{name: "comments", commandPath: []string{"html", "comment", "list"}, args: []string{"html", "comment", "list", "--slug", "doc-1"}, wantQuery: "slug=doc-1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotQuery string
 			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-				gotQuery = r.URL.RawQuery
-				_, _ = w.Write([]byte(`{"data":[{"id":"one"}],"pagination":{"has_more":true,"next_cursor":"c2"}}`))
+				if r.URL.RawQuery != tt.wantQuery {
+					t.Errorf("query = %q, want %q", r.URL.RawQuery, tt.wantQuery)
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"one"}],"pagination":{"total":11,"page":1,"page_size":20}}`))
 			})
+
+			cmd, _, err := root.Find(tt.commandPath)
+			if err != nil {
+				t.Fatalf("find command: %v", err)
+			}
+			for _, flag := range []string{"cursor", "limit", "page-all", "page-limit"} {
+				if cmd.Flags().Lookup(flag) != nil {
+					t.Errorf("%s unexpectedly exposes --%s", strings.Join(tt.commandPath, " "), flag)
+				}
+			}
+
 			root.SetArgs(tt.args)
 			if err := root.Execute(); err != nil {
 				t.Fatalf("execute: %v", err)
-			}
-			if !strings.Contains(gotQuery, "cursor=c1") || !strings.Contains(gotQuery, "limit=7") {
-				t.Errorf("pagination query = %q", gotQuery)
 			}
 			var env map[string]any
 			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
@@ -259,8 +270,9 @@ func TestHTMLListOperationsPreservePaginationEnvelope(t *testing.T) {
 			if _, ok := env["data"].([]any); !ok {
 				t.Errorf("data = %T, want array: %s", env["data"], tf.Out.String())
 			}
-			if _, ok := env["_pagination"].(map[string]any); !ok {
-				t.Errorf("_pagination = %T, want object: %s", env["_pagination"], tf.Out.String())
+			pagination, ok := env["_pagination"].(map[string]any)
+			if !ok || pagination["total"] != float64(11) || pagination["page"] != float64(1) || pagination["page_size"] != float64(20) {
+				t.Errorf("_pagination = %#v, want offset pagination: %s", env["_pagination"], tf.Out.String())
 			}
 		})
 	}

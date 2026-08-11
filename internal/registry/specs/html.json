@@ -14,14 +14,9 @@
       "get": {
         "operationId": "html.list",
         "summary": "List documents (owner-scoped index)",
-        "description": "Owner-scoped document index. The owner check is enforced server-side; a non-owner session is rejected 403.",
+        "description": "Owner-scoped document index. The backend returns offset pagination metadata; generic cursor-based --page-all does not apply.",
         "x-octo-risk": "read",
         "x-octo-response-unwrap": null,
-        "x-octo-pagination": { "cursorParam": "cursor", "limitParam": "limit" },
-        "parameters": [
-          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque pagination cursor." },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "Maximum documents to return." }
-        ],
         "responses": {
           "200": {
             "description": "A list of documents",
@@ -486,15 +481,12 @@
       "get": {
         "operationId": "html.comment.list",
         "summary": "List a document's comments (needs reader)",
-        "description": "List comments for a document. The slug is passed as a query parameter.",
+        "description": "List comments for a document. The slug is passed as a query parameter. The backend returns offset pagination metadata; generic cursor-based --page-all does not apply.",
         "x-octo-risk": "read",
         "x-octo-response-unwrap": null,
-        "x-octo-pagination": { "cursorParam": "cursor", "limitParam": "limit" },
         "parameters": [
           { "name": "slug", "in": "query", "required": true, "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility.", "schema": { "type": "string" } },
-          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" },
-          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque pagination cursor." },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "Maximum comments to return." }
+          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" }
         ],
         "responses": {
           "200": { "description": "Comment list" }

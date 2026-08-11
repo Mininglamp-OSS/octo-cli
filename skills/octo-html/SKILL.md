@@ -80,6 +80,9 @@ octo-cli html versions <doc-ref>
 octo-cli html rm <doc-ref>
 ```
 
+`html list` returns the backend's offset envelope as `data` plus `_pagination`
+(`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
+
 Mounts (`group`, `space`, or `thread`) control placement/registration only. For
 `group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
 document-reference format.
@@ -126,6 +129,9 @@ The wire parameter remains `slug`; pass the saved document reference.
 octo-cli html comment list --slug <doc-ref> [--version all]
 octo-cli html comment add --data '{"slug":"<doc-ref>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
 ```
+
+`html comment list` likewise preserves offset metadata in `_pagination`; it has
+no cursor flags or `--page-all` support.
 
 ## 6. Agent element edit and reply
 

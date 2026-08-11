@@ -95,6 +95,11 @@ func TestOctoHTMLSkillCanonicalCreateContract(t *testing.T) {
 			t.Errorf("octo-html skill retains stale identity guidance %q", stale)
 		}
 	}
+	for _, want := range []string{"`total`, `page`, `page_size`", "no cursor flags or `--page-all` support"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("octo-html skill missing offset-pagination guidance %q", want)
+		}
+	}
 }
 
 func TestOctoSummarySkillEmbedded(t *testing.T) {

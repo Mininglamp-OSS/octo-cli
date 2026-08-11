@@ -209,6 +209,27 @@ func TestHTMLDocIDContract(t *testing.T) {
 	}
 }
 
+func TestHTMLCollectionOperationsPreserveOffsetEnvelopeWithoutCursorPagination(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{"html.list", "html.comment.list"} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Fatalf("%s not found", id)
+		}
+		if op.ResponseUnwrap != "" {
+			t.Errorf("%s response unwrap = %q, want disabled so pagination is preserved", id, op.ResponseUnwrap)
+		}
+		if op.Pagination != nil {
+			t.Errorf("%s cursor pagination = %#v, want nil for offset envelope", id, op.Pagination)
+		}
+		for _, p := range op.Parameters {
+			if p.Name == "cursor" || p.Name == "limit" {
+				t.Errorf("%s unexpectedly declares %q", id, p.Name)
+			}
+		}
+	}
+}
+
 func TestGetOperationMatterList_Pagination(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("matter.list")
