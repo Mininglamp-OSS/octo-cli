@@ -752,7 +752,13 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 			if d, ok := extractRetryAfterFromErr(lastErr); ok {
 				delay = d
 			}
-			c.verbosef("retry #%d after %s (last error: %v)", attempt, delay, lastErr)
+			// Redacted here, not relied on later: the masking boundary is on Do's
+			// *return* value, and lastErr inside this loop has not passed through it
+			// yet. A transport failure is a *url.Error whose text quotes the whole
+			// URL, so on a share or invite path that is the token — printed once per
+			// retry.
+			c.verbosef("retry #%d after %s (last error: %v)", attempt, delay,
+				redactError(lastErr, req.SecretValues))
 			select {
 			case <-ctx.Done():
 				return nil, output.ErrNetwork(ctx.Err().Error(), "request cancelled")
