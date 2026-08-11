@@ -286,3 +286,67 @@ func TestAPI_DataKeepsUint64Precision(t *testing.T) {
 		t.Errorf("the id was rounded on the way to the wire: sent %s, want it to contain %s", got, big)
 	}
 }
+
+// TestAPI_DecodeIsStrictAndLossless covers both of the review's last two findings, one of
+// which was a regression I introduced in the previous commit.
+//
+// Switching --data from json.Unmarshal to a Decoder for UseNumber dropped the
+// trailing-content rejection Unmarshal gives for free, so `{"a":1}{"b":2}` and `{"a":1}]`
+// were accepted and truncated to the first value. resolveBody documents that exact trap and
+// carries the same check; I walked into it anyway, which is why the check now lives in one
+// helper both callers use.
+//
+// --params had the mirror of the precision bug: plain Unmarshal made every number a float64
+// and the formatter routed integer-looking ones back through int64, so 2^53+1 became 2^53 —
+// a valid id addressing a row nobody asked for.
+func TestAPI_DecodeIsStrictAndLossless(t *testing.T) {
+	const big = "9007199254740993" // 2^53 + 1
+
+	t.Run("--params keeps exact digits", func(t *testing.T) {
+		q, err := parseParamsJSON(`{"parent_id":` + big + `,"ids":[` + big + `]}`)
+		if err != nil {
+			t.Fatalf("parseParamsJSON: %v", err)
+		}
+		if got := q.Get("parent_id"); got != big {
+			t.Errorf("parent_id = %q, want %q — a rounded id names a different row", got, big)
+		}
+		if got := q["ids"]; len(got) != 1 || got[0] != big {
+			t.Errorf("ids = %v, want [%s]", got, big)
+		}
+	})
+
+	t.Run("--params still rejects trailing content", func(t *testing.T) {
+		for _, spec := range []string{`{"a":1}{"b":2}`, `{"a":1}]`, `{"a":1} garbage`} {
+			if _, err := parseParamsJSON(spec); err == nil {
+				t.Errorf("%q has content after the first value and must be refused", spec)
+			}
+		}
+	})
+
+	t.Run("--data rejects trailing content", func(t *testing.T) {
+		for _, data := range []string{`{"file_id":1}{"file_id":2}`, `{"password":"x"}]`, `{"a":1} extra`} {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) {
+				t.Errorf("a request was sent for malformed --data %q", data)
+			}, nil)
+			if err := env.run("api", "POST", "/v1/bot/probe", "--data", data); err == nil {
+				t.Errorf("--data %q is two JSON values and must be refused, not truncated", data)
+			}
+		}
+	})
+
+	t.Run("--data still accepts one value", func(t *testing.T) {
+		var got string
+		env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			got = string(raw)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{}`))
+		}, nil)
+		if err := env.run("api", "POST", "/v1/bot/probe", "--data", `{"parent_id":`+big+`}`); err != nil {
+			t.Fatalf("api: %v", err)
+		}
+		if !strings.Contains(got, big) {
+			t.Errorf("sent %s, want it to contain %s", got, big)
+		}
+	})
+}

@@ -3,7 +3,9 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -71,7 +73,7 @@ flags are not auto-generated and --page-all is not available.`,
 				// so it must not be the one place the lossless contract does not hold.
 				dec := json.NewDecoder(bytes.NewReader(rawData))
 				dec.UseNumber()
-				if err := dec.Decode(&body); err != nil {
+				if err := decodeStrict(dec, &body); err != nil {
 					ee := output.ErrValidation(fmt.Sprintf("--data is not valid JSON: %v", err), "pass a JSON value or use @file/@-")
 					_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 					return ee
@@ -126,6 +128,28 @@ flags are not auto-generated and --page-all is not available.`,
 // credential-equivalent path value here to leak. The enum guard also tells callers that
 // when a vocabulary is too narrow there is no way through except `octo-cli api`, so the
 // CLI actively points people at this command.
+// decodeStrict decodes exactly one JSON value and refuses trailing content.
+//
+// json.Unmarshal rejects trailing bytes for free; a json.Decoder stops after the first
+// value, so switching to a Decoder for UseNumber silently accepted `{"a":1}{"b":2}` and
+// `{"a":1}]`, truncating to the first value. That is the trap resolveBody documents, and
+// this is the second time it has been walked into — hence one helper both callers use
+// rather than the check written out twice.
+//
+// The check is a second Decode requiring io.EOF, not dec.More(): More reports whether
+// another element follows *inside the current array or object*, so at top level it answers
+// false for a stray "]" and lets it through.
+func decodeStrict(dec *json.Decoder, into any) error {
+	if err := dec.Decode(into); err != nil {
+		return err
+	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("unexpected content after the first JSON value")
+	}
+	return nil
+}
+
 // apiSecretsForRequest recovers every value this request carries that the spec marks
 // secret — path parameters and request-body leaves alike.
 //
@@ -304,7 +328,9 @@ func parseParamsJSON(spec string) (url.Values, error) {
 		return nil, nil
 	}
 	var obj map[string]any
-	if err := json.Unmarshal([]byte(spec), &obj); err != nil {
+	dec := json.NewDecoder(strings.NewReader(spec))
+	dec.UseNumber()
+	if err := decodeStrict(dec, &obj); err != nil {
 		return nil, output.ErrValidation(
 			fmt.Sprintf("--params is not a JSON object: %v", err),
 			"pass an object like '{\"status\":\"open\"}'",
@@ -332,14 +358,18 @@ func parseParamsJSON(spec string) (url.Values, error) {
 			} else {
 				q.Set(k, "false")
 			}
-		case float64:
-			if val == float64(int64(val)) {
-				q.Set(k, fmt.Sprintf("%d", int64(val)))
-			} else {
-				q.Set(k, fmt.Sprintf("%g", val))
-			}
+		case json.Number:
+			// The exact digits the caller typed. Decoding into float64 and formatting
+			// back through int64 rounded 9007199254740993 to …92, and a rounded id is a
+			// *valid* id addressing a row nobody asked for — the same reason the
+			// generated commands decode with UseNumber.
+			q.Set(k, val.String())
 		case []any:
 			for _, item := range val {
+				if n, ok := item.(json.Number); ok {
+					q.Add(k, n.String())
+					continue
+				}
 				q.Add(k, fmt.Sprintf("%v", item))
 			}
 		default:
