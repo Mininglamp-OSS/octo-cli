@@ -802,6 +802,29 @@ func assertSafeTransferTarget(field string, u *url.URL, loopbackAPI bool) *outpu
 	if err := assertNumericHostIsAnIP(field, u); err != nil {
 		return err
 	}
+	// An initial presigned URL is judged exactly as a redirect hop is. The https arm used to
+	// be empty while CheckRedirect refused every local spelling, so `https://localhost/obj`
+	// was accepted as the *first* upload_url or download_url and refused only if a hop reached
+	// the same place. Two things made that worth closing rather than filing as narrow:
+	//
+	// The comment on the proxy-path narrowing (see transferGuard's row 4) justifies itself with
+	// "the string pre-filter still rejects every literal local spelling before any of this".
+	// That was not true for https, so the note a future reader uses to decide not to look here
+	// was resting on a check that did not exist.
+	//
+	// And the exploitable path, while conditional, is real: with a proxy configured and a name
+	// that does not resolve locally, the guard deliberately lets the proxy resolve it, so a
+	// compromised backend returning `https://foo.localhost/obj` gets the PUT body — the user's
+	// file — delivered to a service on the caller's own machine, or on the download side gets
+	// that service's response written to -o. http.ProxyFromEnvironment's own loopback filter
+	// does not cover "localhost." or "*.localhost", so it does not stand in for this. On the
+	// direct path the dial-time address classification already closes it; this makes the two
+	// paths agree instead of relying on which one is in use.
+	if !loopbackAPI && isLoopbackHost(u.Hostname()) {
+		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+			fmt.Sprintf("%s points at a loopback host, which is not reachable object storage", field),
+			"the storage endpoint named the local machine; report it")
+	}
 	switch u.Scheme {
 	case "https":
 	case "http":

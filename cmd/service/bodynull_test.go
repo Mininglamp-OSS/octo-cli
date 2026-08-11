@@ -288,3 +288,87 @@ func placeholderFor(schema *registry.SchemaInfo) any {
 func mustJSONNumber(digits string) any {
 	return json.Number(digits)
 }
+
+// TestRequiredParameterRejectsAnEmptyValue is round-17 P1-C.
+//
+// This PR introduced rejectEmptyPathValue with an explicit rationale — `drive share revoke
+// "$SHARE_ID"` with an unset shell variable would send DELETE to `{mount}/shares/` rather
+// than fail — and applied it to path values only. The identical unset-variable failure was
+// unguarded one and two functions away, because cobra's MarkFlagRequired only checks whether
+// the flag was *given*: `--flag ""` satisfies it.
+//
+// Reproduced against a binary built from 2153838, with the omitted-flag control alongside:
+//
+//	docs content edit D1 --base-version "" …  -> PATCH went out with "If-Match": ""
+//	docs content edit D1 …                    -> required flag(s) "base-version" not set
+//	drive browse --space-id "" --dry-run      -> …/browse?space_id=
+//
+// An empty If-Match is not a valid entity-tag list, and the idiomatic server-side read
+// (`if h := r.Header.Get("If-Match"); h != "" { …CAS… }`) skips the compare-and-swap
+// entirely — so the concurrency gate the spec marks required is defeated on a collaborative
+// document edit, and the failure mode is a lost update.
+//
+// The guard is on the spec's own `required`, so an optional parameter can still be sent
+// empty: some backends use an empty value to mean "clear this filter", and nothing in review
+// asked for that to change.
+func TestRequiredParameterRejectsAnEmptyValue(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		label    string
+		value    string
+		required bool
+		wantErr  bool
+	}{
+		{"a required parameter given an empty string", "--space-id", "", true, true},
+		{"a required parameter given a value", "--space-id", "shared:s1", true, false},
+		{"an optional parameter given an empty string", "--keyword", "", false, false},
+		{"an optional parameter given a value", "--keyword", "x", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := rejectEmptyRequiredValue(tc.label, tc.value, tc.required)
+			if tc.wantErr && err == nil {
+				t.Fatalf("%s=%q must be refused: cobra's required check only sees whether the "+
+					"flag was given, so an empty value reaches the wire", tc.label, tc.value)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("%s=%q must be accepted: %v", tc.label, tc.value, err)
+			}
+			if tc.wantErr && !strings.Contains(err.Message, tc.label) {
+				t.Errorf("the refusal must name the flag: %s", err.Message)
+			}
+		})
+	}
+}
+
+// TestRequiredParameterGuardCoversEveryRequiredQueryAndHeader is the derived half: rather
+// than trusting that buildQuery and buildHeaders call the guard, it asserts that every
+// required query or header parameter in every embedded spec is one the guard would refuse an
+// empty value for — so a new required parameter is covered the moment it is declared.
+func TestRequiredParameterGuardCoversEveryRequiredQueryAndHeader(t *testing.T) {
+	reg := registry.MustNew()
+	var required int
+
+	for _, svc := range reg.ListServices() {
+		for _, info := range reg.ListOperations(svc) {
+			d, ok := reg.GetOperation(info.ID)
+			if !ok {
+				continue
+			}
+			for i := range d.Parameters {
+				p := &d.Parameters[i]
+				if !p.Required || (p.In != "query" && p.In != "header") {
+					continue
+				}
+				required++
+				if err := rejectEmptyRequiredValue("--"+p.Name, "", p.Required); err == nil {
+					t.Errorf("%s: required %s parameter %q would accept an empty value",
+						info.ID, p.In, p.Name)
+				}
+			}
+		}
+	}
+	if required == 0 {
+		t.Fatal("no required query or header parameter was found, so this asserted nothing")
+	}
+	t.Logf("census covered %d required query/header parameters across all embedded specs", required)
+}

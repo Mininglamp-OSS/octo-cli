@@ -3,6 +3,7 @@ package cmd
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -231,5 +232,140 @@ func TestDriveUpload_OnlyAStoredObjectIsConfirmed(t *testing.T) {
 				t.Errorf("the pending row was not cancelled after a %d PUT", tc.status)
 			}
 		})
+	}
+}
+
+// TestDriveShareCreate_ReportsWhetherAPasswordWasApplied is the sharper half of round-17
+// P1-B: refusing the document branch stops the silent drop, but on the blob branch the
+// caller still could not confirm that a password took effect.
+//
+// `password_set` is the established convention everywhere else in this domain — declared on
+// the share object in drive.json, decoded into shareResponse.PasswordSet, and emitted by
+// `share list`, `share access --dry-run`, `share download --dry-run` and `share create
+// --dry-run`. `share create`'s *success* envelope was the one surface that dropped it, and
+// --dry-run cannot stand in because the dry run stops before the lookup that picks the branch.
+//
+// Reported on both branches, and deliberately not omitempty: "false" is the answer a caller
+// needs on a document link, where a password cannot apply at all, and an absent field would
+// be indistinguishable from an older binary that never reported it.
+func TestDriveShareCreate_ReportsWhetherAPasswordWasApplied(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		entry       string
+		args        []string
+		shareReply  string
+		wantSet     bool
+		wantPresent bool
+	}{
+		{
+			name:        "blob with a password",
+			entry:       `{"id":5,"type":"blob","space_id":"shared:drive-1","name":"c.pdf"}`,
+			args:        []string{"--password", "hunter2hunter2"},
+			shareReply:  `{"id":"TOKEN1234567","file_id":5,"permission":"download","password_set":true}`,
+			wantSet:     true,
+			wantPresent: true,
+		},
+		{
+			name:        "blob without a password",
+			entry:       `{"id":5,"type":"blob","space_id":"shared:drive-1","name":"c.pdf"}`,
+			shareReply:  `{"id":"TOKEN1234567","file_id":5,"permission":"download","password_set":false}`,
+			wantSet:     false,
+			wantPresent: true,
+		},
+		{
+			// The backend is the authority: if it reports no password despite one being
+			// sent, the envelope must say so rather than echo the caller's intent.
+			name:        "blob where the backend did not apply the password",
+			entry:       `{"id":5,"type":"blob","space_id":"shared:drive-1","name":"c.pdf"}`,
+			args:        []string{"--password", "hunter2hunter2"},
+			shareReply:  `{"id":"TOKEN1234567","file_id":5,"permission":"download","password_set":false}`,
+			wantSet:     false,
+			wantPresent: true,
+		},
+		{
+			name:        "document link, where a password cannot apply",
+			entry:       `{"id":5,"type":"doc","ref_id":"d_1","doc_space_id":"space-9","space_id":"shared:drive-1","name":"Spec"}`,
+			wantSet:     false,
+			wantPresent: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/shares") {
+					_, _ = w.Write([]byte(tc.shareReply))
+					return
+				}
+				_, _ = w.Write([]byte(tc.entry))
+			}, nil)
+
+			if err := env.run(append([]string{"drive", "share", "create", "5"}, tc.args...)...); err != nil {
+				t.Fatalf("share create: %v", err)
+			}
+			data := env.data(t)
+			got, present := data["password_set"]
+			if !present {
+				t.Fatalf("password_set is absent, so a caller cannot confirm whether the share "+
+					"is password-gated:\n%s", env.tf.Out.String())
+			}
+			if present != tc.wantPresent || got != tc.wantSet {
+				t.Errorf("password_set = %v, want %v", got, tc.wantSet)
+			}
+		})
+	}
+}
+
+// TestDriveTransfer_InitialPresignedURLIsJudgedLikeARedirectHop is round-17 P1-D.
+//
+// The https arm of assertSafeTransferTarget was empty, while the redirect hop refused exactly
+// these spellings — so `https://localhost/obj` was accepted as an initial upload_url or
+// download_url and refused as a hop. The comment justifying the proxy-path narrowing
+// ("the string pre-filter still rejects every literal local spelling before any of this")
+// depended on the check that was not there, which is the same defect shape as the download-side
+// comment in P1-A: a note a future reader uses to decide not to look here.
+//
+// The exploitable path needs a configured proxy and a name that does not resolve locally, so
+// the severity is conditional — on the direct path the dial-time address classification closes
+// it. The asymmetry is the thing being fixed: an initial URL and a hop are now judged
+// identically. Note http.ProxyFromEnvironment's own loopback filter does not cover "localhost."
+// or "*.localhost", so it does not stand in for this.
+func TestDriveTransfer_InitialPresignedURLIsJudgedLikeARedirectHop(t *testing.T) {
+	for _, raw := range []string{
+		"https://localhost/obj",
+		"https://localhost./obj",
+		"https://foo.localhost/obj",
+		"https://127.0.0.1/obj",
+		"https://[::1]/obj",
+		"https://127.0.0.1.:443/obj",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			u, perr := url.Parse(raw)
+			if perr != nil {
+				t.Fatalf("parse: %v", perr)
+			}
+			// loopbackAPI=false is the remote-origin deployment, which is the one where a
+			// local target is never legitimate.
+			err := assertSafeTransferTarget("download_url", u, false)
+			if err == nil {
+				t.Fatalf("%s was accepted as an initial presigned URL while the identical "+
+					"spelling is refused as a redirect hop", raw)
+			}
+			if err.Code != "UNSAFE_PRESIGNED_URL" {
+				t.Errorf("code = %q, want UNSAFE_PRESIGNED_URL", err.Code)
+			}
+		})
+	}
+
+	// The allow direction, and the bound: against a local Octo origin, loopback storage is
+	// the documented local-development setup and must keep working on both schemes.
+	for _, raw := range []string{"https://localhost/obj", "http://127.0.0.1:9000/obj"} {
+		u, _ := url.Parse(raw)
+		if err := assertSafeTransferTarget("download_url", u, true); err != nil {
+			t.Errorf("%s must still be accepted against a loopback Octo origin: %v", raw, err)
+		}
+	}
+	// And a real remote host is unaffected.
+	u, _ := url.Parse("https://storage.example.invalid/obj")
+	if err := assertSafeTransferTarget("download_url", u, false); err != nil {
+		t.Errorf("a remote https target must be accepted: %v", err)
 	}
 }

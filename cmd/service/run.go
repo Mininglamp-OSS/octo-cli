@@ -56,19 +56,12 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		urlPath = strings.ReplaceAll(urlPath, placeholder, url.PathEscape(pathValues[i]))
 	}
 
-	// Query parameters (only emit flags explicitly set by the user so defaults
-	// don't override backend defaults).
-	q, verr := buildQuery(cobraCmd, rt)
+	// Query and header parameters. Only flags the user explicitly set are emitted, so a
+	// default never overrides a backend default and an omitted optional header stays absent.
+	q, headers, verr := buildQueryAndHeaders(cobraCmd, rt)
 	if verr != nil {
-		_ = f.EmitError(verr) //nolint:errcheck // best-effort emit before returning err
-		return verr
+		return emitAndReturn(f, verr)
 	}
-
-	// Header parameters (spec `"in": "header"`). Emit only headers the user
-	// explicitly set so an omitted optional header stays absent. This is how a
-	// spec-declared header such as If-Match (optimistic-concurrency base
-	// version) reaches the wire from a flag — no per-endpoint transport code.
-	headers := buildHeaders(cobraCmd, rt)
 
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
@@ -110,6 +103,35 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, rt, &req)
+}
+
+// buildQueryAndHeaders assembles both parameter positions that come from flags.
+//
+// One step rather than two because they share a rule and a failure shape: a parameter the
+// spec marks required must not be forwarded empty, wherever it sits. Keeping them together
+// also keeps runOperation — which is a sequence of pre-flight checks and sits at the
+// complexity limit — from growing a branch per position.
+//
+// This is how a spec-declared header such as If-Match (optimistic-concurrency base version)
+// reaches the wire from a flag, with no per-endpoint transport code.
+func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, map[string]string, *output.ExitError) {
+	q, err := buildQuery(cobraCmd, rt)
+	if err != nil {
+		return nil, nil, err
+	}
+	headers, err := buildHeaders(cobraCmd, rt)
+	if err != nil {
+		return nil, nil, err
+	}
+	return q, headers, nil
+}
+
+// emitAndReturn emits a validation failure and returns it, which is the shape every
+// pre-flight check in runOperation shares. Factored out so adding a check does not add
+// another three-line block to a function already at the complexity limit.
+func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
+	_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+	return err
 }
 
 // attachJSONBody resolves the JSON body and applies the operation's declared
@@ -310,6 +332,38 @@ func changedFlagValue(cobraCmd *cobra.Command, flagName string, val *string) str
 }
 
 // findParam locates a spec parameter by wire name and location.
+// rejectEmptyRequiredValue refuses an empty value for a parameter the spec marks required,
+// in any position.
+//
+// It is rejectEmptyPathValue's sibling, and exists because that guard was applied to exactly
+// one of the three places a parameter can sit while the unset-shell-variable failure it was
+// written for is identical in the other two. cobra's MarkFlagRequired only checks whether the
+// flag was *given*, so `--flag ""` satisfies the required gate and the empty value goes on the
+// wire: `--space-id ""` produced `?space_id=`, emptying a required scope, and `--base-version ""`
+// produced `If-Match: `, which is not a valid entity-tag list — the idiomatic server-side read
+// (`if h := r.Header.Get("If-Match"); h != ""`) then skips the compare-and-swap entirely, so the
+// concurrency gate the spec marks required is silently defeated and a collaborative edit loses
+// an update.
+//
+// Gated on the spec's own `required`, so an optional parameter may still be sent empty: a
+// backend may read that as "clear this filter", and narrowing it would be a contract change
+// beyond the defect.
+func rejectEmptyRequiredValue(label, value string, required bool) *output.ExitError {
+	if !required || value != "" {
+		return nil
+	}
+	return output.ErrValidation(
+		fmt.Sprintf("%s is empty, but this operation requires a value", label),
+		"pass a value: the required-flag check only sees whether the flag was given, so an "+
+			"empty string satisfies it while the request carries no value at all")
+}
+
+// paramRequired reports whether the spec marks the named parameter required in that position.
+func paramRequired(d *registry.OperationDetail, apiName, in string) bool {
+	p := findParam(d, apiName, in)
+	return p != nil && p.Required
+}
+
 func findParam(d *registry.OperationDetail, name, in string) *registry.ParamInfo {
 	if d == nil {
 		return nil
@@ -354,6 +408,7 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 		}
 		enum := queryEnum(rt.detail, qf.apiName)
 		label := "--" + flagName
+		required := paramRequired(rt.detail, qf.apiName, "query")
 		switch qf.kind {
 		case kindInt:
 			if err := checkEnum(label, *qf.intVal, enum); err != nil {
@@ -366,14 +421,8 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 			}
 			q.Set(qf.apiName, strconv.FormatBool(*qf.boolVal))
 		case kindStringSlice:
-			// A repeated flag's enum constrains each element, matching how the
-			// spec declares it (schema.items.enum).
-			itemEnum := queryItemEnum(rt.detail, qf.apiName)
-			for _, v := range *qf.strSlc {
-				if err := checkEnum(label, v, itemEnum); err != nil {
-					return nil, err
-				}
-				q.Add(qf.apiName, v)
+			if err := addSliceQueryValues(q, qf, rt, label, required); err != nil {
+				return nil, err
 			}
 		case kindUint64:
 			n, err := output.ParseUint64Decimal(label, *qf.strVal)
@@ -385,6 +434,9 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 			}
 			q.Set(qf.apiName, *qf.strVal)
 		default:
+			if err := rejectEmptyRequiredValue(label, *qf.strVal, required); err != nil {
+				return nil, err
+			}
 			if err := checkEnum(label, *qf.strVal, enum); err != nil {
 				return nil, err
 			}
@@ -392,6 +444,24 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 		}
 	}
 	return q, nil
+}
+
+// addSliceQueryValues emits every element of a repeated query flag, holding each to the
+// element enum the spec declares (schema.items.enum) and to the required-non-empty rule.
+//
+// Extracted to keep buildQuery under the complexity limit; the loop is otherwise unchanged.
+func addSliceQueryValues(q url.Values, qf *queryFlag, rt *operationRuntime, label string, required bool) *output.ExitError {
+	itemEnum := queryItemEnum(rt.detail, qf.apiName)
+	for _, v := range *qf.strSlc {
+		if err := rejectEmptyRequiredValue(label, v, required); err != nil {
+			return err
+		}
+		if err := checkEnum(label, v, itemEnum); err != nil {
+			return err
+		}
+		q.Add(qf.apiName, v)
+	}
+	return nil
 }
 
 // queryEnum returns the enum declared on a query parameter's own schema, or nil.
@@ -421,18 +491,22 @@ func queryItemEnum(d *registry.OperationDetail, apiName string) []any {
 // check here would be unreachable code; TestEnum_NoHeaderOrPathParamDeclaresEnum
 // fails the build the day one does, which is the point at which the asymmetry
 // stops being deliberate and has to be closed.
-func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) map[string]string {
+func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (map[string]string, *output.ExitError) {
 	var headers map[string]string
 	for flagName, hf := range rt.headerFlags {
 		if !cobraCmd.Flags().Changed(flagName) {
 			continue
+		}
+		if err := rejectEmptyRequiredValue("--"+flagName, *hf.strVal,
+			paramRequired(rt.detail, hf.apiName, "header")); err != nil {
+			return nil, err
 		}
 		if headers == nil {
 			headers = map[string]string{}
 		}
 		headers[hf.apiName] = *hf.strVal
 	}
-	return headers
+	return headers, nil
 }
 
 // resolveBody constructs the JSON body. Empty when the op has neither --data

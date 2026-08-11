@@ -36,6 +36,16 @@ type shareTarget struct {
 	ContentType  string `json:"content_type,omitempty"`
 	Permission   string `json:"permission"`
 	ExpiresAt    string `json:"expires_at,omitempty"`
+	// PasswordSet reports whether the share is password-gated, as the backend applied it.
+	//
+	// Deliberately not omitempty: "false" is the answer a caller needs on a document link,
+	// where a password cannot apply at all, and an absent field would be indistinguishable
+	// from an older binary that never reported it. This was the one surface in the domain
+	// that dropped the field — `share list`, all three dry runs and the spec all carry it —
+	// so a caller could not confirm on either branch that a supplied password took effect.
+	// It is read from the backend's own answer rather than from what the caller asked for,
+	// so a backend that did not apply the password cannot be papered over here.
+	PasswordSet bool `json:"password_set"`
 }
 
 // driveEntryResponse is the subset of a DriveEntry the share commands branch on.
@@ -284,6 +294,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 			ContentType:  entry.ContentType,
 			Permission:   share.Permission,
 			ExpiresAt:    share.ExpiresAt,
+			PasswordSet:  share.PasswordSet,
 		})
 
 	default:
