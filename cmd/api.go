@@ -80,6 +80,12 @@ flags are not auto-generated and --page-all is not available.`,
 				}
 			}
 
+			secrets, serr := apiSecretsForRequest(f.Registry(), method, path, body)
+			if serr != nil {
+				_ = f.EmitError(serr) //nolint:errcheck // best-effort emit before returning err
+				return serr
+			}
+
 			cli, err := f.Client()
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -93,7 +99,7 @@ flags are not auto-generated and --page-all is not available.`,
 				Body:    body,
 				// Recovered from the registry rather than from a command definition,
 				// because this command's path is whatever the caller typed.
-				SecretValues: apiSecretsForRequest(f.Registry(), method, path, body),
+				SecretValues: secrets,
 			})
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -158,15 +164,23 @@ func decodeStrict(dec *json.Decoder, into any) error {
 // drive.json marks `password` in the *body* of share.access and share.download. Since every
 // redaction keys off SecretValues and short-circuits when it is empty, missing the body meant
 // --dry-run and --verbose printed the password verbatim.
-func apiSecretsForRequest(reg *registry.Registry, method, path string, body any) []string {
+//
+// A non-string value at a secret property is refused rather than declared. See
+// bodySecretValues for why refusing is the right half of that fix to take.
+func apiSecretsForRequest(reg *registry.Registry, method, path string, body any) ([]string, *output.ExitError) {
 	secrets := apiSecretsForPath(reg, method, path)
 	if body == nil || reg == nil {
-		return secrets
+		return secrets, nil
 	}
 	if d := matchOperation(reg, method, path); d != nil && d.RequestBody != nil {
-		secrets = append(secrets, bodySecretValues(d.RequestBody, body)...)
+		found, err := bodySecretValues(d.RequestBody, body, "")
+		if err != nil {
+			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err),
+				"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")
+		}
+		secrets = append(secrets, found...)
 	}
-	return secrets
+	return secrets, nil
 }
 
 // matchOperation returns the operation whose path template matches, or nil.
@@ -189,35 +203,125 @@ func matchOperation(reg *registry.Registry, method, path string) *registry.Opera
 }
 
 // bodySecretValues walks the supplied body against the schema and returns the values sitting
-// at properties the spec marks secret, at any depth.
-func bodySecretValues(schema *registry.SchemaInfo, value any) []string {
-	var out []string
+// at properties the spec marks secret, at any depth. A non-string value at such a property is
+// an error rather than a collected secret.
+//
+// Refusing is the whole fix on this side, and it is deliberately not symmetrical with the
+// response side. Both halves of the redaction path used to assume "declared secret ⇒ Go
+// string": collection asserted child.(string), so a --data number was never declared, and
+// redactBodyValue returned a json.Number verbatim, so declaring it would not have helped
+// either. `api` does no schema validation, so an unquoted numeric password was accepted, sent
+// and printed twice — in the request trace and in the error detail — and an all-digit share
+// password is an ordinary choice with the quotes the only thing protecting it.
+//
+// Teaching both halves to stringify would fix it too, and would be worse here: it widens the
+// masker over every numeric value in a request body, which masks ordinary ids out of every
+// diagnostic. A type error costs the caller one retry with quotes and cannot disclose
+// anything. The response side gets the masking treatment instead, because there the value
+// arrives from the backend and no caller mistake is involved.
+//
+// The error names the property and never the value: this is the default-deny family, and the
+// point of refusing is that the value has no masked spelling yet.
+//
+// The object and array walks are separate functions only to keep each under the complexity
+// limit; the recursion is one traversal.
+func bodySecretValues(schema *registry.SchemaInfo, value any, at string) ([]string, error) {
 	switch v := value.(type) {
 	case map[string]any:
-		for name := range schema.Properties {
-			prop := schema.Properties[name]
-			child, present := v[name]
-			if !present {
-				continue
-			}
-			if prop.Secret {
-				if str, ok := child.(string); ok && str != "" {
-					out = append(out, str)
-				}
-				continue
-			}
-			if prop.Type == "object" || prop.Items != nil {
-				out = append(out, bodySecretValues(&prop, child)...)
-			}
-		}
+		return objectSecretValues(schema, v, at)
 	case []any:
-		if schema.Items != nil {
-			for _, item := range v {
-				out = append(out, bodySecretValues(schema.Items, item)...)
+		return arraySecretValues(schema, v, at)
+	}
+	return nil, nil
+}
+
+// objectSecretValues collects the secret leaves of one JSON object against its schema.
+func objectSecretValues(schema *registry.SchemaInfo, obj map[string]any, at string) ([]string, error) {
+	var out []string
+	for name := range schema.Properties {
+		prop := schema.Properties[name]
+		child, present := obj[name]
+		if !present {
+			continue
+		}
+		where := joinPropertyPath(at, name)
+		if prop.Secret {
+			str, err := secretStringAt(where, child)
+			if err != nil {
+				return nil, err
 			}
+			if str != "" {
+				out = append(out, str)
+			}
+			continue
+		}
+		if prop.Type == "object" || prop.Items != nil {
+			nested, err := bodySecretValues(&prop, child, where)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, nested...)
 		}
 	}
-	return out
+	return out, nil
+}
+
+// arraySecretValues collects the secret leaves of one JSON array against its item schema.
+func arraySecretValues(schema *registry.SchemaInfo, items []any, at string) ([]string, error) {
+	if schema.Items == nil {
+		return nil, nil
+	}
+	var out []string
+	for i, item := range items {
+		nested, err := bodySecretValues(schema.Items, item, fmt.Sprintf("%s[%d]", at, i))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, nested...)
+	}
+	return out, nil
+}
+
+// secretStringAt reads the value at a declared-secret property, refusing any JSON kind but a
+// string. An empty string is not a secret to mask and is not an error either.
+//
+// An explicit null is left alone rather than refused: it carries no value to disclose, and
+// `api` does no schema validation otherwise, so refusing it would reject a call the backend
+// may well accept.
+func secretStringAt(where string, child any) (string, error) {
+	if child == nil {
+		return "", nil
+	}
+	str, ok := child.(string)
+	if !ok {
+		return "", fmt.Errorf("%s is declared secret and must be a JSON string, not %s",
+			where, jsonKindOf(child))
+	}
+	return str, nil
+}
+
+// joinPropertyPath names a body property for an error message.
+func joinPropertyPath(at, name string) string {
+	if at == "" {
+		return name
+	}
+	return at + "." + name
+}
+
+// jsonKindOf names the JSON kind of a decoded value, for a type error that must not print
+// the value itself.
+func jsonKindOf(v any) string {
+	switch v.(type) {
+	case json.Number, int, int64, float64:
+		return "a number"
+	case bool:
+		return "a boolean"
+	case map[string]any:
+		return "an object"
+	case []any:
+		return "an array"
+	}
+	return "a non-string value"
 }
 
 // pathSegments splits a concrete request path, dropping any query string or fragment.
@@ -347,35 +451,51 @@ func parseParamsJSON(spec string) (url.Values, error) {
 	}
 	q := url.Values{}
 	for k, v := range obj {
-		switch val := v.(type) {
-		case nil:
-			// skip
-		case string:
-			q.Set(k, val)
-		case bool:
-			if val {
-				q.Set(k, "true")
-			} else {
-				q.Set(k, "false")
-			}
-		case json.Number:
-			// The exact digits the caller typed. Decoding into float64 and formatting
-			// back through int64 rounded 9007199254740993 to …92, and a rounded id is a
-			// *valid* id addressing a row nobody asked for — the same reason the
-			// generated commands decode with UseNumber.
-			q.Set(k, val.String())
-		case []any:
-			for _, item := range val {
-				if n, ok := item.(json.Number); ok {
-					q.Add(k, n.String())
-					continue
-				}
-				q.Add(k, fmt.Sprintf("%v", item))
-			}
-		default:
-			buf, _ := json.Marshal(val) //nolint:errcheck // val is pre-validated JSON-safe type
-			q.Set(k, string(buf))
+		if v == nil {
+			// A top-level null means "no such parameter": omitting it is what a caller
+			// merging JSON from a template expects, and there is no arity to preserve.
+			continue
 		}
+		if items, ok := v.([]any); ok {
+			for _, item := range items {
+				q.Add(k, paramValue(item))
+			}
+			continue
+		}
+		q.Set(k, paramValue(v))
 	}
 	return q, nil
+}
+
+// paramValue renders one query value.
+//
+// Scalars keep their plain spelling — a number keeps the exact digits the caller typed,
+// because decoding into float64 and formatting back through int64 rounded 9007199254740993
+// to …92, and a rounded id is a *valid* id addressing a row nobody asked for. Anything a
+// query string cannot carry natively is JSON-encoded.
+//
+// One function for both positions, because they used to disagree. The array arm fell through
+// to fmt.Sprintf("%v", item), so an object element became `map[id:9007199254740993]`, a
+// nested array `[1 2]` and null `<nil>` — Go's debug spelling on the wire — while the same
+// value at top level was marshalled correctly. A null *element* is encoded as `null` rather
+// than skipped, since dropping it would change the array's arity.
+func paramValue(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case json.Number:
+		return t.String()
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	}
+	buf, err := json.Marshal(v)
+	if err != nil {
+		// Unreachable for a value decoded from JSON, and the safe answer if it ever is:
+		// an empty value rather than a Go-syntax dump.
+		return ""
+	}
+	return string(buf)
 }

@@ -242,7 +242,10 @@ func TestAPISecretsForRequest_CollectsBodySecrets(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := apiSecretsForRequest(reg, tc.method, tc.path, tc.body)
+			got, serr := apiSecretsForRequest(reg, tc.method, tc.path, tc.body)
+			if serr != nil {
+				t.Fatalf("apiSecretsForRequest: %v", serr)
+			}
 			for _, want := range tc.want {
 				var found bool
 				for _, g := range got {
@@ -349,4 +352,173 @@ func TestAPI_DecodeIsStrictAndLossless(t *testing.T) {
 			t.Errorf("sent %s, want it to contain %s", got, big)
 		}
 	})
+}
+
+// TestAPI_RefusesANonStringValueAtASecretProperty is round-16 P1-3, request half.
+//
+// Both halves of the redaction path assumed "declared secret ⇒ Go string", and a JSON number
+// satisfies neither: bodySecretValues asserted `child.(string)` so the value was never
+// declared, and redactBodyValue returned a json.Number verbatim so declaring it would not
+// have helped. `api` performs no schema validation, so an unquoted numeric password was
+// accepted, sent, and printed in both the request trace and the error detail — and an
+// all-digit share password is an ordinary choice, with the quotes the only thing protecting
+// it.
+//
+// The fix fails closed rather than teaching the masker to stringify: a type error here is
+// strictly better than a disclosure, and widening the masker over every numeric value would
+// mask ordinary ids — file ids, space ids — out of every diagnostic. The response half still
+// masks non-string scalars, because there no caller mistake is involved.
+func TestAPI_RefusesANonStringValueAtASecretProperty(t *testing.T) {
+	for _, tc := range []struct{ name, data, value string }{
+		{"an all-digit password", `{"password":8675309}`, "8675309"},
+		{"a uint64-sized password", `{"password":9007199254740993}`, "9007199254740993"},
+		{"a boolean", `{"password":true}`, "true"},
+		{"an object", `{"password":{"v":"secret123"}}`, "secret123"},
+		{"an array", `{"password":["secret123"]}`, "secret123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) {
+				t.Error("the request was sent, so the unmaskable value reached the wire and the trace")
+			}, nil)
+			err := env.run("api", "POST", "/v1/bot/drive/shares/TOKEN123456/access",
+				"--data", tc.data, "--verbose")
+			if err == nil {
+				t.Fatal("a non-string value at an x-octo-secret property must be refused")
+			}
+			if !strings.Contains(err.Error(), "password") {
+				t.Errorf("the error must name the offending property: %v", err)
+			}
+			// Default-deny: the refusal itself must not print what it refused.
+			if strings.Contains(err.Error(), tc.value) {
+				t.Errorf("the refusal echoed the value it refused: %v", err)
+			}
+			if out := env.tf.ErrOut.String(); strings.Contains(out, tc.value) {
+				t.Errorf("the value appears on stderr:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestAPI_AStringValueAtASecretPropertyStillWorks is the allow direction: the refusal must
+// be about the type, not about the property being present at all.
+func TestAPI_AStringValueAtASecretPropertyStillWorks(t *testing.T) {
+	const password = "hunter2hunter2"
+
+	var sent string
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}, nil)
+	if err := env.run("api", "POST", "/v1/bot/drive/shares/TOKEN123456/access",
+		"--data", `{"password":"`+password+`"}`, "--verbose"); err != nil {
+		t.Fatalf("api: %v", err)
+	}
+	if !strings.Contains(sent, password) {
+		t.Errorf("the password must still reach the wire intact: %s", sent)
+	}
+	if out := env.tf.ErrOut.String(); strings.Contains(out, password) {
+		t.Errorf("the password appears in the verbose trace:\n%s", out)
+	}
+}
+
+// TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask is round-16 P2-2's tripwire.
+//
+// `api` recovers secrets by matching the concrete path and walking the body, which leaves
+// two declarations it would silently ignore: a secret in *query* or *header* position (
+// pathSegments drops the query component and headers are not read at all), and a secret on a
+// non-string schema, which the request side now refuses outright rather than masks.
+//
+// No embedded spec declares either today, which is why neither is a live leak — but nothing
+// pinned that, so adding one would produce an unmasked credential-equivalent value with no
+// test failing. This is a census over every spec rather than a list, so a new declaration
+// fails here and names what has to be built first.
+func TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask(t *testing.T) {
+	reg := registry.MustNew()
+
+	for _, svc := range reg.ListServices() {
+		for _, info := range reg.ListOperations(svc) {
+			d, ok := reg.GetOperation(info.ID)
+			if !ok {
+				continue
+			}
+			for i := range d.Parameters {
+				p := &d.Parameters[i]
+				if !p.Secret {
+					continue
+				}
+				if p.In != "path" {
+					t.Errorf("%s declares x-octo-secret on a %s parameter %q, but `api` only "+
+						"collects path and body secrets — teach apiSecretsForRequest to read %s "+
+						"position before shipping this declaration", info.ID, p.In, p.Name, p.In)
+				}
+				if p.Type != "" && p.Type != "string" {
+					t.Errorf("%s declares x-octo-secret on a %s-typed parameter %q; the masker's "+
+						"disclosure rules are written for string values", info.ID, p.Type, p.Name)
+				}
+			}
+			if d.RequestBody != nil {
+				assertSecretPropertiesAreStrings(t, info.ID, "", d.RequestBody)
+			}
+		}
+	}
+}
+
+// assertSecretPropertiesAreStrings walks a request-body schema and reports any x-octo-secret
+// property whose declared type is not a string. `api` refuses a non-string value at such a
+// property, so a spec declaring one would make every call to that operation unusable.
+func assertSecretPropertiesAreStrings(t *testing.T, opID, path string, schema *registry.SchemaInfo) {
+	t.Helper()
+	for name := range schema.Properties {
+		prop := schema.Properties[name]
+		where := path + "." + name
+		if prop.Secret && prop.Type != "" && prop.Type != "string" {
+			t.Errorf("%s declares x-octo-secret on %s, whose type is %q — `api` refuses a "+
+				"non-string value there, so the declaration would make the operation uncallable",
+				opID, where, prop.Type)
+		}
+		if prop.Type == "object" || prop.Items != nil {
+			assertSecretPropertiesAreStrings(t, opID, where, &prop)
+		}
+	}
+	if schema.Items != nil {
+		assertSecretPropertiesAreStrings(t, opID, path+"[]", schema.Items)
+	}
+}
+
+// TestAPI_ParamsArrayElementsAreJSONNotGoSyntax is round-16 P2-3.
+//
+// The array arm of parseParamsJSON fell through to fmt.Sprintf("%v", item) for anything that
+// was not a json.Number, so an object became `map[id:9007199254740993]`, a nested array
+// `[1 2]`, and null `<nil>` — Go's own debug spelling on the wire. The *same* value at top
+// level is marshalled correctly by the default arm, so the two arms disagreed about what a
+// non-scalar query value is, and the previous round edited this exact switch while fixing
+// only its numeric half.
+func TestAPI_ParamsArrayElementsAreJSONNotGoSyntax(t *testing.T) {
+	const big = "9007199254740993" // 2^53 + 1
+
+	q, err := parseParamsJSON(`{"filters":[{"id":` + big + `}],"nest":[[1,2]],"vals":[null],` +
+		`"mixed":["s",1,true],"top":{"id":` + big + `}}`)
+	if err != nil {
+		t.Fatalf("parseParamsJSON: %v", err)
+	}
+	for key, want := range map[string][]string{
+		"filters": {`{"id":` + big + `}`},
+		"nest":    {`[1,2]`},
+		"vals":    {`null`},
+		"mixed":   {"s", "1", "true"},
+		"top":     {`{"id":` + big + `}`},
+	} {
+		got := q[key]
+		if len(got) != len(want) {
+			t.Errorf("%s = %v, want %v", key, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("%s[%d] = %q, want %q", key, i, got[i], want[i])
+			}
+		}
+	}
 }
