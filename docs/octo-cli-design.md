@@ -317,6 +317,20 @@ Notes:
 - `doc_space_id` (the document's own Octo Space) and `space_id` (the drive space)
   are different scopes. When a mount predates drive capturing `doc_space_id`,
   `share create` fails with `MISSING_DOC_SPACE_ID` rather than substituting.
+- Both halves of a transfer take the status code as the only evidence available, and neither
+  accepts the whole 2xx family. A download requires exactly `200`: a `206` is the host deciding
+  to send part of the object unasked, and a `204` is no object at all. An upload requires `200`
+  or `201`; the remaining 2xx codes fail as `UPLOAD_NOT_CONFIRMED`, distinct from the
+  `UPLOAD_FAILED` a refusal produces, because a `202 Accepted` from an async storage front end
+  is not evidence the bytes landed — and there is no post-PUT verification anywhere in the path
+  (no ETag comparison, no size echo, no HEAD) that could stand in for it. Confirming an
+  unstored object produces a drive row pointing at nothing, with `ok:true` over it.
+- `share create` refuses `--password`, `--password-file` and `--expires-in-seconds` on a
+  document node rather than dropping them. The share body is built before the node lookup, and
+  the document branch issues no request, so those flags previously vanished and the command
+  returned a `share_url` that looked password-gated and was not. A document link is an entrance
+  into the docs permission system, not a grant this command parameterises. The refusal keys on
+  whether the flag was *set*, since `--expires-in-seconds 0` is a deliberate statement.
 - The presigned PUT/GET runs on a separate HTTP client with **no** Octo
   credential and no space header. A GET follows redirects (storage gateways use
   them) but every hop is re-validated against the same https-or-loopback-http

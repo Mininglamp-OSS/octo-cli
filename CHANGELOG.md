@@ -217,6 +217,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
+- **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
+  body walker visited only non-nil children, so a property *present with value `null`* never
+  reached the enum or uint64 check and was forwarded upstream — while the same field with an
+  out-of-vocabulary or wrongly-typed value was correctly refused. Required fields were never
+  affected (a present `null` is reported as missing), so the exposure was the optional
+  constrained properties; a derived census over every embedded spec found **18** of them
+  across `drive`, `docs`, `html` and `mcp`. Both paths now refuse it, each in its own terms.
+  A `null` on a property with no enum and no `uint64` format is still forwarded — a backend
+  may accept it to clear an optional field.
+- **A presigned PUT answered `202`/`204` is no longer confirmed as a stored object.** The
+  upload accepted the whole 2xx family, so an async or no-content answer from object storage
+  returned success, the CLI went on to `confirm-upload` with the local byte count, and emitted
+  `ok:true` for a drive row pointing at an object that may never have been written. There is
+  no post-PUT verification anywhere in that path — no ETag comparison, no size echo, no HEAD —
+  so the status code is the only evidence the bytes landed, and only `200`/`201` is that
+  evidence. The other 2xx codes now fail as `UPLOAD_NOT_CONFIRMED`, kept distinct from the
+  `UPLOAD_FAILED` a storage *refusal* produces, and the pending row is still cancelled. The
+  download side's comment claiming the upload half "already refuses the same shape" was untrue
+  when written; it is true now and says so.
+- **`drive share create` no longer silently discards `--password` / `--password-file` /
+  `--expires-in-seconds` on a document.** The share body — password included — was built before
+  the node lookup and then dropped on the document branch, which issues no request at all, so
+  the command exited 0 with a `share_url` an operator could hand over believing it was
+  password-gated. It was not. A document link is an entrance into the docs permission system,
+  not a grant this command parameterises, so supplying any of those three flags is now refused
+  with `SHARE_FLAG_NOT_APPLICABLE` and no link is emitted. The check is on whether the caller
+  *set* the flag, so `--expires-in-seconds 0` — a deliberate "use the backend default" — is
+  caught too.
+- **The `octo-drive` skill and a validation hint prescribed a `-r` flag the CLI does not
+  implement.** `SKILL.md` used `-q '…' -r` fifteen times, across every step of all three
+  copy-paste workflows, and the uint64 hint pointed at the same idiom; only `--jq`/`-q` exists,
+  so each of those commands failed with exit 2. Removing `-r` alone would not have fixed them:
+  `--jq` prints a JSON value and ids are JSON strings, so a captured id arrives quoted and the
+  next command rejects it. The recipes now strip the quotes in the shell and say why. A new
+  test walks every `octo-cli` invocation in every embedded skill and asserts each flag it uses
+  exists in the command tree — the tripwire that keeps a recipe and the binary from drifting
+  apart. It also found a pre-existing error in the `octo-shared` skill, where the pagination
+  example used `--page-all` on a command that is not paginated.
 - **A compressed reply can no longer switch off the download completeness check.** The
   transfer transport advertised `Accept-Encoding: gzip` by default, so a storage host that
   compressed had its reply decompressed transparently and `Content-Length` reported as
