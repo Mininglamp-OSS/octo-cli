@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1176,4 +1180,148 @@ func TestDriveDownload_AcceptsACompleteBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDriveDownload_ContentEncodingGzipDoesNotDisableTheCompletenessGuard is round-16
+// P1-1.
+//
+// Go's transport advertises `Accept-Encoding: gzip` unless told not to, decompresses the
+// reply transparently, and then sets resp.ContentLength to -1 because the length it was
+// given describes the compressed bytes and no longer describes the body the caller reads.
+// assertCompleteBody's length comparison is guarded on `contentLength >= 0`, so the guard
+// added to refuse a truncated download became a no-op — switched off by the same untrusted
+// storage host it was written to defend against, and with no bound on how many bytes the
+// decompression writes to the caller's -o path.
+//
+// Both directions are asserted, because either one alone can be satisfied the wrong way:
+//
+//   - allow: a complete object stored with Content-Encoding: gzip must land on disk as the
+//     *stored* bytes, byte for byte, so `download file` round-trips what another client
+//     uploaded and the reported size/sha256 describe the object rather than its expansion.
+//   - refuse: a short-by-Content-Length gzip reply must fail DOWNLOAD_TRUNCATED, which is
+//     the guard actually running rather than a gzip stream error standing in for it.
+func TestDriveDownload_ContentEncodingGzipDoesNotDisableTheCompletenessGuard(t *testing.T) {
+	// Highly compressible, so the amplification is visible: the assertion "bytes on disk
+	// equal the bytes the server sent" is what pins it, and a plain payload could satisfy
+	// that by accident.
+	plain := bytes.Repeat([]byte("A"), 1<<20)
+	var gzBuf bytes.Buffer
+	zw := gzip.NewWriter(&gzBuf)
+	if _, err := zw.Write(plain); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	stored := gzBuf.Bytes()
+	if len(stored) >= len(plain)/16 {
+		t.Fatalf("fixture is not compressible enough to witness amplification: %d vs %d",
+			len(stored), len(plain))
+	}
+
+	t.Run("a complete gzip object is stored verbatim", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.gz")
+
+		var sentAcceptEncoding string
+		store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			sentAcceptEncoding = r.Header.Get("Accept-Encoding")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Content-Length", strconv.Itoa(len(stored)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(stored)
+		}))
+		defer store.Close()
+
+		tf := cmdutil.NewTestFactory()
+		tf.SetConfig(&config.Config{APIBaseURL: "http://127.0.0.1:1", BotToken: "bf_t", Format: "json"})
+		cmd := &cobra.Command{}
+		cmd.SetContext(context.Background())
+
+		res, err := fetchToFile(cmd, tf.Factory, "download_url", store.URL+"/obj", target, false)
+		if err != nil {
+			t.Fatalf("a complete gzip-encoded object must be accepted: %v", err)
+		}
+		if strings.Contains(sentAcceptEncoding, "gzip") {
+			t.Errorf("the transfer offered Accept-Encoding=%q, so the host can switch off the "+
+				"completeness guard by compressing", sentAcceptEncoding)
+		}
+		got, rerr := os.ReadFile(target)
+		if rerr != nil {
+			t.Fatalf("read the download: %v", rerr)
+		}
+		if !bytes.Equal(got, stored) {
+			t.Errorf("the download wrote %d bytes, but storage sent %d — the stored object "+
+				"was rewritten in transit (amplification %.0fx)",
+				len(got), len(stored), float64(len(got))/float64(len(stored)))
+		}
+		if res.Size != strconv.Itoa(len(stored)) {
+			t.Errorf("reported size = %q, want %d (the stored object's own length)", res.Size, len(stored))
+		}
+		sum := sha256.Sum256(stored)
+		if res.SHA256 != hex.EncodeToString(sum[:]) {
+			t.Errorf("reported sha256 describes bytes other than the stored object")
+		}
+	})
+
+	t.Run("a chunked gzip reply is not expanded on disk", func(t *testing.T) {
+		// The Content-Length-free case, where assertCompleteBody has nothing to compare
+		// against and cannot help at all: the only thing bounding what lands on the
+		// caller's -o path is that the transport does not decompress. Before the fix this
+		// wrote 1 MB for a 1 KB reply, unbounded in principle and attacker-chosen.
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.gz")
+
+		store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(stored)
+		}))
+		defer store.Close()
+
+		tf := cmdutil.NewTestFactory()
+		tf.SetConfig(&config.Config{APIBaseURL: "http://127.0.0.1:1", BotToken: "bf_t", Format: "json"})
+		cmd := &cobra.Command{}
+		cmd.SetContext(context.Background())
+
+		res, err := fetchToFile(cmd, tf.Factory, "download_url", store.URL+"/obj", target, false)
+		if err != nil {
+			t.Fatalf("a chunked gzip reply must still be accepted: %v", err)
+		}
+		if res.Size != strconv.Itoa(len(stored)) {
+			t.Errorf("wrote %s bytes for a %d-byte reply — the reply was expanded in transit",
+				res.Size, len(stored))
+		}
+	})
+
+	t.Run("a gzip reply short of its Content-Length is refused", func(t *testing.T) {
+		// The refuse direction. The error *code* is deliberately not pinned: Go's own body
+		// reader enforces a declared Content-Length and returns an unexpected EOF before
+		// assertCompleteBody is reached, so asserting DOWNLOAD_TRUNCATED here would pin a
+		// mechanism that is not the one running. What must hold is that the short transfer
+		// is refused and publishes nothing — which, before the fix, it survived only
+		// because the gzip reader happened to error on a truncated stream.
+		dir := t.TempDir()
+		target := filepath.Join(dir, "out.gz")
+
+		store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Content-Length", strconv.Itoa(len(stored)))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(stored[:len(stored)/2])
+		}))
+		defer store.Close()
+
+		tf := cmdutil.NewTestFactory()
+		tf.SetConfig(&config.Config{APIBaseURL: "http://127.0.0.1:1", BotToken: "bf_t", Format: "json"})
+		cmd := &cobra.Command{}
+		cmd.SetContext(context.Background())
+
+		if _, err := fetchToFile(cmd, tf.Factory, "download_url", store.URL+"/obj", target, false); err == nil {
+			t.Fatal("a reply shorter than its Content-Length was published as complete")
+		}
+		if _, serr := os.Stat(target); serr == nil {
+			t.Errorf("the download was refused but a file was left at the destination")
+		}
+	})
 }

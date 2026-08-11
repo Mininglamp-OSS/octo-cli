@@ -609,8 +609,34 @@ func transferClient(field string, loopbackAPI bool, resolve hostResolver, note f
 func transferClientWithGuard(guard *transferGuard) *http.Client {
 	field, loopbackAPI := guard.field, guard.loopbackAPI
 	transport := &http.Transport{
-		Proxy:                 guard.Proxy,
-		DialContext:           guard.DialContext,
+		Proxy:       guard.Proxy,
+		DialContext: guard.DialContext,
+		// Content-Encoding is refused on this transport, because accepting it hands the
+		// storage host a switch that turns off assertCompleteBody.
+		//
+		// Left unset, the transport advertises Accept-Encoding: gzip on its own,
+		// decompresses the reply transparently, and then sets resp.ContentLength to -1 —
+		// correctly, since the length it was given describes the compressed bytes and no
+		// longer describes the body the caller reads. assertCompleteBody's comparison is
+		// guarded on `contentLength >= 0`, so a host that compresses gets the truncation
+		// check skipped: the guard was disabled at the discretion of the same untrusted
+		// party it defends against. It also made the transfer unbounded in the one
+		// direction that matters here — a 20 KB reply expanded to 20 MB on the caller's
+		// -o path and was reported complete, with an attacker-chosen ratio and no
+		// declared size or checksum in DownloadURL to bound it.
+		//
+		// Two further reasons this is right rather than merely safe. The reported size and
+		// sha256 must describe the *stored object*, and under transparent decompression
+		// they described its expansion — a checksum that certifies the wrong bytes, which
+		// is the harm assertCompleteBody's own docstring is written to prevent. And an
+		// object another client stored with Content-Encoding: gzip was written out
+		// decompressed, so `download file` did not round-trip what `upload file` sent.
+		//
+		// The cost is the wire bytes for an object that would have compressed. Object
+		// storage serves what was stored, so that cost is paid only when the stored object
+		// is itself compressible and uncompressed — and byte-exact transfer is what a
+		// checksum-reporting download owes its caller.
+		DisableCompression:    true,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
