@@ -139,6 +139,32 @@ func maskOrSuppressValue(v string, secrets []string) string {
 	return masked
 }
 
+// maskScalarValue applies maskOrSuppressValue's disclosure rule to a non-string JSON scalar,
+// keeping the value's own type when nothing is disclosed.
+//
+// The question is asked of the value's JSON spelling, which is what a reader of the envelope
+// actually sees. That keeps the two failure modes apart. An unrelated numeric id is
+// untouched, because its digits do not contain a declared secret — so the rule does not mask
+// ordinary ids out of every diagnostic, which is the damage over-declaring causes. And a
+// declared secret echoed as a number is suppressed, because its digits *are* the secret.
+//
+// Suppression replaces the number with the mask string, changing the JSON type of that one
+// field. That is the intended trade: this runs only on an error body being printed for a
+// human or an agent, the alternative is publishing the value, and a caller branching on a
+// machine-readable code reads it from the code position, which redactErrorEnvelope exempts
+// by its own rule rather than through this one.
+func maskScalarValue(v any, secrets []string) any {
+	buf, err := json.Marshal(v)
+	if err != nil {
+		return secretMask
+	}
+	text := string(buf)
+	if redactSecrets(text, secrets) == text && !containsAnySecret(text, secrets) {
+		return v
+	}
+	return secretMask
+}
+
 // containsAnySecret reports whether any declared secret is still literally present in s.
 // Deliberately a raw substring test with no boundary or length condition: the question
 // here is disclosure, not whether a match is meaningful enough to act on.
@@ -301,6 +327,28 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 // Parsing first and walking the decoded values fixes both. A body that is not JSON
 // has no structure to walk and falls back to text substitution.
 //
+// # Two rules the fallback needs and the structural walk does not
+//
+// Only a *complete* JSON body takes the structural path. json.Decoder.Decode reads one
+// value and does not require EOF, so a body merely starting with a JSON token was rewritten
+// to just that token and the rest discarded — `404 page not found`, which is what Go's own
+// http.NotFound writes, became the number 404. That is the same trap decodeStrict was added
+// to close on the input side, and json.Valid is the one-call form of the same question.
+// The direction is over-redaction rather than disclosure, so nothing leaked; what it
+// destroyed was the message/detail contract this CLI exists to hand to an agent, in exactly
+// the case an operator most needs the text.
+//
+// And the text fallback fails closed, because bare masking is not enough there. The
+// boundary rule in replaceSecretForm declines a secret shorter than shortSecretRunes unless
+// it sits at a token boundary, so a single adjacent alphanumeric character defeats it —
+// and `password` is x-octo-secret with no minLength, so a 1-7 character password is an
+// accepted input rather than a hypothetical. ParseBackendError copies a non-JSON body
+// straight into Message, which the envelope prints with no --verbose needed, and a WAF or
+// reverse proxy answering text/html is the ordinary way that body arrives. So the fallback
+// asks the disclosure question the string leaves already ask — maskOrSuppressValue's
+// question — and suppresses the whole body when the answer is yes. A body echoing no secret
+// is untouched, which is what keeps a secret-free diagnostic readable.
+//
 // Object keys are masked too, on the same rule as the values: mask when masking would
 // remove a declared secret, leave alone otherwise. An earlier version copied keys
 // verbatim, justified as "keys carry the response contract, never a secret" and as what
@@ -324,15 +372,24 @@ func redactResponseBody(b []byte, secrets []string) []byte {
 	if len(b) == 0 || len(secrets) == 0 {
 		return b
 	}
-	var parsed any
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.UseNumber()
-	if err := dec.Decode(&parsed); err == nil {
-		if buf, merr := json.Marshal(redactErrorEnvelope(parsed, secrets)); merr == nil {
-			return buf
+	if json.Valid(b) {
+		var parsed any
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
+		if err := dec.Decode(&parsed); err == nil {
+			if buf, merr := json.Marshal(redactErrorEnvelope(parsed, secrets)); merr == nil {
+				return buf
+			}
 		}
 	}
-	return []byte(redactSecrets(string(b), secrets))
+	out := redactSecrets(string(b), secrets)
+	if containsAnySecret(out, secrets) {
+		// The whole body, not the occurrence: an opaque body has no structure to bound the
+		// suppression to, and suppressing a diagnostic costs a line of text while
+		// publishing it costs the user their password.
+		return []byte(secretMask)
+	}
+	return []byte(out)
 }
 
 // redactErrorEnvelope masks a decoded error body, leaving the machine-readable
@@ -444,11 +501,16 @@ func redactErrorEnvelope(v any, secrets []string) any {
 // This keeps the key rule and the value rule independent: the key decides which value
 // rule applies, and a contract key is never rewritten, so the value's exemption
 // decision cannot be changed by masking.
+//
+// A non-contract key gets the value rule in full, suppression included. Masking alone would
+// leave the key position with the same short-secret hole the string leaves had: the boundary
+// rule declines a secret under shortSecretRunes unless it is delimited, so a backend keying
+// a map by "<password>x" would have published it.
 func maskKey(key string, secrets []string) string {
 	if isEnvelopeContractKey(key) {
 		return key
 	}
-	return redactSecrets(key, secrets)
+	return maskOrSuppressValue(key, secrets)
 }
 
 // isEnvelopeContractKey names the keys this CLI itself reads out of a backend body.
@@ -492,18 +554,39 @@ func isExemptCode(val any, secrets []string) bool {
 
 // redactBodyKeysAndValues is redactBodyValue plus key masking, for a body whose
 // keys the caller supplied.
+//
+// Keys and values get the identical rule — maskOrSuppressValue, suppression included. Bare
+// redactSecrets here left the request side with the short-secret hole the response side had:
+// the boundary rule declines a secret under shortSecretRunes unless it is delimited, so a
+// caller who merged `--data '{"pw12345x":...}'` had the key printed in the --verbose trace and
+// the --dry-run description. There is no contract-key exemption on this side, because these
+// names are the caller's rather than the API's — which is also why keys are masked here at
+// all.
+//
+// Colliding masked keys are collapsed in sorted order, matching redactBodyValue. Ranging a Go
+// map is randomised, so with two keys that mask to the same string the surviving value was
+// whichever one the runtime visited last — a dry-run description that differed between
+// identical invocations.
 func redactBodyKeysAndValues(v any, secrets []string) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
-		for key, val := range t {
-			out[redactSecrets(key, secrets)] = redactBodyKeysAndValues(val, secrets)
+		for _, key := range sortedKeys(t) {
+			outKey := maskOrSuppressValue(key, secrets)
+			if _, taken := out[outKey]; taken {
+				continue
+			}
+			out[outKey] = redactBodyKeysAndValues(t[key], secrets)
 		}
 		return out
 	case map[string]string:
 		out := make(map[string]string, len(t))
-		for key, val := range t {
-			out[redactSecrets(key, secrets)] = redactSecrets(val, secrets)
+		for _, key := range sortedStringKeys(t) {
+			outKey := maskOrSuppressValue(key, secrets)
+			if _, taken := out[outKey]; taken {
+				continue
+			}
+			out[outKey] = maskOrSuppressValue(t[key], secrets)
 		}
 		return out
 	case []any:
@@ -516,9 +599,35 @@ func redactBodyKeysAndValues(v any, secrets []string) any {
 	return redactBodyValue(v, secrets)
 }
 
-// redactBodyValue deep-copies v with every string leaf run through
-// redactSecrets. json.Number is a distinct type from string, so a uint64 id is
-// copied through untouched and keeps marshalling as a bare JSON integer.
+// sortedKeys returns m's keys in a fixed order, so a masked collision always collapses the
+// same way.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// sortedStringKeys is sortedKeys for a map[string]string body.
+func sortedStringKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// redactBodyValue deep-copies v with every leaf run through the masker.
+//
+// A declared secret is masked whatever JSON kind it arrives as. The earlier version masked
+// only `case string`, on the reading that a secret is always a string — but a backend
+// echoing a declared value as a JSON number defeated that with no mistake on the caller's
+// part, and an all-digit share password or an id echoed as a number is the ordinary shape.
+// Non-string scalars therefore go through maskScalarValue, which decides on the value's own
+// JSON spelling, so an unrelated id still comes through untouched.
 //
 // The default branch marshals and text-redacts rather than passing the value
 // through: a body shape this function does not walk structurally (a
@@ -530,20 +639,17 @@ func redactBodyValue(v any, secrets []string) any {
 	switch t := v.(type) {
 	case string:
 		return maskOrSuppressValue(t, secrets)
-	case json.Number:
-		return t
-	case bool, nil, int, int64, float64:
+	case nil:
+		// JSON null is the one scalar whose spelling is fixed by the grammar rather than
+		// derived from a value, so there is nothing here to disclose.
 		return v
+	case json.Number, bool, int, int64, float64:
+		return maskScalarValue(v, secrets)
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		// Sorted for the same reason as the envelope walk: colliding masked keys must
 		// collapse the same way on every run.
-		nested := make([]string, 0, len(t))
-		for key := range t {
-			nested = append(nested, key)
-		}
-		sort.Strings(nested)
-		for _, key := range nested {
+		for _, key := range sortedKeys(t) {
 			// Keys are masked on the same rule as values, minus the contract names.
 			// On a request body built from the spec this is a no-op, because a
 			// spec-derived key cannot contain a declared secret; on a response body it
