@@ -204,6 +204,36 @@ func TestDo_BackendErrorParsed(t *testing.T) {
 	}
 }
 
+func TestDo_SelectsBackendErrorProtocolByService(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+	}))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		service  string
+		wantType string
+		wantExit int
+	}{
+		{service: "loop", wantType: "validation", wantExit: 2},
+		{service: "thread", wantType: "api_error", wantExit: 1},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{Service: tc.service, Method: http.MethodGet, Path: "/error"})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("Do error = %v, want ExitError", err)
+			}
+			if ee.Type != tc.wantType || ee.ExitCode() != tc.wantExit || ee.Hint != "do better" {
+				t.Fatalf("error = %+v (exit %d), want type=%s exit=%d with server hint",
+					ee, ee.ExitCode(), tc.wantType, tc.wantExit)
+			}
+		})
+	}
+}
+
 func TestDo_RetryOn503ThenSucceed(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -473,7 +473,7 @@ func WrapCLIError(err error) error {
 		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
-		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, or uk_* token")
+		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, uk_*, or octo_loop_* token")
 	// --- allowlist first: shapes proven to carry no caller value keep their text ---
 	//
 	// Order matters. These are checked before the family catch-all below, because

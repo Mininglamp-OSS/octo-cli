@@ -982,6 +982,36 @@ func TestValidateRequiredBodyFields_EnforcesComposedSchemas(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredBodyFields_PreservesLegacyConstraintHandling(t *testing.T) {
+	r := registry.MustNew()
+	threadCreate, ok := r.GetOperation("thread.create")
+	if !ok || threadCreate.RequestBody == nil {
+		t.Fatal("thread.create request schema not found")
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: threadCreate},
+		map[string]any{"name": strings.Repeat("x", 101)},
+	); err != nil {
+		t.Fatalf("legacy service string bounds must remain backend-enforced: %v", err)
+	}
+}
+
+func TestValidateRequiredBodyFields_AllowsNullableLoopFields(t *testing.T) {
+	r := registry.MustNew()
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update request schema not found")
+	}
+	body := map[string]any{
+		"description":         nil,
+		"project_id":          nil,
+		"task_title_template": nil,
+	}
+	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {
+		t.Fatalf("nullable Loop fields must be forwarded for clearing: %v", err)
+	}
+}
+
 // TestBuildMultipartBody_MissingFile confirms the validation error surfaces
 // when --file is empty.
 func TestBuildMultipartBody_MissingFile(t *testing.T) {

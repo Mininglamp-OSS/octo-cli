@@ -1032,7 +1032,12 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	ee := output.ParseBackendError(resp.StatusCode, redactResponseBody(respBody, req.SecretValues))
+	redactedBody := redactResponseBody(respBody, req.SecretValues)
+	parseError := output.ParseBackendError
+	if req.Service == "loop" {
+		parseError = output.ParsePublicAPIError
+	}
+	ee := parseError(resp.StatusCode, redactedBody)
 
 	if isRetryableStatus(resp.StatusCode) {
 		re := &retryableErr{ExitError: ee}

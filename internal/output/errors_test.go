@@ -142,9 +142,26 @@ func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 
 func TestParseBackendError_PreservesServerHintForUnknownCode(t *testing.T) {
 	body := []byte(`{"error":{"code":"NEW_AUTH_CODE","message":"nope","hint":"refresh the task credential"}}`)
-	ee := ParseBackendError(http.StatusUnauthorized, body)
+	ee := ParsePublicAPIError(http.StatusUnauthorized, body)
 	if ee.Type != "auth_error" || ee.Hint != "refresh the task credential" {
 		t.Fatalf("error = %+v, want status taxonomy and server hint", ee)
+	}
+}
+
+func TestParseBackendError_HintDoesNotChangeLegacyTaxonomy(t *testing.T) {
+	withoutHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing"}}`))
+	withHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+
+	if withoutHint.Type != "api_error" || withHint.Type != withoutHint.Type {
+		t.Fatalf("legacy taxonomy changed with hint: without=%+v with=%+v", withoutHint, withHint)
+	}
+	if withoutHint.ExitCode() != withHint.ExitCode() {
+		t.Fatalf("legacy exit code changed with hint: without=%d with=%d", withoutHint.ExitCode(), withHint.ExitCode())
+	}
+	if withHint.Hint != "do better" {
+		t.Fatalf("server hint was not preserved: %+v", withHint)
 	}
 }
 

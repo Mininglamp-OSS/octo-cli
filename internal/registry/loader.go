@@ -191,8 +191,9 @@ type SchemaInfo struct {
 	Description string                `json:"description,omitempty"`
 	WriteOnly   bool                  `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
-	// validator enforces Required, MinItems and Enum; the rest (MinLength,
-	// MaxLength, MaxItems, Pattern) are descriptive only and left to the backend.
+	// validator enforces Required, MinItems and Enum for every service. Loop
+	// Public API operations additionally enforce MinLength, MaxLength and
+	// MaxItems; Pattern remains descriptive and is left to the backend.
 	MinLength int    `json:"min_length,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
 	MinItems  int    `json:"min_items,omitempty"`

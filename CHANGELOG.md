@@ -118,6 +118,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **Loop request validation now enforces its Public API constraints locally**,
+  including composition, Unicode string lengths, and maximum array sizes.
+  Existing service domains retain their previous backend-enforced behavior.
+- **Unknown Loop Public API error codes use HTTP status taxonomy**, while
+  legacy services retain their historical `api_error` fallback. A server hint
+  remains presentation metadata and no longer changes the error type or exit
+  code by itself.
 - **The default gateway is now `https://im.deepminer.com.cn`** instead of the
   previous localhost development endpoint. Set `OCTO_API_BASE_URL` explicitly
   for test or self-hosted deployments.

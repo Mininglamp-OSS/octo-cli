@@ -633,7 +633,10 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil
 	}
-	v := bodySchemaValidator{flagFor: topLevelBodyFlagNames(rt)}
+	v := bodySchemaValidator{
+		flagFor:                    topLevelBodyFlagNames(rt),
+		enforceExtendedConstraints: rt.detail.Service == "loop",
+	}
 	if exitErr := v.validate(rt.detail.RequestBody, base, "", ""); exitErr != nil {
 		return exitErr
 	}
@@ -661,7 +664,8 @@ func topLevelBodyFlagNames(rt *operationRuntime) map[string]string {
 // required-field and minItems checks already applied to it, so an enum check
 // belongs at the same layer rather than only on the promoted flags.
 type bodySchemaValidator struct {
-	flagFor map[string]string // wire field name → promoted flag name (top level only)
+	flagFor                    map[string]string // wire field name → promoted flag name (top level only)
+	enforceExtendedConstraints bool              // composition, string bounds, and maxItems (Loop Public API only)
 }
 
 // validate reports the first violation found, or nil. Enum violations carry
@@ -669,8 +673,10 @@ type bodySchemaValidator struct {
 // closed set" without parsing the message; structural violations keep the
 // historical VALIDATION_ERROR envelope byte-for-byte.
 func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
-	if err := v.validateComposition(schema, value, path, flagName); err != nil {
-		return err
+	if v.enforceExtendedConstraints {
+		if err := v.validateComposition(schema, value, path, flagName); err != nil {
+			return err
+		}
 	}
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
@@ -685,19 +691,31 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		// optional field — a wider contract change than the bypass calls for.
 		return nil
 	}
+	return v.validateByType(schema, value, path, flagName)
+}
+
+func (v bodySchemaValidator) validateByType(
+	schema *registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
 	switch schema.Type {
 	case "object":
 		return v.validateObject(schema, value, path)
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
 	case "string":
-		return validateString(schema, value, path)
-	case "":
-		if len(schema.Required) > 0 || len(schema.Properties) > 0 {
-			return v.validateObject(schema, value, path)
-		}
-		if schema.MinLength > 0 || schema.MaxLength > 0 {
+		if v.enforceExtendedConstraints {
 			return validateString(schema, value, path)
+		}
+	case "":
+		if v.enforceExtendedConstraints {
+			if len(schema.Required) > 0 || len(schema.Properties) > 0 {
+				return v.validateObject(schema, value, path)
+			}
+			if schema.MinLength > 0 || schema.MaxLength > 0 {
+				return validateString(schema, value, path)
+			}
 		}
 	}
 	return nil
@@ -853,7 +871,7 @@ func (v bodySchemaValidator) validateArray(schema *registry.SchemaInfo, value an
 	if schema.MinItems > 0 && len(items) < schema.MinItems {
 		return schemaError(fmt.Sprintf("field %s must contain at least %d item(s)", bodyPath(path), schema.MinItems))
 	}
-	if schema.MaxItems > 0 && len(items) > schema.MaxItems {
+	if v.enforceExtendedConstraints && schema.MaxItems > 0 && len(items) > schema.MaxItems {
 		return schemaError(fmt.Sprintf("field %s must contain at most %d item(s)", bodyPath(path), schema.MaxItems))
 	}
 	if schema.Items == nil {

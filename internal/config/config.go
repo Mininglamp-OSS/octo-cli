@@ -87,7 +87,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported %s %q", EnvCredentialMode, c.CredentialMode)
 	}
 	if c.BotToken == "" {
-		return fmt.Errorf("%s or %s is required (app_*, bf_*, or uk_* token)", EnvToken, EnvBotToken)
+		return fmt.Errorf("%s or %s is required (app_*, bf_*, uk_*, or octo_loop_* token)", EnvToken, EnvBotToken)
 	}
 	if c.APIBaseURL != "" {
 		baseURL, err := NormalizeAPIBaseURL(c.APIBaseURL)

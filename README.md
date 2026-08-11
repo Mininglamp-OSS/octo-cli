@@ -243,7 +243,7 @@ rejected.
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
 | `OCTO_TOKEN`        | Token (`app_*`, `bf_*`, or `uk_*`). Preferred; wins over `OCTO_BOT_TOKEN`. |
-| `OCTO_BOT_TOKEN`    | Token (`app_*`, `bf_*`, or `uk_*`). Used when `OCTO_TOKEN` is unset. |
+| `OCTO_BOT_TOKEN`    | Token (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`). Used when `OCTO_TOKEN` is unset. |
 | `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |

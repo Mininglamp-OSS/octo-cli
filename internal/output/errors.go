@@ -144,6 +144,18 @@ var backendErrorMapping = map[string]struct {
 // shape, then dmworkim {msg,status}, falling back to a raw dump. The status
 // code is used as a signal when the body is unparseable.
 func ParseBackendError(status int, body []byte) *ExitError {
+	return parseBackendError(status, body, false)
+}
+
+// ParsePublicAPIError parses a Fleet Public API error envelope. Unlike the
+// legacy parser, unknown machine codes use the HTTP status as their taxonomy
+// fallback. The protocol is selected by the caller; a presentation-only field
+// such as hint must never change an agent's exit code.
+func ParsePublicAPIError(status int, body []byte) *ExitError {
+	return parseBackendError(status, body, true)
+}
+
+func parseBackendError(status int, body []byte, publicAPI bool) *ExitError {
 	// Layer 1: matters envelope {"error":{"code":"...","message":"...","details":{...}}}
 	var mEnv struct {
 		Error struct {
@@ -154,11 +166,10 @@ func ParseBackendError(status int, body []byte) *ExitError {
 		} `json:"error"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &mEnv) == nil && mEnv.Error.Code != "" {
-		// Preserve the historical api_error classification for unknown matters
-		// codes. A backend-provided hint identifies the richer Public API shape;
-		// there the HTTP status remains the safest fallback for a new code.
+		// Preserve the historical api_error classification for unknown legacy
+		// codes. Public API callers explicitly opt into status-based fallback.
 		fallbackType := "api_error"
-		if mEnv.Error.Hint != "" {
+		if publicAPI {
 			fallbackType = typeFromStatus(status)
 		}
 		return newBackendError(mEnv.Error.Code, mEnv.Error.Message, fallbackType, mEnv.Error.Hint, body)
