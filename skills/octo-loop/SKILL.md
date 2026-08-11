@@ -29,13 +29,16 @@ Do not use it for chat unrelated to Loop, for pure local file work, or when
 
 ## Authentication
 
-Set `OCTO_BOT_TOKEN` to a credential Fleet accepts directly, such as an Octo
-Session credential, `bf_`, `uk_`, or `octo_loop_`. The CLI does not infer a
+Set `OCTO_BOT_TOKEN` to a bearer credential Fleet accepts directly, such as
+`bf_`, `uk_`, or `octo_loop_`. The CLI does not infer a
 human, device, or execution principal from a token prefix. Fleet verifies the
 credential and constructs the principal.
 
-If a command fails with an auth error, check `octo-cli auth status` and let the
-user run `octo-cli auth login` — do not fabricate credentials. Never leak or
+Outside daemon task mode, if a command fails with an auth error, check
+`octo-cli auth status` and let the user run `octo-cli auth login`. In
+`OCTO_CREDENTIAL_MODE=task`, those profile diagnostics are unavailable: report
+the auth failure so the daemon can refresh or replace the injected credential.
+Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.
 
@@ -51,7 +54,7 @@ explicitly. Discover available workspaces first:
 
 ```bash
 octo-cli loop workspace list
-octo-cli loop workspace member list --workspace-id <workspace-id>
+octo-cli loop workspace member list <workspace-id> --workspace-id <workspace-id>
 ```
 
 ## Discover and execute operations
@@ -87,7 +90,7 @@ Read before you write.
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop task comment list <task-id> --workspace-id <ws>
 octo-cli loop task metadata list <task-id> --workspace-id <ws>
-octo-cli loop task children-by-parent <task-id> --workspace-id <ws>
+octo-cli loop task children-by-parent --workspace-id <ws>
 ```
 
 Comment history is paginated with `--page` / `--page-size`.
@@ -119,7 +122,7 @@ trap 'rm -rf "$body_dir"' EXIT
 # ...write the comment body to "$body_dir/reply.md", preserving real newlines...
 printf '{"content": %s}' "$(jq -Rs . < "$body_dir/reply.md")" > "$body_dir/body.json"
 
-octo-cli loop task comment create <task-id> --workspace-id <ws> --data @body.json
+octo-cli loop task comment create <task-id> --workspace-id <ws> --data "@$body_dir/body.json"
 ```
 
 Use `mktemp -d`, never a fixed path like `./reply.md` (it can clobber a user
@@ -133,7 +136,7 @@ flag with the same shell hazards, so prefer a JSON body from a file:
 printf '{"title": %s, "description": %s}' \
   "$(jq -Rs . <<< 'Fix login redirect')" \
   "$(jq -Rs . < "$body_dir/description.md")" > "$body_dir/task.json"
-octo-cli loop task create --workspace-id <ws> --data @task.json
+octo-cli loop task create --workspace-id <ws> --data "@$body_dir/task.json"
 ```
 
 ### Metadata
@@ -199,7 +202,7 @@ mention:
 ```bash
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
-octo-cli loop workspace member list --workspace-id <ws>
+octo-cli loop workspace member list <ws> --workspace-id <ws>
 ```
 
 Do not mention an expert or expert-team just to say thanks, confirm, or wrap up

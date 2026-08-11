@@ -14,13 +14,9 @@ client extraction was cancelled and is not part of this branch.
 
 ## Scope
 
-The CLI exposes the Fleet public control plane only:
-
-- tasks
-- executions
-- experts
-- expert templates
-- expert teams
+The CLI exposes 14 Fleet public control-plane groups: attachments, autopilots,
+comments, executions, experts, expert teams, expert templates, labels, projects,
+runtimes, skills, skill files, tasks, and workspaces.
 
 Repository operations, daemon device enrollment, task claim/heartbeat, and
 local runtime management are intentionally outside the generic CLI surface.
@@ -57,8 +53,7 @@ This TODO does not add enrollment commands to `octo-cli`.
 - Loop command-tree discovery
 - isolated dry-run routing for task, execution, expert, expert-template, and
   expert-team
-- isolated task-create routing; required-body validation defect recorded in
-  the test report
+- isolated task-create routing and required-body validation
 
 Local checks use a temporary `OCTO_CONFIG_DIR` and placeholder credentials.
 They do not read or modify a developer's saved CLI profiles.
@@ -82,8 +77,9 @@ send `X-Space-Id`. Loop public operations declare
 
 ### 1. Discovery and routing
 
-- `octo-cli schema --list loop` returns all 61 public operations.
-- `octo-cli loop --help` contains the five expected resource groups.
+- `octo-cli schema --list loop` returns all 126 registered public operations
+  (the embedded contract contains 136 operation IDs; 10 are CLI-hidden).
+- `octo-cli loop --help` contains the 14 expected resource groups.
 - Loop requests use `OCTO_API_BASE_URL/fleet/api/v1/*`.
 - Non-Loop requests continue to use their module-qualified gateway paths.
 - Authorization is sent as Bearer; tokens are masked in dry-run and verbose
@@ -93,7 +89,6 @@ send `X-Space-Id`. Loop public operations declare
 
 Run the read-only matrix with each supported test credential:
 
-- Octo Session, if supported by the CLI execution environment
 - `bf_`
 - `uk_`
 - Human or bot `octo_loop_` appropriate for the selected operation
@@ -155,7 +150,8 @@ and active executions when fixtures are available.
 ## Exit criteria
 
 - All local checks remain green.
-- All 61 embedded operations match Fleet `openapi/public-v1.yaml`.
+- All 136 embedded operation IDs match Fleet `openapi/public-v1.yaml`; 126 are
+  registered and 10 are intentionally CLI-hidden.
 - Read-only smoke tests pass for every supported identity.
 - The three write lifecycles pass and clean up their fixtures.
 - Cross-Space and wrong-principal tests are rejected.

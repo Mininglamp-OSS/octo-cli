@@ -239,7 +239,7 @@ before invoking.
 | `INTERNAL_ERROR` | 500 | `api_error` | "internal server error; retry or report" |
 | `PAYLOAD_TOO_LARGE` | 413 | `validation` | "request body exceeds 1MB limit" |
 
-### 4.4 Pagination Envelope Flattening
+### 4.4 Public API Envelope Flattening
 
 Backend paginated responses use: `{"data": [...], "pagination": {"has_more": true, "next_cursor": "xxx"}}`
 
@@ -252,11 +252,18 @@ Naive wrapping produces `data.data` nesting. CLI flattens:
 // --page-all: all pages merged, no _pagination (engine exhausted all pages)
 {"ok": true, "data": [/* all items */]}
 
-// Non-paginated response: pass through as-is
+// Non-paginated Loop resource: unwrap the Public API data object
 {"ok": true, "data": { ... }}
+
+// Non-Loop resource: preserve the backend envelope inside CLI data
+{"ok": true, "data": {"data": { ... }}}
 ```
 
-Detection: backend response is object with `data` (array) + `pagination` (object) keys → flatten. Otherwise pass through. `_pagination` uses underscore prefix consistent with `_rate_limit` and `_notice`.
+Detection: paginated responses shaped as `data` (array) + `pagination`
+(object) are flattened for every service. A non-paginated `{"data": {...}}`
+resource envelope is flattened only for the Loop/Fleet Public API; other
+services retain their existing response shape. `_pagination` uses an underscore
+prefix consistent with `_rate_limit` and `_notice`.
 
 ### 4.5 Rate Limit Metadata
 

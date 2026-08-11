@@ -73,6 +73,7 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		wantType string
 	}{
 		{"UNAUTHORIZED", "auth_error"},
+		{"AUTH_REQUIRED", "auth_error"},
 		{"AUTH_UNAVAILABLE", "network"},
 		{"VALIDATION_ERROR", "validation"},
 		{"MATTER_NOT_FOUND", "api_error"},
@@ -82,6 +83,9 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		{"BOT_WORKSPACE_MEMBERSHIP_REQUIRED", "permission"},
 		{"SPACE_FORBIDDEN", "permission"},
 		{"DUPLICATE_ASSIGNEE", "validation"},
+		{"DUPLICATE", "validation"},
+		{"UNSUPPORTED_MEDIA_TYPE", "validation"},
+		{"CLIENT_VERSION_TOO_OLD", "config"},
 		{"RATE_LIMITED", "rate_limited"},
 		{"UPSTREAM_UNAVAILABLE", "network"},
 		{"INTERNAL_ERROR", "api_error"},
@@ -126,13 +130,21 @@ func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 		t.Errorf("Code = %q", ee.Code)
 	}
 	if ee.Type != "api_error" {
-		t.Errorf("unknown codes should fall back to api_error, got %q", ee.Type)
+		t.Errorf("unknown legacy codes should preserve the api_error fallback, got %q", ee.Type)
 	}
 	if ee.Hint != "" {
 		t.Errorf("unknown codes should have no hint, got %q", ee.Hint)
 	}
 	if ee.Message != "nope" {
 		t.Errorf("Message = %q", ee.Message)
+	}
+}
+
+func TestParseBackendError_PreservesServerHintForUnknownCode(t *testing.T) {
+	body := []byte(`{"error":{"code":"NEW_AUTH_CODE","message":"nope","hint":"refresh the task credential"}}`)
+	ee := ParseBackendError(http.StatusUnauthorized, body)
+	if ee.Type != "auth_error" || ee.Hint != "refresh the task credential" {
+		t.Fatalf("error = %+v, want status taxonomy and server hint", ee)
 	}
 }
 

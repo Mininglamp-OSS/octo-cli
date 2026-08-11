@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -77,7 +78,8 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// behaviour of sending the header when the credential has a space.
 		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
-		SecretValues: collectSecrets(cobraCmd, rt, pathValues),
+		SecretValues:        collectSecrets(cobraCmd, rt, pathValues),
+		SensitiveJSONFields: writeOnlyBodyFields(d.RequestBody),
 	}
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
@@ -666,6 +668,32 @@ type bodySchemaValidator struct {
 // closed set" without parsing the message; structural violations keep the
 // historical VALIDATION_ERROR envelope byte-for-byte.
 func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
+	if schema.Const != nil && !reflect.DeepEqual(schema.Const, value) {
+		return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
+	}
+	if len(schema.OneOf) > 0 {
+		matches := 0
+		for i := range schema.OneOf {
+			if v.validate(&schema.OneOf[i], value, path, flagName) == nil {
+				matches++
+			}
+		}
+		if matches != 1 {
+			return schemaError(fmt.Sprintf("field %s must match exactly one allowed schema", bodyPath(path)))
+		}
+	}
+	if len(schema.AnyOf) > 0 {
+		matched := false
+		for i := range schema.AnyOf {
+			if v.validate(&schema.AnyOf[i], value, path, flagName) == nil {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return schemaError(fmt.Sprintf("field %s must match at least one allowed schema", bodyPath(path)))
+		}
+	}
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
 	}
@@ -684,6 +712,33 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		return v.validateObject(schema, value, path)
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
+	case "string":
+		text, ok := value.(string)
+		if !ok {
+			return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
+		}
+		if schema.MinLength > 0 && len(text) < schema.MinLength {
+			return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
+		}
+		if schema.MaxLength > 0 && len(text) > schema.MaxLength {
+			return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
+		}
+	case "":
+		if len(schema.Required) > 0 || len(schema.Properties) > 0 {
+			return v.validateObject(schema, value, path)
+		}
+		if schema.MinLength > 0 || schema.MaxLength > 0 {
+			text, ok := value.(string)
+			if !ok {
+				return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
+			}
+			if schema.MinLength > 0 && len(text) < schema.MinLength {
+				return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
+			}
+			if schema.MaxLength > 0 && len(text) > schema.MaxLength {
+				return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
+			}
+		}
 	}
 	return nil
 }
@@ -773,6 +828,9 @@ func (v bodySchemaValidator) validateArray(schema *registry.SchemaInfo, value an
 	if schema.MinItems > 0 && len(items) < schema.MinItems {
 		return schemaError(fmt.Sprintf("field %s must contain at least %d item(s)", bodyPath(path), schema.MinItems))
 	}
+	if schema.MaxItems > 0 && len(items) > schema.MaxItems {
+		return schemaError(fmt.Sprintf("field %s must contain at most %d item(s)", bodyPath(path), schema.MaxItems))
+	}
 	if schema.Items == nil {
 		return nil
 	}
@@ -841,6 +899,9 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	if req.Service == "loop" {
+		return f.EmitSuccessWithMeta(body, output.EnvelopeMeta{UnwrapResource: true})
+	}
 	return f.EmitSuccess(body)
 }
 
@@ -860,6 +921,19 @@ func normalizeResponse(f *cmdutil.Factory, rt *operationRuntime, body []byte) ([
 		return nil, output.ErrWithHint("internal", "RESPONSE_NORMALIZE", err.Error(), "report the unexpected response shape")
 	}
 	return out, nil
+}
+
+func writeOnlyBodyFields(schema *registry.SchemaInfo) []string {
+	if schema == nil {
+		return nil
+	}
+	var fields []string
+	for name, property := range schema.Properties {
+		if property.WriteOnly {
+			fields = append(fields, name)
+		}
+	}
+	return fields
 }
 
 // --- pagination ---

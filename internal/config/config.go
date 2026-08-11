@@ -20,8 +20,8 @@ const (
 	EnvToken    = "OCTO_TOKEN"
 	EnvBotToken = "OCTO_BOT_TOKEN"
 	// EnvCredentialMode selects the credential resolution policy. The empty
-	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
-	// used by octo-daemon task processes.
+	// value keeps the normal profile/bot flow; "task" selects the restricted
+	// credential policy used by correctly isolated octo-daemon task processes.
 	EnvCredentialMode  = "OCTO_CREDENTIAL_MODE"
 	CredentialModeTask = "task"
 	EnvSpaceID         = "OCTO_SPACE_ID"
@@ -44,7 +44,8 @@ type Config struct {
 	APIBaseURL string
 	// BotToken is the caller's token (OCTO_TOKEN, else OCTO_BOT_TOKEN).
 	BotToken string
-	// CredentialMode controls credential selection, not server authorization.
+	// CredentialMode controls credential selection, not server authorization or
+	// process isolation. Daemon task processes must use an isolated config dir.
 	// Fleet remains authoritative for the bearer credential's principal kind,
 	// bindings, and actions.
 	CredentialMode string
@@ -108,7 +109,7 @@ func NormalizeAPIBaseURL(raw string) (string, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "", fmt.Errorf("%s must use http or https", EnvAPIBaseURL)
 	}
-	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+	if u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return "", fmt.Errorf("%s must be an absolute base URL without credentials, query parameters, or fragments", EnvAPIBaseURL)
 	}
 	if strings.TrimRight(u.Path, "/") != "" {

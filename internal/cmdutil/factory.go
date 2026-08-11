@@ -160,7 +160,9 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 		if cred.SpaceID != "" {
 			cfg.SpaceID = cred.SpaceID
 		}
-		f.overlayProfileBaseURL(cfg, cred.Profile)
+		if err := f.overlayProfileBaseURL(cfg, cred.Profile); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
@@ -199,10 +201,10 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 }
 
 // buildTaskCredential is deliberately separate from the normal provider
-// chain. A daemon-launched task must use exactly the claim credential injected
-// through OCTO_BOT_TOKEN; local profiles and identity selectors must never
-// replace it. Fleet verifies that the opaque bearer is really an agent_task
-// credential and enforces its bindings/actions.
+// chain when OCTO_CREDENTIAL_MODE=task is present. The daemon is responsible
+// for preserving that marker and isolating OCTO_CONFIG_DIR for task processes;
+// the CLI cannot make a caller-controlled environment tamper-proof. Fleet
+// verifies the opaque bearer and enforces its bindings/actions.
 func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
@@ -241,21 +243,26 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 
 // overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
 // but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
-func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
+func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) error {
 	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
-		return
+		return nil
 	}
 	store, err := f.AuthStore()
 	if err != nil {
-		return
+		return err
 	}
 	profiles, err := store.LoadProfiles()
 	if err != nil {
-		return
+		return err
 	}
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
-		cfg.APIBaseURL = m.APIBaseURL
+		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
+		if err != nil {
+			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+		}
+		cfg.APIBaseURL = normalized
 	}
+	return nil
 }
 
 // Config returns the resolved config (cached).

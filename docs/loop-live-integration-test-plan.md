@@ -20,7 +20,7 @@ Prove that the compiled CLI can use a real credential to:
 6. handle pagination, validation, not-found, conflict, rate-limit and retry
    responses consistently.
 
-Passing local Go tests or matching 61 OpenAPI operation IDs is necessary but
+Passing local Go tests or matching all 136 OpenAPI operation IDs is necessary but
 does not satisfy this plan.
 
 ## 2. Safety and environment requirements
@@ -34,12 +34,22 @@ export OCTO_CLI_BIN="$(pwd)/bin/octo-cli"
 export OCTO_API_BASE_URL="<test-octo-base-url>"
 export OCTO_BOT_TOKEN="<non-production-test-credential>"
 export OCTO_CONFIG_DIR="$(mktemp -d)"
+export LOOP_TEST_WORKSPACE_ID="<workspace-uuid>"
 
 # Pre-provisioned fixture IDs. See the dependency table below.
 export LOOP_TEST_RUNTIME_ID="<runtime-uuid>"
 export LOOP_TEST_TEMPLATE_ID="<template-id>"       # optional
 export LOOP_TEST_SKILL_ID="<skill-uuid>"           # optional
 export LOOP_TEST_LABEL_ID="<label-uuid>"           # optional
+```
+
+Every workspace-scoped command must carry the explicit selector. The examples
+below use this helper so the required flag cannot be omitted:
+
+```bash
+run_loop() {
+  "$OCTO_CLI_BIN" loop "$@" --workspace-id "$LOOP_TEST_WORKSPACE_ID"
+}
 ```
 
 For isolation tests, provide a second identity from another Space through a
@@ -156,11 +166,11 @@ These cases must run before any mutation.
 | ID | Command | Assertion |
 |---|---|---|
 | LIVE-000 | `octo-cli version` | Expected test version |
-| LIVE-001 | `octo-cli schema --list loop` | 61 operations |
-| LIVE-002 | `octo-cli loop task list --page 1 --page-size 2` | Success envelope and pagination |
-| LIVE-003 | `octo-cli loop expert list --page 1 --page-size 2` | Success envelope |
-| LIVE-004 | `octo-cli loop expert-template list --page 1 --page-size 2` | Success envelope |
-| LIVE-005 | `octo-cli loop expert-team list --page 1 --page-size 2` | Success envelope |
+| LIVE-001 | `octo-cli schema --list loop` | 126 registered operations |
+| LIVE-002 | `run_loop task list --page 1 --page-size 2` | Success envelope and pagination |
+| LIVE-003 | `run_loop expert list --page 1 --page-size 2` | Success envelope |
+| LIVE-004 | `run_loop expert-template list --page 1 --page-size 2` | Success envelope |
+| LIVE-005 | `run_loop expert-team list --page 1 --page-size 2` | Success envelope |
 | LIVE-006 | Repeat one list with `--no-retry` | Same business response |
 
 Gate: stop all write levels if authentication, Space scope or base URL is
@@ -172,7 +182,7 @@ This level does not require a runtime or daemon.
 
 ```bash
 create_response=$(
-  "$OCTO_CLI_BIN" loop task create --data "$(jq -nc \
+  run_loop task create --data "$(jq -nc \
     --arg title "$RUN_ID task" \
     --arg description "octo-cli live integration fixture" \
     '{title:$title,description:$description,priority:"normal"}')"
@@ -211,7 +221,7 @@ Requires `LOOP_TEST_RUNTIME_ID`.
 
 ```bash
 expert_response=$(
-  "$OCTO_CLI_BIN" loop expert create --data "$(jq -nc \
+  run_loop expert create --data "$(jq -nc \
     --arg name "$RUN_ID expert" \
     --arg runtime "$LOOP_TEST_RUNTIME_ID" \
     '{name:$name,runtime_id:$runtime,description:"CLI integration fixture"}')"
@@ -242,7 +252,7 @@ Requires Expert A. Create Expert B when member mutation is tested.
 
 ```bash
 team_response=$(
-  "$OCTO_CLI_BIN" loop expert-team create --data "$(jq -nc \
+  run_loop expert-team create --data "$(jq -nc \
     --arg name "$RUN_ID team" --arg leader "$EXPERT_ID" \
     '{name:$name,leader_expert_id:$leader,description:"CLI integration fixture"}')"
 )
@@ -260,8 +270,7 @@ TEAM_ID=$(jq -er '.data.expert_team_id' <<<"$team_response")
 | LIVE-306 | Remove Expert B | Member absent afterwards |
 | LIVE-307 | Delete team | Success; subsequent get is `NOT_FOUND` |
 
-For member add/update, send an explicit body even though the current CLI schema
-display is incomplete:
+For member add/update, send an explicit composed request body:
 
 ```json
 {"member_type":"expert","member_id":"<expert-b-id>","role":"member"}
@@ -304,7 +313,7 @@ known first-Space fixture and address it directly from the second identity.
 
 | ID | Scenario | Expected result |
 |---|---|---|
-| LIVE-600 | Missing required body field | CLI validation after known defect is fixed; otherwise Fleet 4xx recorded |
+| LIVE-600 | Missing required body field | Local `VALIDATION_ERROR`; no request sent |
 | LIVE-601 | Unknown resource | Stable `NOT_FOUND` envelope and non-zero exit |
 | LIVE-602 | Invalid UUID/path ID | Validation or 4xx; no panic |
 | LIVE-603 | Page size boundary | Valid boundary accepted, invalid rejected |
@@ -324,95 +333,95 @@ calls: do not add `--dry-run`.
 ### Task commands
 
 ```bash
-"$OCTO_CLI_BIN" loop task create --data "$TASK_CREATE_BODY"
-"$OCTO_CLI_BIN" loop task get "$TASK_ID"
-"$OCTO_CLI_BIN" loop task update "$TASK_ID" --data "$TASK_UPDATE_BODY"
-"$OCTO_CLI_BIN" loop task search --page 1 --page-size 20
-"$OCTO_CLI_BIN" loop task timeline list "$TASK_ID"
+run_loop task create --data "$TASK_CREATE_BODY"
+run_loop task get "$TASK_ID"
+run_loop task update "$TASK_ID" --data "$TASK_UPDATE_BODY"
+run_loop task search --page 1 --page-size 20
+run_loop task timeline list "$TASK_ID"
 
-"$OCTO_CLI_BIN" loop task comment create "$TASK_ID" \
+run_loop task comment create "$TASK_ID" \
   --content "$RUN_ID comment"
-"$OCTO_CLI_BIN" loop task comment list "$TASK_ID"
+run_loop task comment list "$TASK_ID"
 
-"$OCTO_CLI_BIN" loop task subscribe "$TASK_ID"
-"$OCTO_CLI_BIN" loop task subscriber list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task unsubscribe "$TASK_ID"
+run_loop task subscribe "$TASK_ID"
+run_loop task subscriber list "$TASK_ID"
+run_loop task unsubscribe "$TASK_ID"
 
-"$OCTO_CLI_BIN" loop task reaction add "$TASK_ID" --emoji "thumbsup"
-"$OCTO_CLI_BIN" loop task reaction remove "$TASK_ID" --emoji "thumbsup"
+run_loop task reaction add "$TASK_ID" --emoji "thumbsup"
+run_loop task reaction remove "$TASK_ID" --emoji "thumbsup"
 
 METADATA_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
-"$OCTO_CLI_BIN" loop task metadata set "$TASK_ID" "$METADATA_ID" \
+run_loop task metadata set "$TASK_ID" "$METADATA_ID" \
   --data "$(jq -nc --arg run "$RUN_ID" '{value:{integration_run:$run}}')"
-"$OCTO_CLI_BIN" loop task metadata list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task metadata delete "$TASK_ID" "$METADATA_ID"
+run_loop task metadata list "$TASK_ID"
+run_loop task metadata delete "$TASK_ID" "$METADATA_ID"
 
-"$OCTO_CLI_BIN" loop task label add "$TASK_ID" \
+run_loop task label add "$TASK_ID" \
   --label-id "$LOOP_TEST_LABEL_ID"
-"$OCTO_CLI_BIN" loop task label list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task label remove "$TASK_ID" "$LOOP_TEST_LABEL_ID"
+run_loop task label list "$TASK_ID"
+run_loop task label remove "$TASK_ID" "$LOOP_TEST_LABEL_ID"
 
-"$OCTO_CLI_BIN" loop task usage "$TASK_ID"
-"$OCTO_CLI_BIN" loop task attachment list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task pull-request list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task delete "$TASK_ID"
+run_loop task usage "$TASK_ID"
+run_loop task attachment list "$TASK_ID"
+run_loop task pull-request list "$TASK_ID"
+run_loop task delete "$TASK_ID"
 ```
 
 ### Expert commands
 
 ```bash
-"$OCTO_CLI_BIN" loop expert create --data "$EXPERT_CREATE_BODY"
-"$OCTO_CLI_BIN" loop expert get "$EXPERT_ID"
-"$OCTO_CLI_BIN" loop expert update "$EXPERT_ID" --data "$EXPERT_UPDATE_BODY"
+run_loop expert create --data "$EXPERT_CREATE_BODY"
+run_loop expert get "$EXPERT_ID"
+run_loop expert update "$EXPERT_ID" --data "$EXPERT_UPDATE_BODY"
 
-"$OCTO_CLI_BIN" loop expert environment get "$EXPERT_ID"
-"$OCTO_CLI_BIN" loop expert environment update "$EXPERT_ID" \
+run_loop expert environment get "$EXPERT_ID"
+run_loop expert environment update "$EXPERT_ID" \
   --data '{"custom_env":{"OCTO_CLI_INTEGRATION":"true"}}'
 
-"$OCTO_CLI_BIN" loop expert skill add "$EXPERT_ID" \
+run_loop expert skill add "$EXPERT_ID" \
   --data "$(jq -nc --arg id "$LOOP_TEST_SKILL_ID" '{skill_ids:[$id]}')"
-"$OCTO_CLI_BIN" loop expert skill list "$EXPERT_ID"
-"$OCTO_CLI_BIN" loop expert skill replace "$EXPERT_ID" \
+run_loop expert skill list "$EXPERT_ID"
+run_loop expert skill replace "$EXPERT_ID" \
   --data '{"skill_ids":[]}'
 
-"$OCTO_CLI_BIN" loop expert execution list "$EXPERT_ID"
-"$OCTO_CLI_BIN" loop expert archive "$EXPERT_ID"
-"$OCTO_CLI_BIN" loop expert restore "$EXPERT_ID"
+run_loop expert execution list "$EXPERT_ID"
+run_loop expert archive "$EXPERT_ID"
+run_loop expert restore "$EXPERT_ID"
 
-"$OCTO_CLI_BIN" loop expert create-from-template \
+run_loop expert create-from-template \
   --data "$EXPERT_FROM_TEMPLATE_BODY"
 ```
 
 ### Expert-team commands
 
 ```bash
-"$OCTO_CLI_BIN" loop expert-team create --data "$TEAM_CREATE_BODY"
-"$OCTO_CLI_BIN" loop expert-team get "$TEAM_ID"
-"$OCTO_CLI_BIN" loop expert-team update "$TEAM_ID" --data "$TEAM_UPDATE_BODY"
-"$OCTO_CLI_BIN" loop expert-team member list "$TEAM_ID"
+run_loop expert-team create --data "$TEAM_CREATE_BODY"
+run_loop expert-team get "$TEAM_ID"
+run_loop expert-team update "$TEAM_ID" --data "$TEAM_UPDATE_BODY"
+run_loop expert-team member list "$TEAM_ID"
 
 TEAM_MEMBER_BODY=$(jq -nc --arg id "$EXPERT_B_ID" \
   '{member_type:"expert",member_id:$id,role:"member"}')
-"$OCTO_CLI_BIN" loop expert-team member add "$TEAM_ID" \
+run_loop expert-team member add "$TEAM_ID" \
   --data "$TEAM_MEMBER_BODY"
-"$OCTO_CLI_BIN" loop expert-team member update "$TEAM_ID" \
+run_loop expert-team member update "$TEAM_ID" \
   --data "$TEAM_MEMBER_BODY"
-"$OCTO_CLI_BIN" loop expert-team member-status list "$TEAM_ID"
-"$OCTO_CLI_BIN" loop expert-team member remove "$TEAM_ID" \
+run_loop expert-team member-status list "$TEAM_ID"
+run_loop expert-team member remove "$TEAM_ID" \
   --data "$(jq -nc --arg id "$EXPERT_B_ID" \
     '{member_type:"expert",member_id:$id}')"
-"$OCTO_CLI_BIN" loop expert-team delete "$TEAM_ID"
+run_loop expert-team delete "$TEAM_ID"
 ```
 
 ### Execution commands
 
 ```bash
-"$OCTO_CLI_BIN" loop task active-execution list "$TASK_ID"
-"$OCTO_CLI_BIN" loop task execution list "$TASK_ID"
-"$OCTO_CLI_BIN" loop execution message list "$EXECUTION_ID"
-"$OCTO_CLI_BIN" loop task execution cancel "$TASK_ID" "$EXECUTION_ID"
-"$OCTO_CLI_BIN" loop execution cancel "$EXECUTION_ID"
-"$OCTO_CLI_BIN" loop task rerun "$TASK_ID" \
+run_loop task active-execution list "$TASK_ID"
+run_loop task execution list "$TASK_ID"
+run_loop execution message list "$EXECUTION_ID"
+run_loop task execution cancel "$TASK_ID" "$EXECUTION_ID"
+run_loop execution cancel "$EXECUTION_ID"
+run_loop task rerun "$TASK_ID" \
   --data "$(jq -nc --arg id "$EXECUTION_ID" '{execution_id:$id}')"
 ```
 
@@ -438,18 +447,11 @@ prints credentials.
 
 ## 8. Known blockers before claiming full coverage
 
-1. **CLI required-body validation:** `task.create --data '{}'` currently passes
-   local dry-run despite `title` being required. The live suite must record the
-   Fleet response until CLI validation is fixed.
-2. **Expert-team member schema:** the OpenAPI schema uses `allOf`; the CLI schema
-   loader currently shows an empty request body for member add/update. Explicit
-   `--data` still transports the body, but schema discovery/validation coverage
-   is incomplete.
-3. **Runtime fixture:** expert creation cannot run without a valid runtime.
-4. **Execution fixture:** execution behavior cannot run without an online
+1. **Runtime fixture:** expert creation cannot run without a valid runtime.
+2. **Execution fixture:** execution behavior cannot run without an online
    daemon consuming tasks.
-5. **Expert cleanup:** public API can archive but cannot delete experts.
-6. **Task search parameters:** `task.search` currently exposes only `page` and
+3. **Expert cleanup:** public API can archive but cannot delete experts.
+4. **Task search parameters:** `task.search` currently exposes only `page` and
    `page_size`; no keyword or filter parameter is defined, so the live suite
    cannot perform a deterministic run-ID search.
 
@@ -464,8 +466,6 @@ The release gate is satisfied only when:
 - all created tasks and teams are deleted and experts archived;
 - no full credential appears in output or reports;
 - no unexpected 5xx, panic, malformed envelope or vocabulary leak occurs;
-- the two known CLI schema/validation gaps are fixed or explicitly accepted as
-  release exceptions;
 - the generated report contains commands, exit codes, sanitized responses,
   timings, cleanup results and fixture IDs.
 

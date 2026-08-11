@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -211,8 +212,9 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 		t.Fatal("autopilot.create typed request body not found")
 	}
 	for _, field := range []string{"title", "assignee_id", "dispatch_mode", "task_title_template"} {
-		if _, ok := create.RequestBody.Properties[field]; !ok {
-			t.Errorf("autopilot.create missing %s: %+v", field, create.RequestBody.Properties)
+		property, ok := create.RequestBody.Properties[field]
+		if !ok || property.Type != "string" {
+			t.Errorf("autopilot.create %s = %+v, want string", field, property)
 		}
 	}
 	dispatch := create.RequestBody.Properties["dispatch_mode"]
@@ -256,6 +258,33 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	}
 }
 
+func TestLoopComposedRequestSchemas(t *testing.T) {
+	r := MustNew()
+	member, ok := r.GetOperation("expert_team.member.add")
+	if !ok || member.RequestBody == nil {
+		t.Fatal("expert_team.member.add request body not found")
+	}
+	for _, field := range []string{"member_type", "member_id", "role"} {
+		if _, ok := member.RequestBody.Properties[field]; !ok {
+			t.Errorf("composed member request missing %s: %+v", field, member.RequestBody)
+		}
+	}
+
+	secret, ok := r.GetOperation("autopilot.signing_secret.set")
+	if !ok || secret.RequestBody == nil {
+		t.Fatal("autopilot.signing_secret.set request body not found")
+	}
+	property := secret.RequestBody.Properties["signing_secret"]
+	if !property.WriteOnly || len(property.AnyOf) != 2 {
+		t.Fatalf("signing_secret schema = %+v, want writeOnly anyOf", property)
+	}
+
+	quickCreate, ok := r.GetOperation("task.quick_create")
+	if !ok || quickCreate.ResponseSchema == nil {
+		t.Fatal("task.quick_create referenced 202 response schema not resolved")
+	}
+}
+
 func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 	r := MustNew()
 	for _, info := range r.ListOperations("loop") {
@@ -290,6 +319,25 @@ func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 		if !wantHeader && workspaceHeaders != 0 {
 			t.Errorf("%s: workspace headers = %d, want none", info.ID, workspaceHeaders)
 		}
+	}
+}
+
+func TestLoopOperationsDeclareRisk(t *testing.T) {
+	r := MustNew()
+	for _, info := range r.ListOperations("loop") {
+		if info.Risk == "" {
+			t.Errorf("%s does not declare x-octo-risk", info.ID)
+		}
+	}
+}
+
+func TestLoopSpecUsesSupportedBearerAuthentication(t *testing.T) {
+	raw, err := specsFS.ReadFile("specs/loop.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"octo_session"`)) {
+		t.Fatal("Loop CLI contract advertises unsupported octo_session authentication")
 	}
 }
 

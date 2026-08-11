@@ -101,6 +101,7 @@ var backendErrorMapping = map[string]struct {
 	Hint string
 }{
 	"UNAUTHORIZED":                      {"auth_error", "check OCTO_TOKEN / OCTO_BOT_TOKEN; bot may be unpublished"},
+	"AUTH_REQUIRED":                     {"auth_error", "provide a valid Octo or Loop bearer credential"},
 	"AUTH_UNAVAILABLE":                  {"network", "auth service unreachable; retry later"},
 	"VALIDATION_ERROR":                  {"validation", "check params with `octo-cli schema <op>`"},
 	"MATTER_NOT_FOUND":                  {"api_error", "verify ID with `octo-cli matters list`"},
@@ -110,6 +111,9 @@ var backendErrorMapping = map[string]struct {
 	"BOT_WORKSPACE_MEMBERSHIP_REQUIRED": {"permission", "ask a Workspace owner or admin to add this Bot in Workspace Members"},
 	"SPACE_FORBIDDEN":                   {"permission", "bot not a member of this space"},
 	"DUPLICATE_ASSIGNEE":                {"validation", "already assigned; check current assignees"},
+	"DUPLICATE":                         {"validation", "the resource already exists; inspect the current resource before retrying"},
+	"UNSUPPORTED_MEDIA_TYPE":            {"validation", "use the content type declared by `octo-cli schema <op>`"},
+	"CLIENT_VERSION_TOO_OLD":            {"config", "upgrade octo-cli and retry"},
 	"RATE_LIMITED":                      {"rate_limited", "server-side rate limit; retry after cooldown"},
 	"UPSTREAM_UNAVAILABLE":              {"network", "upstream dependency unavailable; retry later"},
 	"INTERNAL_ERROR":                    {"api_error", "internal server error; retry or report"},
@@ -146,12 +150,18 @@ func ParseBackendError(status int, body []byte) *ExitError {
 			Code    string          `json:"code"`
 			Message string          `json:"message"`
 			Details json.RawMessage `json:"details"`
+			Hint    string          `json:"hint"`
 		} `json:"error"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &mEnv) == nil && mEnv.Error.Code != "" {
-		// Unmapped matters codes keep their historical api_error / no-hint
-		// classification.
-		return newBackendError(mEnv.Error.Code, mEnv.Error.Message, "api_error", "", body)
+		// Preserve the historical api_error classification for unknown matters
+		// codes. A backend-provided hint identifies the richer Public API shape;
+		// there the HTTP status remains the safest fallback for a new code.
+		fallbackType := "api_error"
+		if mEnv.Error.Hint != "" {
+			fallbackType = typeFromStatus(status)
+		}
+		return newBackendError(mEnv.Error.Code, mEnv.Error.Message, fallbackType, mEnv.Error.Hint, body)
 	}
 
 	// Layer 2: octo-drive envelope {"error":"not_found","message":"..."} — the

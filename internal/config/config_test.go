@@ -25,6 +25,7 @@ func TestValidate_RejectsServicePathAsBaseURL(t *testing.T) {
 	for _, raw := range []string{
 		"https://im-test.deepminer.com.cn/fleet",
 		"https://im-test.deepminer.com.cn/fleet/api/v1",
+		"https://im-test.deepminer.com.cn?",
 		"ws://im-test.deepminer.com.cn",
 	} {
 		c := &Config{APIBaseURL: raw, BotToken: "app_xxx"}

@@ -72,11 +72,6 @@
       "bearer_auth": [
 
       ]
-    },
-    {
-      "octo_session": [
-
-      ]
     }
   ],
   "x-common-errors": {
@@ -138,7 +133,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create task",
@@ -172,7 +168,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -218,7 +215,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -256,7 +254,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -294,7 +293,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -340,7 +340,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -381,7 +382,8 @@
           "202": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -427,7 +429,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update task",
@@ -461,7 +464,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete task",
@@ -492,7 +496,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/comments": {
@@ -541,7 +546,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create task comment",
@@ -575,7 +581,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/comments/_trigger_preview": {
@@ -619,7 +626,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/timeline": {
@@ -668,7 +676,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/subscribers": {
@@ -717,7 +726,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/subscribe": {
@@ -761,7 +771,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/unsubscribe": {
@@ -805,7 +816,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/executions": {
@@ -854,7 +866,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/active_executions": {
@@ -903,7 +916,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/rerun": {
@@ -947,7 +961,8 @@
           "202": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/executions/{execution_id}/cancel": {
@@ -991,7 +1006,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/usage": {
@@ -1032,7 +1048,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/reactions": {
@@ -1076,7 +1093,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Remove task reaction",
@@ -1110,7 +1128,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/attachments": {
@@ -1159,7 +1178,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/children": {
@@ -1208,7 +1228,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/labels": {
@@ -1257,7 +1278,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Attach task label",
@@ -1291,7 +1313,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/labels/{label_id}": {
@@ -1335,7 +1358,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/metadata": {
@@ -1376,7 +1400,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/metadata/{metadata_id}": {
@@ -1423,7 +1448,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete task metadata",
@@ -1454,7 +1480,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/pull_requests": {
@@ -1503,7 +1530,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/executions/{execution_id}/messages": {
@@ -1552,7 +1580,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/executions/{execution_id}/cancel": {
@@ -1593,7 +1622,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts": {
@@ -1634,7 +1664,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create expert",
@@ -1671,7 +1702,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -1715,7 +1747,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -1761,7 +1794,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update expert",
@@ -1798,7 +1832,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/archive": {
@@ -1839,7 +1874,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/restore": {
@@ -1880,7 +1916,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/executions/cancel": {
@@ -1921,7 +1958,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/executions": {
@@ -1970,7 +2008,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/skills": {
@@ -2019,7 +2058,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "put": {
         "summary": "Replace expert skills",
@@ -2053,7 +2093,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "post": {
         "summary": "Add expert skills",
@@ -2087,7 +2128,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/experts/{expert_id}/env": {
@@ -2128,7 +2170,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "put": {
         "summary": "Update expert environment",
@@ -2162,7 +2205,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/expert_templates": {
@@ -2203,7 +2247,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -2249,7 +2294,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/expert_teams": {
@@ -2290,7 +2336,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create expert team",
@@ -2324,7 +2371,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -2370,7 +2418,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update expert team",
@@ -2404,7 +2453,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete expert team",
@@ -2435,7 +2485,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/expert_teams/{expert_team_id}/members": {
@@ -2484,7 +2535,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Add expert team member",
@@ -2518,7 +2570,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Remove expert team member",
@@ -2552,7 +2605,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/expert_teams/{expert_team_id}/members/role": {
@@ -2596,7 +2650,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/expert_teams/{expert_team_id}/member_statuses": {
@@ -2637,7 +2692,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/workspaces": {
@@ -2678,7 +2734,8 @@
           "200": {
             "$ref": "#/components/responses/WorkspaceCollection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create workspace",
@@ -2720,7 +2777,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/workspaces/{workspace_id}": {
@@ -2769,7 +2827,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update workspace",
@@ -2822,7 +2881,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete workspace",
@@ -2865,7 +2925,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/workspaces/{workspace_id}/members": {
@@ -2920,7 +2981,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/labels": {
@@ -2961,7 +3023,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create label",
@@ -3002,7 +3065,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -3051,7 +3115,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update label",
@@ -3103,7 +3168,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete label",
@@ -3145,7 +3211,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -3207,7 +3274,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -3269,7 +3337,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create project",
@@ -3328,7 +3397,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -3377,7 +3447,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update project",
@@ -3429,7 +3500,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete project",
@@ -3471,7 +3543,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -3526,7 +3599,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create project resource",
@@ -3578,7 +3652,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -3646,7 +3721,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete project resource",
@@ -3697,7 +3773,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -3756,7 +3833,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete comment",
@@ -3798,7 +3876,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -3847,7 +3926,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -3896,7 +3976,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -3955,7 +4036,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Remove comment reaction",
@@ -4007,7 +4089,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -4056,7 +4139,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -4105,7 +4189,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "delete": {
         "summary": "Delete attachment",
@@ -4147,7 +4232,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -4205,7 +4291,8 @@
               }
             }
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -4263,7 +4350,8 @@
               }
             }
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -4317,7 +4405,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -4365,7 +4454,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -4411,7 +4501,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create skill",
@@ -4452,7 +4543,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -4501,7 +4593,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update skill",
@@ -4553,7 +4646,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete skill",
@@ -4595,7 +4689,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -4650,7 +4745,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "put": {
         "summary": "Create or update skill file",
@@ -4702,7 +4798,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -4760,7 +4857,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -4814,7 +4912,8 @@
           "200": {
             "$ref": "#/components/responses/RuntimeCollection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/runtimes/{runtime_id}": {
@@ -4869,7 +4968,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete runtime",
@@ -4912,7 +5012,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -4962,7 +5063,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5033,7 +5135,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5104,7 +5207,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5175,7 +5279,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5246,7 +5351,8 @@
           "200": {
             "$ref": "#/components/responses/Collection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5306,7 +5412,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5364,7 +5471,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5424,7 +5532,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5482,7 +5591,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5542,7 +5652,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5600,7 +5711,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5660,7 +5772,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5718,7 +5831,8 @@
           "200": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "parameters": [
         {
@@ -5771,7 +5885,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotCollection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "post": {
         "summary": "Create autopilot",
@@ -5805,7 +5920,8 @@
           "201": {
             "$ref": "#/components/responses/AutopilotResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -5847,7 +5963,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotResource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       },
       "patch": {
         "summary": "Update autopilot",
@@ -5880,7 +5997,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete autopilot",
@@ -5910,7 +6028,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/trigger": {
@@ -5947,7 +6066,8 @@
           "201": {
             "$ref": "#/components/responses/AutopilotRunResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/runs": {
@@ -5992,7 +6112,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotRunCollection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/runs/{autopilot_run_id}": {
@@ -6029,7 +6150,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotRunResource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/deliveries": {
@@ -6074,7 +6196,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotDeliveryCollection"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}": {
@@ -6111,7 +6234,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotDeliveryResource"
           }
-        }
+        },
+        "x-octo-risk": "read"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/deliveries/{autopilot_delivery_id}/replay": {
@@ -6148,7 +6272,8 @@
           "201": {
             "$ref": "#/components/responses/AutopilotDeliveryResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/triggers": {
@@ -6188,7 +6313,8 @@
           "201": {
             "$ref": "#/components/responses/AutopilotTriggerResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}": {
@@ -6228,7 +6354,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotTriggerResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete autopilot trigger",
@@ -6258,7 +6385,8 @@
           "200": {
             "$ref": "#/components/responses/Empty"
           }
-        }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/rotate_webhook_token": {
@@ -6295,7 +6423,8 @@
           "201": {
             "$ref": "#/components/responses/AutopilotTriggerResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/autopilots/{autopilot_id}/triggers/{autopilot_trigger_id}/signing_secret": {
@@ -6335,7 +6464,8 @@
           "200": {
             "$ref": "#/components/responses/AutopilotTriggerResource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       }
     },
     "/fleet/api/v1/tasks/{task_id}/expert_team_evaluation": {
@@ -6389,7 +6519,8 @@
           "201": {
             "$ref": "#/components/responses/Resource"
           }
-        }
+        },
+        "x-octo-risk": "write"
       },
       "parameters": [
         {
@@ -6404,12 +6535,6 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Loop credential or supported long-lived Octo server credential."
-      },
-      "octo_session": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "Token",
-        "description": "Octo session token accepted directly by Fleet."
       }
     },
     "parameters": {
@@ -6671,8 +6796,7 @@
                 "value"
               ],
               "properties": {
-                "value": {
-                }
+                "value": {}
               }
             }
           }
@@ -8253,10 +8377,8 @@
               "null"
             ]
           },
-          "trigger_payload": {
-          },
-          "result": {
-          },
+          "trigger_payload": {},
+          "result": {},
           "created_at": {
             "type": "string",
             "format": "date-time"

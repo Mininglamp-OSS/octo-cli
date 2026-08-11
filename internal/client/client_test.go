@@ -326,6 +326,57 @@ func TestDo_VerboseWritesToErrOut(t *testing.T) {
 	}
 }
 
+func TestDo_RedactsWriteOnlyJSONFields(t *testing.T) {
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		receivedBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var errBuf bytes.Buffer
+	c := newTestClient(srv)
+	c.options.DryRun = true
+	c.options.Verbose = true
+	c.options.ErrOut = &errBuf
+	body, err := c.Do(context.Background(), &Request{
+		Method:              http.MethodPut,
+		Path:                "/secret",
+		Body:                map[string]string{"signing_secret": "SUPERSECRET123456", "label": "safe"},
+		SensitiveJSONFields: []string{"signing_secret"},
+		Headers:             map[string]string{"authorization": "raw-secret"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if strings.Contains(string(body), "SUPERSECRET") || strings.Contains(string(body), "raw-secret") {
+		t.Fatalf("dry-run leaked a secret: %s", body)
+	}
+	if !strings.Contains(string(body), "[REDACTED]") || !strings.Contains(string(body), "***") {
+		t.Fatalf("dry-run did not redact fields and credential: %s", body)
+	}
+
+	c.options.DryRun = false
+	errBuf.Reset()
+	_, err = c.Do(context.Background(), &Request{
+		Method:              http.MethodPut,
+		Path:                "/secret",
+		Body:                map[string]string{"signing_secret": "SUPERSECRET123456", "label": "safe"},
+		SensitiveJSONFields: []string{"signing_secret"},
+	})
+	if err != nil {
+		t.Fatalf("verbose Do: %v", err)
+	}
+	if strings.Contains(errBuf.String(), "SUPERSECRET") || !strings.Contains(errBuf.String(), "[REDACTED]") {
+		t.Fatalf("verbose output did not redact secret: %s", errBuf.String())
+	}
+	if !strings.Contains(receivedBody, "SUPERSECRET123456") {
+		t.Fatalf("redaction changed the wire body: %s", receivedBody)
+	}
+}
+
 func TestDo_ServiceURLRouting(t *testing.T) {
 	// With the unified API base URL model, all services route to APIBaseURL.
 	var hitService string

@@ -65,10 +65,29 @@ func TestWriteSuccess_FlattensPagination(t *testing.T) {
 	}
 }
 
+func TestWriteSuccess_PreservesResourceEnvelopeByDefault(t *testing.T) {
+	raw := json.RawMessage(`{"data":{"id":"marketplace-1"}}`)
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data is %T, want original envelope", got["data"])
+	}
+	if _, nested := data["data"]; !nested {
+		t.Fatalf("non-Loop resource envelope changed: %#v", data)
+	}
+}
+
 func TestWriteSuccess_FlattensResourceEnvelope(t *testing.T) {
 	raw := json.RawMessage(`{"data":{"project_id":"project-1","title":"test"}}`)
 	var buf bytes.Buffer
-	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{UnwrapResource: true}); err != nil {
 		t.Fatalf("WriteSuccess: %v", err)
 	}
 	var got map[string]any

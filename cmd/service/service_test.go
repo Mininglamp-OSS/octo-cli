@@ -950,6 +950,38 @@ func TestValidateRequiredBodyFields_SkipsMultipartBinaryProperty(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredBodyFields_EnforcesComposedSchemas(t *testing.T) {
+	r := registry.MustNew()
+	quickCreate, ok := r.GetOperation("task.quick_create")
+	if !ok || quickCreate.RequestBody == nil {
+		t.Fatal("task.quick_create request schema not found")
+	}
+	rt := &operationRuntime{detail: quickCreate}
+	for _, body := range []map[string]any{
+		{"prompt": "work"},
+		{"prompt": "work", "expert_id": "e1", "expert_team_id": "et1"},
+	} {
+		if err := validateRequiredBodyFields(rt, body); err == nil {
+			t.Fatalf("body should fail oneOf validation: %#v", body)
+		}
+	}
+	if err := validateRequiredBodyFields(rt, map[string]any{"prompt": "work", "expert_id": "e1"}); err != nil {
+		t.Fatalf("valid oneOf body rejected: %v", err)
+	}
+
+	secret, ok := r.GetOperation("autopilot.signing_secret.set")
+	if !ok || secret.RequestBody == nil {
+		t.Fatal("signing secret request schema not found")
+	}
+	rt = &operationRuntime{detail: secret}
+	if err := validateRequiredBodyFields(rt, map[string]any{"signing_secret": "short"}); err == nil {
+		t.Fatal("short non-empty signing secret should fail anyOf validation")
+	}
+	if err := validateRequiredBodyFields(rt, map[string]any{"signing_secret": ""}); err != nil {
+		t.Fatalf("empty signing secret should be accepted for clearing: %v", err)
+	}
+}
+
 // TestBuildMultipartBody_MissingFile confirms the validation error surfaces
 // when --file is empty.
 func TestBuildMultipartBody_MissingFile(t *testing.T) {

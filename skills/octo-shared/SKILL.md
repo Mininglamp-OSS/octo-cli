@@ -58,7 +58,10 @@ Token prefix determines capability — the CLI does NOT enforce this locally (th
 
 `uk_*` carries a real person's identity and is meaningful mainly for `message search` (routed to `/v1/user/*`); for other domains use a bot token. `bf_*` can also search on behalf of a person with `--on-behalf-of <uid>`. `identity.bot_kind` reflects the kind: `app_bot`, `user_bot`, or `user_key`.
 
-Before acting, inspect `octo-cli auth status` (or `octo-cli config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
+Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
+`octo-cli config show`) to confirm the active identity. Daemon task mode does
+not expose profile diagnostics; use the `identity` echoed by each success
+envelope and report authentication failures to the daemon instead (see §3).
 
 ## 2. Unified gateway configuration
 

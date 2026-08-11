@@ -121,6 +121,28 @@ func TestFactory_CredentialFromEnv(t *testing.T) {
 	}
 }
 
+func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvAPIBaseURL, "")
+	t.Setenv(config.EnvBotToken, "")
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("legacy", &authstore.ProfileMeta{
+		APIBaseURL: "https://api.example.com/fleet/api/v1",
+		RobotID:    "bot-legacy",
+	}, "app_legacy"); err != nil {
+		t.Fatal(err)
+	}
+	f := NewDefaultFactory()
+	f.Globals.Profile = "legacy"
+	_, err = f.Config()
+	if err == nil || !strings.Contains(err.Error(), `profile "legacy"`) || !strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("Config error = %v, want named profile recovery guidance", err)
+	}
+}
+
 func TestFactory_TaskCredentialMode(t *testing.T) {
 	t.Run("uses only injected token without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"

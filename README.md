@@ -48,7 +48,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
-| `loop`    | 126 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, repos, skills, automations, attachments, and related resources |
+| `loop`    | 126 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, projects, skills, automations, attachments, comments, labels, and related resources |
 
 ## Installation
 
@@ -139,7 +139,7 @@ octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
-octo-cli loop task list
+octo-cli loop task list --workspace-id <workspace-id>
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Mounted HTML documents registered in docs-backend use the same search endpoint.
@@ -191,14 +191,16 @@ octo-cli api POST /v1/messages --data @body.json
 
 `octo-cli` is bot-only — there is no interactive user login. The token comes
 from `OCTO_TOKEN` (preferred) or `OCTO_BOT_TOKEN`, and carries an **App Bot**
-(`app_*`), a **User Bot** (`bf_*`), or a **user API key** (`uk_*`, a real-person
-identity used for message search and drive):
+(`app_*`), a **User Bot** (`bf_*`), a **user API key** (`uk_*`, a real-person
+identity used for message search and drive), or a short-lived **Loop task
+credential** (`octo_loop_*`):
 
 | Prefix  | Type         | DM  | Group read | Group write | Thread | Voice | Search |
 |---------|--------------|-----|------------|-------------|--------|-------|--------|
 | `app_*` | App Bot      | yes | yes        | **no**      | **no** | **no**| **no** |
 | `bf_*`  | User Bot     | yes | yes        | yes         | yes    | yes   | yes    |
 | `uk_*`  | User API key | —   | —          | —           | —      | —     | yes    |
+| `octo_loop_*` | Loop task credential | Fleet policy | Fleet policy | Fleet policy | — | — | — |
 
 (`drive` accepts all three prefixes: `uk_*` acts as the real person, `bf_*` /
 `app_*` as the bot. A bot still has to be added as a member of a shared drive
@@ -234,6 +236,9 @@ The success envelope's `identity.source` names the variable actually used
 ### API Base URL
 
 All backend services are accessed through a single API base URL.
+The value is a gateway origin (`http(s)://host[:port]`) rather than a
+service-specific path; query strings, fragments, credentials, and API paths are
+rejected.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
@@ -245,6 +250,12 @@ All backend services are accessed through a single API base URL.
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
+
+Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
+isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
+the restricted CLI policy but is not a security boundary against a process that
+can rewrite its own environment. In task mode, use the injected
+`OCTO_BOT_TOKEN`; `auth` and `config` diagnostics are intentionally unavailable.
 
 ## Output
 

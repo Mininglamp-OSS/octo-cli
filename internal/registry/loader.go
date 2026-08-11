@@ -175,18 +175,21 @@ type ParamInfo struct {
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
-// the schema command to describe a request/response body to an Agent. One
-// level of `$ref` into `components.schemas` is resolved eagerly; deeper refs
-// are surfaced as an unresolved `$ref` pointer so the output still contains
-// a useful reference.
+// the schema command and generic request validator. It resolves bounded local
+// references, nullable type unions, and composition constraints while leaving
+// an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
 	Type        string                `json:"type,omitempty"`
 	Required    []string              `json:"required,omitempty"`
 	Properties  map[string]SchemaInfo `json:"properties,omitempty"`
 	Items       *SchemaInfo           `json:"items,omitempty"`
+	OneOf       []SchemaInfo          `json:"one_of,omitempty"`
+	AnyOf       []SchemaInfo          `json:"any_of,omitempty"`
 	Enum        []any                 `json:"enum,omitempty"`
+	Const       any                   `json:"const,omitempty"`
 	Format      string                `json:"format,omitempty"`
 	Description string                `json:"description,omitempty"`
+	WriteOnly   bool                  `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
 	// validator enforces Required, MinItems and Enum; the rest (MinLength,
 	// MaxLength, MaxItems, Pattern) are descriptive only and left to the backend.
@@ -236,8 +239,11 @@ type OperationDetail struct {
 	RequestBodyRequired bool            `json:"request_body_required,omitempty"`
 	ResponseSchema      *SchemaInfo     `json:"response_schema,omitempty"`
 	Pagination          *PaginationInfo `json:"pagination,omitempty"`
-	BaseURLEnv          string          `json:"base_url_env,omitempty"`
-	SpaceHeader         bool            `json:"space_header,omitempty"`
+	// BaseURLEnv is retained in schema output for compatibility with existing
+	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
+	// intentionally does not select a different service URL from this metadata.
+	BaseURLEnv  string `json:"base_url_env,omitempty"`
+	SpaceHeader bool   `json:"space_header,omitempty"`
 	// SpaceHeaderSet records whether the spec declared x-octo-space-header at
 	// all. It lets the transport distinguish an explicit `false` (suppress the
 	// X-Space-Id header) from an omitted flag (keep the default behaviour of
@@ -624,6 +630,9 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 			continue
 		}
 		if rm, ok := r.(map[string]any); ok {
+			if ref := stringOf(rm["$ref"]); ref != "" {
+				rm = followResponseRef(doc, ref)
+			}
 			if s := extractJSONSchema(rm); s != nil {
 				resolved := resolveSchema(doc, s)
 				return &resolved
@@ -633,9 +642,9 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 	return nil
 }
 
-// resolveSchema performs a shallow walk of a schema node, following one level
-// of $ref into components.schemas. Deeper refs are left as `$ref` strings so
-// the schema command can still surface a useful pointer to the consumer.
+// resolveSchema performs a bounded walk of a schema node. Deeper references
+// are left as `$ref` strings so schema output remains useful without risking
+// cycles in recursive component models.
 func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
@@ -654,21 +663,32 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 	}
 
 	info := SchemaInfo{
-		Type:        stringOf(s["type"]),
+		Type:        schemaType(s["type"]),
 		Format:      stringOf(s["format"]),
 		Description: stringOf(s["description"]),
 		FlagName:    stringOf(s["x-octo-flag"]),
 		Secret:      truthy(s["x-octo-secret"]),
+		WriteOnly:   boolOf(s["writeOnly"]),
 		MinLength:   intOf(s["minLength"]),
 		MaxLength:   intOf(s["maxLength"]),
 		MinItems:    intOf(s["minItems"]),
 		MaxItems:    intOf(s["maxItems"]),
 		Pattern:     stringOf(s["pattern"]),
 	}
+	if value, ok := s["const"]; ok {
+		info.Const = value
+	}
+	if allOf, ok := s["allOf"].([]any); ok {
+		for _, candidate := range allOf {
+			if sub, ok := candidate.(map[string]any); ok {
+				mergeSchemaInfo(&info, resolveSchemaWithDepth(doc, sub, depth+1))
+			}
+		}
+	}
 	if req, ok := s["required"].([]any); ok {
 		for _, x := range req {
 			if name, ok := x.(string); ok {
-				info.Required = append(info.Required, name)
+				info.Required = appendUniqueStrings(info.Required, name)
 			}
 		}
 	}
@@ -676,7 +696,9 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 		info.Enum = enum
 	}
 	if props, ok := s["properties"].(map[string]any); ok {
-		info.Properties = map[string]SchemaInfo{}
+		if info.Properties == nil {
+			info.Properties = map[string]SchemaInfo{}
+		}
 		for name, v := range props {
 			if sub, ok := v.(map[string]any); ok {
 				info.Properties[name] = resolveSchemaWithDepth(doc, sub, depth+1)
@@ -687,7 +709,103 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 		sub := resolveSchemaWithDepth(doc, items, depth+1)
 		info.Items = &sub
 	}
+	info.OneOf = resolveSchemaAlternatives(doc, s["oneOf"], depth)
+	info.AnyOf = resolveSchemaAlternatives(doc, s["anyOf"], depth)
 	return info
+}
+
+func schemaType(value any) string {
+	if single, ok := value.(string); ok {
+		return single
+	}
+	if union, ok := value.([]any); ok {
+		for _, candidate := range union {
+			if typ, ok := candidate.(string); ok && typ != "null" {
+				return typ
+			}
+		}
+	}
+	return ""
+}
+
+func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []SchemaInfo {
+	alternatives, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	resolved := make([]SchemaInfo, 0, len(alternatives))
+	for _, candidate := range alternatives {
+		if sub, ok := candidate.(map[string]any); ok {
+			resolved = append(resolved, resolveSchemaWithDepth(doc, sub, depth+1))
+		}
+	}
+	return resolved
+}
+
+func mergeSchemaInfo(dst *SchemaInfo, src SchemaInfo) {
+	if dst.Type == "" {
+		dst.Type = src.Type
+	}
+	if dst.Format == "" {
+		dst.Format = src.Format
+	}
+	if dst.Description == "" {
+		dst.Description = src.Description
+	}
+	if dst.FlagName == "" {
+		dst.FlagName = src.FlagName
+	}
+	dst.WriteOnly = dst.WriteOnly || src.WriteOnly
+	dst.Required = appendUniqueStrings(dst.Required, src.Required...)
+	if len(src.Properties) > 0 {
+		if dst.Properties == nil {
+			dst.Properties = map[string]SchemaInfo{}
+		}
+		for name, property := range src.Properties {
+			dst.Properties[name] = property
+		}
+	}
+	if dst.Items == nil {
+		dst.Items = src.Items
+	}
+	dst.OneOf = append(dst.OneOf, src.OneOf...)
+	dst.AnyOf = append(dst.AnyOf, src.AnyOf...)
+	if len(dst.Enum) == 0 {
+		dst.Enum = src.Enum
+	}
+	if dst.Const == nil {
+		dst.Const = src.Const
+	}
+	if dst.MinLength == 0 {
+		dst.MinLength = src.MinLength
+	}
+	if dst.MaxLength == 0 {
+		dst.MaxLength = src.MaxLength
+	}
+	if dst.MinItems == 0 {
+		dst.MinItems = src.MinItems
+	}
+	if dst.MaxItems == 0 {
+		dst.MaxItems = src.MaxItems
+	}
+	if dst.Pattern == "" {
+		dst.Pattern = src.Pattern
+	}
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	for _, value := range dst {
+		seen[value] = struct{}{}
+	}
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		dst = append(dst, value)
+	}
+	return dst
 }
 
 func followRef(doc map[string]any, ref string) map[string]any {

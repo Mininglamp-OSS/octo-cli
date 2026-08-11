@@ -33,7 +33,7 @@ const (
 	defaultBaseDelay   = 500 * time.Millisecond
 	defaultMaxDelay    = 10 * time.Second
 	defaultTimeout     = 30 * time.Second
-	publicAPIMediaType = "application/vnd.octo+json"
+	publicAPIMediaType = "application/json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -82,6 +82,9 @@ type Request struct {
 	// traces and --dry-run output, whether it appears in the URL path or the
 	// request body. The values still go on the wire unchanged.
 	SecretValues []string
+	// SensitiveJSONFields lists top-level writeOnly request properties that
+	// must be redacted from dry-run and verbose diagnostic output.
+	SensitiveJSONFields []string
 }
 
 // secretMask replaces a redacted value in verbose / dry-run output. It is a
@@ -930,7 +933,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 
 	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
 	if c.options.Verbose && len(body) > 0 {
-		c.verbosef("request body: %s", truncate(redactBodyForLog(req, body), 1024))
+		c.verbosef("request body: %s", truncate(redactDiagnosticBody(req, body), 1024))
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -1086,7 +1089,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte, error) {
 	var bodyField any
 	if len(body) > 0 {
-		redacted := redactBodyForLog(req, body)
+		redacted := redactDiagnosticBody(req, body)
 		// UseNumber so a uint64 id in the echoed body is shown at full precision;
 		// a plain unmarshal would round it and make --dry-run misreport what the
 		// request actually carries.
@@ -1097,14 +1100,15 @@ func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte,
 		}
 	}
 	hdr := map[string]string{}
+	for k, v := range req.Headers {
+		hdr[k] = redactSecrets(v, req.SecretValues)
+	}
+	removeHeader(hdr, "Authorization")
 	if c.cred != nil && c.cred.Token != "" {
 		hdr["Authorization"] = "Bearer " + credential.MaskToken(c.cred.Token)
 	}
 	if c.cred != nil && c.cred.SpaceID != "" && !req.SuppressSpaceHeader {
 		hdr["X-Space-Id"] = c.cred.SpaceID
-	}
-	for k, v := range req.Headers {
-		hdr[k] = redactSecrets(v, req.SecretValues)
 	}
 	out := map[string]any{
 		"dry_run": true,
@@ -1120,6 +1124,39 @@ func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte,
 		return nil, output.ErrWithHint("internal", "MARSHAL_FAILED", err.Error(), "")
 	}
 	return buf, nil
+}
+
+func removeHeader(headers map[string]string, name string) {
+	for key := range headers {
+		if strings.EqualFold(key, name) {
+			delete(headers, key)
+		}
+	}
+}
+
+func redactJSONBody(body []byte, sensitiveFields []string) []byte {
+	if len(body) == 0 || len(sensitiveFields) == 0 {
+		return body
+	}
+	var value map[string]any
+	if err := json.Unmarshal(body, &value); err != nil {
+		return body
+	}
+	for _, field := range sensitiveFields {
+		if _, ok := value[field]; ok {
+			value[field] = "[REDACTED]"
+		}
+	}
+	redacted, err := json.Marshal(value)
+	if err != nil {
+		return body
+	}
+	return redacted
+}
+
+func redactDiagnosticBody(req *Request, body []byte) string {
+	redacted := []byte(redactBodyForLog(req, body))
+	return string(redactJSONBody(redacted, req.SensitiveJSONFields))
 }
 
 // --- helpers ---
