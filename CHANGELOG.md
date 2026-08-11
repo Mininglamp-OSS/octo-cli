@@ -123,6 +123,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is still honoured, and a proxy on the local machine is not refused: it is not the
   storage host. Where the proxy is also the only resolver, the target cannot be
   classified locally and the transfer proceeds unclassified, reported under `--verbose`.
+- **`--data null` and `--params null` are now rejected instead of being treated as an
+  absent value.** Both are valid JSON that decodes into a nil map, so `--data null` used
+  to behave like "no body" (and, with a promoted body flag, crash — see Fixed) while
+  `--params null` behaved like "no query parameters". Both are now
+  `VALIDATION_ERROR` / exit 2 with a message naming the shape. Every other non-object
+  shape (`true`, a number, a string, an array) was already rejected; these two were the
+  gap. **This is a user-visible behaviour change**: a script passing `null` to mean
+  "nothing" must omit the flag instead.
+- **A presigned URL whose host is not in canonical ASCII form is refused.** `net/http`
+  canonicalises a host with IDNA before dialling it while the resolver does not, so a
+  non-ASCII spelling was checked as one string and connected to as another — the
+  fullwidth spellings of `127.0.0.1` and `localhost` passed every rule and reached the
+  local machine. An internationalised storage host must be presented in its A-label
+  (`xn--…`) form, which is what DNS carries; the CLI does not perform the mapping itself,
+  because the checked string and the dialled string then could not be guaranteed equal.
 - **An unknown subcommand no longer echoes the word it did not recognise.** Every
   service domain's parent command now reports
   `unknown subcommand for "octo-cli drive share"; available: access, blob-create, create, download, list, revoke`
@@ -175,6 +190,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
+- **`--data null` with a promoted body flag crashed the CLI** with
+  `panic: assignment to entry in nil map`, on every service domain. JSON `null` decodes
+  into a nil map without error, and the promoted-flag merge then wrote into it. The same
+  unchecked-successful-decode is fixed in `docs import`, where a `null` response body
+  from the backend hit the same write.
 - **Documented that `drive blob create` now verifies the object.** octo-drive's
   low-level register path used to take "this object already exists" on trust, so
   `blob create --object-path does/not/exist.txt` returned a confirmed row that

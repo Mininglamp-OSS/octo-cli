@@ -265,3 +265,39 @@ func TestDocsImportExcalidraw_RejectsUnknownMode(t *testing.T) {
 		t.Fatal("server must not be called")
 	}
 }
+
+// TestDocsImport_NullResponseDoesNotPanic is round-12 P2-5, and a correction to a claim
+// I made last round.
+//
+// After fixing `--data null` I wrote that the other decode sites either take no caller
+// input or never write into the result. That was wrong: this one decodes the *backend's*
+// response into a map and then writes "format" into it, so a `null` body left the map nil
+// and the write panicked — the same defect class with the input arriving from the other
+// direction.
+//
+// Re-enumerated properly this time. Seven sites decode into a map; the other six either
+// only read from it (indexing and range are both safe on a nil map) or already check for
+// nil. This was the only one that wrote.
+func TestDocsImport_NullResponseDoesNotPanic(t *testing.T) {
+	for _, body := range []string{"null", `{"docId":"d1"}`} {
+		t.Run(body, func(t *testing.T) {
+			tf, _ := importTestRoot(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			})
+			file := writeImportFixture(t, ".md", []byte("# Imported\n"))
+
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("panicked on a %s response body: %v — a backend reply must never "+
+							"crash the CLI", body, r)
+					}
+				}()
+				if _, _, err := execRoot(t, tf, "docs", "import", "d1", "--file", file); err != nil {
+					t.Errorf("import: %v", err)
+				}
+			}()
+		})
+	}
+}
