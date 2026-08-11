@@ -359,6 +359,7 @@ func (f *Factory) EmitError(err error) error {
 //
 //	origin                     format                                     embeds argv?
 //	---------------------------+-------------------------------------------+------------
+//	pflag failf (bad syntax)   bad flag syntax: %s                         YES (the whole token)
 //	pflag UnknownFlagError     unknown flag: --%s                          YES (the name IS argv)
 //	pflag UnknownFlagError     unknown shorthand flag: %q in -%s           YES (the whole run)
 //	pflag ValueRequiredError   flag needs an argument: [%q in -]%s         YES (same run)
@@ -379,7 +380,15 @@ func (f *Factory) EmitError(err error) error {
 // command path and lists the real subcommands instead of echoing the argument. Blanking
 // that one would throw away the fix rather than extend it.
 //
-// The five that embed argv are reported by category instead. That is a real loss of
+// pflag has six failf call sites, and the list above matched five of them: `bad flag
+// syntax: %s`, whose argument is the entire argv token, was in no branch and printed in
+// full. So the rule is inverted rather than extended by one: **within the flag-parse
+// family, echoing requires an allowlist entry**, and everything else is reported by
+// category. The allowlist is checked first because "required flag(s) …" mentions flags
+// too. A seventh failf in a future pflag release is covered without being enumerated,
+// which is the whole point — enumerating the unsafe shapes is what missed one.
+//
+// The categories that embed argv are reported by name instead. That is a real loss of
 // detail — an operator no longer sees which flag was rejected — and it is accepted
 // because the alternative cannot be made safe here: this runs *before* collectSecrets,
 // so there is no list of declared secrets to mask against, and a base64url share or
@@ -408,7 +417,19 @@ func WrapCLIError(err error) error {
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
 		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, or uk_* token")
-	// --- the categories whose own text embeds argv: reported, never echoed ---
+	// --- allowlist first: shapes proven to carry no caller value keep their text ---
+	//
+	// Order matters. These are checked before the family catch-all below, because
+	// "required flag(s) …" also mentions flags and would otherwise be blinded along
+	// with everything else.
+	case strings.Contains(lower, "unknown subcommand"),
+		strings.Contains(lower, "required flag"),
+		strings.Contains(lower, "accepts "),
+		strings.Contains(lower, "requires at "),
+		strings.Contains(lower, "arg(s)"):
+		return output.ErrValidation(msg, "run `octo-cli <command> --help` to see valid flags and args")
+
+	// --- then the categories reported by name, for a useful remedy ---
 	case strings.Contains(lower, "unknown flag"),
 		strings.Contains(lower, "unknown shorthand"):
 		return output.ErrValidation("a flag in the command line was not recognised",
@@ -420,17 +441,24 @@ func WrapCLIError(err error) error {
 	case strings.Contains(lower, "invalid argument"):
 		return output.ErrValidation("a flag value was rejected by its type",
 			"run `octo-cli <command> --help` to see the expected type for each flag")
+	case strings.Contains(lower, "bad flag syntax"):
+		return output.ErrValidation("a flag in the command line is malformed",
+			"a flag is --name or --name=value (or -n); check for a stray dash or a missing name")
 	case strings.Contains(lower, "unknown command"):
 		return output.ErrValidation("that is not a known command",
 			"run `octo-cli --help`, or `octo-cli <domain> --help`, for the available commands")
 
-	// --- the categories whose text carries only counts, flag names, or our own words ---
-	case strings.Contains(lower, "unknown subcommand"),
-		strings.Contains(lower, "required flag"),
-		strings.Contains(lower, "accepts "),
-		strings.Contains(lower, "requires at "),
-		strings.Contains(lower, "arg(s)"):
-		return output.ErrValidation(msg, "run `octo-cli <command> --help` to see valid flags and args")
+	// --- and the family catch-all: anything else about flags is not echoed ---
+	//
+	// This is what makes the rule default-deny rather than a list of known-bad shapes.
+	// The previous version enumerated the formats that embed argv and blinded those,
+	// which matched five of pflag's six failf sites and missed "bad flag syntax: %s" —
+	// the one whose argument is the entire argv token. A sixth strings.Contains would
+	// have repeated the same mistake at a different index; this covers the seventh
+	// failf a future pflag release adds without anyone having to notice it.
+	case strings.Contains(lower, "flag"), strings.Contains(lower, "shorthand"):
+		return output.ErrValidation("the command line could not be parsed",
+			"run `octo-cli <command> --help` for the valid flags and args")
 	}
 	return output.ErrWithHint("config", "CLI_ERROR", msg, "")
 }

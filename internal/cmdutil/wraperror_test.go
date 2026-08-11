@@ -93,3 +93,53 @@ func TestWrapCLIError_AuthMessagesAreOurOwnText(t *testing.T) {
 		t.Errorf("message = %q, want the original diagnostic", ee.Message)
 	}
 }
+
+// TestWrapCLIError_TheFlagFamilyIsDefaultDeny is round-14 P1-4, and the lesson is about
+// the shape of the previous fix rather than the missing case.
+//
+// Last round I enumerated the pflag formats that embed argv and blinded those. pflag has
+// six failf call sites, and the enumeration matched five of them: `bad flag syntax: %s`
+// was not in any branch, so it fell to the generic fallback and printed the whole argv
+// token — value included. One extra dash is all it takes:
+//
+//	--bogus=SecretValue123     -> "a flag … was not recognised"          (blinded)
+//	---password=Correct...     -> "bad flag syntax: ---password=Correct" (printed)
+//
+// Adding a fifth strings.Contains would repeat the mistake at a different index, so the
+// family is now default-deny: a message that mentions flags is reported by category
+// unless it matches an explicit allowlist of shapes proven to carry no caller value.
+// A seventh failf added by a future pflag release is covered without being enumerated.
+func TestWrapCLIError_TheFlagFamilyIsDefaultDeny(t *testing.T) {
+	const secret = "CorrectHorseBattery"
+
+	// Every failf format pflag can produce, with the secret in the position pflag puts
+	// the caller's text.
+	for _, tc := range []struct{ name, msg string }{
+		{"bad flag syntax", "bad flag syntax: ---password=" + secret},
+		{"bad flag syntax, equals first", "bad flag syntax: --=" + secret},
+		{"unknown long flag", "unknown flag: --" + secret},
+		{"unknown shorthand", "unknown shorthand flag: 'A' in -A" + secret},
+		{"value required, long", "flag needs an argument: --password=" + secret},
+		{"value required, shorthand", "flag needs an argument: 'p' in -p" + secret},
+		{"invalid argument", `invalid argument "` + secret + `" for "--password" flag: bad`},
+		// A shape pflag does not emit today, standing in for the next one it adds.
+		{"an unenumerated future flag error", "flag something new: " + secret},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ee := output.AsExitError(WrapCLIError(errors.New(tc.msg)))
+			if ee == nil {
+				t.Fatalf("expected a structured error")
+			}
+			visible := ee.Message + " " + ee.Hint + " " + string(ee.Detail)
+			if strings.Contains(visible, secret) {
+				t.Errorf("the argv fragment reached the envelope: %s", visible)
+			}
+			if ee.Type != "validation" {
+				t.Errorf("Type = %q, want validation — a malformed command line is the caller's input", ee.Type)
+			}
+			if ee.Hint == "" {
+				t.Error("blanking the text must not also drop the remedy")
+			}
+		})
+	}
+}
