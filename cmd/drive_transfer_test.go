@@ -7,10 +7,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/spf13/cobra"
+
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
@@ -1072,5 +1075,105 @@ func TestApplyDownloadMode_ChmodsTheDescriptorNotThePath(t *testing.T) {
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("the victim's mode became %#o: the chmod followed the symlink at the part path "+
 			"instead of acting on the descriptor", got)
+	}
+}
+
+// TestDriveDownload_RefusesATruncatedOrEmptyBody is Jerry-Xin's P1-1, relayed from
+// yujiawei's sweep. It did not reach me in this round's brief, so it went unfixed for a
+// head — recording that rather than quietly closing it now.
+//
+// fetchToFile accepted any 2xx and copied the body without comparing what it wrote to what
+// was promised. So 204 published a 0-byte file and reported ok with the sha256 of nothing,
+// and 206 published a truncation and reported ok with a sha256 describing the truncation —
+// a checksum that certifies the wrong bytes is worse than no checksum. The upload half of
+// this same PR already refuses exactly this shape, from the same untrusted storage host.
+func TestDriveDownload_RefusesATruncatedOrEmptyBody(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		status        int
+		body          string
+		contentLength int64
+	}{
+		{"204 with no content", http.StatusNoContent, "", 0},
+		{"206 partial content", http.StatusPartialContent, "half", 4},
+		{"200 but shorter than Content-Length", http.StatusOK, "short", 100},
+		{"200 with an empty body", http.StatusOK, "", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "out.bin")
+
+			store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.contentLength > 0 {
+					w.Header().Set("Content-Length", strconv.FormatInt(tc.contentLength, 10))
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer store.Close()
+
+			tf := cmdutil.NewTestFactory()
+			cfg := &config.Config{APIBaseURL: "http://127.0.0.1:1", BotToken: "bf_t", Format: "json"}
+			tf.SetConfig(cfg)
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+
+			_, err := fetchToFile(cmd, tf.Factory, "download_url", store.URL+"/obj", target, false)
+			if err == nil {
+				got, _ := os.ReadFile(target)
+				t.Fatalf("a %d response with %d body bytes was published as a complete download "+
+					"(%d bytes on disk)", tc.status, len(tc.body), len(got))
+			}
+			if _, serr := os.Stat(target); serr == nil {
+				t.Errorf("the download was refused but a file was left at the destination")
+			}
+		})
+	}
+}
+
+// TestDriveDownload_AcceptsACompleteBody is the allow direction: the length check must not
+// refuse a download that is actually complete, including one with no Content-Length at all
+// (a close-delimited or chunked response, where -1 means "unknown" and there is nothing to
+// compare against).
+func TestDriveDownload_AcceptsACompleteBody(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		setLength bool
+		body      string
+		chunked   bool
+	}{
+		{"200 with a matching Content-Length", true, "the whole object", false},
+		{"200 chunked, no Content-Length", false, "the whole object", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			target := filepath.Join(dir, "out.bin")
+
+			store := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.setLength {
+					w.Header().Set("Content-Length", strconv.Itoa(len(tc.body)))
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer store.Close()
+
+			tf := cmdutil.NewTestFactory()
+			tf.SetConfig(&config.Config{APIBaseURL: "http://127.0.0.1:1", BotToken: "bf_t", Format: "json"})
+			cmd := &cobra.Command{}
+			cmd.SetContext(context.Background())
+
+			res, err := fetchToFile(cmd, tf.Factory, "download_url", store.URL+"/obj", target, false)
+			if err != nil {
+				t.Fatalf("a complete body must be accepted: %v", err)
+			}
+			if res.Size != strconv.Itoa(len(tc.body)) {
+				t.Errorf("size = %q, want %d", res.Size, len(tc.body))
+			}
+			got, rerr := os.ReadFile(target)
+			if rerr != nil || string(got) != tc.body {
+				t.Errorf("target contents = %q (err %v), want %q", got, rerr, tc.body)
+			}
+		})
 	}
 }

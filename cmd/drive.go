@@ -977,9 +977,16 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		return nil, transferNetworkError("download", u, rerr)
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	// Exactly 200, not any 2xx. This request never sends a Range header, so a 206 is
+	// the storage host deciding to send part of the object on its own — and 204 is no
+	// object at all. Accepting the whole 2xx family published both as complete
+	// downloads: 204 wrote a 0-byte file and reported ok with the sha256 of nothing,
+	// and 206 wrote a truncation and reported ok with a sha256 that certifies the
+	// wrong bytes, which is worse than no checksum. The upload half of this command
+	// already refuses the same shape from the same untrusted host.
+	if resp.StatusCode != http.StatusOK {
 		return nil, output.ErrWithHint("api_error", "DOWNLOAD_FAILED",
-			fmt.Sprintf("object storage returned status %d", resp.StatusCode),
+			fmt.Sprintf("object storage returned status %d, not 200", resp.StatusCode),
 			"the signed URL may have expired; re-run the command to get a fresh one")
 	}
 
@@ -1005,6 +1012,26 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		ee := transferNetworkError("download", u, copyErr)
 		ee.Hint = "transfer interrupted; the partial file was removed"
 		return nil, ee
+	}
+	// What arrived must be what was promised. resp.ContentLength is -1 when the
+	// response is chunked or close-delimited, in which case there is nothing to compare
+	// against and the copy error above is the only signal available.
+	if resp.ContentLength >= 0 && written != resp.ContentLength {
+		_ = part.Close() //nolint:errcheck // already failing
+		cleanup()
+		return nil, output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
+			fmt.Sprintf("object storage sent %d of %d bytes", written, resp.ContentLength),
+			"the transfer ended early; re-run the command to get a fresh signed URL")
+	}
+	// A zero-byte object is refused rather than published: every drive upload path
+	// rejects an empty file, so an empty download is the storage host disagreeing with
+	// what the drive row says exists, not a legitimate object.
+	if written == 0 {
+		_ = part.Close() //nolint:errcheck // already failing
+		cleanup()
+		return nil, output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
+			"object storage sent an empty body",
+			"the object is registered but storage returned nothing; report it")
 	}
 	if err := part.Sync(); err != nil {
 		_ = part.Close() //nolint:errcheck // already returning the sync error
@@ -1158,8 +1185,14 @@ func removeReservedPlaceholder(target string, reserved os.FileInfo, published *b
 	if *published || reserved == nil {
 		return
 	}
+	// sameDownloadedFile, not bare os.SameFile: this PR established at that helper that
+	// device+inode alone cannot tell "the file I created" from "a different file that
+	// reused its inode", which ext4 and tmpfs both do. The other two identity checks
+	// were switched over; this one was missed, and it is the one that *deletes* — so
+	// the failure mode was removing a file another writer had just created, while the
+	// docstring above promised exactly the opposite.
 	now, err := os.Lstat(target)
-	if err != nil || !now.Mode().IsRegular() || !os.SameFile(now, reserved) {
+	if err != nil || !sameDownloadedFile(now, reserved) {
 		return
 	}
 	_ = os.Remove(target) //nolint:errcheck // best-effort cleanup of our own placeholder
@@ -1244,8 +1277,11 @@ func assertPartFileUnchanged(partPath string, created os.FileInfo) *output.ExitE
 // operation in this sequence that follows a symlink, so doing it by path handed
 // back exactly the arbitrary-file write the random O_EXCL name exists to prevent.
 func applyDownloadMode(part *os.File, target string) *output.ExitError {
+	// Lstat, matching the write path: os.Stat follows a symlink, so a symlink planted
+	// at the destination would have donated its *target's* mode to the file this
+	// download publishes. Only a regular file's mode is inherited.
 	mode := os.FileMode(0o600)
-	if info, err := os.Stat(target); err == nil && info.Mode().IsRegular() {
+	if info, err := os.Lstat(target); err == nil && info.Mode().IsRegular() {
 		mode = info.Mode().Perm()
 	}
 	if err := part.Chmod(mode); err != nil {

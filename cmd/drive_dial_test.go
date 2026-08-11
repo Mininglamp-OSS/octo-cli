@@ -640,3 +640,49 @@ func TestPublishDownload_FailedRenameLeavesNoPlaceholder(t *testing.T) {
 			"an empty file there looks like a finished download", len(got), got)
 	}
 }
+
+// TestRemoveReservedPlaceholder_LeavesAForeignFileAlone is Jerry-Xin's P1-2. The cleanup
+// guarded with bare os.SameFile, which this PR itself established cannot tell "the file I
+// created" from "a different file that reused its inode" — ext4 and tmpfs both reuse one.
+// The other two identity checks were switched to sameDownloadedFile; this one was missed,
+// and it is the one that *deletes*, so the failure mode was removing a file another writer
+// had just created while the docstring promised the opposite.
+//
+// Constructed deterministically rather than by racing an inode: the placeholder's recorded
+// identity is kept and the file at the destination is replaced in place, so device and
+// inode still match and only the size and mtime differ — which is the same condition an
+// inode reuse produces and the reason sameDownloadedFile compares all three.
+func TestRemoveReservedPlaceholder_LeavesAForeignFileAlone(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+
+	// The empty placeholder this process would have created.
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Another writer puts content at the same name, keeping the inode.
+	if werr := os.WriteFile(target, []byte("someone else's data"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	if now, serr := os.Lstat(target); serr != nil {
+		t.Fatal(serr)
+	} else if !os.SameFile(now, reserved) {
+		t.Skip("this filesystem changed the identity on an in-place rewrite; the condition does not arise here")
+	}
+
+	published := false
+	removeReservedPlaceholder(target, reserved, &published)
+
+	got, rerr := os.ReadFile(target)
+	if rerr != nil {
+		t.Fatalf("the cleanup deleted a file it did not create: %v", rerr)
+	}
+	if string(got) != "someone else's data" {
+		t.Errorf("target contents = %q, want the other writer's content", got)
+	}
+}
