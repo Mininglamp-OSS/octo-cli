@@ -188,6 +188,58 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 	}
 }
 
+func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
+	r := MustNew()
+	create, ok := r.GetOperation("autopilot.create")
+	if !ok || create.RequestBody == nil {
+		t.Fatal("autopilot.create typed request body not found")
+	}
+	for _, field := range []string{"title", "assignee_id", "dispatch_mode", "task_title_template"} {
+		if _, ok := create.RequestBody.Properties[field]; !ok {
+			t.Errorf("autopilot.create missing %s: %+v", field, create.RequestBody.Properties)
+		}
+	}
+	dispatch := create.RequestBody.Properties["dispatch_mode"]
+	if !reflect.DeepEqual(dispatch.Enum, []any{"create_task", "direct_execution"}) {
+		t.Fatalf("dispatch_mode enum = %#v", dispatch.Enum)
+	}
+	for _, legacy := range []string{"execution_mode", "issue_title_template"} {
+		if _, ok := create.RequestBody.Properties[legacy]; ok {
+			t.Errorf("autopilot.create exposes legacy field %q", legacy)
+		}
+	}
+
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update typed request body not found")
+	}
+	if _, ok := update.RequestBody.Properties["dispatch_mode"]; !ok {
+		t.Fatalf("autopilot.update request = %+v", update.RequestBody.Properties)
+	}
+
+	trigger, ok := r.GetOperation("autopilot.trigger")
+	if !ok {
+		t.Fatal("autopilot.trigger not found")
+	}
+	if trigger.RequestBody != nil {
+		t.Fatalf("autopilot.trigger must not expose an unused request body: %+v", trigger.RequestBody)
+	}
+
+	get, ok := r.GetOperation("autopilot.get")
+	if !ok || get.ResponseSchema == nil {
+		t.Fatal("autopilot.get typed response not found")
+	}
+	data, ok := get.ResponseSchema.Properties["data"]
+	if !ok {
+		t.Fatalf("autopilot.get data schema = %+v", data)
+	}
+	for _, field := range []string{"autopilot_id", "dispatch_mode", "task_title_template", "triggers"} {
+		if _, ok := data.Properties[field]; !ok {
+			t.Errorf("autopilot.get data schema missing %s: %+v", field, data.Properties)
+		}
+	}
+}
+
 func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 	r := MustNew()
 	for _, info := range r.ListOperations("loop") {
