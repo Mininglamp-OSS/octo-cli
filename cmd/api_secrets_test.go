@@ -145,3 +145,41 @@ func TestAPI_MasksASpecDeclaredSecretOnBothPaths(t *testing.T) {
 		}
 	})
 }
+
+// TestAPISecretsForPath_StripsQueryAndFragment is a defect in this round's own fix, caught
+// in review. apiSecretsForPath split the raw PATH argument on "/" and matched it against the
+// registry templates without first removing a query string or fragment. For the three
+// templates whose secret parameter is followed by a literal segment —
+// shares/{share_token}/access, .../download, invites/{invite_token}/accept — an inline query
+// turns that last segment into "access?x=1", nothing matches, SecretValues stays empty, and
+// redactSecrets short-circuits on the empty list.
+//
+// Same leak class as the finding this helper was written to close, on a shape the fix did not
+// cover: the value came from the caller's own argument, so nothing normalised it first.
+func TestAPISecretsForPath_StripsQueryAndFragment(t *testing.T) {
+	reg := registry.MustNew()
+	const token = "TOKEN123456"
+
+	for _, tc := range []struct{ name, method, path string }{
+		{"trailing literal segment with a query", "POST", "/v1/bot/drive/shares/" + token + "/access?x=1"},
+		{"download with a query", "POST", "/v1/bot/drive/shares/" + token + "/download?a=b&c=d"},
+		{"invite accept with a query", "POST", "/v1/bot/drive/invites/" + token + "/accept?x=1"},
+		{"secret in the last segment with a query", "DELETE", "/v1/bot/drive/shares/" + token + "?x=1"},
+		{"a fragment", "DELETE", "/v1/bot/drive/shares/" + token + "#frag"},
+		{"both", "POST", "/v1/bot/drive/shares/" + token + "/access?x=1#frag"},
+		{"an empty query marker", "DELETE", "/v1/bot/drive/shares/" + token + "?"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiSecretsForPath(reg, tc.method, tc.path)
+			if len(got) == 0 {
+				t.Fatalf("no secret recovered from %q, so the token would be printed unmasked", tc.path)
+			}
+			for _, v := range got {
+				if v != token {
+					t.Errorf("recovered %q, want the bare token %q — a query string must not be "+
+						"captured as part of the value either", v, token)
+				}
+			}
+		})
+	}
+}

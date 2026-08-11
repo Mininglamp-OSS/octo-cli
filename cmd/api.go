@@ -122,6 +122,15 @@ func apiSecretsForPath(reg *registry.Registry, method, path string) []string {
 	if reg == nil {
 		return nil
 	}
+	// The query string and fragment come off first. The PATH argument is whatever the
+	// caller typed, so it can carry both — and leaving them on made the last segment
+	// "access?x=1", which matches no template, so nothing was declared and the token
+	// printed in full. That is the same leak this helper exists to close, on a shape it
+	// did not normalise: the value is caller input, and nothing else was going to clean
+	// it up first.
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
 	want := strings.Split(strings.Trim(path, "/"), "/")
 	var secrets []string
 	for _, svc := range reg.ListServices() {
