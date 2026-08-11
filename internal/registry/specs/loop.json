@@ -3,7 +3,7 @@
   "info": {
     "title": "Octo Fleet Public API",
     "version": "1.0.0",
-    "description": "Stable Fleet API using product vocabulary: task, expert, expert team, and\nexecution. Legacy internal issue, agent, and squad routes remain separate.\n",
+    "description": "Stable Fleet API for tasks, experts, expert teams, executions, and\nworkspace automation.\n",
     "contact": {
       "name": "Octo API Team"
     }
