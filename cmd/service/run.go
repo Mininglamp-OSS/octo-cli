@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -184,6 +185,9 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 	}
 
 	applyBodyFlags(cobraCmd, rt, base)
+	if err := applyGeneratedIdempotencyKey(rt, base); err != nil {
+		return nil, err
+	}
 
 	if err := validateRequiredBodyFields(rt, base); err != nil {
 		return nil, err
@@ -198,6 +202,50 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 	return base, nil
 }
 
+func applyGeneratedIdempotencyKey(rt *operationRuntime, body map[string]any) error {
+	if rt.detail == nil || rt.detail.AutoIdempotencyKey == "" {
+		return nil
+	}
+	name := rt.detail.AutoIdempotencyKey
+	if _, present := body[name]; present {
+		return nil
+	}
+	if len(rt.detail.BodyVariants) > 0 && !variantNeedsGeneratedField(rt.detail.BodyVariants, body, name) {
+		return nil
+	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return output.ErrWithHint("internal", "RANDOM_FAILED", fmt.Sprintf("generate idempotency key: %v", err), "retry the command")
+	}
+	body[name] = fmt.Sprintf("octo-cli-%x", key)
+	return nil
+}
+
+func variantNeedsGeneratedField(variants []registry.BodyVariant, body map[string]any, field string) bool {
+	for _, variant := range variants {
+		needsField := false
+		compatible := true
+		for _, required := range variant.Required {
+			if required == field {
+				needsField = true
+				continue
+			}
+			if value, present := body[required]; !present || value == nil {
+				compatible = false
+			}
+		}
+		for _, forbidden := range variant.Forbidden {
+			if _, present := body[forbidden]; present {
+				compatible = false
+			}
+		}
+		if needsField && compatible {
+			return true
+		}
+	}
+	return false
+}
+
 func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 	if rt.detail == nil || len(rt.detail.BodyVariants) == 0 {
 		return nil
@@ -210,7 +258,7 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 			}
 		}
 		for _, name := range variant.Forbidden {
-			if value, exists := body[name]; exists && value != nil {
+			if _, exists := body[name]; exists {
 				valid = false
 			}
 		}
@@ -218,7 +266,7 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 			return nil
 		}
 	}
-	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug and with idempotency_key, or republish an existing slug without idempotency_key")
+	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug (the CLI generates a key when omitted), or republish an existing slug without idempotency_key")
 }
 
 // applyBodyFlags merges body-flag values (--foo, --bar) into base, following the

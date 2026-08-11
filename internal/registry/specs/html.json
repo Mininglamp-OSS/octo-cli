@@ -16,6 +16,12 @@
         "summary": "List documents (owner-scoped index)",
         "description": "Owner-scoped document index. The owner check is enforced server-side; a non-owner session is rejected 403.",
         "x-octo-risk": "read",
+        "x-octo-response-unwrap": null,
+        "x-octo-pagination": { "cursorParam": "cursor", "limitParam": "limit" },
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque pagination cursor." },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "Maximum documents to return." }
+        ],
         "responses": {
           "200": {
             "description": "A list of documents",
@@ -41,8 +47,9 @@
       "post": {
         "operationId": "html.publish",
         "summary": "Create an HTML document or publish a later version",
-        "description": "Create by omitting slug and supplying a fresh idempotency_key. Every new document receives a canonical doc_id whether mounted or unmounted; response data.slug is the document reference and equals data.doc_id. To publish a later version, pass the previously returned data.slug in the legacy-named slug field and omit idempotency_key. An unknown legacy slug is rejected and cannot create a document. Old legacy documents continue to use their legacy slug as that reference. A display name is metadata, not identity: publishing the same name without the saved reference creates a different document, so same-name republish is not supported. Do not infer identity mode from mount_type or from whether doc_id is non-empty. Requires the write token (Bearer). The server stamps commentable artifacts and reconciles existing comment anchors.",
+        "description": "Create by omitting slug; the CLI generates a fresh idempotency_key unless one is supplied explicitly. Every new document receives a canonical doc_id whether mounted or unmounted; response data.slug is the document reference and equals data.doc_id. To publish a later version, pass the previously returned data.slug in the legacy-named slug field and omit idempotency_key. An unknown legacy slug is rejected and cannot create a document. Old legacy documents continue to use their legacy slug as that reference. A display name is metadata, not identity: publishing the same name without the saved reference creates a different document, so same-name republish is not supported. Do not infer identity mode from mount_type or from whether doc_id is non-empty. Requires the write token (Bearer). The server stamps commentable artifacts and reconciles existing comment anchors.",
         "x-octo-risk": "write",
+        "x-octo-auto-idempotency-key": "idempotency_key",
         "x-octo-body-variants": [
           { "name": "create", "required": ["html", "idempotency_key"], "forbidden": ["slug"] },
           { "name": "republish", "required": ["html", "slug"], "forbidden": ["idempotency_key"] }
@@ -57,7 +64,7 @@
                 "properties": {
                   "slug": { "type": "string", "description": "Legacy wire name for an existing document reference. Omit when creating. For every later publish pass the prior response data.slug: it is the canonical doc_id for a new document or the legacy slug for an old document. Never pass a display name as identity." },
                   "html": { "type": "string", "description": "the full self-contained HTML document body" },
-                  "idempotency_key": { "type": "string", "description": "Caller-generated key that makes canonical creation safe to retry. Required when slug is omitted; omit when republishing an existing slug." },
+                  "idempotency_key": { "type": "string", "description": "Optional caller key for retrying this exact creation operation; otherwise the CLI generates a cryptographically random key once per invocation and reuses it for transport retries. Omit when republishing an existing slug." },
                   "version": { "type": "integer", "description": "optional explicit version; omit to auto-increment" },
                   "meta": {
                     "type": "object",
@@ -109,18 +116,19 @@
       "post": {
         "operationId": "html.draft.create",
         "summary": "Create a canonical HTML draft",
-        "description": "Create a new draft without a document reference. Supply a fresh idempotency_key and omit slug; the response data.slug is the canonical document reference for later draft save/promote and publish operations.",
+        "description": "Create a new draft without a document reference. The CLI generates a fresh idempotency_key unless one is supplied explicitly; the response data.slug is the canonical document reference for later draft save/promote and publish operations.",
         "x-octo-risk": "write",
+        "x-octo-auto-idempotency-key": "idempotency_key",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["html", "idempotency_key"],
+                "required": ["html"],
                 "properties": {
                   "html": { "type": "string", "description": "Initial draft HTML body." },
-                  "idempotency_key": { "type": "string", "description": "Caller-generated key that makes draft creation safe to retry." },
+                  "idempotency_key": { "type": "string", "description": "Optional caller key for retrying the same creation operation; otherwise the CLI generates one per invocation." },
                   "meta": {
                     "type": "object",
                     "description": "Optional document metadata such as display title.",
@@ -480,9 +488,13 @@
         "summary": "List a document's comments (needs reader)",
         "description": "List comments for a document. The slug is passed as a query parameter.",
         "x-octo-risk": "read",
+        "x-octo-response-unwrap": null,
+        "x-octo-pagination": { "cursorParam": "cursor", "limitParam": "limit" },
         "parameters": [
           { "name": "slug", "in": "query", "required": true, "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility.", "schema": { "type": "string" } },
-          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" }
+          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "Opaque pagination cursor." },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "Maximum comments to return." }
         ],
         "responses": {
           "200": { "description": "Comment list" }

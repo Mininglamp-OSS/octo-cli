@@ -250,6 +250,9 @@ type OperationDetail struct {
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool          `json:"validate_elements_index,omitempty"`
 	BodyVariants          []BodyVariant `json:"body_variants,omitempty"`
+	// AutoIdempotencyKey names a request field generated once per command run
+	// when absent. The transport reuses the serialized body for all retries.
+	AutoIdempotencyKey string `json:"auto_idempotency_key,omitempty"`
 	// ResponseUnwrap is a dot-separated successful-response field path selected
 	// before the standard CLI envelope is emitted.
 	ResponseUnwrap string `json:"response_unwrap,omitempty"`
@@ -367,10 +370,12 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
-	d.ResponseUnwrap = stringOf(op["x-octo-response-unwrap"])
-	if d.ResponseUnwrap == "" {
+	unwrap, operationUnwrapSet := op["x-octo-response-unwrap"]
+	d.ResponseUnwrap = stringOf(unwrap)
+	if !operationUnwrapSet {
 		d.ResponseUnwrap = stringOf(doc["x-octo-response-unwrap"])
 	}
+	d.AutoIdempotencyKey = stringOf(op["x-octo-auto-idempotency-key"])
 	if variants, ok := op["x-octo-body-variants"].([]any); ok {
 		for _, raw := range variants {
 			variant, ok := raw.(map[string]any)

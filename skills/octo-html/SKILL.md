@@ -19,8 +19,8 @@ All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the standard
 
 ## Document-reference contract
 
-- **Canonical create has no document reference.** Omit `slug`, include a fresh
-  `idempotency_key`, and provide `html`. A display name belongs in `meta.title`;
+- **Canonical create has no document reference.** Omit `slug` and provide
+  `html`. The CLI generates `idempotency_key`; an explicit key is optional. A display name belongs in `meta.title`;
   it is metadata, not identity.
 - **Save `data.slug` from the response.** New documents always return
   `data.doc_id` and `data.slug`, with `data.slug == data.doc_id`, whether mounted
@@ -54,18 +54,24 @@ deployed before this CLI is released.
 ## 1. Create and publish
 
 ```bash
-# Canonical create: no --slug. idempotency_key makes retries safe.
-octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html>","idempotency_key":"create-runbook-001","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
+# Canonical create: no --slug. The CLI generates the idempotency key.
+octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
 # → data: { doc_id, slug, version, url, share_url, size, aids,
 #           merged_comments, registered, status }
 # Save data.slug; for this new document data.slug == data.doc_id.
 
 # Unmounted creation follows the same identity contract and also gets doc_id.
-octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","idempotency_key":"create-private-001","meta":{"title":"Private draft"}}'
+octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","meta":{"title":"Private draft"}}'
 
 # Publish a later immutable version. Keep the wire field name `slug` and omit
 # idempotency_key. An unknown legacy slug is rejected; it cannot create a doc.
 octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
+
+# An explicit --idempotency-key <same-operation-key> is supported only for
+# retrying this exact creation operation. The CLI-generated key is created once
+# per invocation and the HTTP retry loop reuses the same serialized request.
+# Reusing a key with different HTML returns the old document and discards the
+# new HTML. Once its document is deleted, that key is unusable.
 
 # List, inspect, list versions, and soft-delete.
 octo-cli html list
@@ -85,7 +91,7 @@ until promoted.
 
 ```bash
 # Create a canonical draft without a document reference. Save response data.slug.
-octo-cli html draft create --html '<html><body><h1>WIP</h1></body></html>' --idempotency-key draft-runbook-001
+octo-cli html draft create --html '<html><body><h1>WIP</h1></body></html>'
 
 octo-cli html draft save <doc-ref> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
 octo-cli html draft promote <doc-ref>

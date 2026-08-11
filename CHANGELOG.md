@@ -67,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **`octo-cli html` adopts canonical create and document references** — create
-  omits `slug`, includes `idempotency_key`, and returns `data.doc_id` plus
+  omits `slug`; the CLI generates `idempotency_key` once per invocation and
+  reuses it across transport retries (an explicit key remains supported). It returns `data.doc_id` plus
   `data.slug == data.doc_id`, whether mounted or unmounted. Every later operation
   uses `data.slug`; old documents retain their legacy slug as that reference.
   Display names are metadata, not aliases, and same-name republish is unsupported.

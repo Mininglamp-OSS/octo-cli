@@ -161,8 +161,8 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.
-# Canonical create has no doc reference: omit --slug and supply an idempotency key.
-octo-cli html publish --html '<h1>hi</h1>' --idempotency-key create-launch-1 \
+# Canonical create has no doc reference: omit --slug. The CLI generates a key.
+octo-cli html publish --html '<h1>hi</h1>' \
   --mount-type group --group-no <group_no> --data '{"meta":{"title":"Launch page"}}'
 # Save data.slug from the publish response. For a new document data.slug == data.doc_id, mounted or
 # unmounted. Every later operation uses data.slug. Old documents keep their legacy
@@ -171,7 +171,7 @@ octo-cli html publish --html '<h1>hi</h1>' --idempotency-key create-launch-1 \
 # legacy slug is rejected and cannot create a document.
 octo-cli html list
 octo-cli html versions <doc-ref>
-octo-cli html draft create --html '<h1>wip</h1>' --idempotency-key draft-launch-1
+octo-cli html draft create --html '<h1>wip</h1>'
 octo-cli html draft save <doc-ref> --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote <doc-ref>
 octo-cli html share <doc-ref>                                        # mint a reader share code
 octo-cli html grant add <doc-ref> --data '{"uid":"u-1"}'             # per-uid authorization

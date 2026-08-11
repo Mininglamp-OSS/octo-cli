@@ -197,8 +197,9 @@ func TestHTMLPublishConditionalValidationAndResponseUnwrap(t *testing.T) {
 	})
 
 	invalid := [][]string{
-		{"html", "publish", "--html", "new"},
 		{"html", "publish", "--html", "new", "--slug", "legacy-unknown", "--idempotency-key", "bad"},
+		{"html", "publish", "--data", `{"html":"new","slug":null,"idempotency_key":"bad"}`},
+		{"html", "publish", "--data", `{"html":"new","slug":"doc-1","idempotency_key":null}`},
 	}
 	for _, args := range invalid {
 		root.SetArgs(args)
@@ -229,6 +230,97 @@ func TestHTMLPublishConditionalValidationAndResponseUnwrap(t *testing.T) {
 	}
 }
 
+func TestHTMLListOperationsPreservePaginationEnvelope(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "documents", args: []string{"html", "list", "--cursor", "c1", "--limit", "7"}},
+		{name: "comments", args: []string{"html", "comment", "list", "--slug", "doc-1", "--cursor", "c1", "--limit", "7"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotQuery string
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.RawQuery
+				_, _ = w.Write([]byte(`{"data":[{"id":"one"}],"pagination":{"has_more":true,"next_cursor":"c2"}}`))
+			})
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if !strings.Contains(gotQuery, "cursor=c1") || !strings.Contains(gotQuery, "limit=7") {
+				t.Errorf("pagination query = %q", gotQuery)
+			}
+			var env map[string]any
+			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+				t.Fatalf("response: %v: %s", err, tf.Out.String())
+			}
+			if _, ok := env["data"].([]any); !ok {
+				t.Errorf("data = %T, want array: %s", env["data"], tf.Out.String())
+			}
+			if _, ok := env["_pagination"].(map[string]any); !ok {
+				t.Errorf("_pagination = %T, want object: %s", env["_pagination"], tf.Out.String())
+			}
+		})
+	}
+}
+
+func TestHTMLCreateGeneratesRunScopedIdempotencyKey(t *testing.T) {
+	var bodies []map[string]any
+	hits := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		hits++
+		if hits == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "new"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("request count = %d, want retry", len(bodies))
+	}
+	first, _ := bodies[0]["idempotency_key"].(string)
+	second, _ := bodies[1]["idempotency_key"].(string)
+	if first == "" || first != second {
+		t.Errorf("retry keys = %q, %q; want one generated key", first, second)
+	}
+}
+
+func TestHTMLCreateKeysDifferAcrossInvocationsAndExplicitKeyWins(t *testing.T) {
+	var keys []string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		keys = append(keys, body["idempotency_key"].(string))
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+	})
+	for _, args := range [][]string{
+		{"html", "publish", "--html", "one"},
+		{"html", "publish", "--html", "two"},
+		{"html", "publish", "--html", "three", "--idempotency-key", "caller-key"},
+	} {
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if keys[0] == "" || keys[1] == "" || keys[0] == keys[1] {
+		t.Errorf("independent invocation keys = %q, %q", keys[0], keys[1])
+	}
+	if keys[2] != "caller-key" {
+		t.Errorf("explicit key = %q", keys[2])
+	}
+}
+
 func TestHTMLCanonicalDraftCreate(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
@@ -237,11 +329,11 @@ func TestHTMLCanonicalDraftCreate(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_, _ = w.Write([]byte(`{"data":{"slug":"doc-draft","doc_id":"doc-draft"}}`))
 	})
-	root.SetArgs([]string{"html", "draft", "create", "--html", "<h1>wip</h1>", "--idempotency-key", "draft-1"})
+	root.SetArgs([]string{"html", "draft", "create", "--html", "<h1>wip</h1>"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("draft create: %v", err)
 	}
-	if gotPath != "/docs-html/v1/docs/draft" || gotBody["idempotency_key"] != "draft-1" {
+	if key, _ := gotBody["idempotency_key"].(string); gotPath != "/docs-html/v1/docs/draft" || key == "" {
 		t.Errorf("draft create request: path=%q body=%#v", gotPath, gotBody)
 	}
 }

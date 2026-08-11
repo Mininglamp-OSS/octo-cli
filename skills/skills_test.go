@@ -83,6 +83,8 @@ func TestOctoHTMLSkillCanonicalCreateContract(t *testing.T) {
 		"octo-docs-backend#166",
 		"html draft create",
 		"unknown legacy slug",
+		"different HTML returns the old document",
+		"document is deleted, that key is unusable",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("octo-html skill missing canonical-create contract %q", want)

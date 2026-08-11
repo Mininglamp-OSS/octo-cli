@@ -164,8 +164,11 @@ func TestHTMLDocIDContract(t *testing.T) {
 	if draftCreate.Method != "POST" || draftCreate.Path != "/docs-html/v1/docs/draft" {
 		t.Errorf("draft create wire operation = %s %s", draftCreate.Method, draftCreate.Path)
 	}
-	if got := draftCreate.RequestBody.Required; !reflect.DeepEqual(got, []string{"html", "idempotency_key"}) {
-		t.Errorf("draft create required = %v", got)
+	if got := draftCreate.RequestBody.Required; !reflect.DeepEqual(got, []string{"html"}) {
+		t.Errorf("draft create required = %v, want CLI-required html only", got)
+	}
+	if draftCreate.AutoIdempotencyKey != "idempotency_key" || publish.AutoIdempotencyKey != "idempotency_key" {
+		t.Errorf("auto idempotency fields: publish=%q draft=%q", publish.AutoIdempotencyKey, draftCreate.AutoIdempotencyKey)
 	}
 	if _, hasRef := draftCreate.RequestBody.Properties["slug"]; hasRef {
 		t.Error("canonical draft create must not accept slug")
