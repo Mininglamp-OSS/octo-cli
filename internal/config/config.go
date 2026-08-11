@@ -6,14 +6,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Environment variable names. Centralised for testability and discoverability.
 const (
 	EnvAPIBaseURL = "OCTO_API_BASE_URL"
-	EnvBotToken   = "OCTO_BOT_TOKEN"
-	EnvSpaceID    = "OCTO_SPACE_ID"
-	EnvFormat     = "OCTO_FORMAT"
+	// EnvToken is the preferred token variable. It holds any of the three token
+	// kinds (app_*, bf_*, uk_*) and takes precedence over EnvBotToken, so a
+	// real-person user API key can be supplied without disturbing an existing
+	// OCTO_BOT_TOKEN setup.
+	EnvToken    = "OCTO_TOKEN"
+	EnvBotToken = "OCTO_BOT_TOKEN"
+	EnvSpaceID  = "OCTO_SPACE_ID"
+	EnvFormat   = "OCTO_FORMAT"
 	// EnvBotID is the env form of --bot-id: a robot id that selects a stored
 	// credential profile. It is a selector, not a secret (cf. EnvBotToken).
 	EnvBotID = "OCTO_BOT_ID"
@@ -27,7 +33,7 @@ type Config struct {
 	// APIBaseURL is the unified base URL for all backend services.
 	// Set via OCTO_API_BASE_URL.
 	APIBaseURL string
-	// BotToken is the App Bot token (OCTO_BOT_TOKEN).
+	// BotToken is the caller's token (OCTO_TOKEN, else OCTO_BOT_TOKEN).
 	BotToken string
 	// SpaceID is the platform-bot space context (OCTO_SPACE_ID). Optional for space-scoped bots.
 	SpaceID string
@@ -35,14 +41,27 @@ type Config struct {
 	Format string
 }
 
-// Load reads configuration from the environment.
+// Load reads configuration from the environment. The token follows the same
+// precedence as credential.EnvProvider — OCTO_TOKEN wins over OCTO_BOT_TOKEN —
+// so the auth gate and `config show` agree with the resolved credential.
 func Load() *Config {
 	return &Config{
 		APIBaseURL: envOrDefault(EnvAPIBaseURL, "http://127.0.0.1:8080"),
-		BotToken:   os.Getenv(EnvBotToken),
+		BotToken:   envToken(),
 		SpaceID:    os.Getenv(EnvSpaceID),
 		Format:     envOrDefault(EnvFormat, "json"),
 	}
+}
+
+// envToken returns the token from the highest-precedence variable that is set.
+// Both variables are trimmed, and symmetrically: an untrimmed OCTO_BOT_TOKEN
+// holding only whitespace would pass Validate here and then resolve to no
+// credential in credential.EnvProvider, which trims both.
+func envToken() string {
+	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(os.Getenv(EnvBotToken))
 }
 
 // Validate checks required fields. Only the token is required at load time;
@@ -50,7 +69,7 @@ func Load() *Config {
 // is space- or platform-scoped from the spec).
 func (c *Config) Validate() error {
 	if c.BotToken == "" {
-		return fmt.Errorf("%s is required (App Bot token, app_*)", EnvBotToken)
+		return fmt.Errorf("%s or %s is required (app_*, bf_*, or uk_* token)", EnvToken, EnvBotToken)
 	}
 	return nil
 }

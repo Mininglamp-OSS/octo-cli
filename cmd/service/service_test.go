@@ -24,6 +24,45 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. These tests assert on the exact request the engine builds, and
+// ambient variables rewrite it: OCTO_MARKETPLACE_API_PREFIX replaces the
+// leading /market segment (run.go marketplacePath), OCTO_API_BASE_URL and
+// OCTO_SPACE_ID feed the resolved config, OCTO_FORMAT reshapes the envelope.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX is
+// read straight from the environment with no config constant behind it, so it is
+// exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config
+// dir and a developer's stored profiles leak back in. Tests that exercise a
+// variable's effect still set it themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "octo-service-test")
+	if err != nil {
+		panic(err)
+	}
+	sweepOctoEnv()
+	os.Setenv("OCTO_CONFIG_DIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// sweepOctoEnv unsets every OCTO_-prefixed variable in the process environment.
+// os.Environ returns a snapshot, so unsetting while ranging over it is safe.
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
+}
+
 // rootWithService builds a minimal cobra root wired to a real httptest server,
 // a TestFactory, and the real embedded registry. The returned TestFactory lets
 // the caller read emitted envelopes.

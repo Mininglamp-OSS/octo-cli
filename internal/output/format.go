@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -37,10 +38,16 @@ func Format(w io.Writer, format string, v any) error {
 	}
 }
 
-// extractRows returns the rows the tabular formatters (table, csv) should
-// render. It unwraps a success envelope to its data field and coerces scalar
-// objects to a single-row slice. Returns (nil, false) for values that cannot
-// be rendered as rows.
+// extractRows returns the rows the tabular formatters (table, csv, ndjson)
+// should render. It unwraps a success envelope to its data field and coerces
+// scalar objects to a single-row slice. Returns (nil, false) for values that
+// cannot be rendered as rows.
+//
+// Every decode on this path uses UseNumber. A plain Unmarshal turns each JSON
+// number into a float64, which rounds any integer above 2^53 — so a backend id
+// printed as a table cell would differ from the one --format json shows, and
+// renderCell's json.Number branch (which exists precisely to print the literal
+// digits) would never see a json.Number to print.
 func extractRows(v any) ([]map[string]any, bool) {
 	buf, err := json.Marshal(v)
 	if err != nil {
@@ -52,7 +59,7 @@ func extractRows(v any) ([]map[string]any, bool) {
 		OK   *bool           `json:"ok"`
 		Data json.RawMessage `json:"data"`
 	}
-	if json.Unmarshal(buf, &env) == nil && env.OK != nil && len(env.Data) > 0 {
+	if decodeLossless(buf, &env) == nil && env.OK != nil && len(env.Data) > 0 {
 		return coerceRows(env.Data)
 	}
 	return coerceRows(buf)
@@ -60,14 +67,22 @@ func extractRows(v any) ([]map[string]any, bool) {
 
 func coerceRows(raw json.RawMessage) ([]map[string]any, bool) {
 	var arr []map[string]any
-	if err := json.Unmarshal(raw, &arr); err == nil {
+	if err := decodeLossless(raw, &arr); err == nil {
 		return arr, true
 	}
 	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err == nil {
+	if err := decodeLossless(raw, &obj); err == nil {
 		return []map[string]any{obj}, true
 	}
 	return nil, false
+}
+
+// decodeLossless unmarshals raw into target with UseNumber, so integers keep
+// their exact decimal text instead of being widened to float64.
+func decodeLossless(raw []byte, target any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	return dec.Decode(target)
 }
 
 func writeTable(w io.Writer, v any) error {
@@ -172,6 +187,10 @@ func renderCell(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
+	case json.Number:
+		// A decoder using UseNumber yields these; render the literal text so a
+		// uint64 id keeps every digit.
+		return val.String()
 	case float64:
 		if val == float64(int64(val)) {
 			return fmt.Sprintf("%d", int64(val))

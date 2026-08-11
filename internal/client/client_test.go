@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -852,5 +853,111 @@ func TestTruncate(t *testing.T) {
 	got := truncate("1234567890abc", 5)
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("truncate marker missing: %q", got)
+	}
+}
+
+// --- x-octo-secret redaction ---
+
+// A share token in the URL path and a share password in the body are
+// credential-equivalent. Both must go on the wire untouched but must never
+// appear in a --verbose trace or --dry-run description, which are the surfaces
+// most likely to end up in a log or a ticket.
+func TestSecretValues_RedactedInVerboseButSentOnTheWire(t *testing.T) {
+	const token = "share-token-abc"
+	const password = "hunter2"
+
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var trace bytes.Buffer
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "bf_secret_token"},
+		Options{Verbose: true, ErrOut: &trace},
+	)
+	if _, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/bot/drive/shares/" + token + "/download",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	// The wire is untouched: redaction is a logging concern only.
+	if !strings.Contains(gotPath, token) {
+		t.Errorf("request path lost the token: %q", gotPath)
+	}
+	if !strings.Contains(gotBody, password) {
+		t.Errorf("request body lost the password: %q", gotBody)
+	}
+
+	log := trace.String()
+	if strings.Contains(log, token) {
+		t.Errorf("verbose trace leaked the share token:\n%s", log)
+	}
+	if strings.Contains(log, password) {
+		t.Errorf("verbose trace leaked the share password:\n%s", log)
+	}
+	if !strings.Contains(log, "REDACTED") {
+		t.Errorf("verbose trace should show the masked values:\n%s", log)
+	}
+}
+
+func TestSecretValues_RedactedInDryRun(t *testing.T) {
+	const token = "share-token-abc"
+	const password = "hunter2"
+
+	c := New(
+		&config.Config{APIBaseURL: "https://octo.test"},
+		&credential.BotCredential{Token: "bf_secret_token"},
+		Options{DryRun: true, ErrOut: io.Discard},
+	)
+	body, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/bot/drive/shares/" + token + "/access",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	out := string(body)
+	if strings.Contains(out, token) || strings.Contains(out, password) {
+		t.Errorf("dry-run description leaked a secret:\n%s", out)
+	}
+	if !strings.Contains(out, "REDACTED") {
+		t.Errorf("dry-run description should show masked values:\n%s", out)
+	}
+	// The bot token itself stays masked by the existing MaskToken path.
+	if strings.Contains(out, "bf_secret_token") {
+		t.Errorf("dry-run description leaked the bot token:\n%s", out)
+	}
+}
+
+// A uint64 id above 2^53 must be echoed exactly in --dry-run. A plain unmarshal
+// would round it and make the dry run misreport the request.
+func TestDryRun_PreservesUint64Precision(t *testing.T) {
+	c := New(
+		&config.Config{APIBaseURL: "https://octo.test"},
+		&credential.BotCredential{Token: "bf_t"},
+		Options{DryRun: true, ErrOut: io.Discard},
+	)
+	body, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPost,
+		Path:   "/v1/bot/drive/folders",
+		Body:   map[string]any{"parent_id": json.Number("18446744073709551615")},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if !strings.Contains(string(body), "18446744073709551615") {
+		t.Errorf("dry-run body rounded the id:\n%s", body)
 	}
 }

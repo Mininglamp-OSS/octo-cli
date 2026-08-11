@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -111,4 +114,63 @@ func TestNewRootCmd_LeafStillRequiresAuth(t *testing.T) {
 	if ee.Type != "auth_error" {
 		t.Errorf("leaf should hit auth gate (type=auth_error), got type=%q msg=%s", ee.Type, ee.Message)
 	}
+}
+
+// TestNewRootCmd_ReservedGlobalFlagNamesMatchPersistentFlags is the drift guard
+// for the engine's reserved-flag set.
+//
+// cmd/service refuses a spec-declared flag whose name is one of root's global
+// flags, because cobra merges inherited flags with AddFlagSet and skips a name
+// the leaf already has: no panic, but the leaf's local flag wins and the global
+// becomes unreachable for that one command. The engine cannot read root's flag
+// set — package cmd imports cmd/service, not the reverse — so the names are
+// listed there and this test holds the two in step. It is the only place the
+// divergence can be reported.
+//
+// The `-q` shorthand of `--jq` is deliberately absent from the reserved set:
+// pflag keeps shorthands in a separate namespace, so a spec param legitimately
+// named `q` (matter.list, marketplace skill.list) does not shadow it.
+func TestNewRootCmd_ReservedGlobalFlagNamesMatchPersistentFlags(t *testing.T) {
+	f := cmdutil.NewTestFactory()
+	f.SetConfig(&config.Config{Format: "json"})
+	root := NewRootCmd(f.Factory)
+
+	registered := persistentFlagNames(root)
+	reserved := map[string]bool{}
+	for _, name := range service.ReservedGlobalFlagNames() {
+		reserved[name] = true
+	}
+
+	for name := range registered {
+		if !reserved[name] {
+			t.Errorf("root registers persistent flag --%s but cmd/service does not reserve it; "+
+				"a spec param of that name would silently shadow the global for its leaf — "+
+				"add it to rootPersistentFlagNames", name)
+		}
+	}
+	for name := range reserved {
+		if !registered[name] {
+			t.Errorf("cmd/service reserves --%s but root no longer registers it; "+
+				"a spec is being refused a name that is free — remove it from rootPersistentFlagNames", name)
+		}
+	}
+}
+
+// persistentFlagNames reads root's persistent flag names out of the rendered
+// usage block. Enumerating the flag set directly would mean importing pflag by
+// name, which promotes it from an indirect to a direct module requirement for a
+// test — the usage text is already the exact list cobra will show a caller, so it
+// is the cheaper source for the same assertion.
+func persistentFlagNames(root *cobra.Command) map[string]bool {
+	names := map[string]bool{}
+	for _, line := range strings.Split(root.PersistentFlags().FlagUsages(), "\n") {
+		for _, field := range strings.Fields(line) {
+			if !strings.HasPrefix(field, "--") {
+				continue
+			}
+			names[strings.TrimSuffix(strings.TrimPrefix(field, "--"), ",")] = true
+			break
+		}
+	}
+	return names
 }

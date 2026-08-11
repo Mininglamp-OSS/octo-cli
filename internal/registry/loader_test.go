@@ -12,7 +12,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "marketplace", "matter", "message", "summary", "thread"}
+	want := []string{"bot", "docs", "drive", "event", "file", "group", "html", "marketplace", "matter", "message", "summary", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -44,6 +44,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"bot":         6,
 		"event":       2,
 		"docs":        32,
+		"drive":       42,
 		"html":        20,
 		"marketplace": 25,
 		"summary":     4,
@@ -152,7 +153,13 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	if !ok || docType.Items == nil {
 		t.Fatal("docs.search docType item schema missing")
 	}
-	wantTypes := []any{"doc", "sheet", "board", "html"}
+	// html_ppt is a first-class document kind in octo-docs-backend's DOC_TYPES
+	// (src/db/docType.ts, "the SINGLE source of truth"), with its own
+	// /api/v1/ppt/** routes. It matters here because the CLI now enforces this
+	// enum locally: omitting a kind the backend accepts turns a working call into
+	// exit 2. cmd/service's requestSideVocabularies pins the same set with
+	// provenance.
+	wantTypes := []any{"doc", "sheet", "board", "html", "html_ppt"}
 	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
 		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}

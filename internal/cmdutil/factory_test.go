@@ -12,20 +12,45 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// TestMain isolates the credential store for the whole package: NewDefaultFactory
-// now resolves credentials through the on-disk store first, so env-based tests
-// must not see a developer's real ~/.octo-cli. An empty OCTO_CONFIG_DIR yields
-// zero profiles, so resolution falls through to OCTO_BOT_TOKEN as these tests
-// expect. Individual tests may still override OCTO_CONFIG_DIR via t.Setenv.
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. NewDefaultFactory resolves credentials through the on-disk store
+// and then the env chain, so an ambient variable can outrank or redirect the
+// fixtures these tests pin with t.Setenv: OCTO_TOKEN outranks the OCTO_BOT_TOKEN
+// they set (internal/credential/env_provider.go), OCTO_BOT_ID selects a stored
+// profile that does not exist here, OCTO_FORMAT reshapes the resolved config.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX
+// (cmd/service/run.go) is read straight from the environment with no config
+// constant behind it, so it is exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config dir
+// and a developer's stored profiles leak back in. An empty dir yields zero
+// profiles, so resolution falls through to the env chain as these tests expect.
+// Individual tests may still override any of this with t.Setenv.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "octo-cmdutil-test")
 	if err != nil {
 		panic(err)
 	}
+	sweepOctoEnv()
 	os.Setenv("OCTO_CONFIG_DIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// sweepOctoEnv unsets every OCTO_-prefixed variable in the process environment.
+// os.Environ returns a snapshot, so unsetting while ranging over it is safe.
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
 }
 
 func TestNewDefaultFactory_InitializesFields(t *testing.T) {
