@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -151,6 +152,41 @@ func systemHostResolver(ctx context.Context, host string) ([]net.IPAddr, error) 
 //	5 | proxied, loopback Octo origin      | the proxy only  | nobody — rule off    | the proxy's address  | n/a
 //	6 | redirect hop                       | as 1-5 for the new URL, after the CheckRedirect string pre-filter
 //
+// # The host value, enumerated
+//
+// The table above enumerates *configurations*. It silently assumed something the
+// round-12 review disproved: that the host is one value. It is not — it is a value
+// that gets rewritten on its way to the socket, and the two halves of this file were
+// reading different versions of it:
+//
+//	stage | who                                              | version of the host
+//	------+--------------------------------------------------+---------------------------------
+//	  1   | the backend, inside the presigned URL             | raw text
+//	  2   | url.Parse                                        | u.Host (host[:port])
+//	  3   | u.Hostname()                                     | port stripped, IPv6 brackets off
+//	  4   | our string pre-filter (isLoopbackHost, …)         | stage 3
+//	  5   | our classification, resolver, validated map key   | stage 3
+//	  6   | net/http canonicalAddr -> idnaASCIIFromURL        | **idnaASCII(stage 3)**
+//	  7   | the dial, or the CONNECT authority                | stage 6
+//	  8   | our DialContext validatedFor() lookup             | stage 6, split back out of addr
+//
+// Stage 6 is the one nothing here accounted for. net/http's idnaASCII returns its
+// input unchanged when the host is already ASCII and otherwise maps it through UTS-46
+// (idna.Lookup.ToASCII), keeping the raw value when that fails. So for a non-ASCII
+// host, stages 4 and 5 judge one string and stages 7 and 8 use another: the fullwidth
+// spellings of 127.0.0.1 and localhost passed every string rule as ordinary names,
+// failed resolution (Go's resolver performs no IDNA, so the lookup could not succeed),
+// landed in row 4 as "unclassified, allowed", and were then dialled as the loopback
+// address net/http had mapped them to. Deterministically, not by luck.
+//
+// The fix is to make stage 3 and stage 6 the same value rather than to teach stages 4
+// and 5 one more spelling — that would only move the next Unicode mapping to the next
+// round. Because idnaASCII is the identity on ASCII input, requiring the host to be
+// ASCII at the boundary makes the two stages equal *by construction*, with nothing to
+// keep in sync with a future version of net/http. assertHostIsCanonicalASCII is that
+// requirement; a host needing an internationalised name is presented in its A-label
+// (xn--) form, which is what DNS carries anyway.
+//
 // Row 4 is the one that cost a round. A proxy-only network — tightened egress with no
 // external resolver, or a split-horizon name only the proxy's resolver can answer —
 // is ordinary, and "CONNECT host:port" exists precisely so the proxy resolves the
@@ -226,6 +262,14 @@ func (g *transferGuard) Proxy(req *http.Request) (*url.URL, error) {
 	//
 	// Resolving first, as this did, made a proxy-only network fail on a lookup that
 	// nothing needed and nobody could have satisfied.
+	// The boundary refuses a non-canonical host before a transfer starts, and this is
+	// the same rule again at the point that classifies. Not a second patch: it is one
+	// function, called where the guarantee has to hold even if a future call site
+	// reaches the transport without going through assertSafeTransferURL. Every request
+	// the transport makes passes through here, hops included.
+	if cerr := assertHostIsCanonicalASCII(g.field, req.URL); cerr != nil {
+		return nil, cerr
+	}
 	proxyURL, perr := g.proxy(req)
 	if perr != nil {
 		return nil, invalidProxyError(perr)
@@ -280,12 +324,20 @@ func (g *transferGuard) Proxy(req *http.Request) (*url.URL, error) {
 // So nothing derived from the value is included. The caller knows which variables to
 // look at, and is told why the value is not shown.
 func invalidProxyError(cause error) *output.ExitError {
-	_ = cause // deliberately not surfaced: it can embed the raw proxy URL
+	// The cause is not dropped, only stripped of anything derived from the value. Its
+	// concrete type is what actually distinguishes the failures a caller can act on —
+	// a URL that would not parse versus net/http refusing to honour HTTP_PROXY in a CGI
+	// environment, which is a real and otherwise baffling case — and a type name cannot
+	// carry a password.
+	detail := "the value could not be parsed as a proxy URL"
+	if cause != nil && strings.Contains(cause.Error(), "CGI environment") {
+		detail = "net/http refuses to use HTTP_PROXY when CGI environment variables are present"
+	}
 	return output.ErrWithHint("validation", "INVALID_PROXY",
-		"the proxy configuration in this environment could not be used",
+		"the proxy configuration in this environment could not be used: "+detail,
 		"check http_proxy / https_proxy / all_proxy: the value must be a URL such as "+
-			"http://proxy.example:3128. It is not repeated here because a proxy URL often "+
-			"carries credentials")
+			"http://proxy.example:3128. The value itself is not repeated here because a "+
+			"proxy URL often carries credentials")
 }
 
 // verboseNoter adapts progressf to the guard's note sink, so a decision the guard
@@ -316,8 +368,12 @@ func (g *transferGuard) notef(format string, args ...any) {
 //     not apply to it. Refusing it here is what broke every transfer for those users.
 //   - anything else: nobody classified this host, so classify it now and fail closed
 //     if it is local — but attribute it to the environment, because the backend did
-//     not choose it. In a correctly wired transport this case does not arise; it is
-//     the fail-closed default rather than a reachable configuration.
+//     not choose it. This case *is* reachable, and row 2 of the table is how: under a
+//     loopback Octo origin Proxy classifies nothing, so the target arrives here
+//     unrecorded and this branch performs the lookup that pins the address. It is also
+//     the fail-closed default for a host that reached the transport without passing the
+//     boundary. (An earlier version of this comment said the case does not arise; that
+//     was written before the loopback short-circuit moved above the lookup.)
 func (g *transferGuard) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -642,6 +698,43 @@ func assertSafeTransferURL(field, raw string, loopbackAPI bool) (*url.URL, *outp
 	return u, nil
 }
 
+// assertHostIsCanonicalASCII requires the host to be the same string net/http will
+// dial, which is what makes every other rule in this file mean what it says.
+//
+// net/http's canonicalAddr sends the host through idnaASCII: the identity when the host
+// is already ASCII, UTS-46 (idna.Lookup.ToASCII) when it is not, and the raw value again
+// when that mapping fails. Go's resolver performs no IDNA at all. So a non-ASCII host
+// gave this file two different strings to reason about — the pre-filter and the
+// classification saw the spelling from the URL, the dial and the CONNECT authority saw
+// the mapped form — and the fullwidth spellings of 127.0.0.1 and localhost went through
+// as unclassifiable names and came out as loopback.
+//
+// Requiring ASCII is chosen over mapping it ourselves deliberately. Because idnaASCII is
+// the identity on ASCII, this makes the checked string and the dialled string equal *by
+// construction*: there is one spelling, so "every literal local spelling is refused by
+// the pre-filter" is true again. Mapping it ourselves would instead require reproducing
+// net/http's UTS-46 behaviour exactly, including which failures it salvages, and staying
+// identical to it across Go releases — and any divergence is a bypass of precisely this
+// kind. It also needs a dependency this project does not carry (see the docstring on
+// transferGuard for the whole enumeration).
+//
+// Nothing is lost that DNS itself carries: an internationalised host has an A-label
+// (xn--) form, that form is ASCII, and it is what a resolver is given anyway.
+func assertHostIsCanonicalASCII(field string, u *url.URL) *output.ExitError {
+	host := u.Hostname()
+	for i := 0; i < len(host); i++ {
+		if host[i] >= utf8.RuneSelf {
+			// %q escapes the non-ASCII runes, so a host chosen to read like a
+			// different one is visible in the message rather than rendered as it.
+			return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
+				fmt.Sprintf("%s host %q is not in canonical ASCII form, so it is not the host that would be connected to", field, host),
+				"an internationalised host must be presented in its A-label (xn--…) form, which is what DNS carries; "+
+					"the CLI will not map it, because the mapping applied later would not be the string that was checked")
+		}
+	}
+	return nil
+}
+
 // urlParseCause strips the *url.Error wrapper that url.Parse returns, whose
 // Error() quotes the entire input URL.
 func urlParseCause(err error) error {
@@ -669,6 +762,11 @@ func assertSafeTransferTarget(field string, u *url.URL, loopbackAPI bool) *outpu
 		return output.ErrWithHint("api_error", "UNSAFE_PRESIGNED_URL",
 			fmt.Sprintf("%s must not embed credentials", field),
 			"the backend returned an unusable presigned URL; report it")
+	}
+	// First, because every rule below reasons about the host as a string and this is
+	// what guarantees that string is the one that gets dialled.
+	if err := assertHostIsCanonicalASCII(field, u); err != nil {
+		return err
 	}
 	if err := assertNumericHostIsAnIP(field, u); err != nil {
 		return err

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -282,16 +283,28 @@ func newTestTransferGuard(t *testing.T, loopbackAPI bool, resolve hostResolver) 
 // discarded lookup.
 
 // newProxyServer starts a local server that answers any proxied request 200.
-func newProxyServer(t *testing.T) (srv *httptest.Server, requests *[]string) {
+//
+// The requests are handed back through a snapshot function, not a pointer to the slice:
+// the handler runs on the server's goroutine. Reading it directly happened to be safe
+// here because completing the response creates a happens-before edge, but relying on
+// that is how a test becomes flaky later, and the sibling helper below has no such edge.
+func newProxyServer(t *testing.T) (srv *httptest.Server, requests func() []string) {
 	t.Helper()
+	var mu sync.Mutex
 	var seen []string
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		seen = append(seen, r.URL.String())
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("object-bytes"))
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &seen
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
 }
 
 // failingResolver answers nothing, like a host with no external DNS.
@@ -330,7 +343,7 @@ func TestTransferProxy_UnresolvableTargetStillTransfersThroughTheProxy(t *testin
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
-	if len(*proxied) == 0 {
+	if len(proxied()) == 0 {
 		t.Error("the request never reached the proxy")
 	}
 }
@@ -479,5 +492,173 @@ func TestTransferProxy_SelectedProxyHostIsNamedWithoutCredentials(t *testing.T) 
 		if strings.Contains(host, "s3cr3t-pass") || strings.Contains(host, "alice") {
 			t.Errorf("the recorded proxy identity carries credentials: %q", host)
 		}
+	}
+}
+
+// --- Round-12 P0: one host, one spelling ---
+//
+// The round-11 path table enumerated configurations and assumed the host was a single
+// value. It is not. net/http rewrites it on the way to the socket — canonicalAddr runs
+// idnaASCII, which is the identity on ASCII and UTS-46 (idna.Lookup.ToASCII) otherwise
+// — so for a non-ASCII host this file's string rules and classification judged one
+// string while the dial and the CONNECT authority used another.
+//
+// Concretely: the fullwidth spellings of 127.0.0.1 and localhost are ordinary names to
+// every string rule, and Go's resolver performs no IDNA so the lookup *cannot* succeed,
+// which put them in row 4 of the table — unclassified, allowed — after which net/http
+// mapped them to the loopback address and dialled it. Deterministic, not luck. Direction
+// matters too: `upload file` PUTs local file bytes to whatever that turns out to be.
+//
+// Every existing fixture in this file is ASCII, which is exactly why the round-11 tests
+// covering rows 1-5 could not observe any of this.
+
+// Fullwidth spellings, written as escapes so the intent survives any editor or diff
+// tool. UTS-46 maps each to the ASCII on the right.
+const (
+	fullwidthDottedIP = "127．0．0．1" // -> 127.0.0.1
+	fullwidthDigitIP  = "１２７．0．0．１" // -> 127.0.0.1
+	fullwidthLocalimp = "ｌｏｃａｌｈｏｓｔ"
+)
+
+// connectCapturingProxy is a proxy that records the authority of every request it is
+// asked to make — the CONNECT target for https, the absolute-URI host for plain http.
+// That authority is the host net/http actually decided to reach, which is the value the
+// guard has to have agreed with.
+// The authorities are returned through a snapshot function rather than a pointer to the
+// slice: the handler runs on the server's own goroutine, so reading the slice directly
+// from the test goroutine is a data race, and -race is part of the gate for a reason.
+func connectCapturingProxy(t *testing.T) (srv *httptest.Server, asked func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if r.Method == http.MethodConnect {
+			seen = append(seen, r.Host)
+		} else {
+			seen = append(seen, r.URL.Host)
+		}
+		mu.Unlock()
+
+		if r.Method == http.MethodConnect {
+			// Refuse the tunnel: what was asked for is the whole assertion, and
+			// completing it would mean actually connecting somewhere.
+			if hj, ok := w.(http.Hijacker); ok {
+				if conn, _, err := hj.Hijack(); err == nil {
+					_ = conn.Close()
+				}
+			}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), seen...)
+	}
+}
+
+// TestTransferProxy_TheHostClassifiedIsTheHostDialled is the property, stated so it
+// cannot be satisfied by learning one more spelling: no host may be reached that the
+// guard did not classify under that exact name.
+//
+// It is deliberately not "the fullwidth dot is rejected". A test for the three spellings
+// in the report would pass while the next Unicode mapping walked through, which is the
+// same shape of mistake as fixing the path in front of you without enumerating the set.
+func TestTransferProxy_TheHostClassifiedIsTheHostDialled(t *testing.T) {
+	for _, host := range []string{
+		fullwidthDottedIP,
+		fullwidthDigitIP,
+		fullwidthLocalimp,
+		"storage.example.invalid", // ASCII control: must still work end to end
+		"xn--nxasmq6b.example",    // an A-label is ASCII, so it is the supported way to name an IDN
+	} {
+		t.Run(url.QueryEscape(host), func(t *testing.T) {
+			proxy, asked := connectCapturingProxy(t)
+
+			var classified []string
+			var mu sync.Mutex
+			g := newTransferGuard("download_url", false, func(_ context.Context, h string) ([]net.IPAddr, error) {
+				mu.Lock()
+				classified = append(classified, h)
+				mu.Unlock()
+				// Only the plain ASCII control name resolves; everything else fails,
+				// which is what a resolver does with a name it cannot answer.
+				if h == "storage.example.invalid" {
+					return []net.IPAddr{{IP: net.ParseIP("203.0.113.9")}}, nil
+				}
+				return nil, &net.DNSError{Err: "no such host", Name: h, IsNotFound: true}
+			})
+			g.proxy = fixedProxy(t, proxy.URL)
+
+			req, err := http.NewRequest(http.MethodGet, "https://"+host+"/obj", http.NoBody)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, derr := transferClientWithGuard(g).Do(req)
+			if derr == nil {
+				_ = resp.Body.Close()
+			}
+
+			mu.Lock()
+			seenClassified := append([]string(nil), classified...)
+			mu.Unlock()
+
+			for _, authority := range asked() {
+				dialledHost, _, splitErr := net.SplitHostPort(authority)
+				if splitErr != nil {
+					dialledHost = authority
+				}
+				var agreed bool
+				for _, c := range seenClassified {
+					if c == dialledHost {
+						agreed = true
+					}
+				}
+				if !agreed {
+					t.Errorf("the transport asked to reach %q, which the guard never classified "+
+						"(it classified %v).\nThe two are reading different versions of the same host: "+
+						"net/http canonicalises it with idnaASCII and this guard does not, so every rule "+
+						"here judged a string that is not the one connected to.",
+						dialledHost, seenClassified)
+				}
+			}
+		})
+	}
+}
+
+// TestTransferTarget_RejectsANonCanonicalHost is the boundary half. It belongs at
+// assertSafeTransferURL because that is where a presigned URL enters, so one check
+// covers the initial URL and every redirect hop rather than four separate rules.
+func TestTransferTarget_RejectsANonCanonicalHost(t *testing.T) {
+	refused := []string{fullwidthDottedIP, fullwidthDigitIP, fullwidthLocalimp,
+		"storage．example．invalid", // a plain name, non-ASCII: still refused
+	}
+	for _, host := range refused {
+		t.Run("refused/"+url.QueryEscape(host), func(t *testing.T) {
+			_, err := assertSafeTransferURL("download_url", "https://"+host+"/obj", false)
+			if err == nil {
+				t.Fatalf("%q is not the host that would be dialled, so it must be refused", host)
+			}
+			if err.Code != "UNSAFE_PRESIGNED_URL" {
+				t.Errorf("code = %q, want UNSAFE_PRESIGNED_URL", err.Code)
+			}
+		})
+	}
+
+	allowed := []string{
+		"storage.example.invalid",
+		"xn--nxasmq6b.example", // the A-label form of an IDN is ASCII and stays supported
+		"203.0.113.9",
+		"storage-internal.example.invalid",
+	}
+	for _, host := range allowed {
+		t.Run("allowed/"+host, func(t *testing.T) {
+			if _, err := assertSafeTransferURL("download_url", "https://"+host+"/obj", false); err != nil {
+				t.Errorf("%q is a canonical ASCII host and must be accepted: %v", host, err)
+			}
+		})
 	}
 }
