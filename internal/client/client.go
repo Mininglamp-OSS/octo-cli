@@ -242,10 +242,13 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 // touched — while a backend that keys a map by a caller-supplied id, the ordinary shape
 // of a per-id batch result, used to put a share token straight into the printed envelope.
 //
-// One consequence worth knowing rather than discovering: if two keys in the same object
-// both carry secrets and mask to the same string, they collapse to one entry. Both names
-// were secret-bearing and are being destroyed on purpose, and this is a diagnostic body,
-// so the collision is accepted rather than worked around.
+// Two consequences worth knowing rather than discovering. The keys this CLI itself reads
+// out of a body — see isEnvelopeContractKey — are never masked, because masking them
+// destroys what a caller branches on while hiding a name the API fixes anyway; that is
+// clause 1's argument applied to the key. And if two other keys in the same object both
+// carry secrets and mask to the same string, they collapse to one entry: both names were
+// being destroyed on purpose, and the walk iterates in sorted order so the same input
+// always collapses the same way.
 func redactResponseBody(b []byte, secrets []string) []byte {
 	if len(b) == 0 || len(secrets) == 0 {
 		return b
@@ -322,17 +325,26 @@ func redactErrorEnvelope(v any, secrets []string) any {
 		return redactBodyValue(v, secrets)
 	}
 	out := make(map[string]any, len(obj))
-	for key, val := range obj {
+	// Sorted, not map order: two keys that both carry secrets mask to the same string
+	// and collapse to one entry, and with Go's randomised range order *which* value
+	// survived changed between runs. Collapsing is accepted — both names were being
+	// destroyed on purpose — but producing different output for the same input is not,
+	// for a CLI whose callers parse this. First key in sorted order wins.
+	keys := make([]string, 0, len(obj))
+	for key := range obj {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		val := obj[key]
 		// The semantic decisions below are made on the key as the backend wrote it —
 		// whether it is the code-bearing field, whether it is the nested envelope —
-		// while what gets written is the masked spelling. Which of the two is used is
-		// unobservable today, and deliberately so rather than by luck: masking only ever
-		// substitutes the mask string, so a masked key can never *become* "code", and a
-		// secret short enough to sit inside "code" or "error" is not substituted at all
-		// because short secrets are only replaced at a token boundary. Reading the
-		// backend's own spelling is still the right side to be on, since that is what
-		// carries the field's meaning.
-		outKey := redactSecrets(key, secrets)
+		// while what gets written is the masked spelling.
+		outKey := maskKey(key, secrets)
+		if _, taken := out[outKey]; taken {
+			continue // an earlier key already masked to this name
+		}
 		switch {
 		case isCodeBearingKey(key) && isExemptCode(val, secrets):
 			out[outKey] = val
@@ -345,6 +357,37 @@ func redactErrorEnvelope(v any, secrets []string) any {
 		}
 	}
 	return out
+}
+
+// maskKey masks an object key unless the key names the envelope contract.
+//
+// The exemption is clause 1's argument applied to the key instead of the value. A
+// contract field name is fixed by the API, so leaving it discloses nothing a caller
+// could not already predict, while masking it destroys what they branch on — and an
+// exact-match secret *is* replaced regardless of length, so a caller whose password
+// happens to be an ordinary word like "code" or "message" had the envelope's own field
+// names rewritten. The earlier reasoning here — that short secrets are only substituted
+// at a token boundary — covers a secret sitting *inside* "code" and not a secret that is
+// "code".
+//
+// This keeps the key rule and the value rule independent: the key decides which value
+// rule applies, and a contract key is never rewritten, so the value's exemption
+// decision cannot be changed by masking.
+func maskKey(key string, secrets []string) string {
+	if isEnvelopeContractKey(key) {
+		return key
+	}
+	return redactSecrets(key, secrets)
+}
+
+// isEnvelopeContractKey names the keys this CLI itself reads out of a backend body.
+// Keeping them legible is the whole point of the redaction being structural.
+func isEnvelopeContractKey(key string) bool {
+	switch key {
+	case "code", "error", "errors", "message", "msg", "detail", "details", "data":
+		return true
+	}
+	return false
 }
 
 // isCodeBearingKey names the keys the three envelope families put a
@@ -418,12 +461,24 @@ func redactBodyValue(v any, secrets []string) any {
 		return v
 	case map[string]any:
 		out := make(map[string]any, len(t))
-		for key, val := range t {
-			// Keys are masked on the same rule as values. On a request body built
-			// from the spec this is a no-op, because a spec-derived key cannot
-			// contain a declared secret; on a response body it is what stops a
-			// backend that keys a map by a caller-supplied id from printing it.
-			out[redactSecrets(key, secrets)] = redactBodyValue(val, secrets)
+		// Sorted for the same reason as the envelope walk: colliding masked keys must
+		// collapse the same way on every run.
+		nested := make([]string, 0, len(t))
+		for key := range t {
+			nested = append(nested, key)
+		}
+		sort.Strings(nested)
+		for _, key := range nested {
+			// Keys are masked on the same rule as values, minus the contract names.
+			// On a request body built from the spec this is a no-op, because a
+			// spec-derived key cannot contain a declared secret; on a response body it
+			// is what stops a backend that keys a map by a caller-supplied id from
+			// printing it.
+			outKey := maskKey(key, secrets)
+			if _, taken := out[outKey]; taken {
+				continue
+			}
+			out[outKey] = redactBodyValue(t[key], secrets)
 		}
 		return out
 	case []any:

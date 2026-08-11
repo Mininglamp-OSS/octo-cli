@@ -123,14 +123,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is still honoured, and a proxy on the local machine is not refused: it is not the
   storage host. Where the proxy is also the only resolver, the target cannot be
   classified locally and the transfer proceeds unclassified, reported under `--verbose`.
+- **A malformed command line no longer echoes the argument it could not parse.** pflag
+  and cobra quote the offending token in their own messages — `unknown flag: --<x>`,
+  `unknown shorthand flag: 'A' in -<x>`, `invalid argument "<x>" for …`, `unknown command
+  "<x>"` — and those went into the structured error on stderr verbatim. Because base64url
+  share and invite ids commonly start with `-`, a missing verb or a mistyped flag name put
+  an id there. These four categories now report what kind of error it was and point at
+  `--help`; the messages that carry only counts or flag names (`accepts N arg(s)`,
+  `required flag(s) "x" not set`) are unchanged, as is `unknown subcommand`, which lists
+  this CLI's own subcommand names rather than the argument.
+- **`--dry-run` masks the token inside `share_url`.** `share access` and `share download`
+  masked the token in the request `path` and printed the same token verbatim in
+  `share_url` one field below. A dry-run description is meant to be safe to paste into a
+  ticket, so both are masked now; the `share_url` field is still present, with
+  `***REDACTED***` in place of the token.
+- **A numeric host a resolver would read as an address is refused in every base.** The
+  rule previously looked for "digits and dots", so `0x7f.0.0.1` and `0x7f000001` were
+  treated as ordinary names while the resolver read them as `127.0.0.1`. It now mirrors
+  what `inet_aton` does — decimal, `0`-prefixed octal, `0x`-prefixed hex, and fewer than
+  four labels — and refuses any such host that `net.ParseIP` does not accept. Names whose
+  labels are hex *letters* (`storage.de`) are unaffected.
+- **`OCTO_API_BASE_URL` with a path is now refused rather than silently trimmed.** Share
+  links were built from the scheme and host only, so a deployment served under a path
+  prefix produced links that looked correct and resolved to nothing.
 - **`--data null` and `--params null` are now rejected instead of being treated as an
-  absent value.** Both are valid JSON that decodes into a nil map, so `--data null` used
-  to behave like "no body" (and, with a promoted body flag, crash — see Fixed) while
-  `--params null` behaved like "no query parameters". Both are now
-  `VALIDATION_ERROR` / exit 2 with a message naming the shape. Every other non-object
-  shape (`true`, a number, a string, an array) was already rejected; these two were the
-  gap. **This is a user-visible behaviour change**: a script passing `null` to mean
-  "nothing" must omit the flag instead.
+  absent value.** Both are valid JSON that decodes into a nil map. `--data null` — on any
+  generated service command and on `octo-cli api` — used to behave like "no body", and
+  with a promoted body flag it crashed (see Fixed); `--params null`, which is `octo-cli
+  api` only, behaved like "no query parameters". Both are now `VALIDATION_ERROR` / exit 2
+  with a message naming the shape. Every other non-object shape (`true`, a number, a
+  string, an array) was already rejected; these two were the gap. **This is a
+  user-visible behaviour change**: a script passing `null` to mean "nothing" must omit
+  the flag instead.
 - **A presigned URL whose host is not in canonical ASCII form is refused.** `net/http`
   canonicalises a host with IDNA before dialling it while the resolver does not, so a
   non-ASCII spelling was checked as one string and connected to as another — the
@@ -190,6 +214,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
+- **A share link is no longer printed when it fails to parse.** `url.Parse` returns an
+  error whose text quotes the whole input, and on `share access` / `share download` the
+  whole input is the link, so a malformed link put the share token into the error on
+  stderr. The inner cause is reported instead, which names what was wrong without
+  repeating it.
+- **`--overwrite=false` is honoured on filesystems without hard links.** Publication
+  refuses an existing destination by relying on `os.Link` failing atomically; when links
+  were unavailable the code fell through to `os.Rename`, which replaces its destination
+  unconditionally. The fallback now reserves the name with `O_CREATE|O_EXCL` first, so the
+  refusal no longer depends on which filesystem the download lands on.
+- **Response redaction no longer masks the envelope's own field names**, which a caller
+  whose secret happened to be an ordinary word like `code` or `message` could trigger,
+  destroying the machine-readable code. Redaction is also deterministic when two
+  secret-bearing keys mask to the same name.
 - **`--data null` with a promoted body flag crashed the CLI** with
   `panic: assignment to entry in nil map`, on every service domain. JSON `null` decodes
   into a nil map without error, and the promoted-flag merge then wrote into it. The same

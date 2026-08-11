@@ -916,3 +916,91 @@ func TestResponseMask_ASecretInAKeyPositionIsMasked(t *testing.T) {
 		})
 	}
 }
+
+// TestResponseMask_KeyMaskingDoesNotDestroyTheContract is round-13 P2-5, a side effect
+// of the key masking added last round.
+//
+// I argued that a short secret could not disturb a contract key because short secrets are
+// only substituted at a token boundary. That covers a secret sitting *inside* "code"; it
+// does not cover a secret that *is* "code". An exact match is replaced regardless of
+// length, so a caller whose password happens to be an English word like "code" or
+// "message" had the envelope's own field names masked — destroying exactly what the round-10
+// exemption rule exists to protect.
+//
+// The fix applies clause 1's argument to the key instead of the value: a key that names
+// the envelope contract is fixed by the API, so masking it hides nothing a caller could
+// not already predict, while breaking what they branch on. Compatibility with the value
+// rule is therefore total — the key decides *which* rule applies, and a contract key is
+// never rewritten, so the value's exemption decision cannot change.
+func TestResponseMask_KeyMaskingDoesNotDestroyTheContract(t *testing.T) {
+	for _, secret := range []string{"code", "error", "message", "detail", "errors", "data"} {
+		t.Run("secret is the word "+secret, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				// Every contract key present at once, so the case for each word asserts
+				// that *that* key survived rather than that some other one did.
+				_, _ = w.Write([]byte(`{"error":"not_found","code":"not_found","message":"no such share",` +
+					`"detail":{"a":1},"errors":[],"data":null}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/x/access",
+				Body:         map[string]any{"password": secret},
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if ee.Code != "not_found" {
+				t.Errorf("the backend code was destroyed by masking a contract key: ee.Code = %q, detail = %s",
+					ee.Code, ee.Detail)
+			}
+			var reparsed map[string]any
+			if uerr := json.Unmarshal(ee.Detail, &reparsed); uerr != nil {
+				t.Fatalf("redacted body is not parseable: %v", uerr)
+			}
+			if _, ok := reparsed[secret]; !ok {
+				t.Errorf("the contract key %q was masked away, so a caller can no longer read it: %s",
+					secret, ee.Detail)
+			}
+		})
+	}
+}
+
+// TestResponseMask_CollidingKeysAreDeterministic is P2-6. Two keys that both carry
+// secrets mask to the same string and collapse to one entry — which is accepted, since
+// both names were being destroyed on purpose. What is not acceptable is that *which* value
+// survived depended on Go's randomised map iteration order, so the same input produced
+// different output between runs. For a CLI whose callers parse this, nondeterminism is a
+// defect in its own right, and it also makes any test over it flaky rather than failing.
+func TestResponseMask_CollidingKeysAreDeterministic(t *testing.T) {
+	// Two *whole* keys, each a declared secret, so both mask to exactly the same
+	// string and genuinely collide. An earlier version of this test used one secret
+	// with two different suffixes, which masks to two distinct keys and collides with
+	// nothing — it would have passed no matter what this code did.
+	const secretA = "SHARETOKENAAA"
+	const secretB = "SHARETOKENBBB"
+	body := `{"error":"not_found","` + secretA + `":"first","` + secretB + `":"second"}`
+
+	var seen []string
+	for i := 0; i < 64; i++ {
+		got := string(redactResponseBody([]byte(body), []string{secretA, secretB}))
+		if strings.Contains(got, secretA) || strings.Contains(got, secretB) {
+			t.Fatalf("a secret survived: %s", got)
+		}
+		seen = append(seen, got)
+	}
+	for i := range seen {
+		if seen[i] != seen[0] {
+			t.Fatalf("redaction is not deterministic across runs:\n  %s\n  %s", seen[0], seen[i])
+		}
+	}
+}
