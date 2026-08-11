@@ -346,6 +346,53 @@ func (f *Factory) EmitError(err error) error {
 //
 // Shared by the root command (for cobra-framework errors) and the Factory
 // (for EmitError callers) so both paths produce identical taxonomy.
+//
+// # Which messages may be echoed, and why
+//
+// This is the last funnel before stderr, and the stderr envelope is unconditional —
+// no --verbose gates it. Five separate rounds of review found a caller-supplied secret
+// arriving here through some formatting point, so the rule is written down rather than
+// re-derived each time: **a message reaches the envelope only if its text cannot
+// contain a value the caller typed.**
+//
+// The messages that arrive here, by origin:
+//
+//	origin                     format                                     embeds argv?
+//	---------------------------+-------------------------------------------+------------
+//	pflag UnknownFlagError     unknown flag: --%s                          YES (the name IS argv)
+//	pflag UnknownFlagError     unknown shorthand flag: %q in -%s           YES (the whole run)
+//	pflag ValueRequiredError   flag needs an argument: [%q in -]%s         YES (same run)
+//	pflag InvalidArgumentError invalid argument %q for %q flag: %v         YES (the value)
+//	cobra unknown command      unknown command %q for %q                   YES (the token)
+//	this project's             unknown subcommand for %q; available: %s     no (our own words:
+//	rejectUnknownSubcommand                                                 the command path and
+//	                                                                        our subcommand names)
+//	cobra arg count            accepts %d arg(s), received %d              no (counts)
+//	cobra minimum args         requires at least %d arg(s), only received  no (counts)
+//	cobra required flags       required flag(s) %q not set                 no (flag names)
+//	this project's config/     "token is required", "…OCTO_TOKEN…"         no (our own text)
+//	credential packages
+//
+// Note the two "unknown …" rows are different strings from different producers and must
+// not be collapsed: cobra quotes the token it did not recognise, while this project's own
+// rejectUnknownSubcommand was rewritten in an earlier round precisely so that it names the
+// command path and lists the real subcommands instead of echoing the argument. Blanking
+// that one would throw away the fix rather than extend it.
+//
+// The five that embed argv are reported by category instead. That is a real loss of
+// detail — an operator no longer sees which flag was rejected — and it is accepted
+// because the alternative cannot be made safe here: this runs *before* collectSecrets,
+// so there is no list of declared secrets to mask against, and a base64url share or
+// invite token beginning with "-" is exactly what pflag reports as an unknown flag.
+// The hint carries the remedy, including the "-" case, so the caller is not left
+// guessing.
+//
+// The fallback keeps its text. Everything reaching it either comes from this project's
+// own code or is a cobra error not matched above; the standing contract for our own
+// code is that an error carrying a caller value must be constructed as an *ExitError
+// with the value already masked, which is checked at the sites that have a secret list.
+// If a future error type formats argv into an unclassified message, that contract is
+// where it has to be fixed — not by widening the guesses here.
 func WrapCLIError(err error) error {
 	if err == nil {
 		return nil
@@ -361,12 +408,25 @@ func WrapCLIError(err error) error {
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
 		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, or uk_* token")
+	// --- the categories whose own text embeds argv: reported, never echoed ---
 	case strings.Contains(lower, "unknown flag"),
-		strings.Contains(lower, "unknown command"),
-		strings.Contains(lower, "unknown subcommand"),
-		strings.Contains(lower, "unknown shorthand"),
+		strings.Contains(lower, "unknown shorthand"):
+		return output.ErrValidation("a flag in the command line was not recognised",
+			"run `octo-cli <command> --help` for the valid flags. If this is an id that starts "+
+				"with \"-\" (base64url ids do), pass it as its named flag or after a \"--\" separator")
+	case strings.Contains(lower, "flag needs an argument"):
+		return output.ErrValidation("a flag was given without its value",
+			"run `octo-cli <command> --help` for the valid flags and their arguments")
+	case strings.Contains(lower, "invalid argument"):
+		return output.ErrValidation("a flag value was rejected by its type",
+			"run `octo-cli <command> --help` to see the expected type for each flag")
+	case strings.Contains(lower, "unknown command"):
+		return output.ErrValidation("that is not a known command",
+			"run `octo-cli --help`, or `octo-cli <domain> --help`, for the available commands")
+
+	// --- the categories whose text carries only counts, flag names, or our own words ---
+	case strings.Contains(lower, "unknown subcommand"),
 		strings.Contains(lower, "required flag"),
-		strings.Contains(lower, "invalid argument"),
 		strings.Contains(lower, "accepts "),
 		strings.Contains(lower, "requires at "),
 		strings.Contains(lower, "arg(s)"):

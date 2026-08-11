@@ -62,7 +62,13 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return nil, invalidShareURL(fmt.Sprintf("not a valid URL: %v", err))
+		// urlParseCause, not err: *url.Error.Error() quotes its whole input, and on
+		// `share access` / `share download` the whole input is the link, whose path is
+		// the share token. The inner cause names what was wrong without repeating it.
+		// (A couple of net/url causes do carry a very short fragment — url.EscapeError
+		// quotes the three-character escape, InvalidHostError one character — which is
+		// a category label rather than the token.)
+		return nil, invalidShareURL(fmt.Sprintf("not a valid URL: %v", urlParseCause(err)))
 	}
 	origin, oerr := webOrigin(cfg)
 	if oerr != nil {
@@ -208,7 +214,43 @@ func webOrigin(cfg *config.Config) (*url.URL, *output.ExitError) {
 			fmt.Sprintf("%s is not a valid absolute URL: %q", config.EnvAPIBaseURL, cfg.APIBaseURL),
 			"set it to the Octo origin, e.g. https://im.example.com (no path)")
 	}
+	// A configured path is refused rather than dropped. Returning scheme+host silently
+	// discarded it, so a deployment served under a path prefix got share links built
+	// against the wrong origin — links that look right, are handed to a recipient, and
+	// resolve to nothing. The setting is documented as an origin with no path, so the
+	// honest failure is to say the value is unusable instead of quietly reinterpreting it.
+	if u.Path != "" {
+		return nil, output.ErrWithHint("config", "MISSING_API_BASE_URL",
+			fmt.Sprintf("%s must be an origin with no path, but it has %q", config.EnvAPIBaseURL, u.Path),
+			"set it to the scheme and host only, e.g. https://im.example.com")
+	}
 	return &url.URL{Scheme: u.Scheme, Host: u.Host}, nil
+}
+
+// shareURLMask is the placeholder a masked share link carries in place of its token.
+// It matches the spelling the rest of the dry-run envelope already uses for the same
+// value, so the two halves of one envelope agree.
+const shareURLMask = "***REDACTED***"
+
+// redactedShareURL renders the link with its token replaced, for a --dry-run envelope.
+//
+// The dry-run description used to contradict itself: it masked the token inside "path",
+// because a leaked description must not hand the share over, and printed the same token
+// verbatim in "share_url" on the grounds that the caller supplied it so nothing new was
+// disclosed. Both arguments cannot hold at once, and the standard for this output is that
+// it is safe to paste into a ticket or a log, so masking wins on both.
+//
+// A document link has no token — its identifiers are the doc id and its Octo Space, both
+// of which the same envelope reports as their own fields — so there is nothing to mask
+// and the canonical link is returned unchanged.
+func redactedShareURL(p *parsedShareURL) string {
+	if p == nil {
+		return ""
+	}
+	if p.token == "" {
+		return p.canonical
+	}
+	return strings.Replace(p.canonical, p.token, shareURLMask, 1)
 }
 
 // buildBlobShareURL renders the link the sharer hands over for a blob share.
