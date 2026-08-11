@@ -136,3 +136,43 @@ func TestWebOrigin_RefusesAConfiguredPath(t *testing.T) {
 		})
 	}
 }
+
+// TestRedactedShareURL_MasksTheTokenPositionNotTheFirstMatch is a bug in this round's own
+// fix, found in review within the hour.
+//
+// redactedShareURL masked with strings.Replace(canonical, token, mask, 1), which replaces
+// the first occurrence *anywhere* in the URL. A token that also appears earlier — in the
+// scheme or the host — had that earlier occurrence masked instead, leaving the real token
+// in the path. With token "https" the output was
+// "***REDACTED***://octo.example/drive/s/https", which masks nothing and looks masked.
+//
+// Searching for the value was the wrong shape of solution: the token's position is known
+// by construction, so the masked link is rebuilt from the parsed parts instead. There is
+// nothing left to search and therefore nothing to mismatch.
+func TestRedactedShareURL_MasksTheTokenPositionNotTheFirstMatch(t *testing.T) {
+	cfg := &config.Config{APIBaseURL: "https://octo.example"}
+
+	// Tokens chosen to collide with earlier parts of the URL: the scheme, the host, and
+	// the path prefix itself.
+	for _, token := range []string{"https", "octo", "example", "drive", "s", "Ab3cDeFgHiJk"} {
+		t.Run("token="+token, func(t *testing.T) {
+			parsed, err := parseShareURL(cfg, "https://octo.example"+blobSharePathPrefix+token)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			got := redactedShareURL(parsed)
+
+			// The token must not survive in the path position. Checking the last path
+			// segment specifically, because that is where it lives — a whole-string
+			// "contains" check would be satisfied by the scheme for token "https".
+			lastSlash := strings.LastIndex(got, "/")
+			if lastSlash < 0 {
+				t.Fatalf("masked link has no path: %q", got)
+			}
+			if segment := got[lastSlash+1:]; segment != shareURLMask {
+				t.Errorf("last path segment = %q, want %q — the mask landed somewhere else and the "+
+					"token is still in the link: %s", segment, shareURLMask, got)
+			}
+		})
+	}
+}

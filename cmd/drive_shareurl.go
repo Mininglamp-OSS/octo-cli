@@ -30,6 +30,9 @@ type parsedShareURL struct {
 	// docID / docSpaceID identify an online document (kind=doc).
 	docID      string
 	docSpaceID string
+	// origin is the web origin the link was normalised against, kept so a masked
+	// rendering can be rebuilt from the parts instead of searching the string.
+	origin *url.URL
 	// canonical is the link normalised against the configured web origin, which
 	// is what gets echoed back so both sides see the same string.
 	canonical string
@@ -87,6 +90,7 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 		return &parsedShareURL{
 			kind:      shareKindBlob,
 			token:     token,
+			origin:    origin,
 			canonical: buildBlobShareURL(origin, token),
 		}, nil
 
@@ -105,6 +109,7 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 			kind:       shareKindDoc,
 			docID:      docID,
 			docSpaceID: docSpaceID,
+			origin:     origin,
 			canonical:  buildDocShareURL(origin, docID, docSpaceID),
 		}, nil
 	}
@@ -240,17 +245,26 @@ const shareURLMask = "***REDACTED***"
 // disclosed. Both arguments cannot hold at once, and the standard for this output is that
 // it is safe to paste into a ticket or a log, so masking wins on both.
 //
+// The masked link is *rebuilt from the parsed parts*, not produced by substituting the
+// token into the finished string. The first version did the latter — one
+// strings.Replace of the token, count 1 — which replaces the first occurrence anywhere in
+// the URL, so a token that also appears in the scheme or the host had that earlier
+// occurrence masked while the real token stayed in the path. A token of "https" produced
+// "***REDACTED***://octo.example/drive/s/https": masked-looking and masking nothing.
+// Searching for the value was the wrong shape of answer, because the token's position is
+// already known — rebuilding leaves nothing to search and nothing to mismatch.
+//
 // A document link has no token — its identifiers are the doc id and its Octo Space, both
-// of which the same envelope reports as their own fields — so there is nothing to mask
-// and the canonical link is returned unchanged.
+// of which the same envelope reports as their own fields — so its canonical link is
+// returned unchanged.
 func redactedShareURL(p *parsedShareURL) string {
 	if p == nil {
 		return ""
 	}
-	if p.token == "" {
+	if p.token == "" || p.origin == nil {
 		return p.canonical
 	}
-	return strings.Replace(p.canonical, p.token, shareURLMask, 1)
+	return buildBlobShareURL(p.origin, shareURLMask)
 }
 
 // buildBlobShareURL renders the link the sharer hands over for a blob share.

@@ -608,3 +608,35 @@ func TestPublishDownload_FallbackPublishesToAFreeName(t *testing.T) {
 		t.Errorf("target contents = %q", got)
 	}
 }
+
+// TestPublishDownload_FailedRenameLeavesNoPlaceholder covers the other half of this
+// round's O_EXCL reservation, reported in review as a consequence of adding it.
+//
+// The reservation creates an empty file to hold the destination name. If the rename then
+// failed, that empty file stayed: the command reported the error, so it was not a false
+// success, but it left something at the destination that looks like a finished download —
+// exactly what the part-file sequence exists to prevent. The placeholder is now removed on
+// failure, and only when it is still the file this process created.
+func TestPublishDownload_FailedRenameLeavesNoPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "obj")
+	partPath, created := mustCreatePartFor(t, dir, "downloaded bytes", "")
+
+	// Delete the part file after the pre-publication check and after the name has been
+	// reserved, so os.Rename fails with the reservation already in place.
+	err := publishDownloadWithLinker(partPath, target, false, created,
+		nil, func(string, string) error {
+			_ = os.Remove(partPath)
+			return syscall.EPERM
+		})
+	if err == nil {
+		// The rename succeeded, so this fixture did not reach the case under test.
+		t.Skip("rename succeeded; this platform did not exercise the failure path")
+	}
+
+	if _, serr := os.Lstat(target); serr == nil {
+		got, _ := os.ReadFile(target)
+		t.Errorf("publication failed but left a file at the destination (%d bytes: %q) — "+
+			"an empty file there looks like a finished download", len(got), got)
+	}
+}

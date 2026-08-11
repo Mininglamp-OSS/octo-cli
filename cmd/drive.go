@@ -1092,6 +1092,10 @@ func publishDownload(partPath, target string, overwrite bool, created os.FileInf
 func publishDownloadWithLinker(partPath, target string, overwrite bool, created os.FileInfo,
 	beforePublish func(), link func(oldname, newname string) error,
 ) *output.ExitError {
+	// published records whether the rename actually happened, so the reserved name is
+	// cleaned up on failure and kept on success.
+	var published bool
+
 	if err := assertPartFileUnchanged(partPath, created); err != nil {
 		return err
 	}
@@ -1126,12 +1130,39 @@ func publishDownloadWithLinker(partPath, target string, overwrite bool, created 
 			}
 			return output.ErrValidation(fmt.Sprintf("reserve %q: %v", target, perr), "")
 		}
+		// Remember what was created so a failed rename can clean it up without
+		// deleting a file that something else put at the name in the meantime.
+		reserved, sterr := placeholder.Stat()
 		_ = placeholder.Close() //nolint:errcheck // nothing was written to it
+		if sterr == nil {
+			defer removeReservedPlaceholder(target, reserved, &published)
+		}
 	}
 	if err := os.Rename(partPath, target); err != nil {
 		return output.ErrValidation(fmt.Sprintf("finalise %q: %v", target, err), "")
 	}
+	published = true
 	return assertPublishedFileMatches(target, created)
+}
+
+// removeReservedPlaceholder deletes the empty file the no-hard-links fallback created to
+// reserve the destination name, when publication did not go on to replace it.
+//
+// Without this, a rename that fails after the reservation left a zero-length file at the
+// destination: the command reports the error, so it is not a false success, but it does
+// leave something that looks like a finished download, which is the property the whole
+// part-file dance exists to provide. The identity is checked before removing, so a file
+// another writer put at that name between the failure and the cleanup is left alone
+// rather than deleted on its behalf.
+func removeReservedPlaceholder(target string, reserved os.FileInfo, published *bool) {
+	if *published || reserved == nil {
+		return
+	}
+	now, err := os.Lstat(target)
+	if err != nil || !now.Mode().IsRegular() || !os.SameFile(now, reserved) {
+		return
+	}
+	_ = os.Remove(target) //nolint:errcheck // best-effort cleanup of our own placeholder
 }
 
 // assertPublishedFileMatches confirms the destination now holds the file this
