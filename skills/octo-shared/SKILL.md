@@ -174,7 +174,7 @@ octo-cli group list --jq '.data[].id' | xargs -I{} octo-cli group get {}
 ### Paginating
 
 ```bash
-octo-cli group list --page-all --page-limit 20
+octo-cli docs search --keyword "spec" --page-all --page-limit 20
 ```
 
 `--page-all` applies to any list operation that reports a cursor in `_pagination`. The merged output drops `_pagination` — you get a flat `data` array.

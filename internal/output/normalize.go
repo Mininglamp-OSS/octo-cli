@@ -157,7 +157,8 @@ func ParseUint64Decimal(flagOrArg, value string) (uint64, *ExitError) {
 		if value[i] < '0' || value[i] > '9' {
 			return 0, ErrValidation(
 				fmt.Sprintf("%s must be a decimal uint64 id, got %q", flagOrArg, value),
-				"pass digits only — the id from `-q '.data.id' -r`, with no sign, spaces, or exponent")
+				`pass digits only, with no sign, spaces, or exponent — ids come back as JSON strings, so a `+
+					`captured id needs its quotes removed: -q '.data.id' | tr -d '"'`)
 		}
 	}
 	n, err := strconv.ParseUint(value, 10, 64)

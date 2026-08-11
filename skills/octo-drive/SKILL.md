@@ -53,7 +53,9 @@ Drive never sends `X-Space-Id` — the tenant comes from the verified identity.
 | `share_id` vs `share_token` | opaque strings | `share create`, `share blob-create`, `share list` | `share_id` → `share revoke`; the token is embedded in `share_url` |
 | `invite_id` vs `invite_token` | opaque strings | `invite create`, `invite list` | `invite_id` → `invite revoke`; `invite_token` → `invite accept` |
 
-**File ids are uint64 and are emitted as JSON strings on purpose.** Values above 2^53 would be silently rounded by a JavaScript-style parser, addressing a *different file*. So: pass them through verbatim (`-q '.data.id' -r`), never do arithmetic on them, never reformat them. The CLI rejects a non-decimal or out-of-range id locally.
+**File ids are uint64 and are emitted as JSON strings on purpose.** Values above 2^53 would be silently rounded by a JavaScript-style parser, addressing a *different file*. So: pass them through verbatim (`-q '.data.id' | tr -d '"'`), never do arithmetic on them, never reformat them. The CLI rejects a non-decimal or out-of-range id locally.
+
+**Why `| tr -d '"'` on every capture below.** `--jq`/`-q` prints a JSON *value*, and ids are JSON strings — so `-q '.data.id'` emits `"123"` including the quotes, and a quoted id is rejected by the next command's id validation. There is no raw-output flag; `-q` is the only output filter the CLI defines. Strip the quotes in the shell. (Numbers already come out bare, so this matters for string-valued fields: every id, `share_url`, and every opaque token.)
 
 Two traps worth naming:
 
@@ -65,11 +67,11 @@ Two traps worth naming:
 ### Space → folder → upload → share → download
 
 ```bash
-SPACE=$(octo-cli drive space create --name "Project files" -q '.data.id' -r)
-FOLDER=$(octo-cli drive folder create --space-id "$SPACE" --parent-id 0 --name Contracts -q '.data.id' -r)
-FILE=$(octo-cli drive upload file ./contract.pdf --space-id "$SPACE" --parent-id "$FOLDER" -q '.data.id' -r)
+SPACE=$(octo-cli drive space create --name "Project files" -q '.data.id' | tr -d '"')
+FOLDER=$(octo-cli drive folder create --space-id "$SPACE" --parent-id 0 --name Contracts -q '.data.id' | tr -d '"')
+FILE=$(octo-cli drive upload file ./contract.pdf --space-id "$SPACE" --parent-id "$FOLDER" -q '.data.id' | tr -d '"')
 
-SHARE_URL=$(octo-cli drive share create "$FILE" -q '.data.share_url' -r)
+SHARE_URL=$(octo-cli drive share create "$FILE" -q '.data.share_url' | tr -d '"')
 # Hand SHARE_URL to the receiver verbatim. They never extract a token:
 octo-cli drive share access   "$SHARE_URL"
 octo-cli drive share download "$SHARE_URL" -o ./contract.pdf
@@ -81,10 +83,10 @@ octo-cli drive download file "$FILE" -o ./copy.pdf
 ### Personal space → mount a document → share its link
 
 ```bash
-SPACE=$(octo-cli drive space ensure-personal -q '.data.id' -r)
-DOC=$(octo-cli drive doc candidates --space-id "$SPACE" -q '.data.items[0].doc_id' -r)
-MOUNT=$(octo-cli drive doc mount --space-id "$SPACE" --doc-id "$DOC" -q '.data.id' -r)
-DOC_URL=$(octo-cli drive share create "$MOUNT" -q '.data.share_url' -r)
+SPACE=$(octo-cli drive space ensure-personal -q '.data.id' | tr -d '"')
+DOC=$(octo-cli drive doc candidates --space-id "$SPACE" -q '.data.items[0].doc_id' | tr -d '"')
+MOUNT=$(octo-cli drive doc mount --space-id "$SPACE" --doc-id "$DOC" -q '.data.id' | tr -d '"')
+DOC_URL=$(octo-cli drive share create "$MOUNT" -q '.data.share_url' | tr -d '"')
 
 octo-cli drive share access "$DOC_URL"      # resolves the target; grants nothing
 # `share download` on a document link fails with NOT_DOWNLOADABLE — by design.
@@ -95,9 +97,9 @@ octo-cli drive share access "$DOC_URL"      # resolves the target; grants nothin
 ### Invite a member
 
 ```bash
-SPACE=$(octo-cli drive space create --name "Collab" -q '.data.id' -r)
-INVITE_ID=$(octo-cli drive invite create "$SPACE" --role editor -q '.data.invite_id' -r)
-TOKEN=$(octo-cli drive invite list "$SPACE" -q '.data.invites[0].invite_token' -r)
+SPACE=$(octo-cli drive space create --name "Collab" -q '.data.id' | tr -d '"')
+INVITE_ID=$(octo-cli drive invite create "$SPACE" --role editor -q '.data.invite_id' | tr -d '"')
+TOKEN=$(octo-cli drive invite list "$SPACE" -q '.data.invites[0].invite_token' | tr -d '"')
 
 octo-cli drive invite accept "$TOKEN"          # as the invitee's credential
 octo-cli drive invite revoke "$SPACE" "$INVITE_ID"
@@ -126,10 +128,10 @@ Drive has no user search — get a uid from the message/group commands or your o
 ### IM attachment → drive
 
 ```bash
-MSG=$(octo-cli message search files --chat-id "$GROUP" -q '.data.items[0].message_id' -r)
+MSG=$(octo-cli message search files --chat-id "$GROUP" -q '.data.items[0].message_id' | tr -d '"')
 FILE=$(octo-cli drive im-transfer create \
   --im-group-no "$GROUP" --im-channel-type 2 --im-msg-id "$MSG" \
-  --target-space-id "$SPACE" -q '.data.id' -r)
+  --target-space-id "$SPACE" -q '.data.id' | tr -d '"')
 ```
 
 `--im-channel-type` is required: `1`=DM, `2`=group, `5`=thread, and it must be the kind the message actually came from. It picks the upstream message-read route (`1` uses the DM route; `2` and `5` share the group route, where group vs sub-thread comes from the composite `group_no`), and it is stored as the first segment of the row's `source_key` (`channelType#channelID#msgID`), which the chat file-card's already-transferred lookup matches on — a wrong value makes that lookup miss. Anything outside `1|2|5` is rejected locally (`ENUM_NOT_ALLOWED`, exit 2).
@@ -142,7 +144,7 @@ Transfer idempotency is keyed on (target space, type=blob, object path), not on 
 octo-cli drive browse --space-id "$SPACE" --parent-id 0
 octo-cli drive browse --space-id "$SPACE" --type blob --source user-upload
 
-FILE=$(octo-cli drive browse --space-id "$SPACE" -q '.data.entries[0].id' -r)
+FILE=$(octo-cli drive browse --space-id "$SPACE" -q '.data.entries[0].id' | tr -d '"')
 octo-cli drive file get    "$FILE"                       # type → blob | doc | folder
 octo-cli drive file move   "$FILE" --parent-id "$FOLDER"
 octo-cli drive file rename "$FILE" --name new-name.pdf
