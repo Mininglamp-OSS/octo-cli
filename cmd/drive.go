@@ -1013,25 +1013,10 @@ func fetchToFile(cmd *cobra.Command, f *cmdutil.Factory, field, rawURL, target s
 		ee.Hint = "transfer interrupted; the partial file was removed"
 		return nil, ee
 	}
-	// What arrived must be what was promised. resp.ContentLength is -1 when the
-	// response is chunked or close-delimited, in which case there is nothing to compare
-	// against and the copy error above is the only signal available.
-	if resp.ContentLength >= 0 && written != resp.ContentLength {
+	if terr := assertCompleteBody(written, resp.ContentLength); terr != nil {
 		_ = part.Close() //nolint:errcheck // already failing
 		cleanup()
-		return nil, output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
-			fmt.Sprintf("object storage sent %d of %d bytes", written, resp.ContentLength),
-			"the transfer ended early; re-run the command to get a fresh signed URL")
-	}
-	// A zero-byte object is refused rather than published: every drive upload path
-	// rejects an empty file, so an empty download is the storage host disagreeing with
-	// what the drive row says exists, not a legitimate object.
-	if written == 0 {
-		_ = part.Close() //nolint:errcheck // already failing
-		cleanup()
-		return nil, output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
-			"object storage sent an empty body",
-			"the object is registered but storage returned nothing; report it")
+		return nil, terr
 	}
 	if err := part.Sync(); err != nil {
 		_ = part.Close() //nolint:errcheck // already returning the sync error
@@ -1263,6 +1248,34 @@ func assertPartFileUnchanged(partPath string, created os.FileInfo) *output.ExitE
 		return output.ErrWithHint("validation", "PARTIAL_FILE_REPLACED",
 			"the partial download file was replaced before it could be published",
 			"another process wrote to the destination directory mid-download; re-run, and prefer a directory only you can write")
+	}
+	return nil
+}
+
+// assertCompleteBody refuses a body that is not the whole object.
+//
+// Extracted so fetchToFile stays under the complexity limit, and because the two
+// conditions are one question: did we receive the object, or part of it?
+//
+// contentLength is -1 for a chunked or close-delimited response, where nothing was
+// promised and there is nothing to compare against — the copy error is then the only
+// signal available. An empty body is refused outright: every upload path in this domain
+// rejects an empty file, so an empty download means storage disagrees with what the drive
+// row claims exists rather than that the object is legitimately zero bytes.
+//
+// Publishing either shape reported ok with a sha256 that describes the wrong bytes, and a
+// checksum that certifies a truncation is worse than no checksum, because a caller
+// verifying it concludes the transfer was sound.
+func assertCompleteBody(written, contentLength int64) *output.ExitError {
+	if contentLength >= 0 && written != contentLength {
+		return output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
+			fmt.Sprintf("object storage sent %d of %d bytes", written, contentLength),
+			"the transfer ended early; re-run the command to get a fresh signed URL")
+	}
+	if written == 0 {
+		return output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
+			"object storage sent an empty body",
+			"the object is registered but storage returned nothing; report it")
 	}
 	return nil
 }
