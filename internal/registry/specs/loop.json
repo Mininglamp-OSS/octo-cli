@@ -7350,11 +7350,12 @@
           "status": {
             "type": "string",
             "enum": [
-              "task_created",
-              "running",
-              "completed",
-              "failed",
-              "skipped"
+              "backlog",
+              "todo",
+              "in_progress",
+              "done",
+              "blocked",
+              "cancelled"
             ]
           },
           "priority": {
