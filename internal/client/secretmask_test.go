@@ -845,3 +845,74 @@ func TestBackendError_CodePositionAgreesWithOtherCodeKeys(t *testing.T) {
 		})
 	}
 }
+
+// TestResponseMask_ASecretInAKeyPositionIsMasked is round-12 P2-1.
+//
+// The structural walk copied object keys verbatim, on the stated grounds that keys
+// "carry the response contract, never a secret" and that leaving them alone "is what
+// keeps the body parseable". The second half was the reason for the first, and it was
+// carried over from the textual substitution it replaced: rewriting a key inside a
+// *decoded* map and re-marshalling produces valid JSON by construction, which is why
+// redactBodyKeysAndValues has always masked keys on the request side. So the claim
+// protected nothing here, and a backend that keys a map by a caller-supplied id — the
+// ordinary shape of a per-id batch result — put a share token straight into the
+// printed envelope.
+//
+// The rule is the same one clause 2 of the code exemption settled on: mask when masking
+// would remove a secret, and leave alone otherwise. A contract field name cannot become
+// a declared secret, so no contract is lost.
+func TestResponseMask_ASecretInAKeyPositionIsMasked(t *testing.T) {
+	const secret = "SHARETOKEN123"
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"key at the top level", `{"error":"not_found","` + secret + `":"no such share","message":"x"}`},
+		{"key nested under a field", `{"error":"not_found","results":{"` + secret + `":"missing"}}`},
+		{"key inside an array element", `{"error":"not_found","items":[{"` + secret + `":1}]}`},
+		{"secret embedded in a longer key", `{"error":"not_found","share_` + secret + `_state":"gone"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+
+			if strings.Contains(string(ee.Detail), secret) {
+				t.Errorf("the secret survived in a key position: %s", ee.Detail)
+			}
+
+			// The whole reason keys were left alone. If masking them broke this, the
+			// cure would be worse than the leak, so it is asserted rather than argued.
+			var reparsed map[string]any
+			if uerr := json.Unmarshal(ee.Detail, &reparsed); uerr != nil {
+				t.Fatalf("the redacted body is no longer parseable JSON: %v\n%s", uerr, ee.Detail)
+			}
+			// And the contract still reaches the caller: masking keys must not touch
+			// the machine-readable code.
+			if reparsed["error"] != "not_found" {
+				t.Errorf("the backend code was lost: %s", ee.Detail)
+			}
+			if ee.Code != "not_found" {
+				t.Errorf("ee.Code = %q, want not_found", ee.Code)
+			}
+		})
+	}
+}

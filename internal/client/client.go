@@ -227,10 +227,25 @@ func redactBodyForLog(req *Request, marshalled []byte) string {
 // only guessable for a Go producer: a backend that writes `\/` for a slash
 // defeats a substitution built from json.Marshal's spelling.
 //
-// Parsing first and walking the decoded values fixes both. Object keys are left
-// alone — they carry the response contract, never a secret — which is what keeps
-// the body parseable. A body that is not JSON has no structure to walk and falls
-// back to text substitution.
+// Parsing first and walking the decoded values fixes both. A body that is not JSON
+// has no structure to walk and falls back to text substitution.
+//
+// Object keys are masked too, on the same rule as the values: mask when masking would
+// remove a declared secret, leave alone otherwise. An earlier version copied keys
+// verbatim, justified as "keys carry the response contract, never a secret" and as what
+// "keeps the body parseable". The parseability half was inherited from the textual
+// substitution this replaced and does not apply to a structural walk — renaming a key
+// in a decoded map and re-marshalling yields valid JSON by construction, which is why
+// redactBodyKeysAndValues has always masked keys on the request side. With that gone
+// the contract half does not carry the claim either: a contract field name is fixed by
+// the API and cannot become a caller-supplied token, so nothing a caller branches on is
+// touched — while a backend that keys a map by a caller-supplied id, the ordinary shape
+// of a per-id batch result, used to put a share token straight into the printed envelope.
+//
+// One consequence worth knowing rather than discovering: if two keys in the same object
+// both carry secrets and mask to the same string, they collapse to one entry. Both names
+// were secret-bearing and are being destroyed on purpose, and this is a diagnostic body,
+// so the collision is accepted rather than worked around.
 func redactResponseBody(b []byte, secrets []string) []byte {
 	if len(b) == 0 || len(secrets) == 0 {
 		return b
@@ -308,15 +323,25 @@ func redactErrorEnvelope(v any, secrets []string) any {
 	}
 	out := make(map[string]any, len(obj))
 	for key, val := range obj {
+		// The semantic decisions below are made on the key as the backend wrote it —
+		// whether it is the code-bearing field, whether it is the nested envelope —
+		// while what gets written is the masked spelling. Which of the two is used is
+		// unobservable today, and deliberately so rather than by luck: masking only ever
+		// substitutes the mask string, so a masked key can never *become* "code", and a
+		// secret short enough to sit inside "code" or "error" is not substituted at all
+		// because short secrets are only replaced at a token boundary. Reading the
+		// backend's own spelling is still the right side to be on, since that is what
+		// carries the field's meaning.
+		outKey := redactSecrets(key, secrets)
 		switch {
 		case isCodeBearingKey(key) && isExemptCode(val, secrets):
-			out[key] = val
+			out[outKey] = val
 		case key == "error":
 			// The matters envelope nests {"code":…,"message":…} under "error";
 			// recurse so its code is exempt too while its message is masked.
-			out[key] = redactErrorEnvelope(val, secrets)
+			out[outKey] = redactErrorEnvelope(val, secrets)
 		default:
-			out[key] = redactBodyValue(val, secrets)
+			out[outKey] = redactBodyValue(val, secrets)
 		}
 	}
 	return out
@@ -394,7 +419,11 @@ func redactBodyValue(v any, secrets []string) any {
 	case map[string]any:
 		out := make(map[string]any, len(t))
 		for key, val := range t {
-			out[key] = redactBodyValue(val, secrets)
+			// Keys are masked on the same rule as values. On a request body built
+			// from the spec this is a no-op, because a spec-derived key cannot
+			// contain a declared secret; on a response body it is what stops a
+			// backend that keys a map by a caller-supplied id from printing it.
+			out[redactSecrets(key, secrets)] = redactBodyValue(val, secrets)
 		}
 		return out
 	case []any:
