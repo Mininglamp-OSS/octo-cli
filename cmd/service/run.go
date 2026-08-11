@@ -207,7 +207,7 @@ func applyGeneratedIdempotencyKey(rt *operationRuntime, body map[string]any) err
 		return nil
 	}
 	name := rt.detail.AutoIdempotencyKey
-	if _, present := body[name]; present {
+	if value, present := body[name]; present && !emptyAutoIdempotencyValue(value) {
 		return nil
 	}
 	if len(rt.detail.BodyVariants) > 0 && !variantNeedsGeneratedField(rt.detail.BodyVariants, body, name) {
@@ -221,6 +221,14 @@ func applyGeneratedIdempotencyKey(rt *operationRuntime, body map[string]any) err
 	return nil
 }
 
+func emptyAutoIdempotencyValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	text, ok := value.(string)
+	return ok && strings.TrimSpace(text) == ""
+}
+
 func variantNeedsGeneratedField(variants []registry.BodyVariant, body map[string]any, field string) bool {
 	for _, variant := range variants {
 		needsField := false
@@ -230,7 +238,7 @@ func variantNeedsGeneratedField(variants []registry.BodyVariant, body map[string
 				needsField = true
 				continue
 			}
-			if value, present := body[required]; !present || value == nil {
+			if value, present := body[required]; !present || missingVariantRequiredValue(value) {
 				compatible = false
 			}
 		}
@@ -253,7 +261,7 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 	for _, variant := range rt.detail.BodyVariants {
 		valid := true
 		for _, name := range variant.Required {
-			if value, exists := body[name]; !exists || value == nil {
+			if value, exists := body[name]; !exists || missingVariantRequiredValue(value) {
 				valid = false
 			}
 		}
@@ -267,6 +275,14 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 		}
 	}
 	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug (the CLI generates a key when omitted), or republish an existing slug without idempotency_key")
+}
+
+func missingVariantRequiredValue(value any) bool {
+	if value == nil {
+		return true
+	}
+	text, ok := value.(string)
+	return ok && text == ""
 }
 
 // applyBodyFlags merges body-flag values (--foo, --bar) into base, following the

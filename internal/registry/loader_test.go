@@ -167,6 +167,9 @@ func TestHTMLDocIDContract(t *testing.T) {
 	if got := draftCreate.RequestBody.Required; !reflect.DeepEqual(got, []string{"html"}) {
 		t.Errorf("draft create required = %v, want CLI-required html only", got)
 	}
+	if len(draftCreate.BodyVariants) != 1 || !reflect.DeepEqual(draftCreate.BodyVariants[0].Required, []string{"html", "idempotency_key"}) || !reflect.DeepEqual(draftCreate.BodyVariants[0].Forbidden, []string{"slug"}) {
+		t.Errorf("draft create variant = %#v", draftCreate.BodyVariants)
+	}
 	if draftCreate.AutoIdempotencyKey != "idempotency_key" || publish.AutoIdempotencyKey != "idempotency_key" {
 		t.Errorf("auto idempotency fields: publish=%q draft=%q", publish.AutoIdempotencyKey, draftCreate.AutoIdempotencyKey)
 	}

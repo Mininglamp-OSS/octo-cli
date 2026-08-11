@@ -350,6 +350,108 @@ func TestHTMLCanonicalDraftCreate(t *testing.T) {
 	}
 }
 
+func TestHTMLDraftCreateRejectsSlugWithoutHTTPRequest(t *testing.T) {
+	hits := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	})
+	root.SetArgs([]string{"html", "draft", "create", "--data", `{"html":"wip","slug":"legacy"}`})
+	if err := root.Execute(); err == nil {
+		t.Fatal("draft create with slug unexpectedly succeeded")
+	}
+	if hits != 0 {
+		t.Fatalf("draft create with slug reached backend %d time(s)", hits)
+	}
+}
+
+func TestHTMLAutoIdempotencyReplacesEmptyValues(t *testing.T) {
+	operations := []struct {
+		name string
+		args []string
+	}{
+		{name: "publish", args: []string{"html", "publish"}},
+		{name: "draft create", args: []string{"html", "draft", "create"}},
+	}
+	inputs := []struct {
+		name  string
+		value string
+	}{
+		{name: "absent"},
+		{name: "null", value: `,"idempotency_key":null`},
+		{name: "empty", value: `,"idempotency_key":""`},
+		{name: "whitespace", value: `,"idempotency_key":"   "`},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			var keys []string
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				key, _ := body["idempotency_key"].(string)
+				keys = append(keys, key)
+				_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+			})
+			for _, input := range inputs {
+				args := append(append([]string{}, operation.args...), "--data", `{"html":"wip"`+input.value+`}`)
+				root.SetArgs(args)
+				if err := root.Execute(); err != nil {
+					t.Fatalf("%s: %v", input.name, err)
+				}
+			}
+			seen := map[string]bool{}
+			for i, key := range keys {
+				if strings.TrimSpace(key) == "" {
+					t.Errorf("%s key = %q, want generated key", inputs[i].name, key)
+				}
+				if seen[key] {
+					t.Errorf("generated key %q was reused across invocations", key)
+				}
+				seen[key] = true
+			}
+		})
+	}
+}
+
+func TestHTMLAutoIdempotencyPreservesExplicitNonEmptyValue(t *testing.T) {
+	for _, args := range [][]string{
+		{"html", "publish", "--data", `{"html":"wip","idempotency_key":"caller-key"}`},
+		{"html", "draft", "create", "--data", `{"html":"wip","idempotency_key":"caller-key"}`},
+	} {
+		var got string
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			got, _ = body["idempotency_key"].(string)
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		})
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if got != "caller-key" {
+			t.Errorf("%v sent key %q", args[:3], got)
+		}
+	}
+}
+
+func TestHTMLVariantsRejectEmptyRequiredStringsWithoutHTTPRequest(t *testing.T) {
+	for _, args := range [][]string{
+		{"html", "publish", "--html", ""},
+		{"html", "draft", "create", "--html", ""},
+	} {
+		hits := 0
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { hits++ })
+		root.SetArgs(args)
+		if err := root.Execute(); err == nil {
+			t.Errorf("%v unexpectedly succeeded", args)
+		}
+		if hits != 0 {
+			t.Errorf("%v reached backend %d time(s)", args, hits)
+		}
+	}
+}
+
 func TestMatterList_QueryParamsFromFlags(t *testing.T) {
 	var gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
