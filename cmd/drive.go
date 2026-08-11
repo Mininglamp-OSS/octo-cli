@@ -1285,9 +1285,27 @@ func assertPartFileUnchanged(partPath string, created os.FileInfo) *output.ExitE
 //
 // contentLength is -1 for a chunked or close-delimited response, where nothing was
 // promised and there is nothing to compare against — the copy error is then the only
-// signal available. An empty body is refused outright: every upload path in this domain
-// rejects an empty file, so an empty download means storage disagrees with what the drive
-// row claims exists rather than that the object is legitimately zero bytes.
+// signal available. (Under a Content-Length the transport's own body reader reports a short
+// read before this is reached; the comparison here is the backstop for the shapes it does
+// not police, and Content-Encoding is refused on this transport so a compressed reply cannot
+// blank the length out. See transferClientWithGuard.)
+//
+// # The empty case is this CLI's rule, not a claim about storage
+//
+// An empty body is refused, and the reason is worth stating precisely because the hint used
+// to blame the wrong party. Every upload path in *this* CLI rejects an empty file
+// (cmd/drive_upload.go:132), so within this CLI a zero-byte blob cannot be created — but the
+// backend contract is wider: `blob create` documents `size: 0` as "a stated value, not an
+// omission" (internal/registry/specs/drive.json), so a 0-byte blob registered by another
+// client is a legitimate row rather than evidence of a storage fault.
+//
+// The behaviour is deliberately unchanged: a zero-byte object and a transfer that delivered
+// nothing are indistinguishable at this point — DownloadURL carries no declared size or
+// checksum to separate them — and publishing an empty file with the sha256 of nothing is the
+// failure this guard exists to prevent. What changed is the attribution: the refusal now
+// names itself as a CLI limitation instead of telling the operator to report a storage bug
+// they do not have. Widening it to admit 0 bytes would need the backend to declare a length
+// the CLI can check against, which is a product decision rather than a fix here.
 //
 // Publishing either shape reported ok with a sha256 that describes the wrong bytes, and a
 // checksum that certifies a truncation is worse than no checksum, because a caller
@@ -1301,7 +1319,9 @@ func assertCompleteBody(written, contentLength int64) *output.ExitError {
 	if written == 0 {
 		return output.ErrWithHint("api_error", "DOWNLOAD_TRUNCATED",
 			"object storage sent an empty body",
-			"the object is registered but storage returned nothing; report it")
+			"this CLI refuses a zero-byte download, because an empty object and a transfer that "+
+				"delivered nothing cannot be told apart here; re-run once, and if the blob really is "+
+				"0 bytes report the refusal as a CLI limitation rather than a storage fault")
 	}
 	return nil
 }

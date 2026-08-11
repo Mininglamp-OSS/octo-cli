@@ -420,13 +420,50 @@ Notes:
   marshalling and on the response side after parsing, so a password containing `"`,
   `\` or a newline is masked whatever spelling the producer chose, and the response
   stays parseable so
-  the backend's machine-readable `code` survives redaction. Object keys are never
-  rewritten. A secret shorter than eight characters is masked only where it appears
+  the backend's machine-readable `code` survives redaction. Object keys **are** masked, on
+  the same rule as values and including wholesale suppression: a backend that keys a per-id
+  result map by a caller-supplied value, or a caller who merges such a key through `--data`,
+  used to put it straight into the printed envelope. The names this CLI itself reads out of a
+  body (`code`, `error`, `message`, `detail`, …) are the one exemption, because masking them
+  destroys what a caller branches on while hiding a name the API fixes anyway. (An earlier
+  revision of this document said keys are never rewritten; that stopped being true when key
+  masking was added and is corrected here.)
+  A secret shorter than eight characters is *masked* only where it appears
   as a whole token, because substring-masking a one-character value rewrites
-  unrelated text without protecting anything. A body shape the walk does not
+  unrelated text without protecting anything — but that threshold governs masking only, never
+  disclosure. Wherever the two questions meet, the value is checked for literal presence
+  afterwards and the whole field is suppressed if it survived, because a boundary rule that
+  is right for prose is not a reason to publish a password. That applies to string leaves,
+  object keys, and non-JSON bodies alike.
+  A declared secret is masked whatever JSON kind it arrives as: non-string scalars are judged
+  on their own JSON spelling, so an unrelated numeric id is untouched while a secret echoed
+  as a number is suppressed. On the request side `octo-cli api` **refuses** a non-string value
+  at an `x-octo-secret` property instead — a type error cannot disclose anything, and widening
+  the masker over every number in a request body would mask ordinary ids out of every
+  diagnostic. No embedded spec declares a secret in query or header position, or on a
+  non-string schema; `api` collects neither, and a registry census test fails if one appears.
+  Only a *complete, valid* JSON body takes the structural path — decoding one value without
+  requiring EOF meant a body merely starting with a JSON token (`404 page not found`) was
+  truncated to it and the backend's real answer discarded.
+  A body shape the walk does not
   recognise is rendered and text-masked rather than passed through. A password may
   also be supplied off argv with `--password-file <path>` (or `-` for stdin),
   mirroring `auth login --token-file`.
+- Presigned transfers refuse content encodings. Left to Go's default the transport advertises
+  `Accept-Encoding: gzip`, decompresses transparently and reports `Content-Length` as unknown,
+  which switches off the download completeness check — at the discretion of the same untrusted
+  host it defends against — and makes the write unbounded: a 1 KB reply expanded to 1 MB on
+  the caller's `-o` path and was reported complete. It also meant the reported `size` and
+  `sha256` described the expansion rather than the stored object, and that a blob another
+  client stored compressed came back decompressed, so `download file` did not round-trip
+  `upload file`.
+- A zero-byte download is refused, and that is a CLI limitation rather than a claim about
+  storage. `blob create` documents `size: 0` as "a stated value, not an omission", so a
+  0-byte blob registered by another client is a legitimate row — but `DownloadURL` carries no
+  declared size or checksum, so an empty object and a transfer that delivered nothing are
+  indistinguishable, and publishing an empty file with the sha256 of nothing is the failure
+  the guard exists to prevent. Admitting 0 bytes needs a backend-declared length to check
+  against.
 - Both sides of a share link agree by construction: an id the CLI puts into a
   `share_url` (a blob share token or a mounted document's `doc_id`) is held to the
   same charset `share access` enforces on the way in, so the command cannot emit a

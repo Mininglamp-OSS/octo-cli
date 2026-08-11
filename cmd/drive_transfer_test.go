@@ -1101,6 +1101,12 @@ func TestDriveDownload_RefusesATruncatedOrEmptyBody(t *testing.T) {
 		{"204 with no content", http.StatusNoContent, "", 0},
 		{"206 partial content", http.StatusPartialContent, "half", 4},
 		{"200 but shorter than Content-Length", http.StatusOK, "short", 100},
+		// Deliberate, and a CLI limitation rather than a storage-fault claim: `blob create`
+		// documents size 0 as a stated value, so a 0-byte blob another client registered is
+		// a legitimate row — but nothing here can tell it apart from a transfer that
+		// delivered nothing, and publishing an empty file with the sha256 of nothing is the
+		// failure this guard exists to prevent. assertCompleteBody's docstring carries the
+		// reasoning and the hint now names the limitation instead of blaming storage.
 		{"200 with an empty body", http.StatusOK, "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

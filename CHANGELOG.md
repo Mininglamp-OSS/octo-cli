@@ -217,6 +217,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
+- **A compressed reply can no longer switch off the download completeness check.** The
+  transfer transport advertised `Accept-Encoding: gzip` by default, so a storage host that
+  compressed had its reply decompressed transparently and `Content-Length` reported as
+  unknown — which skipped the length comparison entirely and let a 1 KB response write
+  1 MB to the caller's `-o` path, reported as a complete download at an
+  attacker-chosen ratio. The reported `size` and `sha256` also described the expansion
+  rather than the stored object, and a blob another client stored compressed was written
+  out decompressed, so `download file` did not round-trip `upload file`. The transport now
+  refuses content encodings, and the transfer tests cover the compressed case in both
+  directions.
+- **A short declared secret no longer reaches stderr through a non-JSON error body.** The
+  text fallback in response redaction used the masker's prose boundary rule, which declines
+  a secret under 8 characters unless it is delimited — so one adjacent character published a
+  1–7 character password (an accepted input: `password` has no `minLength`) whenever a WAF or
+  reverse proxy answered with HTML. The fallback now asks the same disclosure question the
+  structured path asks and suppresses the whole body when the answer is yes; a body echoing
+  no secret is untouched, so a secret-free diagnostic stays readable.
+- **A declared secret is masked whatever JSON kind it arrives as.** Redaction masked only
+  string leaves, so a backend echoing a declared value as a number or boolean defeated it
+  with no mistake on the caller's part. Non-string scalars are now judged on their own JSON
+  spelling, which leaves unrelated numeric ids untouched. On the request side `octo-cli api`
+  instead **refuses** a non-string value at an `x-octo-secret` property: a type error cannot
+  disclose anything, and widening the masker over every number would mask ordinary ids out
+  of every diagnostic.
+- **A JSON prefix no longer truncates a backend diagnostic.** Response redaction decoded one
+  value without requiring EOF, so any body merely starting with a JSON token was rewritten to
+  just that token — `404 page not found`, which is what Go's own `http.NotFound` writes,
+  became the number `404`. Only a complete, valid JSON body takes the structural path now.
+- **A short declared secret no longer survives in an object-key position**, on either side.
+  Key masking used the bare masker, so a backend keying a per-id result map by
+  `<password>x` — or a caller merging such a key through `--data` — published it. Keys now
+  get the value rule in full, suppression included, and request-side key collisions collapse
+  in sorted order so a `--dry-run` description no longer varies between identical runs.
+- **`--params` array elements are JSON, not Go syntax.** An object, nested array or null
+  inside a `--params` array fell through to `fmt.Sprintf("%v", …)` and went on the wire as
+  `map[id:9007199254740993]`, `[1 2]` and `<nil>`, while the same value at top level was
+  correctly encoded. Both positions now share one renderer, and a number keeps the exact
+  digits the caller typed.
+- **A refused zero-byte download no longer blames storage.** The behaviour is unchanged —
+  an empty object and a transfer that delivered nothing cannot be told apart, and publishing
+  an empty file with the sha256 of nothing is what the guard prevents — but `blob create`
+  documents `size: 0` as a stated value, so such a blob can legitimately exist. The hint now
+  names the CLI limitation instead of telling the operator to report a bug they do not have.
 - **A share link is no longer printed when it fails to parse.** `url.Parse` returns an
   error whose text quotes the whole input, and on `share access` / `share download` the
   whole input is the link, so a malformed link put the share token into the error on
