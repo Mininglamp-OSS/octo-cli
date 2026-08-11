@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -63,7 +64,14 @@ flags are not auto-generated and --page-all is not available.`,
 			}
 			var body any
 			if len(rawData) > 0 {
-				if err := json.Unmarshal(rawData, &body); err != nil {
+				// UseNumber, matching every generated command: a plain decode turns each
+				// JSON number into float64, which silently rounds a uint64 id above 2^53
+				// — and a rounded id is a *valid* id pointing at a row the caller did not
+				// name. This command is the escape hatch the enum guard points people at,
+				// so it must not be the one place the lossless contract does not hold.
+				dec := json.NewDecoder(bytes.NewReader(rawData))
+				dec.UseNumber()
+				if err := dec.Decode(&body); err != nil {
 					ee := output.ErrValidation(fmt.Sprintf("--data is not valid JSON: %v", err), "pass a JSON value or use @file/@-")
 					_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
 					return ee
@@ -83,7 +91,7 @@ flags are not auto-generated and --page-all is not available.`,
 				Body:    body,
 				// Recovered from the registry rather than from a command definition,
 				// because this command's path is whatever the caller typed.
-				SecretValues: apiSecretsForPath(f.Registry(), method, path),
+				SecretValues: apiSecretsForRequest(f.Registry(), method, path, body),
 			})
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -118,20 +126,93 @@ flags are not auto-generated and --page-all is not available.`,
 // credential-equivalent path value here to leak. The enum guard also tells callers that
 // when a vocabulary is too narrow there is no way through except `octo-cli api`, so the
 // CLI actively points people at this command.
+// apiSecretsForRequest recovers every value this request carries that the spec marks
+// secret — path parameters and request-body leaves alike.
+//
+// The path half was written first and stopped there, which was a partial enumeration of the
+// same kind this branch keeps producing: a spec can mark a secret in three places, and
+// drive.json marks `password` in the *body* of share.access and share.download. Since every
+// redaction keys off SecretValues and short-circuits when it is empty, missing the body meant
+// --dry-run and --verbose printed the password verbatim.
+func apiSecretsForRequest(reg *registry.Registry, method, path string, body any) []string {
+	secrets := apiSecretsForPath(reg, method, path)
+	if body == nil || reg == nil {
+		return secrets
+	}
+	if d := matchOperation(reg, method, path); d != nil && d.RequestBody != nil {
+		secrets = append(secrets, bodySecretValues(d.RequestBody, body)...)
+	}
+	return secrets
+}
+
+// matchOperation returns the operation whose path template matches, or nil.
+func matchOperation(reg *registry.Registry, method, path string) *registry.OperationDetail {
+	want := pathSegments(path)
+	for _, svc := range reg.ListServices() {
+		for _, info := range reg.ListOperations(svc) {
+			d, ok := reg.GetOperation(info.ID)
+			if !ok || !strings.EqualFold(d.Method, method) {
+				continue
+			}
+			for _, template := range candidatePaths(d) {
+				if _, matched := matchPathTemplate(template, want); matched {
+					return d
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// bodySecretValues walks the supplied body against the schema and returns the values sitting
+// at properties the spec marks secret, at any depth.
+func bodySecretValues(schema *registry.SchemaInfo, value any) []string {
+	var out []string
+	switch v := value.(type) {
+	case map[string]any:
+		for name := range schema.Properties {
+			prop := schema.Properties[name]
+			child, present := v[name]
+			if !present {
+				continue
+			}
+			if prop.Secret {
+				if str, ok := child.(string); ok && str != "" {
+					out = append(out, str)
+				}
+				continue
+			}
+			if prop.Type == "object" || prop.Items != nil {
+				out = append(out, bodySecretValues(&prop, child)...)
+			}
+		}
+	case []any:
+		if schema.Items != nil {
+			for _, item := range v {
+				out = append(out, bodySecretValues(schema.Items, item)...)
+			}
+		}
+	}
+	return out
+}
+
+// pathSegments splits a concrete request path, dropping any query string or fragment.
+func pathSegments(path string) []string {
+	if i := strings.IndexAny(path, "?#"); i >= 0 {
+		path = path[:i]
+	}
+	return strings.Split(strings.Trim(path, "/"), "/")
+}
+
 func apiSecretsForPath(reg *registry.Registry, method, path string) []string {
 	if reg == nil {
 		return nil
 	}
-	// The query string and fragment come off first. The PATH argument is whatever the
+	// pathSegments drops the query string and fragment. The PATH argument is whatever the
 	// caller typed, so it can carry both — and leaving them on made the last segment
 	// "access?x=1", which matches no template, so nothing was declared and the token
-	// printed in full. That is the same leak this helper exists to close, on a shape it
-	// did not normalise: the value is caller input, and nothing else was going to clean
-	// it up first.
-	if i := strings.IndexAny(path, "?#"); i >= 0 {
-		path = path[:i]
-	}
-	want := strings.Split(strings.Trim(path, "/"), "/")
+	// printed in full.
+	want := pathSegments(path)
 	var secrets []string
 	for _, svc := range reg.ListServices() {
 		for _, info := range reg.ListOperations(svc) {

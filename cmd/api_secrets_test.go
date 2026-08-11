@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -181,5 +182,107 @@ func TestAPISecretsForPath_StripsQueryAndFragment(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAPISecretsForRequest_CollectsBodySecrets is the other half of P1-5, caught in review:
+// apiSecretsForPath recovers secret *path* parameters and never looks at the body. drive.json
+// marks `password` x-octo-secret in the request body of drive.share.access and
+// drive.share.download — the first body secret on a supported drive endpoint — so
+//
+//	api POST /v1/bot/drive/shares/<token>/access --data '{"password":"…"}' --dry-run
+//
+// printed the password verbatim, and so did --verbose, because every redaction keys off
+// SecretValues and short-circuits when it is empty.
+//
+// I closed the path half and stopped there. The spec marks secrets in three places (path,
+// query, body) and I checked one, which is the same partial-enumeration mistake this PR keeps
+// producing — so this walks the body against the matched operation's schema, at any depth.
+func TestAPISecretsForRequest_CollectsBodySecrets(t *testing.T) {
+	reg := registry.MustNew()
+	const token = "TOKEN123456"
+	const password = "hunter2hunter2"
+
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+		want               []string
+	}{
+		{
+			name:   "share access password",
+			method: "POST", path: "/v1/bot/drive/shares/" + token + "/access",
+			body: map[string]any{"password": password},
+			want: []string{token, password},
+		},
+		{
+			name:   "share download password",
+			method: "POST", path: "/v1/bot/drive/shares/" + token + "/download",
+			body: map[string]any{"password": password},
+			want: []string{token, password},
+		},
+		{
+			name:   "the same path with a query string still finds both",
+			method: "POST", path: "/v1/bot/drive/shares/" + token + "/access?x=1",
+			body: map[string]any{"password": password},
+			want: []string{token, password},
+		},
+		{
+			// A non-secret body field must not be declared: over-declaring masks
+			// ordinary values out of every diagnostic.
+			name:   "a non-secret body field is not collected",
+			method: "POST", path: "/v1/bot/drive/shares/" + token + "/access",
+			body: map[string]any{"password": password, "note": "not a secret"},
+			want: []string{token, password},
+		},
+		{
+			name:   "no body at all",
+			method: "DELETE", path: "/v1/bot/drive/shares/" + token,
+			body: nil,
+			want: []string{token},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiSecretsForRequest(reg, tc.method, tc.path, tc.body)
+			for _, want := range tc.want {
+				var found bool
+				for _, g := range got {
+					if g == want {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("secret %q was not collected (got %v), so it would be printed unmasked", want, got)
+				}
+			}
+			for _, g := range got {
+				if g == "not a secret" {
+					t.Errorf("a non-secret field was declared as a secret: %v", got)
+				}
+			}
+		})
+	}
+}
+
+// TestAPI_DataKeepsUint64Precision is the non-blocking parity item. Every generated command
+// decodes --data with UseNumber so a uint64 id above 2^53 is not rounded, because a rounded
+// id is a *valid* id naming a row the caller did not ask for. `api` used a plain Unmarshal —
+// and it is the command the enum guard points people at when a vocabulary is too narrow, so
+// it was the one place the lossless contract this PR enforces did not hold.
+func TestAPI_DataKeepsUint64Precision(t *testing.T) {
+	const big = "9007199254740993" // 2^53 + 1: the first integer float64 cannot represent
+
+	var got string
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}, nil)
+
+	if err := env.run("api", "POST", "/v1/bot/probe", "--data", `{"parent_id":`+big+`}`); err != nil {
+		t.Fatalf("api: %v", err)
+	}
+	if !strings.Contains(got, big) {
+		t.Errorf("the id was rounded on the way to the wire: sent %s, want it to contain %s", got, big)
 	}
 }
