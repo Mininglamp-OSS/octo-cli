@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -757,10 +758,11 @@ func validateString(schema *registry.SchemaInfo, value any, path string) *output
 	if !ok {
 		return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
 	}
-	if schema.MinLength > 0 && len(text) < schema.MinLength {
+	length := utf8.RuneCountInString(text)
+	if schema.MinLength > 0 && length < schema.MinLength {
 		return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
 	}
-	if schema.MaxLength > 0 && len(text) > schema.MaxLength {
+	if schema.MaxLength > 0 && length > schema.MaxLength {
 		return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
 	}
 	return nil
