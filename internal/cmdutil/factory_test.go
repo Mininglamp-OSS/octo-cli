@@ -7,25 +7,51 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/authstore"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// TestMain isolates the credential store for the whole package: NewDefaultFactory
-// now resolves credentials through the on-disk store first, so env-based tests
-// must not see a developer's real ~/.octo-cli. An empty OCTO_CONFIG_DIR yields
-// zero profiles, so resolution falls through to OCTO_BOT_TOKEN as these tests
-// expect. Individual tests may still override OCTO_CONFIG_DIR via t.Setenv.
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. NewDefaultFactory resolves credentials through the on-disk store
+// and then the env chain, so an ambient variable can outrank or redirect the
+// fixtures these tests pin with t.Setenv: OCTO_TOKEN outranks the OCTO_BOT_TOKEN
+// they set (internal/credential/env_provider.go), OCTO_BOT_ID selects a stored
+// profile that does not exist here, OCTO_FORMAT reshapes the resolved config.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX
+// (cmd/service/run.go) is read straight from the environment with no config
+// constant behind it, so it is exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config dir
+// and a developer's stored profiles leak back in. An empty dir yields zero
+// profiles, so resolution falls through to the env chain as these tests expect.
+// Individual tests may still override any of this with t.Setenv.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "octo-cmdutil-test")
 	if err != nil {
 		panic(err)
 	}
+	sweepOctoEnv()
 	os.Setenv("OCTO_CONFIG_DIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+// sweepOctoEnv unsets every OCTO_-prefixed variable in the process environment.
+// os.Environ returns a snapshot, so unsetting while ranging over it is safe.
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
 }
 
 func TestNewDefaultFactory_InitializesFields(t *testing.T) {
@@ -93,6 +119,102 @@ func TestFactory_CredentialFromEnv(t *testing.T) {
 	if cred.SpaceID != "space-A" {
 		t.Errorf("SpaceID = %q", cred.SpaceID)
 	}
+}
+
+func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvAPIBaseURL, "")
+	t.Setenv(config.EnvBotToken, "")
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("legacy", &authstore.ProfileMeta{
+		APIBaseURL: "https://api.example.com/fleet/api/v1",
+		RobotID:    "bot-legacy",
+	}, "app_legacy"); err != nil {
+		t.Fatal(err)
+	}
+	f := NewDefaultFactory()
+	f.Globals.Profile = "legacy"
+	_, err = f.Config()
+	if err == nil || !strings.Contains(err.Error(), `profile "legacy"`) || !strings.Contains(err.Error(), "auth login") {
+		t.Fatalf("Config error = %v, want named profile recovery guidance", err)
+	}
+}
+
+func TestFactory_TaskCredentialMode(t *testing.T) {
+	t.Run("uses only injected token without opening auth store", func(t *testing.T) {
+		blockedStore := t.TempDir() + "/not-a-directory"
+		if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(authstore.EnvConfigDir, blockedStore)
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "octo_loop_task")
+
+		f := NewDefaultFactory()
+		cred, err := f.Credential()
+		if err != nil {
+			t.Fatalf("Credential: %v", err)
+		}
+		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" ||
+			cred.Source != "env:"+config.EnvBotToken {
+			t.Fatalf("credential = %+v", cred)
+		}
+		identity, ok := f.identityValue().(map[string]any)
+		if !ok || identity["type"] != "agent_task" || identity["credential_kind"] != "agent_task" {
+			t.Fatalf("identity = %#v", identity)
+		}
+	})
+
+	t.Run("rejects generic token override", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvToken, "bf_human")
+		t.Setenv(config.EnvBotToken, "octo_loop_task")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), config.EnvToken) {
+			t.Fatalf("Credential error = %v, want %s rejection", err, config.EnvToken)
+		}
+	})
+
+	t.Run("rejects non-loop bot token", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "bf_human")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), "Loop task credential") {
+			t.Fatalf("Credential error = %v, want Loop credential rejection", err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T, *Factory)
+	}{
+		{"profile selector", func(_ *testing.T, f *Factory) { f.Globals.Profile = "default" }},
+		{"bot id selector", func(_ *testing.T, f *Factory) { f.Globals.BotID = "bot-1" }},
+		{"bot id environment", func(t *testing.T, _ *Factory) { t.Setenv(config.EnvBotID, "bot-1") }},
+		{"space override", func(_ *testing.T, f *Factory) { f.Globals.Space = "space-1" }},
+	} {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+			t.Setenv(config.EnvBotToken, "octo_loop_task")
+			f := NewDefaultFactory()
+			tc.setup(t, f)
+			if _, err := f.Credential(); err == nil {
+				t.Fatalf("task mode should reject %s", tc.name)
+			}
+		})
+	}
+
+	t.Run("missing injected token fails closed", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvBotToken, "")
+		f := NewDefaultFactory()
+		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {
+			t.Fatalf("Credential error = %v, want ErrNoCredential", err)
+		}
+	})
 }
 
 func TestFactory_CredentialSpaceOverride(t *testing.T) {

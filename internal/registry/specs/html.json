@@ -27,10 +27,19 @@
                   "items": {
                     "type": "object",
                     "properties": {
-                      "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new canonical document, or the legacy slug for an old document." },
-                      "title": { "type": "string" },
-                      "latest": { "type": "integer" },
-                      "updated": { "type": "string" }
+                      "slug": {
+                        "type": "string",
+                        "description": "Document reference: canonical doc_id for a new canonical document, or the legacy slug for an old document."
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "latest": {
+                        "type": "integer"
+                      },
+                      "updated": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -46,8 +55,26 @@
         "x-octo-risk": "write",
         "x-octo-auto-idempotency-key": "idempotency_key",
         "x-octo-body-variants": [
-          { "name": "create", "required": ["html", "idempotency_key"], "forbidden": ["slug"] },
-          { "name": "republish", "required": ["html", "slug"], "forbidden": ["idempotency_key"] }
+          {
+            "name": "create",
+            "required": [
+              "html",
+              "idempotency_key"
+            ],
+            "forbidden": [
+              "slug"
+            ]
+          },
+          {
+            "name": "republish",
+            "required": [
+              "html",
+              "slug"
+            ],
+            "forbidden": [
+              "idempotency_key"
+            ]
+          }
         ],
         "requestBody": {
           "required": true,
@@ -55,26 +82,52 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["html"],
+                "required": [
+                  "html"
+                ],
                 "properties": {
-                  "slug": { "type": "string", "description": "Legacy wire name for an existing document reference. Omit when creating. For every later publish pass the prior response data.slug: it is the canonical doc_id for a new document or the legacy slug for an old document. Never pass a display name as identity." },
-                  "html": { "type": "string", "description": "the full self-contained HTML document body" },
-                  "idempotency_key": { "type": "string", "description": "Optional caller key for retrying this exact creation operation; otherwise the CLI generates a cryptographically random key once per invocation and reuses it for transport retries. Omit when republishing an existing slug." },
-                  "version": { "type": "integer", "description": "optional explicit version; omit to auto-increment" },
+                  "slug": {
+                    "type": "string",
+                    "description": "Legacy wire name for an existing document reference. Omit when creating. For every later publish pass the prior response data.slug: it is the canonical doc_id for a new document or the legacy slug for an old document. Never pass a display name as identity."
+                  },
+                  "html": {
+                    "type": "string",
+                    "description": "the full self-contained HTML document body"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "Optional caller key for retrying this exact creation operation; otherwise the CLI generates a cryptographically random key once per invocation and reuses it for transport retries. Omit when republishing an existing slug."
+                  },
+                  "version": {
+                    "type": "integer",
+                    "description": "optional explicit version; omit to auto-increment"
+                  },
                   "meta": {
                     "type": "object",
                     "description": "optional metadata (e.g. {\"title\":\"...\"})",
                     "properties": {
-                      "title": { "type": "string" }
+                      "title": {
+                        "type": "string"
+                      }
                     }
                   },
                   "mount_type": {
                     "type": "string",
-                    "enum": ["group", "space", "thread"],
+                    "enum": [
+                      "group",
+                      "space",
+                      "thread"
+                    ],
                     "description": "Optional placement in docs-backend and the file sidebar; 'group', 'space', and 'thread' are supported. Mounting does not determine document identity."
                   },
-                  "group_no": { "type": "string", "description": "group number; supply when mount_type=group" },
-                  "thread_id": { "type": "string", "description": "thread id; supply when mount_type=thread" }
+                  "group_no": {
+                    "type": "string",
+                    "description": "group number; supply when mount_type=group"
+                  },
+                  "thread_id": {
+                    "type": "string",
+                    "description": "thread id; supply when mount_type=thread"
+                  }
                 }
               }
             }
@@ -87,18 +140,46 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["doc_id", "slug"],
+                  "required": [
+                    "doc_id",
+                    "slug"
+                  ],
                   "properties": {
-                    "doc_id": { "type": "string", "description": "Canonical document identifier for every newly created document. Read it at data.doc_id; do not use its presence to infer a mode." },
-                    "slug": { "type": "string", "description": "Document reference for all later operations. Read data.slug and persist it; for every newly created document it is equal to doc_id, while an old legacy document retains its legacy slug." },
-                    "version": { "type": "integer" },
-                    "url": { "type": "string" },
-                    "share_url": { "type": "string", "description": "Share URL when supplied by the server." },
-                    "size": { "type": "integer" },
-                    "aids": { "type": "integer" },
-                    "merged_comments": { "type": "integer" },
-                    "registered": { "type": "boolean", "description": "Whether docs-backend registration is active; operational status only, not an identity-mode discriminator." },
-                    "status": { "type": "string", "description": "Server publish/registration status; operational status only, not a document-reference discriminator." }
+                    "doc_id": {
+                      "type": "string",
+                      "description": "Canonical document identifier for every newly created document. Read it at data.doc_id; do not use its presence to infer a mode."
+                    },
+                    "slug": {
+                      "type": "string",
+                      "description": "Document reference for all later operations. Read data.slug and persist it; for every newly created document it is equal to doc_id, while an old legacy document retains its legacy slug."
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "share_url": {
+                      "type": "string",
+                      "description": "Share URL when supplied by the server."
+                    },
+                    "size": {
+                      "type": "integer"
+                    },
+                    "aids": {
+                      "type": "integer"
+                    },
+                    "merged_comments": {
+                      "type": "integer"
+                    },
+                    "registered": {
+                      "type": "boolean",
+                      "description": "Whether docs-backend registration is active; operational status only, not an identity-mode discriminator."
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "Server publish/registration status; operational status only, not a document-reference discriminator."
+                    }
                   }
                 }
               }
@@ -115,7 +196,16 @@
         "x-octo-risk": "write",
         "x-octo-auto-idempotency-key": "idempotency_key",
         "x-octo-body-variants": [
-          { "name": "create", "required": ["html", "idempotency_key"], "forbidden": ["slug"] }
+          {
+            "name": "create",
+            "required": [
+              "html",
+              "idempotency_key"
+            ],
+            "forbidden": [
+              "slug"
+            ]
+          }
         ],
         "requestBody": {
           "required": true,
@@ -123,18 +213,44 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["html"],
+                "required": [
+                  "html"
+                ],
                 "properties": {
-                  "html": { "type": "string", "description": "Initial draft HTML body." },
-                  "idempotency_key": { "type": "string", "description": "Optional caller key for retrying the same creation operation; otherwise the CLI generates one per invocation." },
+                  "html": {
+                    "type": "string",
+                    "description": "Initial draft HTML body."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "Optional caller key for retrying the same creation operation; otherwise the CLI generates one per invocation."
+                  },
                   "meta": {
                     "type": "object",
                     "description": "Optional document metadata such as display title.",
-                    "properties": { "title": { "type": "string" } }
+                    "properties": {
+                      "title": {
+                        "type": "string"
+                      }
+                    }
                   },
-                  "mount_type": { "type": "string", "enum": ["group", "space", "thread"], "description": "Optional placement; does not identify the document." },
-                  "group_no": { "type": "string", "description": "Group number when mount_type=group." },
-                  "thread_id": { "type": "string", "description": "Thread id when mount_type=thread." }
+                  "mount_type": {
+                    "type": "string",
+                    "enum": [
+                      "group",
+                      "space",
+                      "thread"
+                    ],
+                    "description": "Optional placement; does not identify the document."
+                  },
+                  "group_no": {
+                    "type": "string",
+                    "description": "Group number when mount_type=group."
+                  },
+                  "thread_id": {
+                    "type": "string",
+                    "description": "Thread id when mount_type=thread."
+                  }
                 }
               }
             }
@@ -147,11 +263,21 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["doc_id", "slug"],
+                  "required": [
+                    "doc_id",
+                    "slug"
+                  ],
                   "properties": {
-                    "doc_id": { "type": "string" },
-                    "slug": { "type": "string", "description": "Canonical document reference; equal to doc_id." },
-                    "status": { "type": "string" }
+                    "doc_id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string",
+                      "description": "Canonical document reference; equal to doc_id."
+                    },
+                    "status": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -167,7 +293,15 @@
         "description": "Return a single document's metadata (slug, title, latest version, timestamps). Backend endpoint GET /docs-html/v1/docs/{doc_id} — added to octo-doc to back this command.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -177,11 +311,22 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                    "title": { "type": "string" },
-                    "latest": { "type": "integer" },
-                    "created": { "type": "string" },
-                    "updated": { "type": "string" }
+                    "slug": {
+                      "type": "string",
+                      "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "latest": {
+                      "type": "integer"
+                    },
+                    "created": {
+                      "type": "string"
+                    },
+                    "updated": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -195,10 +340,28 @@
         "description": "Soft-delete a document. Requires the write token / doc author credential.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Deleted" }
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -208,7 +371,15 @@
         "summary": "List a document's versions (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -220,8 +391,12 @@
                   "items": {
                     "type": "object",
                     "properties": {
-                      "n": { "type": "integer" },
-                      "created": { "type": "string" }
+                      "n": {
+                        "type": "integer"
+                      },
+                      "created": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -238,7 +413,15 @@
         "description": "Write the author-only draft slot for a document reference. Does not mint an immutable version until promoted.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -246,16 +429,31 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["html"],
+                "required": [
+                  "html"
+                ],
                 "properties": {
-                  "html": { "type": "string", "description": "the draft HTML body" }
+                  "html": {
+                    "type": "string",
+                    "description": "the draft HTML body"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Draft saved" }
+          "200": {
+            "description": "Draft saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -265,7 +463,15 @@
         "summary": "Promote the author draft to an immutable version (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -275,9 +481,16 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                    "version": { "type": "integer" },
-                    "url": { "type": "string" }
+                    "slug": {
+                      "type": "string",
+                      "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -292,7 +505,15 @@
         "summary": "Mint / rotate a per-doc read+comment share code (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -302,8 +523,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "code": { "type": "string" },
-                    "url": { "type": "string" }
+                    "code": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -316,10 +541,28 @@
         "summary": "Revoke the per-doc share code (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Revoked" }
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -330,7 +573,15 @@
         "description": "List the uids granted access to this document and their role. Author-only (only the doc creator can view grants).",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -342,8 +593,12 @@
                   "items": {
                     "type": "object",
                     "properties": {
-                      "uid": { "type": "string" },
-                      "role": { "type": "string" }
+                      "uid": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -358,7 +613,15 @@
         "description": "Grant a specific uid access to this document (upsert by uid). role defaults to 'reader' (read published versions + comment/react). Only the doc creator (author) can grant. The granted uid resolves to a reader capability on subsequent requests — no share code needed.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -366,17 +629,40 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["uid"],
+                "required": [
+                  "uid"
+                ],
                 "properties": {
-                  "uid": { "type": "string", "description": "the uid to grant access to" },
-                  "role": { "type": "string", "enum": ["reader"], "description": "capability to grant; defaults to 'reader' when omitted" }
+                  "uid": {
+                    "type": "string",
+                    "description": "the uid to grant access to"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer"
+                    ],
+                    "description": "capability to grant; defaults to 'reader' when omitted. Matches octo-docs-html AddGrant (internal/service/grants.go), whose own 400 text is \"role must be reader|commenter|writer\" — admin is refused there because admin identity comes from creator_uid, never the grants API"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Grant added" }
+          "200": {
+            "description": "Grant added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -387,11 +673,36 @@
         "description": "Revoke a uid's grant on this document. Author-only. The doc creator cannot be removed (they own the doc) — attempting to returns a conflict.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } },
-          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Grant revoked" }
+          "200": {
+            "description": "Grant revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -401,7 +712,15 @@
         "summary": "List a document's media assets (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -413,10 +732,18 @@
                   "items": {
                     "type": "object",
                     "properties": {
-                      "sha256": { "type": "string" },
-                      "name": { "type": "string" },
-                      "size": { "type": "integer" },
-                      "mime": { "type": "string" }
+                      "sha256": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      },
+                      "mime": {
+                        "type": "string"
+                      }
                     }
                   }
                 }
@@ -432,7 +759,15 @@
         "x-octo-risk": "write",
         "x-octo-multipart": true,
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -440,9 +775,14 @@
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": ["file"],
+                "required": [
+                  "file"
+                ],
                 "properties": {
-                  "file": { "type": "string", "format": "binary" }
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
                 }
               }
             }
@@ -456,8 +796,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "sha256": { "type": "string" },
-                    "url": { "type": "string" }
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -472,11 +816,36 @@
         "summary": "Delete a media asset (author-only)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "doc_id", "in": "path", "required": true, "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.", "schema": { "type": "string" } },
-          { "name": "sha256", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Deleted" }
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -488,11 +857,28 @@
         "x-octo-risk": "read",
         "x-octo-response-unwrap": null,
         "parameters": [
-          { "name": "slug", "in": "query", "required": true, "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility.", "schema": { "type": "string" } },
-          { "name": "version", "in": "query", "schema": { "type": "string" }, "description": "version to fold to, or 'all'" }
+          {
+            "name": "slug",
+            "in": "query",
+            "required": true,
+            "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "version to fold to, or 'all'"
+          }
         ],
         "responses": {
-          "200": { "description": "Comment list" }
+          "200": {
+            "description": "Comment list"
+          }
         }
       },
       "post": {
@@ -506,10 +892,19 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slug", "text"],
+                "required": [
+                  "slug",
+                  "text"
+                ],
                 "properties": {
-                  "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                  "text": { "type": "string", "description": "comment body" },
+                  "slug": {
+                    "type": "string",
+                    "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "comment body"
+                  },
                   "anchor": {
                     "type": "object",
                     "description": "optional anchor (text or element by aid); omit for an unanchored comment"
@@ -520,7 +915,17 @@
           }
         },
         "responses": {
-          "200": { "description": "Comment created" }
+          "200": {
+            "description": "Comment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -536,20 +941,54 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slug", "parent_id", "text"],
+                "required": [
+                  "slug",
+                  "parent_id",
+                  "text"
+                ],
                 "properties": {
-                  "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                  "parent_id": { "type": "string", "description": "the comment thread root id being replied to" },
-                  "text": { "type": "string", "description": "reply body" },
-                  "status": { "type": "string", "enum": ["applied", "partial", "question"], "description": "optional verdict rendered on the parent" },
-                  "applied_in": { "type": "integer", "description": "optional version the change was applied in" }
+                  "slug": {
+                    "type": "string",
+                    "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                  },
+                  "parent_id": {
+                    "type": "string",
+                    "description": "the comment thread root id being replied to"
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "reply body"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "applied",
+                      "partial",
+                      "question"
+                    ],
+                    "description": "optional verdict rendered on the parent"
+                  },
+                  "applied_in": {
+                    "type": "integer",
+                    "description": "optional version the change was applied in"
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "Reply posted" }
+          "200": {
+            "description": "Reply posted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -565,11 +1004,23 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slug", "aid"],
+                "required": [
+                  "slug",
+                  "aid"
+                ],
                 "properties": {
-                  "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                  "version": { "type": "integer", "description": "version to read; 0 or omitted = latest" },
-                  "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" }
+                  "slug": {
+                    "type": "string",
+                    "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                  },
+                  "version": {
+                    "type": "integer",
+                    "description": "version to read; 0 or omitted = latest"
+                  },
+                  "aid": {
+                    "type": "string",
+                    "description": "the artifact's stamped data-odoc-aid"
+                  }
                 }
               }
             }
@@ -583,9 +1034,15 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "aid": { "type": "string" },
-                    "tag": { "type": "string" },
-                    "html": { "type": "string" }
+                    "aid": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "html": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -606,12 +1063,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slug", "aid", "new_html"],
+                "required": [
+                  "slug",
+                  "aid",
+                  "new_html"
+                ],
                 "properties": {
-                  "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                  "base_version": { "type": "integer", "description": "version whose aid to locate; 0 or omitted = latest" },
-                  "aid": { "type": "string", "description": "the artifact's stamped data-odoc-aid" },
-                  "new_html": { "type": "string", "description": "replacement single top-level element" }
+                  "slug": {
+                    "type": "string",
+                    "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                  },
+                  "base_version": {
+                    "type": "integer",
+                    "description": "version whose aid to locate; 0 or omitted = latest"
+                  },
+                  "aid": {
+                    "type": "string",
+                    "description": "the artifact's stamped data-odoc-aid"
+                  },
+                  "new_html": {
+                    "type": "string",
+                    "description": "replacement single top-level element"
+                  }
                 }
               }
             }
@@ -625,9 +1098,16 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "slug": { "type": "string", "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility." },
-                    "version": { "type": "integer" },
-                    "url": { "type": "string" }
+                    "slug": {
+                      "type": "string",
+                      "description": "Document reference: canonical doc_id for a new document, or the retained legacy slug for an old document. The wire name remains slug for server compatibility."
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
                   }
                 }
               }

@@ -131,7 +131,8 @@
                         "doc",
                         "sheet",
                         "board",
-                        "html"
+                        "html",
+                        "html_ppt"
                       ]
                     },
                     "x-octo-flag": "doc-type",
@@ -696,7 +697,7 @@
                 "required": ["uid", "role"],
                 "properties": {
                   "uid": { "type": "string", "description": "target user uid" },
-                  "role": { "type": "string", "enum": ["reader", "writer", "admin"], "description": "role to grant" }
+                  "role": { "type": "string", "enum": ["reader", "commenter", "writer", "admin"], "description": "role to grant. Matches octo-docs-backend isMemberRole (src/permission/role.ts); commenter is a stored role ranked between reader and writer, so omitting it made the local enum gate reject a call the backend accepts" }
                 }
               }
             }
@@ -808,7 +809,7 @@
                 "required": ["uid", "role"],
                 "properties": {
                   "uid": { "type": "string", "description": "target user uid" },
-                  "role": { "type": "string", "enum": ["reader", "writer"], "description": "role to grant (grant-only, never downgrades)" }
+                  "role": { "type": "string", "enum": ["reader", "commenter", "writer"], "description": "role to grant (grant-only, never downgrades). Matches octo-docs-backend isForwardGrantRole (src/permission/role.ts) = the member roles minus admin" }
                 }
               }
             }

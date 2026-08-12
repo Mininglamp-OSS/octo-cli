@@ -42,16 +42,17 @@ Findings from reading dmworkim develop + todos (matters) main — constraints th
 
 ### 2.1 Service Discovery
 
-The Octo ecosystem is **not a single API**. It's a constellation of services behind dmworkim:
+The Octo ecosystem is a constellation of services exposed through one gateway:
 
-| Service | Base URL | Module | Current State |
-|---------|----------|--------|---------------|
-| **Matters** (todo/task) | `$MATTERS_URL/api/v1/matters` | `github.com/dmwork-org/matters` | 9.8K LOC, production |
-| **Bot API** (messaging) | `$DMWORKIM_URL/v1/bot/*` | `dmworkim/modules/bot_api` | Production |
-| **App Bot** (bot mgmt) | `$DMWORKIM_URL/v1/admin/app_bot` | `dmworkim/modules/app_bot` | Production |
+| Service | Gateway path | Module | Current State |
+|---------|--------------|--------|---------------|
+| **Matters** (todo/task) | `/api/v1/matters` | `github.com/dmwork-org/matters` | 9.8K LOC, production |
+| **Bot API** (messaging) | `/v1/bot/*` | `dmworkim/modules/bot_api` | Production |
+| **App Bot** (bot mgmt) | `/v1/admin/app_bot` | `dmworkim/modules/app_bot` | Production |
 | Future services | TBD | TBD | — |
 
-**Architectural implication**: Octo CLI is a **multi-backend CLI**. Each service domain may have a different base URL. The config/credential system must support per-service URL routing, not just one `OCTO_API_URL`.
+**Architectural implication**: Octo CLI uses one `OCTO_API_BASE_URL`.
+Each service domain owns a module-qualified path in its embedded OpenAPI spec.
 
 ### 2.2 Authentication Model
 
@@ -176,17 +177,18 @@ CLI doesn't need to know these details, but error messages about "forbidden" may
 - `cmdutil/` (Factory) is the hub — no leaf depends on it
 - **No circular dependencies. Ever.**
 
-### 3.2 Multi-Service URL Routing
+### 3.2 Unified Gateway Routing
 
 ```go
-// Config supports per-service base URLs
-type ServiceEndpoints struct {
-    Default  string            // fallback: OCTO_API_URL
-    Services map[string]string // override per domain: {"matters": "https://matters.example.com"}
+// Config exposes one gateway; OpenAPI paths carry module namespaces.
+type Config struct {
+    APIBaseURL string // OCTO_API_BASE_URL
 }
 ```
 
-Service commands resolve base URL: `spec.x-octo-base-url` → config override → default. This supports the reality that matters and dmworkim are separate deployments.
+Service commands resolve URLs as `OCTO_API_BASE_URL + operation path`.
+Module namespaces such as `/market/api`, `/docs-html`, and `/fleet/api` live
+in the embedded OpenAPI paths.
 
 ---
 
@@ -229,6 +231,7 @@ before invoking.
 | `NOT_FOUND` | 404 | `api_error` | "resource not found" |
 | `ASSIGNEE_NOT_FOUND` | 404 | `api_error` | "assignee not in space or invalid UID" |
 | `FORBIDDEN` | 403 | `permission` | "bot lacks permission; check space membership" |
+| `BOT_WORKSPACE_MEMBERSHIP_REQUIRED` | 403 | `permission` | "ask a Workspace owner or admin to add this Bot in Workspace Members" |
 | `SPACE_FORBIDDEN` | 403 | `permission` | "bot not a member of this space" |
 | `DUPLICATE_ASSIGNEE` | 409 | `validation` | "already assigned; check current assignees" |
 | `RATE_LIMITED` | 429 | `rate_limited` | "server-side rate limit; retry after cooldown" |
@@ -236,7 +239,7 @@ before invoking.
 | `INTERNAL_ERROR` | 500 | `api_error` | "internal server error; retry or report" |
 | `PAYLOAD_TOO_LARGE` | 413 | `validation` | "request body exceeds 1MB limit" |
 
-### 4.4 Pagination Envelope Flattening
+### 4.4 Public API Envelope Flattening
 
 Backend paginated responses use: `{"data": [...], "pagination": {"has_more": true, "next_cursor": "xxx"}}`
 
@@ -249,11 +252,18 @@ Naive wrapping produces `data.data` nesting. CLI flattens:
 // --page-all: all pages merged, no _pagination (engine exhausted all pages)
 {"ok": true, "data": [/* all items */]}
 
-// Non-paginated response: pass through as-is
+// Non-paginated Loop resource: unwrap the Public API data object
 {"ok": true, "data": { ... }}
+
+// Non-Loop resource: preserve the backend envelope inside CLI data
+{"ok": true, "data": {"data": { ... }}}
 ```
 
-Detection: backend response is object with `data` (array) + `pagination` (object) keys → flatten. Otherwise pass through. `_pagination` uses underscore prefix consistent with `_rate_limit` and `_notice`.
+Detection: paginated responses shaped as `data` (array) + `pagination`
+(object) are flattened for every service. A non-paginated `{"data": {...}}`
+resource envelope is flattened only for the Loop/Fleet Public API; other
+services retain their existing response shape. `_pagination` uses an underscore
+prefix consistent with `_rate_limit` and `_notice`.
 
 ### 4.5 Rate Limit Metadata
 
@@ -282,7 +292,7 @@ Current v0.x outputs raw server JSON. Break immediately — only internal Agent 
 | Extension | Purpose | Example |
 |-----------|---------|---------|
 | `x-octo-service` | CLI domain name | `"matters"` |
-| `x-octo-base-url` | Default service URL env var | `"OCTO_MATTERS_URL"` |
+| `x-octo-base-url` | Gateway URL env var | `"OCTO_API_BASE_URL"` |
 | `x-octo-risk` | Operation risk | `"read"` / `"write"` / `"high-risk-write"` |
 | `x-octo-pagination` | Cursor config | `{"cursorParam":"cursor","cursorField":"pagination.next_cursor"}` |
 | `x-octo-cli-name` | Override command name | `"close"` (for transition endpoint) |
@@ -333,11 +343,11 @@ Postel's Law: strict in sending, liberal in receiving.
 
 ## 6. API Client
 
-### 6.1 Multi-Service Client
+### 6.1 Unified Gateway Client
 
 ```go
 type APIClient struct {
-    Endpoints  ServiceEndpoints  // per-service URL routing
+    APIBaseURL string             // unified gateway
     HTTP       *http.Client
     Credential *credential.CredentialProvider
     Retry      RetryConfig
@@ -348,7 +358,8 @@ type APIClient struct {
 func (c *APIClient) DoAPI(ctx context.Context, service string, req Request) (json.RawMessage, error)
 ```
 
-Service name resolves base URL. X-Space-Id header injected automatically when x-octo-space-header is set.
+The operation path selects the module behind the gateway. X-Space-Id is
+injected automatically when x-octo-space-header is set.
 
 ### 6.2 Retry & Timeout
 
@@ -478,7 +489,7 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 | 1.5 | --dry-run, --verbose, --timeout, --no-retry | 1d |
 | 1.6 | --jq filter (gojq) | 0.5d |
 | 1.7 | stdin input (@- / @file) + --space flag | 0.5d |
-| 1.8 | Multi-service URL routing (ServiceEndpoints) | 0.5d |
+| 1.8 | Unified gateway and module-qualified path routing | 0.5d |
 | 1.9 | Tests on TestFactory | 0.5d |
 
 **Exit**: Existing commands work. Envelope output. Universal flags functional. Error mapping matches backend codes.
@@ -524,7 +535,7 @@ Test data: request bodies from spec required fields + types (automated). Mock re
 
 | # | Task | Effort |
 |---|------|--------|
-| 4a.1 | Config file format (per-profile: token + per-service URLs + space_id) | 1d |
+| 4a.1 | Config file format (per-profile: token + gateway URL + space_id) | 1d |
 | 4a.2 | `octo-cli config init` + `octo-cli config show` | 1d |
 | 4a.3 | Config file credential provider + --profile | 1d |
 

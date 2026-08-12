@@ -12,9 +12,11 @@
 |-------------|------|-------------|
 | `app_*` | App Bot | DM only, no group/thread write, no voice; **cannot search** (CLI rejects locally) |
 | `bf_*` | User Bot | Full access (DM + group + thread + voice); can search (as bot, or as a person via `--on-behalf-of`) |
-| `uk_*` | User API key | Real-person identity, used mainly for `message search`; routed to `/v1/user/*`. `bot_kind` shows `user_key` |
+| `uk_*` | User API key | Real-person identity, used for `message search` and all of `drive`; routed to `/v1/user/*`. `bot_kind` shows `user_key` |
 
-> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with one exception: an `app_*` token running `message search` is rejected locally (`validation`) before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+> The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with two exceptions: an `app_*` token running `message search`, and a credential whose kind a domain's spec does not list in `x-octo-allowed-token-kinds` (`TOKEN_KIND_NOT_ALLOWED`). Both are local `validation` errors (exit 2) raised before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
+
+> **Token source.** The token comes from a stored profile, else `OCTO_TOKEN`, else `OCTO_BOT_TOKEN`. `OCTO_TOKEN` is the preferred env slot and accepts any of the three kinds; `identity.source` in the success envelope names the variable actually used.
 
 ---
 
@@ -206,6 +208,296 @@ Notes:
 
 ---
 
+## Domain 8: drive (octo-drive, 45 commands)
+
+All three token kinds are accepted. The mount is chosen from the kind, so the
+command surface is identical either way: `uk_*` → `/v1/user/drive/*` (acts as the
+real person), `bf_*` / `app_*` → `/v1/bot/drive/*` (acts as the bot). Paths below
+are written with `{mount}` standing for whichever applies.
+
+A bot has no implicit access to a shared drive space — it must be added as a
+member exactly like a person, and gets `permission_denied` until it is. Drive
+never sends `X-Space-Id`; the tenant comes from the verified identity.
+
+`<file-id>` and `--parent-id` are backend **uint64** values. They are decimal
+strings on the CLI surface (validated in `[0, 2^64-1]`, sent as JSON integers,
+returned as decimal strings) so a value above 2^53 cannot be rounded by a
+JavaScript-style parser into a different file's id.
+
+| # | Command | Method | Path | Risk |
+|---|---------|--------|------|------|
+| 51 | `octo-cli drive space create` | POST | {mount}/spaces | write |
+| 52 | `octo-cli drive space list` | GET | {mount}/spaces | read |
+| 53 | `octo-cli drive space ensure-personal` | POST | {mount}/spaces/personal | write (idempotent) |
+| 54 | `octo-cli drive space get <space-id>` | GET | {mount}/spaces/:id | read |
+| 55 | `octo-cli drive space rename <space-id>` | PUT | {mount}/spaces/:id | write |
+| 56 | `octo-cli drive space delete <space-id>` | DELETE | {mount}/spaces/:id | high-risk-write |
+| 57 | `octo-cli drive member list <space-id>` | GET | {mount}/spaces/:id/members | read |
+| 58 | `octo-cli drive member add <space-id>` | POST | {mount}/spaces/:id/members | write |
+| 59 | `octo-cli drive member set-role <space-id> <uid>` | PUT | {mount}/spaces/:id/members/:uid | write |
+| 60 | `octo-cli drive member remove <space-id> <uid>` | DELETE | {mount}/spaces/:id/members/:uid | high-risk-write |
+| 61 | `octo-cli drive browse` | GET | {mount}/browse | read |
+| 62 | `octo-cli drive folder create` | POST | {mount}/folders | write |
+| 63 | `octo-cli drive folder list <space-id> <parent-id>` | GET | {mount}/folders/:space_id/:parent_id | read |
+| 64 | `octo-cli drive folder rename <folder-id>` | PATCH | {mount}/folders/:id/rename | write |
+| 65 | `octo-cli drive folder move <folder-id>` | PATCH | {mount}/folders/:id/move | write |
+| 66 | `octo-cli drive folder delete <folder-id>` | DELETE | {mount}/folders/:id | high-risk-write |
+| 67 | `octo-cli drive file get <file-id>` | GET | {mount}/files/:id | read |
+| 68 | `octo-cli drive file move <file-id>` | POST | {mount}/files/:id/move | write |
+| 69 | `octo-cli drive file copy <file-id>` | POST | {mount}/files/:id/copy | write |
+| 70 | `octo-cli drive file rename <file-id>` | POST | {mount}/files/:id/rename | write |
+| 71 | `octo-cli drive blob create` | POST | {mount}/blobs | write |
+| 72 | `octo-cli drive blob get <blob-id>` | GET | {mount}/blobs/:id | read |
+| 73 | `octo-cli drive blob list` | GET | {mount}/blobs | read |
+| 74 | `octo-cli drive blob delete <blob-id>` | DELETE | {mount}/blobs/:id | high-risk-write |
+| 75 | `octo-cli drive upload prepare` | POST | {mount}/files/prepare-upload | write |
+| 76 | `octo-cli drive upload confirm <file-id>` | POST | {mount}/files/:id/confirm-upload | write |
+| 77 | `octo-cli drive upload cancel <file-id>` | POST | {mount}/files/:id/cancel-upload | write (idempotent) |
+| 78 | `octo-cli drive upload file <local-path>` | — | composite: prepare → PUT → confirm | write |
+| 79 | `octo-cli drive download url <file-id>` | GET | {mount}/files/:id/download | read |
+| 80 | `octo-cli drive download file <file-id>` | — | composite: download-url → object GET | read + local write |
+| 81 | `octo-cli drive doc mount` | POST | {mount}/docs | write |
+| 82 | `octo-cli drive doc unmount <file-id>` | DELETE | {mount}/docs/:id | high-risk-write |
+| 83 | `octo-cli drive doc list` | GET | {mount}/docs | read |
+| 84 | `octo-cli drive doc candidates` | GET | {mount}/mountable-docs | read |
+| 85 | `octo-cli drive share create <file-id>` | — | composite: file get → blob token or doc link | write |
+| 86 | `octo-cli drive share blob-create <file-id>` | POST | {mount}/shares | write |
+| 87 | `octo-cli drive share list` | GET | {mount}/shares | read |
+| 88 | `octo-cli drive share revoke <share-id>` | DELETE | {mount}/shares/:id | high-risk-write |
+| 89 | `octo-cli drive share access <share-url>` | POST | {mount}/shares/:token/access | read |
+| 90 | `octo-cli drive share download <share-url>` | POST | {mount}/shares/:token/download | read + local write |
+| 91 | `octo-cli drive invite create <space-id>` | POST | {mount}/spaces/:id/invites | write |
+| 92 | `octo-cli drive invite list <space-id>` | GET | {mount}/spaces/:id/invites | read |
+| 93 | `octo-cli drive invite revoke <space-id> <invite-id>` | DELETE | {mount}/spaces/:id/invites/:invite_id | high-risk-write |
+| 94 | `octo-cli drive invite accept <invite-token>` | POST | {mount}/invites/:token/accept | write (idempotent) |
+| 95 | `octo-cli drive im-transfer create` | POST | {mount}/blobs/transfer-from-im | write (idempotent) |
+
+Flags:
+- space create / rename: --name
+- space list: --page-index, --page-size
+- member add: --uid, --role; member set-role: --role
+  (role ∈ preview_only | downloader | uploader_downloader | editor | admin | custom; `super_admin` is server-rejected — it is bound to the space creator at space creation. `custom` is accepted here but rejected by `invite create`; see the role matrix below)
+- browse: --space-id (required), --parent-id, --type (all|doc|blob|folder), --source (all|user-upload|im-transfer|user-mount|docs-sync), --page-index, --page-size
+- folder create: --space-id, --parent-id, --name; folder rename: --name; folder move: --parent-id
+- file move: --parent-id; file copy: --parent-id, --name; file rename: --name
+- blob create: --space-id, --parent-id, --name, --object-path, --size, --content-type, --source (user-mount is Type-1 only). The backend **verifies the object**: an `--object-path` storage does not hold is `invalid_argument`, and a `--size` that conflicts with the stored object is rejected (including `--size 0` for a non-empty object — 0 is a stated count, not an omission). An inconclusive probe (storage unreachable/timeout) surfaces as a 500, not `invalid_argument`. A row created this way carries no persisted download URL, so `share download` on it is `not_found` — use `upload file` for a shareable blob.
+- blob list: --space-id (required), --parent-id
+- upload prepare: --space-id, --parent-id, --name, --size, --content-type; upload confirm: --actual-size
+- upload file: --space-id (required), --parent-id, --name, --content-type
+- download file: --output/-o (required), --overwrite
+- doc mount: --space-id, --parent-id, --doc-id, --source (user-mount|docs-sync; no --doc-title: the title and doc_space_id are read server-side from the document metadata)
+- doc list: --space-id (required), --parent-id; doc candidates: --space-id (required), --page, --page-size
+- share create / blob-create: --permission (view|download), --expires-in-seconds, --password / --password-file (mutually exclusive)
+- share access: --password / --password-file; share download: --output/-o (required), --password / --password-file, --overwrite
+- invite create: --role (required, role ∈ preview_only | downloader | uploader_downloader | editor | admin — `custom` and `super_admin` are rejected), --expires-in-seconds
+- im-transfer create: --im-group-no (required), --im-channel-type (required, 1=DM|2=group|5=thread; picks the message-read route — 1 is the DM route, 2 and 5 share the group route — and is stored as the first segment of the row's source_key, which the already-transferred batch lookup matches on. Transfer idempotency is (target space, type=blob, object path), so a wrong value cannot duplicate a file), --im-msg-id (required), --target-space-id (required), --target-parent-id, --name-override
+
+Role grantability matrix (the enum is one shared schema; the accepted subset is not):
+
+| role | member add / set-role | invite create | notes |
+|---|---|---|---|
+| `preview_only` | ✅ | ✅ | rank 20 |
+| `downloader` | ✅ | ✅ | rank 30 |
+| `uploader_downloader` | ✅ | ✅ | rank 40 |
+| `editor` | ✅ | ✅ | rank 60 |
+| `admin` | ✅ super_admin only | ✅ super_admin only | rank 80; an admin cannot grant admin |
+| `custom` | ✅ | ❌ | rank 10 — lowest; carries no invite-link semantics |
+| `super_admin` | ❌ | ❌ | rank 100; bound to the creator at space creation |
+
+Notes:
+- **Share hand-over is the `share_url`, nothing else.** `share create` returns
+  `/drive/s/<token>` for a blob or `/d/<docId>?sp=<docSpaceId>` for a mounted
+  document; the receiver passes that link straight to `share access` /
+  `share download`. The token is never a caller-facing parameter.
+- `share access` / `share download` parse the link and refuse anything that is
+  not one of those two shapes on the configured Octo origin — same scheme, same
+  host and port, no userinfo, no percent-encoding in the id segment. The CLI never
+  fetches the link's host — it calls the configured API with the parsed token.
+  Both sides need a credential; there is no anonymous share.
+- `doc_space_id` (the document's own Octo Space) and `space_id` (the drive space)
+  are different scopes. When a mount predates drive capturing `doc_space_id`,
+  `share create` fails with `MISSING_DOC_SPACE_ID` rather than substituting.
+- Both halves of a transfer take the status code as the only evidence available, and neither
+  accepts the whole 2xx family. A download requires exactly `200`: a `206` is the host deciding
+  to send part of the object unasked, and a `204` is no object at all. An upload requires `200`
+  or `201`; the remaining 2xx codes fail as `UPLOAD_NOT_CONFIRMED`, distinct from the
+  `UPLOAD_FAILED` a refusal produces, because a `202 Accepted` from an async storage front end
+  is not evidence the bytes landed — and there is no post-PUT verification anywhere in the path
+  (no ETag comparison, no size echo, no HEAD) that could stand in for it. Confirming an
+  unstored object produces a drive row pointing at nothing, with `ok:true` over it.
+- `share create` refuses `--password`, `--password-file` and `--expires-in-seconds` on a
+  document node rather than dropping them. The share body is built before the node lookup, and
+  the document branch issues no request, so those flags previously vanished and the command
+  returned a `share_url` that looked password-gated and was not. A document link is an entrance
+  into the docs permission system, not a grant this command parameterises. The refusal keys on
+  whether the flag was *set*, since `--expires-in-seconds 0` is a deliberate statement.
+- The presigned PUT/GET runs on a separate HTTP client with **no** Octo
+  credential and no space header. A GET follows redirects (storage gateways use
+  them) but every hop is re-validated against the same https-or-loopback-http
+  rule as the first. **No connection may land on the local machine** — the initial
+  one or any hop, in any spelling a resolver would accept, under any scheme — unless
+  the configured Octo origin is itself loopback. The decision is made on the resolved
+  address rather than on how the host is written, and the connection then goes to the
+  address that was checked, so a second lookup cannot answer differently in between.
+  Other internal ranges stay reachable; only the caller's own machine does not. The
+  consequence to know is that a deployment with a remote Octo origin whose object
+  storage resolves to the caller's own machine will not transfer — pointing
+  `OCTO_API_BASE_URL` at loopback is what re-enables the whole local setup.
+
+  A configured HTTP(S) proxy is honoured: transfers still traverse it, because a
+  network that can only reach object storage through a proxy is a normal deployment
+  and refusing to proxy would make the CLI unusable there. The target is classified
+  before the request is handed over, in the transport's proxy selector rather than in
+  its dialer — the dialer is only ever told the proxy's address on that path, so a
+  dialer-only check would be judging the wrong machine. The proxy is the operator's
+  own component, so a proxy on the local machine is not refused. The two conditions
+  report differently on purpose: a presigned URL pointing at this machine is
+  `UNSAFE_PRESIGNED_URL` and asks for the storage endpoint to be reported, while a
+  connection that arrives here without the URL naming it is
+  `TRANSFER_REDIRECTED_LOCALLY` and points at the local proxy configuration. A
+  malformed proxy value is `INVALID_PROXY`, which names the variables to check but
+  never repeats the value, because a proxy URL commonly carries credentials.
+
+  **Named limitation — the proxy path keeps a rebinding window the direct path
+  closes.** On the direct path the CLI resolves the host, classifies the answers, and
+  dials one of the addresses it checked, so the address judged and the address
+  connected to are the same one. Through a proxy it cannot be: the proxy performs its
+  own resolution and its own connection, so between the CLI's classification and the
+  proxy's lookup the answer may differ, and a name that classified as remote may be
+  connected to somewhere else. Nothing in the CLI can close that — it never sees the
+  address. What stands in for it is that the proxy is operator-chosen, that the string
+  pre-filter rejects every literal local spelling before any of this, and that the
+  connection terminates at the proxy rather than at a service on the caller's machine.
+  A second case falls under the same limitation: where the proxy is the only resolver
+  (tightened egress with no external DNS, or a split-horizon name), the CLI cannot
+  resolve the target at all, so it is not classified. That is reported under
+  `--verbose` rather than passed over, and it does not fail the transfer — insisting on
+  a local lookup there would break a deployment shape the proxy exists to serve.
+
+  `cmd/drive.go`'s `transferGuard` docstring carries the full path table (who resolves,
+  who classifies, what is dialled, and what a resolution failure means, per
+  configuration); it is the reference for changing any of this. A **PUT does not
+  follow redirects at all**: Go rewrites a PUT into a bodiless GET on 301/302/303,
+  so a storage host answering 2xx after such a hop would report a successful upload
+  with nothing written, and the caller would then confirm a drive row pointing at an
+  object that does not exist. Refusing is also simply correct — a presigned
+  signature is bound to its own URL and cannot be honoured at a different one. The
+  `Referer` header Go would fill in from the previous hop's full URL is dropped, since
+  a presigned URL carries its signature in the query string and forwarding it would
+  hand object read (GET) or write (PUT) access to a host that has no use for it. A
+  failed `upload file` cancels the pending row and reports `file_id` + the cancel
+  outcome in the error detail. A transport failure names the storage host and the
+  cause but never the URL, and neither does a URL-parse failure.
+- `upload file` opens the local file once and keeps the descriptor: the size it
+  stats is what the backend signs, so re-opening by path after the prepare
+  round-trip would let a replacement at that path be uploaded under the previous
+  file's signed `Content-Length`.
+- `download file` / `share download` write a randomly-named `<base>.<rand>.part`
+  created `O_EXCL` in the destination directory, fsync, then publish; an existing
+  destination is refused unless `--overwrite` is passed. The name is random
+  rather than `<output>.part` so a pre-created symlink at a predictable path
+  cannot redirect the write, and two concurrent downloads to one destination
+  cannot interleave. Publication is a hard link when `--overwrite` is absent,
+  which fails with `EEXIST` atomically and in the same directory, so
+  `--overwrite=false` is a guarantee rather than a narrowed check-then-rename
+  window — except on a filesystem without hard links or across a device boundary,
+  where it falls back to `os.Rename`, which replaces unconditionally; with
+  `--overwrite` it is a rename by design, because unconditional replacement is what
+  the caller asked for. After publishing, the destination is compared with the
+  descriptor's own identity, so a swap winning the one remaining syscall window is
+  reported as an error rather than as a success whose `sha256` describes different
+  bytes. The mode is set explicitly — an existing target keeps
+  its own, a fresh one gets `0600` — so a download neither leaves the mode to the
+  temp file's default nor silently tightens a destination the caller had widened.
+- Share passwords, share tokens, `share_id` and invite tokens are marked
+  `x-octo-secret`: they go on the wire unchanged but are masked in `--verbose` and
+  `--dry-run` output, and in **every** error the transport returns — redaction is
+  applied once, on the way out of `client.Do`, rather than at individual sites,
+  because three review rounds each found another site that formatted a
+  secret-bearing string into an error raised outside the transport window (URL
+  construction, service routing, response read). Two error paths sit outside the
+  client and cannot redact, because they run before the spec's secret list is
+  resolved — a flag-parse failure and the both-forms-supplied check — so those
+  report which mistake was made without echoing the value, as the sibling
+  empty-value and dot-segment guards already did. The masked value is never the
+  backend's machine-readable `code`: that is a closed vocabulary the caller
+  branches on, so masking it destroyed the CLI's own error contract while
+  protecting nothing. The two paths of the error envelope are
+  the transport error (whose `*url.Error` embeds the request URL) and the backend
+  error body (which may echo the value it was given, and for these operations the
+  id *is* the secret). `share_id` is on that list because the backend returns one
+  opaque id that is both the management handle and the access token, so `share
+  revoke`'s path parameter is the bearer token; `invite_id` is deliberately **not**,
+  because an Invite has genuinely distinct id and token fields and masking the id
+  would hide a value callers need to read. Masking is structural on both sides: the
+  value is walked and matching leaves replaced, on the request side before
+  marshalling and on the response side after parsing, so a password containing `"`,
+  `\` or a newline is masked whatever spelling the producer chose, and the response
+  stays parseable so
+  the backend's machine-readable `code` survives redaction. Object keys **are** masked, on
+  the same rule as values and including wholesale suppression: a backend that keys a per-id
+  result map by a caller-supplied value, or a caller who merges such a key through `--data`,
+  used to put it straight into the printed envelope. The names this CLI itself reads out of a
+  body (`code`, `error`, `message`, `detail`, …) are the one exemption, because masking them
+  destroys what a caller branches on while hiding a name the API fixes anyway. (An earlier
+  revision of this document said keys are never rewritten; that stopped being true when key
+  masking was added and is corrected here.)
+  A secret shorter than eight characters is *masked* only where it appears
+  as a whole token, because substring-masking a one-character value rewrites
+  unrelated text without protecting anything — but that threshold governs masking only, never
+  disclosure. Wherever the two questions meet, the value is checked for literal presence
+  afterwards and the whole field is suppressed if it survived, because a boundary rule that
+  is right for prose is not a reason to publish a password. That applies to string leaves,
+  object keys, and non-JSON bodies alike.
+  A declared secret is masked whatever JSON kind it arrives as: non-string scalars are judged
+  on their own JSON spelling, so an unrelated numeric id is untouched while a secret echoed
+  as a number is suppressed. On the request side `octo-cli api` **refuses** a non-string value
+  at an `x-octo-secret` property instead — a type error cannot disclose anything, and widening
+  the masker over every number in a request body would mask ordinary ids out of every
+  diagnostic. No embedded spec declares a secret in query or header position, or on a
+  non-string schema; `api` collects neither, and a registry census test fails if one appears.
+  Only a *complete, valid* JSON body takes the structural path — decoding one value without
+  requiring EOF meant a body merely starting with a JSON token (`404 page not found`) was
+  truncated to it and the backend's real answer discarded.
+  A body shape the walk does not
+  recognise is rendered and text-masked rather than passed through. A password may
+  also be supplied off argv with `--password-file <path>` (or `-` for stdin),
+  mirroring `auth login --token-file`.
+- Presigned transfers refuse content encodings. Left to Go's default the transport advertises
+  `Accept-Encoding: gzip`, decompresses transparently and reports `Content-Length` as unknown,
+  which switches off the download completeness check — at the discretion of the same untrusted
+  host it defends against — and makes the write unbounded: a 1 KB reply expanded to 1 MB on
+  the caller's `-o` path and was reported complete. It also meant the reported `size` and
+  `sha256` described the expansion rather than the stored object, and that a blob another
+  client stored compressed came back decompressed, so `download file` did not round-trip
+  `upload file`.
+- A zero-byte download is refused, and that is a CLI limitation rather than a claim about
+  storage. `blob create` documents `size: 0` as "a stated value, not an omission", so a
+  0-byte blob registered by another client is a legitimate row — but `DownloadURL` carries no
+  declared size or checksum, so an empty object and a transfer that delivered nothing are
+  indistinguishable, and publishing an empty file with the sha256 of nothing is the failure
+  the guard exists to prevent. Admitting 0 bytes needs a backend-declared length to check
+  against.
+- Both sides of a share link agree by construction: an id the CLI puts into a
+  `share_url` (a blob share token or a mounted document's `doc_id`) is held to the
+  same charset `share access` enforces on the way in, so the command cannot emit a
+  link its own parser would refuse.
+- **base64url ids may start with `-`**, which cobra parses as a flag before the
+  command runs. The three affected path params (`share_id`, `invite_id`,
+  `invite_token`) declare `x-octo-flag`, so each also accepts a flag form —
+  `drive share revoke --share-id <id>`, `drive invite revoke <space> --invite-id
+  <id>`, `drive invite accept --invite-token <tok>`. The `--` separator still
+  works. Positional parsing is unchanged for every other operation: only a path
+  param that declares `x-octo-flag` relaxes its command's arity, and the flag is
+  optional. Supplying both forms for the same slot is a validation error rather
+  than a silent winner.
+- `browse` returns the full listing; its `page` object is an envelope, not a
+  database page, so `--page-all` is deliberately not offered yet.
+- There are no `drive org` commands: the product's member picker is a frontend
+  filter over the space roster, not a backend search.
+
+---
+
 ## Summary
 
 | Domain | Commands | App Bot (Y) | App Bot (N) | User Bot (Y) | User Bot (N) |
@@ -217,8 +509,17 @@ Notes:
 | file | 4 | 4 | 0 | 4 | 0 |
 | bot | 6 | 6 | 0 | 6 | 0 |
 | event | 2 | 2 | 0 | 2 | 0 |
-| **Total** | **56** | **38** | **18** | **56** | **0** |
+| drive | 45 | 45 (needs a resolvable space) | 0 | 45 | 0 |
+| **Total** | **101** | **83** | **18** | **101** | **0** |
 
-- **App Bot**: 38/56 commands available (68%)
-- **User Bot**: 56/56 commands available (100%)
+- **App Bot**: 83/101 commands available (82%)
+- **User Bot**: 101/101 commands available (100%)
 - **App Bot blocked**: group write (4) + thread all (8) + message search (6) = 18 commands
+- **drive** additionally accepts a `uk_*` user API key, which acts as the real
+  person rather than a bot. An `app_*` token reaches drive only if the server can
+  resolve a space for it; otherwise the mount returns 401 (exit 3) and a `bf_*`
+  or `uk_*` credential is required.
+
+> This reference predates the `docs`, `html`, `marketplace` and `summary`
+> domains and does not cover them. `octo-cli schema --list` is the authoritative,
+> always-current inventory.

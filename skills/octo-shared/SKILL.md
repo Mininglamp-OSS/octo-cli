@@ -1,7 +1,7 @@
 ---
 name: octo-shared
 version: 0.5.0
-description: Shared knowledge for using the octo CLI — authentication, multi-service config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
+description: Shared knowledge for using the octo CLI — authentication, unified gateway config, output envelopes, universal flags, error handling, and common patterns. Load before invoking any octo domain skill.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -58,14 +58,20 @@ Token prefix determines capability — the CLI does NOT enforce this locally (th
 
 `uk_*` carries a real person's identity and is meaningful mainly for `message search` (routed to `/v1/user/*`); for other domains use a bot token. `bf_*` can also search on behalf of a person with `--on-behalf-of <uid>`. `identity.bot_kind` reflects the kind: `app_bot`, `user_bot`, or `user_key`.
 
-Before acting, inspect `octo-cli auth status` (or `octo-cli config show`) to confirm the active identity. Every success envelope also echoes it under `identity` (see §3).
+Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
+`octo-cli config show`) to confirm the active identity. Daemon task mode does
+not expose profile diagnostics; use the `identity` echoed by each success
+envelope and report authentication failures to the daemon instead (see §3).
 
-## 2. Multi-service configuration
+## 2. Unified gateway configuration
 
-Different Octo services run at different URLs. Set whichever you need:
+All Octo domains use one gateway. Override it only for test or self-hosted
+deployments:
 
 ```bash
-export OCTO_API_BASE_URL=https://api.example.com   # unified API base URL for all services
+# Production defaults to https://im.deepminer.com.cn. Override for test or
+# self-hosted deployments:
+export OCTO_API_BASE_URL=https://im-test.deepminer.com.cn
 
 export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bots
 export OCTO_FORMAT=json                            # default output format
@@ -174,7 +180,7 @@ octo-cli group list --jq '.data[].id' | xargs -I{} octo-cli group get {}
 ### Paginating
 
 ```bash
-octo-cli group list --page-all --page-limit 20
+octo-cli docs search --keyword "spec" --page-all --page-limit 20
 ```
 
 `--page-all` applies to any list operation that reports a cursor in `_pagination`. The merged output drops `_pagination` — you get a flat `data` array.

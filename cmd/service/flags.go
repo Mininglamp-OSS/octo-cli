@@ -3,31 +3,36 @@ package service
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // operationRuntime holds everything the RunE closure needs to build the
 // outbound request from the user's flag values.
 type operationRuntime struct {
-	detail      *registry.OperationDetail
-	pathParams  []string               // path param names in order
-	queryFlags  map[string]*queryFlag  // flag name → query param binding
-	headerFlags map[string]*headerFlag // flag name → header param binding
-	bodyFlags   map[string]*bodyFlag   // flag name → body field binding
-	bodyData    *string                // --data (nil when command has no body)
-	pageAll     *bool                  // --page-all (nil when no pagination)
-	pageLimit   *int                   // --page-limit
-	filePath    *string                // --file (multipart operations only)
-	outputPath  *string                // --output/-o (binary-response operations only)
+	detail        *registry.OperationDetail
+	pathParams    []string               // path param names in order
+	pathFlags     []*pathFlag            // optional flag alternatives to positional args
+	pathFlagNames map[string]bool        // flag names claimed by pathFlags
+	queryFlags    map[string]*queryFlag  // flag name → query param binding
+	headerFlags   map[string]*headerFlag // flag name → header param binding
+	bodyFlags     map[string]*bodyFlag   // flag name → body field binding
+	bodyData      *string                // --data (nil when command has no body)
+	pageAll       *bool                  // --page-all (nil when no pagination)
+	pageLimit     *int                   // --page-limit
+	filePath      *string                // --file (multipart operations only)
+	outputPath    *string                // --output/-o (binary-response operations only)
 }
 
 type queryFlag struct {
 	apiName string // URL query parameter name
 	kind    valueKind
+	secret  bool // x-octo-secret: mask the value in verbose / dry-run output
 	strVal  *string
 	intVal  *int
 	boolVal *bool
@@ -40,12 +45,29 @@ type queryFlag struct {
 // flag, so an omitted optional header stays absent.
 type headerFlag struct {
 	apiName string // HTTP header name (e.g. "If-Match")
+	secret  bool   // x-octo-secret: mask the value in verbose / dry-run output
 	strVal  *string
+}
+
+// pathFlag is the optional flag alternative to a positional path argument,
+// declared by x-octo-flag on a `"in": "path"` parameter.
+//
+// It exists because cobra cannot accept a positional value that starts with
+// "-": it is parsed as a flag before the command ever runs. base64url ids
+// legitimately start with "-" (roughly one id in 64), so `share revoke -Ab3…`
+// fails with "unknown shorthand flag" and the caller has to know to write
+// `share revoke -- -Ab3…`. A flag form sidesteps the ambiguity entirely without
+// changing how any positional argument is parsed.
+type pathFlag struct {
+	paramName string // path placeholder name (e.g. "share_id")
+	flagName  string // CLI flag name (e.g. "share-id")
+	strVal    *string
 }
 
 type bodyFlag struct {
 	apiName string // JSON body field name
 	kind    valueKind
+	secret  bool // x-octo-secret: mask the value in verbose / dry-run output
 	strVal  *string
 	intVal  *int
 	boolVal *bool
@@ -59,7 +81,19 @@ const (
 	kindInt
 	kindBool
 	kindStringSlice
+	// kindUint64 is a decimal-string flag backing a backend uint64 id. It is
+	// NOT kindInt: Go's int tops out an order of magnitude below math.MaxUint64,
+	// so an int-typed flag silently cannot express the upper half of the id
+	// space. The flag value is validated as a decimal in [0, 2^64-1] and sent as
+	// a JSON integer (query params as the same decimal text), so the wire
+	// contract is unchanged while the CLI surface stays lossless.
+	kindUint64
 )
+
+// uint64Format is the OpenAPI `format` that marks an integer schema as a
+// backend uint64 id. Declaring it opts the field into decimal-string handling
+// on input and, together with x-octo-lossless-id-fields, on output.
+const uint64Format = "uint64"
 
 func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
 	for i := range d.Parameters {
@@ -68,7 +102,10 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 			continue
 		}
 		flagName := paramFlagName(p)
-		qf := &queryFlag{apiName: p.Name, kind: queryParamKind(p)}
+		if rt.pathFlagNames[flagName] || reservedFlagNames[flagName] {
+			continue
+		}
+		qf := &queryFlag{apiName: p.Name, kind: queryParamKind(p), secret: p.Secret}
 		desc := p.Description
 		if len(p.Enum) > 0 {
 			desc = fmt.Sprintf("%s (one of: %s)", desc, formatEnum(p.Enum))
@@ -91,6 +128,9 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 		case kindStringSlice:
 			qf.strSlc = new([]string)
 			cmd.Flags().StringSliceVar(qf.strSlc, flagName, nil, desc)
+		case kindUint64:
+			qf.strVal = new(string)
+			cmd.Flags().StringVar(qf.strVal, flagName, uint64Default(p.Default), uint64Desc(desc))
 		default:
 			qf.strVal = new(string)
 			dv := ""
@@ -132,13 +172,120 @@ func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.O
 			continue
 		}
 		flagName := paramFlagName(p)
-		hf := &headerFlag{apiName: p.Name, strVal: new(string)}
+		if rt.pathFlagNames[flagName] || reservedFlagNames[flagName] {
+			continue
+		}
+		hf := &headerFlag{apiName: p.Name, secret: p.Secret, strVal: new(string)}
 		cmd.Flags().StringVar(hf.strVal, flagName, "", p.Description)
 		rt.headerFlags[flagName] = hf
 		if p.Required {
 			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
 		}
 	}
+}
+
+// reservedFlagNames are the flag names a spec-declared flag must not claim,
+// because the CLI already registers them: the engine's own per-leaf flags, and
+// the global flags root registers as persistent flags.
+//
+// The two halves fail differently. An engine flag is registered on the leaf
+// itself, so a colliding spec flag would panic pflag ("flag redefined") at
+// startup, which takes down the whole binary — every leaf is built in
+// RegisterServiceCommands, so even `octo-cli version` would die. A global is
+// inherited, and cobra merges inherited flags with AddFlagSet, which skips a
+// name the leaf already has: there is no panic, the leaf's local flag wins, and
+// the global becomes unreachable for that one command. A spec param named
+// `format` would therefore silently disable `--format` on its leaf alone.
+//
+// All four registration paths (path / query / header / body) refuse a colliding
+// name instead. Refusing means the spec's flag is silently absent, which is a
+// spec bug the engine cannot report at load time (registration has no error
+// channel). It is still strictly better than either failure above, and
+// TestFlags_NoSpecCollidesWithEngineFlags turns the whole class into a test
+// failure at development time rather than a silent loss in production.
+var reservedFlagNames = buildReservedFlagNames()
+
+// engineFlagNames are the flags the engine registers on an operation leaf.
+var engineFlagNames = []string{
+	"data", "file",
+	"page-all", "page-limit",
+	"output", "o",
+}
+
+// rootPersistentFlagNames are the global flags root registers as persistent
+// flags. Only long names are listed: `--jq`'s `-q` shorthand lives in pflag's
+// separate shorthand namespace, so a spec param legitimately named `q`
+// (matter.list, skill.list) does not shadow it and must stay registrable.
+//
+// The list is spelled out here rather than read from the root command because
+// package cmd imports this package, not the other way round.
+// TestRoot_ReservedGlobalFlagNamesMatchPersistentFlags (package cmd) fails if
+// root's persistent flag set and this list ever drift apart.
+var rootPersistentFlagNames = []string{
+	"format", "jq",
+	"dry-run", "verbose",
+	"timeout", "no-retry",
+	"space", "bot-id", "profile",
+}
+
+func buildReservedFlagNames() map[string]bool {
+	reserved := make(map[string]bool, len(engineFlagNames)+len(rootPersistentFlagNames))
+	for _, name := range engineFlagNames {
+		reserved[name] = true
+	}
+	for _, name := range rootPersistentFlagNames {
+		reserved[name] = true
+	}
+	return reserved
+}
+
+// ReservedGlobalFlagNames returns the global flag names the engine refuses to
+// let a spec-declared flag shadow. Exported so the root command's own test can
+// assert the list still matches the flags root actually registers.
+func ReservedGlobalFlagNames() []string {
+	return append([]string(nil), rootPersistentFlagNames...)
+}
+
+// registerPathFlags binds every path parameter that declares x-octo-flag to an
+// optional string flag alternative to its positional slot. Registered before
+// query / header / body flags so a path flag always wins a name collision — a
+// positional value has no other way in, while every other kind does.
+//
+// Operations whose path params declare no x-octo-flag get no flags and keep
+// cobra.ExactArgs, so positional parsing is untouched everywhere else.
+//
+// A name already taken by the engine's own flags, or by an earlier path param in
+// the same operation, is skipped: that param keeps working positionally, which
+// is strictly better than panicking the whole tree on a spec typo.
+func registerPathFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) {
+	for _, name := range rt.pathParams {
+		p := findParam(d, name, "path")
+		if p == nil || p.FlagName == "" {
+			continue
+		}
+		if reservedFlagNames[p.FlagName] || rt.pathFlagNames[p.FlagName] {
+			continue
+		}
+		pf := &pathFlag{paramName: name, flagName: p.FlagName, strVal: new(string)}
+		cmd.Flags().StringVar(pf.strVal, p.FlagName, "",
+			fmt.Sprintf("%s (alternative to the positional <%s>)",
+				firstSentence(p.Description), strings.ReplaceAll(name, "_", "-")))
+		rt.pathFlags = append(rt.pathFlags, pf)
+		if rt.pathFlagNames == nil {
+			rt.pathFlagNames = map[string]bool{}
+		}
+		rt.pathFlagNames[p.FlagName] = true
+	}
+}
+
+// firstSentence trims a spec description down to its leading sentence so a
+// path flag's help line stays one line. Descriptions without a "." are used
+// whole.
+func firstSentence(desc string) string {
+	if i := strings.Index(desc, ". "); i >= 0 {
+		return desc[:i]
+	}
+	return strings.TrimSuffix(desc, ".")
 }
 
 func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.OperationDetail) { //nolint:gocyclo // flag registration has many branches by nature; well-structured
@@ -195,10 +342,13 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		if flagName == "" {
 			flagName = strings.ReplaceAll(name, "_", "-")
 		}
-		// Avoid collisions with --data, --file, a query param, or a spec-declared
-		// header flag of the same name (e.g. an If-Match header exposed as
-		// --base-version takes precedence over a body baseVersion mirror).
-		if flagName == "data" || flagName == "file" || rt.queryFlags[flagName] != nil || rt.headerFlags[flagName] != nil {
+		// Avoid collisions with the engine's own flags (--data, --file, the
+		// pagination and --output flags), a path flag, a query param, or a
+		// spec-declared header flag of the same name (e.g. an If-Match header
+		// exposed as --base-version takes precedence over a body baseVersion
+		// mirror).
+		if reservedFlagNames[flagName] || rt.pathFlagNames[flagName] ||
+			rt.queryFlags[flagName] != nil || rt.headerFlags[flagName] != nil {
 			continue
 		}
 		desc := prop.Description
@@ -208,7 +358,7 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		if required[name] {
 			desc = strings.TrimSpace(desc + " (required)")
 		}
-		bf := &bodyFlag{apiName: name, kind: kind}
+		bf := &bodyFlag{apiName: name, kind: kind, secret: prop.Secret}
 		switch kind {
 		case kindInt:
 			bf.intVal = new(int)
@@ -219,12 +369,37 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		case kindStringSlice:
 			bf.strSlc = new([]string)
 			cmd.Flags().StringSliceVar(bf.strSlc, flagName, nil, desc)
+		case kindUint64:
+			bf.strVal = new(string)
+			cmd.Flags().StringVar(bf.strVal, flagName, "", uint64Desc(desc))
 		default:
 			bf.strVal = new(string)
 			cmd.Flags().StringVar(bf.strVal, flagName, "", desc)
 		}
 		rt.bodyFlags[flagName] = bf
 	}
+}
+
+// uint64Desc appends the lossless-id contract to a flag description so the
+// help text tells an Agent to paste the id verbatim rather than compute with it.
+func uint64Desc(desc string) string {
+	return strings.TrimSpace(desc + " (decimal uint64 id, max " + output.MaxUint64Decimal + ")")
+}
+
+// uint64Default renders a spec default for a uint64 flag. The spec writes it as
+// a JSON number (e.g. parent_id defaults to 0); the flag is text, so it has to
+// be formatted rather than assigned.
+func uint64Default(def any) string {
+	switch v := def.(type) {
+	case string:
+		return v
+	case float64:
+		if v < 0 {
+			return ""
+		}
+		return strconv.FormatUint(uint64(v), 10)
+	}
+	return ""
 }
 
 // promotableKind returns the primitive flag kind a body property maps to,
@@ -235,6 +410,9 @@ func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 	case "string":
 		return kindString, true
 	case "integer", "number":
+		if p.Format == uint64Format {
+			return kindUint64, true
+		}
 		return kindInt, true
 	case "boolean":
 		return kindBool, true
@@ -249,6 +427,9 @@ func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 func queryParamKind(p *registry.ParamInfo) valueKind {
 	switch p.Type {
 	case "integer", "number":
+		if p.Format == uint64Format {
+			return kindUint64
+		}
 		return kindInt
 	case "boolean":
 		return kindBool
