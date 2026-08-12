@@ -180,7 +180,6 @@ type ParamInfo struct {
 // an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
 	Type                 string                `json:"type,omitempty"`
-	Nullable             bool                  `json:"nullable,omitempty"`
 	Required             []string              `json:"required,omitempty"`
 	Properties           map[string]SchemaInfo `json:"properties,omitempty"`
 	AdditionalProperties *bool                 `json:"additional_properties,omitempty"`
@@ -194,8 +193,8 @@ type SchemaInfo struct {
 	WriteOnly            bool                  `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
 	// validator enforces Required, MinItems and Enum for every service. Loop
-	// Public API operations additionally enforce nullability, closed-object and
-	// minimum-property constraints, MinLength, MaxLength and MaxItems. Pattern
+	// Public API operations additionally enforce closed-object and minimum-
+	// property constraints, MinLength, MaxLength and MaxItems. Pattern
 	// remains descriptive and is left to the backend.
 	MinLength     int    `json:"min_length,omitempty"`
 	MaxLength     int    `json:"max_length,omitempty"`
@@ -647,9 +646,10 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 	return nil
 }
 
-// resolveSchema performs a bounded walk of a schema node. Deeper references
-// are left as `$ref` strings so schema output remains useful without risking
-// cycles in recursive component models.
+// resolveSchema performs a bounded walk of a schema node. The budget counts
+// followed references rather than ordinary property/item nesting, so deeply
+// nested acyclic schemas remain enforceable while recursive component models
+// still terminate with an unresolved `$ref`.
 func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
@@ -686,10 +686,8 @@ func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, 
 }
 
 func schemaInfoFromNode(schema map[string]any) SchemaInfo {
-	typeName, nullable := schemaType(schema["type"])
 	info := SchemaInfo{
-		Type:          typeName,
-		Nullable:      nullable,
+		Type:          schemaType(schema["type"]),
 		Format:        stringOf(schema["format"]),
 		Description:   stringOf(schema["description"]),
 		FlagName:      stringOf(schema["x-octo-flag"]),
@@ -705,6 +703,9 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 	if allowed, ok := schema["additionalProperties"].(bool); ok {
 		info.AdditionalProperties = &allowed
 	}
+	// A schema-valued additionalProperties declaration describes allowed
+	// dynamic values. Treat it as open until the validator can retain that
+	// nested schema instead of incorrectly rejecting every dynamic key.
 	if value, ok := schema["const"]; ok {
 		info.Const = value
 	}
@@ -721,7 +722,7 @@ func mergeAllOfSchemas(dst *SchemaInfo, doc map[string]any, value any, depth int
 	}
 	for _, candidate := range allOf {
 		if sub, ok := candidate.(map[string]any); ok {
-			resolved := resolveSchemaWithDepth(doc, sub, depth+1)
+			resolved := resolveSchemaWithDepth(doc, sub, depth)
 			mergeSchemaInfo(dst, &resolved)
 		}
 	}
@@ -749,7 +750,7 @@ func appendSchemaProperties(dst *SchemaInfo, doc map[string]any, value any, dept
 	}
 	for name, candidate := range properties {
 		if sub, ok := candidate.(map[string]any); ok {
-			dst.Properties[name] = resolveSchemaWithDepth(doc, sub, depth+1)
+			dst.Properties[name] = resolveSchemaWithDepth(doc, sub, depth)
 		}
 	}
 }
@@ -759,28 +760,24 @@ func appendSchemaItems(dst *SchemaInfo, doc map[string]any, value any, depth int
 	if !ok {
 		return
 	}
-	resolved := resolveSchemaWithDepth(doc, items, depth+1)
+	resolved := resolveSchemaWithDepth(doc, items, depth)
 	dst.Items = &resolved
 }
 
-func schemaType(value any) (typeName string, nullable bool) {
+func schemaType(value any) string {
 	if single, ok := value.(string); ok {
-		return single, single == "null"
+		return single
 	}
 	union, ok := value.([]any)
 	if !ok {
-		return "", false
+		return ""
 	}
 	for _, candidate := range union {
-		if typ, ok := candidate.(string); ok {
-			if typ == "null" {
-				nullable = true
-			} else if typeName == "" {
-				typeName = typ
-			}
+		if typ, ok := candidate.(string); ok && typ != "null" {
+			return typ
 		}
 	}
-	return typeName, nullable
+	return ""
 }
 
 func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []SchemaInfo {
@@ -791,7 +788,7 @@ func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []Schem
 	resolved := make([]SchemaInfo, 0, len(alternatives))
 	for _, candidate := range alternatives {
 		if sub, ok := candidate.(map[string]any); ok {
-			resolved = append(resolved, resolveSchemaWithDepth(doc, sub, depth+1))
+			resolved = append(resolved, resolveSchemaWithDepth(doc, sub, depth))
 		}
 	}
 	return resolved
@@ -806,7 +803,6 @@ func mergeSchemaInfo(dst, src *SchemaInfo) {
 func mergeSchemaIdentity(dst, src *SchemaInfo) {
 	if dst.Type == "" {
 		dst.Type = src.Type
-		dst.Nullable = src.Nullable
 	}
 	if dst.Format == "" {
 		dst.Format = src.Format

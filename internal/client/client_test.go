@@ -70,8 +70,8 @@ func TestDo_LoopSelectsPublicAPIContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	if gotAccept != publicAPIMediaType {
-		t.Fatalf("Accept = %q, want %q", gotAccept, publicAPIMediaType)
+	if gotAccept != loopAcceptMediaType {
+		t.Fatalf("Accept = %q, want %q", gotAccept, loopAcceptMediaType)
 	}
 }
 

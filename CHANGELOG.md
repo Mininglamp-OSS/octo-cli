@@ -119,8 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Loop request validation now enforces its Public API constraints locally**,
-  including composition, nullable and closed-object semantics, minimum object
-  sizes, Unicode string lengths, and maximum array sizes. Existing service
+  including composition, closed-object semantics, minimum object sizes,
+  Unicode string lengths, and maximum array sizes. Existing service
   domains retain their previous backend-enforced behavior.
 - **Unknown Loop Public API error codes use HTTP status taxonomy**, while
   legacy services retain their historical `api_error` fallback. A server hint

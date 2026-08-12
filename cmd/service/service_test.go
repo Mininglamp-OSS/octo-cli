@@ -980,6 +980,23 @@ func TestValidateRequiredBodyFields_EnforcesComposedSchemas(t *testing.T) {
 	if err := validateRequiredBodyFields(rt, map[string]any{"signing_secret": ""}); err != nil {
 		t.Fatalf("empty signing secret should be accepted for clearing: %v", err)
 	}
+
+	numericConst := &registry.OperationDetail{
+		OperationInfo:       registry.OperationInfo{Service: "loop"},
+		RequestBodyRequired: true,
+		RequestBody: &registry.SchemaInfo{
+			Type: "object",
+			Properties: map[string]registry.SchemaInfo{
+				"value": {Const: float64(1)},
+			},
+		},
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: numericConst},
+		map[string]any{"value": json.Number("1")},
+	); err != nil {
+		t.Fatalf("numeric constant should match an equivalent JSON number: %v", err)
+	}
 }
 
 func TestValidateRequiredBodyFields_PreservesLegacyConstraintHandling(t *testing.T) {
@@ -1016,7 +1033,7 @@ func TestValidateRequiredBodyFields_PreservesLegacyConstraintHandling(t *testing
 	}
 }
 
-func TestValidateRequiredBodyFields_AllowsNullableLoopFields(t *testing.T) {
+func TestValidateRequiredBodyFields_AllowsOptionalLoopNulls(t *testing.T) {
 	r := registry.MustNew()
 	update, ok := r.GetOperation("autopilot.update")
 	if !ok || update.RequestBody == nil {
@@ -1028,22 +1045,29 @@ func TestValidateRequiredBodyFields_AllowsNullableLoopFields(t *testing.T) {
 		"task_title_template": nil,
 	}
 	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {
-		t.Fatalf("nullable Loop fields must be forwarded for clearing: %v", err)
+		t.Fatalf("optional Loop fields must be forwarded for clearing: %v", err)
 	}
 
-	unconstrained := &registry.OperationDetail{
-		OperationInfo:       registry.OperationInfo{Service: "loop"},
-		RequestBodyRequired: true,
-		RequestBody: &registry.SchemaInfo{
-			Type:       "object",
-			Properties: map[string]registry.SchemaInfo{"value": {}},
-		},
+	taskUpdate, ok := r.GetOperation("task.update")
+	if !ok || taskUpdate.RequestBody == nil {
+		t.Fatal("task.update request schema not found")
 	}
 	if err := validateRequiredBodyFields(
-		&operationRuntime{detail: unconstrained},
-		map[string]any{"value": nil},
+		&operationRuntime{detail: taskUpdate},
+		map[string]any{"description": nil, "parent_task_id": nil},
 	); err != nil {
-		t.Fatalf("an unconstrained Loop field must continue to allow null: %v", err)
+		t.Fatalf("optional typed Loop fields must preserve null passthrough: %v", err)
+	}
+
+	metadataSet, ok := r.GetOperation("task.metadata.set")
+	if !ok || metadataSet.RequestBody == nil {
+		t.Fatal("task.metadata.set request schema not found")
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: metadataSet},
+		map[string]any{"value": nil},
+	); err == nil {
+		t.Fatal("a required Loop field set to null must remain missing")
 	}
 }
 
@@ -1055,13 +1079,32 @@ func TestValidateRequiredBodyFields_EnforcesLoopObjectConstraints(t *testing.T) 
 	}
 
 	for name, body := range map[string]map[string]any{
-		"empty update":      {},
-		"unknown field":     {"unknown": true},
-		"non-nullable null": {"title": nil},
+		"empty update":  {},
+		"unknown field": {"unknown": true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err == nil {
+			err := validateRequiredBodyFields(&operationRuntime{detail: update}, body)
+			if err == nil {
 				t.Fatalf("body should fail Loop object validation: %#v", body)
+			}
+			if name == "empty update" && strings.Contains(err.Error(), "<root>") {
+				t.Fatalf("root placeholder leaked into validation error: %v", err)
+			}
+		})
+	}
+
+	trigger, ok := r.GetOperation("autopilot.trigger_config.create")
+	if !ok || trigger.RequestBody == nil {
+		t.Fatal("autopilot.trigger_config.create request schema not found")
+	}
+	for name, body := range map[string]map[string]any{
+		"nested unknown field": {"kind": "webhook", "event_filters": []any{map[string]any{"event": "push", "garbage": true}}},
+		"nested missing field": {"kind": "webhook", "event_filters": []any{map[string]any{}}},
+		"nested string bound":  {"kind": "webhook", "event_filters": []any{map[string]any{"event": ""}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRequiredBodyFields(&operationRuntime{detail: trigger}, body); err == nil {
+				t.Fatalf("nested body should fail Loop validation: %#v", body)
 			}
 		})
 	}

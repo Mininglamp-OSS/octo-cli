@@ -9,7 +9,6 @@ import (
 	"io"
 	"net/url"
 	"os"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -620,8 +619,8 @@ func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[stri
 // validateRequiredBodyFields enforces the request schema against the merged
 // body. It runs before the empty-body short-circuit so schema-required fields
 // are checked even when no body values were supplied. Optional request bodies
-// remain optional unless their Loop schema requires a minimum object size; if
-// supplied, nested constraints and enum vocabularies still apply.
+// remain optional; if supplied, nested constraints and enum vocabularies still
+// apply.
 func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error {
 	if rt.detail == nil || rt.detail.RequestBody == nil {
 		return nil
@@ -632,8 +631,7 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 		return nil
 	}
 	enforcePublicAPIConstraints := rt.detail.Service == "loop"
-	mustValidateEmptyObject := enforcePublicAPIConstraints && rt.detail.RequestBody.MinProperties > 0
-	if len(base) == 0 && !rt.detail.RequestBodyRequired && !mustValidateEmptyObject {
+	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil
 	}
 	v := bodySchemaValidator{
@@ -683,17 +681,13 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
 	}
-	if value == nil {
-		if v.enforcePublicAPIConstraints {
-			if schema.Nullable || schema.Type == "" {
-				return nil
-			}
-			return schemaError(fmt.Sprintf("field %s must not be null", bodyPath(path)))
-		}
-		return checkUint64Field(schema, value, path, flagName)
-	}
 	if err := checkUint64Field(schema, value, path, flagName); err != nil {
 		return err
+	}
+	if value == nil {
+		// Enum and uint64 constraints above reject null. Other optional fields
+		// preserve the historical clearing-value passthrough.
+		return nil
 	}
 	return v.validateByType(schema, value, path, flagName)
 }
@@ -721,10 +715,6 @@ func (v bodySchemaValidator) validateByType(
 				return validateString(schema, value, path)
 			}
 		}
-	case "null":
-		if v.enforcePublicAPIConstraints {
-			return schemaError(fmt.Sprintf("field %s must be null", bodyPath(path)))
-		}
 	}
 	return nil
 }
@@ -734,8 +724,10 @@ func (v bodySchemaValidator) validateComposition(
 	value any,
 	path, flagName string,
 ) *output.ExitError {
-	if schema.Const != nil && !reflect.DeepEqual(schema.Const, value) {
-		return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
+	if schema.Const != nil {
+		if err := checkEnum(enumFieldLabel(path, flagName), value, []any{schema.Const}); err != nil {
+			return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
+		}
 	}
 	if err := v.validateOneOf(schema.OneOf, value, path, flagName); err != nil {
 		return err
@@ -869,9 +861,7 @@ func (v bodySchemaValidator) validateRequiredProperties(
 	var missing []string
 	for _, name := range schema.Required {
 		child, exists := obj[name]
-		childSchema, declared := schema.Properties[name]
-		allowsNull := declared && (childSchema.Nullable || childSchema.Type == "")
-		if !exists || (child == nil && (!v.enforcePublicAPIConstraints || !allowsNull)) {
+		if !exists || child == nil {
 			missing = append(missing, joinBodyPath(path, name))
 		}
 	}
@@ -890,6 +880,9 @@ func (v bodySchemaValidator) validateObjectConstraints(
 		return nil
 	}
 	if schema.MinProperties > 0 && len(obj) < schema.MinProperties {
+		if path == "" && schema.MinProperties == 1 {
+			return schemaError("must provide at least one field to update")
+		}
 		return schemaError(fmt.Sprintf("field %s must contain at least %d field(s)",
 			bodyPath(path), schema.MinProperties))
 	}

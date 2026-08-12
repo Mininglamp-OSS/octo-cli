@@ -224,9 +224,6 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	if create.RequestBody.AdditionalProperties == nil || *create.RequestBody.AdditionalProperties {
 		t.Fatalf("autopilot.create additionalProperties = %v, want false", create.RequestBody.AdditionalProperties)
 	}
-	if create.RequestBody.Properties["title"].Nullable || !create.RequestBody.Properties["description"].Nullable {
-		t.Fatalf("autopilot.create nullability was not preserved: %+v", create.RequestBody.Properties)
-	}
 	for _, legacy := range []string{"execution_mode", "issue_title_template"} {
 		if _, ok := create.RequestBody.Properties[legacy]; ok {
 			t.Errorf("autopilot.create exposes legacy field %q", legacy)
@@ -291,6 +288,24 @@ func TestLoopComposedRequestSchemas(t *testing.T) {
 	quickCreate, ok := r.GetOperation("task.quick_create")
 	if !ok || quickCreate.ResponseSchema == nil {
 		t.Fatal("task.quick_create referenced 202 response schema not resolved")
+	}
+}
+
+func TestLoopNestedReferencedRequestSchemasAreResolved(t *testing.T) {
+	r := MustNew()
+	trigger, ok := r.GetOperation("autopilot.trigger_config.create")
+	if !ok || trigger.RequestBody == nil {
+		t.Fatal("autopilot.trigger_config.create request body not found")
+	}
+	eventFilters := trigger.RequestBody.Properties["event_filters"]
+	if eventFilters.Items == nil || eventFilters.Items.Ref != "" {
+		t.Fatalf("event_filters item schema was not resolved: %+v", eventFilters.Items)
+	}
+	if eventFilters.Items.AdditionalProperties == nil || *eventFilters.Items.AdditionalProperties {
+		t.Fatalf("event_filters items must reject unknown fields: %+v", eventFilters.Items)
+	}
+	if !reflect.DeepEqual(eventFilters.Items.Required, []string{"event"}) {
+		t.Fatalf("event_filters item required fields = %#v", eventFilters.Items.Required)
 	}
 }
 
@@ -731,8 +746,8 @@ func TestWorkspaceListResolvesTypedCollection(t *testing.T) {
 	if !ok || data.Items == nil {
 		t.Fatalf("workspace.list data schema = %+v", data)
 	}
-	if data.Items.Ref != "#/components/schemas/Workspace" {
-		t.Fatalf("workspace item schema ref = %q, want Workspace", data.Items.Ref)
+	if data.Items.Ref != "" || data.Items.Properties["workspace_id"].Type != "string" {
+		t.Fatalf("workspace item schema was not resolved: %+v", data.Items)
 	}
 	if _, ok := op.ResponseSchema.Properties["pagination"]; !ok {
 		t.Fatalf("workspace.list response schema = %+v, want pagination", op.ResponseSchema.Properties)

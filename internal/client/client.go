@@ -29,11 +29,11 @@ import (
 
 // Retry defaults per architecture-design.md §6.2.
 const (
-	defaultMaxRetries  = 3
-	defaultBaseDelay   = 500 * time.Millisecond
-	defaultMaxDelay    = 10 * time.Second
-	defaultTimeout     = 30 * time.Second
-	publicAPIMediaType = "application/json"
+	defaultMaxRetries   = 3
+	defaultBaseDelay    = 500 * time.Millisecond
+	defaultMaxDelay     = 10 * time.Second
+	defaultTimeout      = 30 * time.Second
+	loopAcceptMediaType = "application/json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -843,7 +843,7 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		if req.Headers == nil {
 			req.Headers = make(map[string]string)
 		}
-		req.Headers["Accept"] = publicAPIMediaType
+		req.Headers["Accept"] = loopAcceptMediaType
 	}
 
 	if c.options.DryRun {
