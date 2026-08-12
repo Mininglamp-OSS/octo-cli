@@ -17,6 +17,9 @@ type EnvelopeMeta struct {
 	RateLimit json.RawMessage
 	Notice    json.RawMessage
 	Identity  any
+	// UnwrapResource enables the Fleet Public API's {"data": {...}}
+	// resource envelope without changing output contracts for other services.
+	UnwrapResource bool
 }
 
 // IdentityType is the actor type tag. The envelope's identity is always an
@@ -30,10 +33,10 @@ func defaultIdentity() map[string]any {
 	return map[string]any{"type": IdentityType}
 }
 
-// WriteSuccess emits a success envelope to w. If raw is an object containing
-// top-level "data" (array) + "pagination" (object) keys, those are flattened
-// onto the envelope as data + _pagination. Otherwise raw is placed under data
-// as-is. Meta fields (if non-nil) are attached as _rate_limit / _notice.
+// WriteSuccess emits a success envelope to w. Paginated backend envelopes are
+// flattened into data + _pagination. A {data: object} resource envelope is
+// flattened only when the caller opts in through EnvelopeMeta, keeping legacy
+// service output stable. Other payloads are placed under data as-is.
 func WriteSuccess(w io.Writer, raw json.RawMessage, meta EnvelopeMeta) error {
 	var identity any = defaultIdentity()
 	if meta.Identity != nil {
@@ -48,6 +51,14 @@ func WriteSuccess(w io.Writer, raw json.RawMessage, meta EnvelopeMeta) error {
 	if ok {
 		env["data"] = dataField
 		env["_pagination"] = paginationField
+	} else if meta.UnwrapResource {
+		if dataField, ok := splitResourceData(raw); ok {
+			env["data"] = dataField
+		} else if len(raw) == 0 {
+			env["data"] = nil
+		} else {
+			env["data"] = raw
+		}
 	} else if len(raw) == 0 {
 		env["data"] = nil
 	} else {
@@ -62,6 +73,24 @@ func WriteSuccess(w io.Writer, raw json.RawMessage, meta EnvelopeMeta) error {
 	}
 
 	return writeJSON(w, env)
+}
+
+// splitResourceData detects the public API's non-paginated resource envelope.
+// Requiring data to be the only top-level field avoids unwrapping unrelated
+// business payloads that happen to contain a field named data.
+func splitResourceData(raw json.RawMessage) (data json.RawMessage, ok bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) != 1 {
+		return nil, false
+	}
+	data, ok = obj["data"]
+	if !ok || !isJSONObject(data) {
+		return nil, false
+	}
+	return data, true
 }
 
 // WriteError emits an error envelope to w. err is rendered as the envelope's

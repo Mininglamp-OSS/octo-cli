@@ -160,7 +160,9 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 		if cred.SpaceID != "" {
 			cfg.SpaceID = cred.SpaceID
 		}
-		f.overlayProfileBaseURL(cfg, cred.Profile)
+		if err := f.overlayProfileBaseURL(cfg, cred.Profile); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
@@ -168,6 +170,14 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 // buildCredential resolves the credential through the file→env chain, applying
 // the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
 func (f *Factory) buildCredential() (*credential.BotCredential, error) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)))
+	if mode == config.CredentialModeTask {
+		return f.buildTaskCredential()
+	}
+	if mode != "" {
+		return nil, fmt.Errorf("unsupported %s %q", config.EnvCredentialMode, mode)
+	}
+
 	store, err := f.AuthStore()
 	if err != nil {
 		return nil, err
@@ -190,6 +200,42 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	return cred, nil
 }
 
+// buildTaskCredential is deliberately separate from the normal provider
+// chain when OCTO_CREDENTIAL_MODE=task is present. The daemon is responsible
+// for preserving that marker and isolating OCTO_CONFIG_DIR for task processes;
+// the CLI cannot make a caller-controlled environment tamper-proof. Fleet
+// verifies the opaque bearer and enforces its bindings/actions.
+func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
+	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
+		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
+		return nil, fmt.Errorf("%s=task does not allow --profile, --bot-id, or %s", config.EnvCredentialMode, config.EnvBotID)
+	}
+	if f.Globals.Space != "" {
+		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
+	}
+	if strings.TrimSpace(os.Getenv(config.EnvToken)) != "" {
+		return nil, fmt.Errorf("%s=task does not allow %s; use the daemon-injected %s", config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
+	}
+
+	provider := credential.NewEnvProvider()
+	provider.TokenVar = config.EnvBotToken
+	cred, err := provider.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if cred == nil {
+		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvBotToken)
+	}
+	if credential.TokenKind(cred.Token) != "loop_credential" {
+		return nil, fmt.Errorf("%s=task requires a Loop task credential in %s", config.EnvCredentialMode, config.EnvBotToken)
+	}
+	// Task credentials are server-bound; never forward a caller-selected Space
+	// context alongside them.
+	cred.SpaceID = ""
+	cred.BotKind = "agent_task"
+	return cred, nil
+}
+
 // AuthStore lazily constructs and caches the credential store.
 func (f *Factory) AuthStore() (*authstore.Store, error) {
 	if f.store != nil {
@@ -205,21 +251,26 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 
 // overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
 // but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
-func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
+func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) error {
 	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
-		return
+		return nil
 	}
 	store, err := f.AuthStore()
 	if err != nil {
-		return
+		return err
 	}
 	profiles, err := store.LoadProfiles()
 	if err != nil {
-		return
+		return err
 	}
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
-		cfg.APIBaseURL = m.APIBaseURL
+		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
+		if err != nil {
+			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+		}
+		cfg.APIBaseURL = normalized
 	}
+	return nil
 }
 
 // Config returns the resolved config (cached).
@@ -271,14 +322,20 @@ func (f *Factory) identityValue() any {
 	if f.cred == nil {
 		return nil
 	}
-	id := map[string]any{"type": "bot"}
+	identityType := "bot"
+	if f.cred.BotKind == "agent_task" {
+		identityType = "agent_task"
+	}
+	id := map[string]any{"type": identityType}
 	if f.cred.Profile != "" {
 		id["profile"] = f.cred.Profile
 	}
 	if f.cred.RobotID != "" {
 		id["robot_id"] = f.cred.RobotID
 	}
-	if kind := credential.TokenKind(f.cred.Token); kind != "" {
+	if f.cred.BotKind == "agent_task" {
+		id["credential_kind"] = "agent_task"
+	} else if kind := credential.TokenKind(f.cred.Token); kind != "" {
 		id["bot_kind"] = kind
 	}
 	if f.cred.Source != "" {
@@ -416,7 +473,7 @@ func WrapCLIError(err error) error {
 		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
-		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, or uk_* token")
+		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, uk_*, or octo_loop_* token")
 	// --- allowlist first: shapes proven to carry no caller value keep their text ---
 	//
 	// Order matters. These are checked before the family catch-all below, because

@@ -12,7 +12,8 @@ func TestMaskToken(t *testing.T) {
 		{"app_abcdefgh12345678", "app_ab***5678"},
 		{"bf_something", "bf_so***hing"},
 		{"app_tiny", "app_***"}, // body too short to reveal
-		{"short", "***"},        // unknown prefix
+		{"octo_loop_abcdefghijk", "octo_loop_ab***hijk"},
+		{"short", "***"}, // unknown prefix
 		{"", nil},
 		{"unknown_format_token", "***"}, // unknown prefix: reveal nothing
 	}

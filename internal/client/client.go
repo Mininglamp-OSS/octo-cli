@@ -1,6 +1,6 @@
-// Package client is the REST transport for the Octo backend. It supports
-// per-service URL routing (matters / dmworkim / default), retry with
-// exponential backoff + jitter, Retry-After, verbose logging, and --dry-run.
+// Package client is the REST transport for the Octo gateway. It supports
+// module-qualified paths, retry with exponential backoff + jitter, Retry-After,
+// verbose logging, and --dry-run.
 package client
 
 import (
@@ -29,10 +29,11 @@ import (
 
 // Retry defaults per architecture-design.md §6.2.
 const (
-	defaultMaxRetries = 3
-	defaultBaseDelay  = 500 * time.Millisecond
-	defaultMaxDelay   = 10 * time.Second
-	defaultTimeout    = 30 * time.Second
+	defaultMaxRetries   = 3
+	defaultBaseDelay    = 500 * time.Millisecond
+	defaultMaxDelay     = 10 * time.Second
+	defaultTimeout      = 30 * time.Second
+	loopAcceptMediaType = "application/json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -44,9 +45,10 @@ type Options struct {
 	ErrOut  io.Writer // verbose traces and dry-run output go here
 }
 
-// Request is a generic API request. Service selects per-service URL; Path is
-// the URL suffix (e.g. "/api/v1/todos/t1"). Body is JSON-encoded if non-nil.
-// Query is merged into the URL; headers take precedence over client defaults.
+// Request is a generic API request. Service identifies the logical domain for
+// diagnostics; Path is the module-qualified gateway suffix (for example,
+// "/fleet/api/v1/tasks/t1"). Body is JSON-encoded if non-nil. Query is merged
+// into the URL; headers take precedence over client defaults.
 //
 // For non-JSON payloads (e.g. multipart uploads) set RawBody + ContentType.
 // When RawBody is non-nil, Body is ignored and no JSON marshaling is performed.
@@ -80,6 +82,9 @@ type Request struct {
 	// traces and --dry-run output, whether it appears in the URL path or the
 	// request body. The values still go on the wire unchanged.
 	SecretValues []string
+	// SensitiveJSONFields lists top-level writeOnly request properties that
+	// must be redacted from dry-run and verbose diagnostic output.
+	SensitiveJSONFields []string
 }
 
 // secretMask replaces a redacted value in verbose / dry-run output. It is a
@@ -834,11 +839,27 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		contentType = "application/json"
 	}
 
+	if req.Service == "loop" && headerValue(req.Headers, "Accept") == "" {
+		if req.Headers == nil {
+			req.Headers = make(map[string]string)
+		}
+		req.Headers["Accept"] = loopAcceptMediaType
+	}
+
 	if c.options.DryRun {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
 	return c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+}
+
+func headerValue(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
@@ -912,7 +933,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 
 	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
 	if c.options.Verbose && len(body) > 0 {
-		c.verbosef("request body: %s", truncate(redactBodyForLog(req, body), 1024))
+		c.verbosef("request body: %s", truncate(redactDiagnosticBody(req, body), 1024))
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -1011,7 +1032,12 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	ee := output.ParseBackendError(resp.StatusCode, redactResponseBody(respBody, req.SecretValues))
+	redactedBody := redactResponseBody(respBody, req.SecretValues)
+	parseError := output.ParseBackendError
+	if req.Service == "loop" {
+		parseError = output.ParsePublicAPIError
+	}
+	ee := parseError(resp.StatusCode, redactedBody)
 
 	if isRetryableStatus(resp.StatusCode) {
 		re := &retryableErr{ExitError: ee}
@@ -1068,7 +1094,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte, error) {
 	var bodyField any
 	if len(body) > 0 {
-		redacted := redactBodyForLog(req, body)
+		redacted := redactDiagnosticBody(req, body)
 		// UseNumber so a uint64 id in the echoed body is shown at full precision;
 		// a plain unmarshal would round it and make --dry-run misreport what the
 		// request actually carries.
@@ -1079,14 +1105,15 @@ func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte,
 		}
 	}
 	hdr := map[string]string{}
+	for k, v := range req.Headers {
+		hdr[k] = redactSecrets(v, req.SecretValues)
+	}
+	removeHeader(hdr, "Authorization")
 	if c.cred != nil && c.cred.Token != "" {
 		hdr["Authorization"] = "Bearer " + credential.MaskToken(c.cred.Token)
 	}
 	if c.cred != nil && c.cred.SpaceID != "" && !req.SuppressSpaceHeader {
 		hdr["X-Space-Id"] = c.cred.SpaceID
-	}
-	for k, v := range req.Headers {
-		hdr[k] = redactSecrets(v, req.SecretValues)
 	}
 	out := map[string]any{
 		"dry_run": true,
@@ -1104,6 +1131,41 @@ func (c *Client) renderDryRun(req *Request, urlStr string, body []byte) ([]byte,
 	return buf, nil
 }
 
+func removeHeader(headers map[string]string, name string) {
+	for key := range headers {
+		if strings.EqualFold(key, name) {
+			delete(headers, key)
+		}
+	}
+}
+
+func redactJSONBody(body []byte, sensitiveFields []string) []byte {
+	if len(body) == 0 || len(sensitiveFields) == 0 {
+		return body
+	}
+	var value map[string]any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&value); err != nil {
+		return body
+	}
+	for _, field := range sensitiveFields {
+		if _, ok := value[field]; ok {
+			value[field] = "[REDACTED]"
+		}
+	}
+	redacted, err := json.Marshal(value)
+	if err != nil {
+		return body
+	}
+	return redacted
+}
+
+func redactDiagnosticBody(req *Request, body []byte) string {
+	redacted := []byte(redactBodyForLog(req, body))
+	return string(redactJSONBody(redacted, req.SensitiveJSONFields))
+}
+
 // --- helpers ---
 
 func (c *Client) verbosef(format string, args ...any) {
@@ -1114,9 +1176,8 @@ func (c *Client) verbosef(format string, args ...any) {
 }
 
 func buildURL(base, path string, query url.Values) (string, error) {
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
+	base = strings.TrimRight(base, "/")
+	path = "/" + strings.TrimLeft(path, "/")
 	u, err := url.Parse(base + path)
 	if err != nil {
 		return "", fmt.Errorf("build url: %w", err)

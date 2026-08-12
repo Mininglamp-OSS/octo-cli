@@ -65,6 +65,63 @@ func TestWriteSuccess_FlattensPagination(t *testing.T) {
 	}
 }
 
+func TestWriteSuccess_PreservesResourceEnvelopeByDefault(t *testing.T) {
+	raw := json.RawMessage(`{"data":{"id":"marketplace-1"}}`)
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data is %T, want original envelope", got["data"])
+	}
+	if _, nested := data["data"]; !nested {
+		t.Fatalf("non-Loop resource envelope changed: %#v", data)
+	}
+}
+
+func TestWriteSuccess_FlattensResourceEnvelope(t *testing.T) {
+	raw := json.RawMessage(`{"data":{"project_id":"project-1","title":"test"}}`)
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{UnwrapResource: true}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data is %T, want object", got["data"])
+	}
+	if data["project_id"] != "project-1" {
+		t.Fatalf("data = %#v", data)
+	}
+	if _, nested := data["data"]; nested {
+		t.Fatalf("resource envelope was not flattened: %#v", data)
+	}
+}
+
+func TestWriteSuccess_PreservesBusinessObjectContainingData(t *testing.T) {
+	raw := json.RawMessage(`{"data":{"id":"item-1"},"status":"ready"}`)
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if !ok || data["status"] != "ready" {
+		t.Fatalf("business payload should remain intact: %#v", got["data"])
+	}
+}
+
 func TestWriteSuccess_ArrayPassedThrough(t *testing.T) {
 	// Raw arrays (no pagination wrapper) are placed under data as-is.
 	raw := json.RawMessage(`[{"id":"a"}]`)
@@ -182,6 +239,29 @@ func TestSplitPagination_Detection(t *testing.T) {
 			_, _, ok := splitPagination(json.RawMessage(tt.raw))
 			if ok != tt.want {
 				t.Errorf("splitPagination(%q) ok=%v, want %v", tt.raw, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestSplitResourceData_Detection(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"resource object", `{"data":{"id":"x"}}`, true},
+		{"extra top-level field", `{"data":{"id":"x"},"status":"ok"}`, false},
+		{"array data", `{"data":[]}`, false},
+		{"scalar data", `{"data":"x"}`, false},
+		{"raw resource", `{"id":"x"}`, false},
+		{"invalid", `{`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ok := splitResourceData(json.RawMessage(tt.raw))
+			if ok != tt.want {
+				t.Errorf("splitResourceData(%q) ok=%v, want %v", tt.raw, ok, tt.want)
 			}
 		})
 	}

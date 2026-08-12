@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -66,7 +68,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
-		Service:        serviceForBaseURL(d.BaseURLEnv),
+		Service:        d.Service,
 		Method:         d.Method,
 		Path:           urlPath,
 		Query:          q,
@@ -77,7 +79,8 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// behaviour of sending the header when the credential has a space.
 		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
-		SecretValues: collectSecrets(cobraCmd, rt, pathValues),
+		SecretValues:        collectSecrets(cobraCmd, rt, pathValues),
+		SensitiveJSONFields: writeOnlyBodyFields(d.RequestBody),
 	}
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
@@ -616,8 +619,8 @@ func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[stri
 // validateRequiredBodyFields enforces the request schema against the merged
 // body. It runs before the empty-body short-circuit so schema-required fields
 // are checked even when no body values were supplied. Optional request bodies
-// remain optional, but if supplied their nested required fields, minItems
-// constraints and enum vocabularies still apply.
+// remain optional; if supplied, nested constraints and enum vocabularies still
+// apply.
 func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error {
 	if rt.detail == nil || rt.detail.RequestBody == nil {
 		return nil
@@ -627,10 +630,14 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if rt.detail.Multipart {
 		return nil
 	}
+	enforcePublicAPIConstraints := rt.detail.Service == "loop"
 	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil
 	}
-	v := bodySchemaValidator{flagFor: topLevelBodyFlagNames(rt)}
+	v := bodySchemaValidator{
+		flagFor:                     topLevelBodyFlagNames(rt),
+		enforcePublicAPIConstraints: enforcePublicAPIConstraints,
+	}
 	if exitErr := v.validate(rt.detail.RequestBody, base, "", ""); exitErr != nil {
 		return exitErr
 	}
@@ -653,12 +660,12 @@ func topLevelBodyFlagNames(rt *operationRuntime) map[string]string {
 
 // bodySchemaValidator walks a resolved request body against the operation's
 // request schema, enforcing required fields, minItems and enum vocabularies
-// before anything is sent. It covers the merged body — promoted flags AND
-// --data — because --data has never been a raw passthrough on this path:
-// required-field and minItems checks already applied to it, so an enum check
-// belongs at the same layer rather than only on the promoted flags.
+// before anything is sent. Loop additionally enforces the extended constraints
+// retained from its Public API schema. It covers the merged body — promoted
+// flags AND --data — because --data is not a raw passthrough on this path.
 type bodySchemaValidator struct {
-	flagFor map[string]string // wire field name → promoted flag name (top level only)
+	flagFor                     map[string]string // wire field name → promoted flag name (top level only)
+	enforcePublicAPIConstraints bool              // extended JSON Schema constraints (Loop Public API only)
 }
 
 // validate reports the first violation found, or nil. Enum violations carry
@@ -666,6 +673,11 @@ type bodySchemaValidator struct {
 // closed set" without parsing the message; structural violations keep the
 // historical VALIDATION_ERROR envelope byte-for-byte.
 func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
+	if v.enforcePublicAPIConstraints {
+		if err := v.validateComposition(schema, value, path, flagName); err != nil {
+			return err
+		}
+	}
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
 		return err
 	}
@@ -673,17 +685,103 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		return err
 	}
 	if value == nil {
-		// An explicit null has had its say from the two constraint checks above, which is
-		// where it must be caught. Descending further would report a shape error ("field
-		// x must be an object") for a value a backend may legitimately accept to clear an
-		// optional field — a wider contract change than the bypass calls for.
+		// Enum and uint64 constraints above reject null. Other optional fields
+		// preserve the historical clearing-value passthrough.
 		return nil
 	}
+	return v.validateByType(schema, value, path, flagName)
+}
+
+func (v bodySchemaValidator) validateByType(
+	schema *registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
 	switch schema.Type {
 	case "object":
 		return v.validateObject(schema, value, path)
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
+	case "string":
+		if v.enforcePublicAPIConstraints {
+			return validateString(schema, value, path)
+		}
+	case "":
+		if v.enforcePublicAPIConstraints {
+			if len(schema.Required) > 0 || len(schema.Properties) > 0 {
+				return v.validateObject(schema, value, path)
+			}
+			if schema.MinLength > 0 || schema.MaxLength > 0 {
+				return validateString(schema, value, path)
+			}
+		}
+	}
+	return nil
+}
+
+func (v bodySchemaValidator) validateComposition(
+	schema *registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if schema.Const != nil {
+		if err := checkEnum(enumFieldLabel(path, flagName), value, []any{schema.Const}); err != nil {
+			return schemaError(fmt.Sprintf("field %s must equal the declared constant", bodyPath(path)))
+		}
+	}
+	if err := v.validateOneOf(schema.OneOf, value, path, flagName); err != nil {
+		return err
+	}
+	return v.validateAnyOf(schema.AnyOf, value, path, flagName)
+}
+
+func (v bodySchemaValidator) validateOneOf(
+	schemas []registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if len(schemas) == 0 {
+		return nil
+	}
+	matches := 0
+	for i := range schemas {
+		if v.validate(&schemas[i], value, path, flagName) == nil {
+			matches++
+		}
+	}
+	if matches != 1 {
+		return schemaError(fmt.Sprintf("field %s must match exactly one allowed schema", bodyPath(path)))
+	}
+	return nil
+}
+
+func (v bodySchemaValidator) validateAnyOf(
+	schemas []registry.SchemaInfo,
+	value any,
+	path, flagName string,
+) *output.ExitError {
+	if len(schemas) == 0 {
+		return nil
+	}
+	for i := range schemas {
+		if v.validate(&schemas[i], value, path, flagName) == nil {
+			return nil
+		}
+	}
+	return schemaError(fmt.Sprintf("field %s must match at least one allowed schema", bodyPath(path)))
+}
+
+func validateString(schema *registry.SchemaInfo, value any, path string) *output.ExitError {
+	text, ok := value.(string)
+	if !ok {
+		return schemaError(fmt.Sprintf("field %s must be a string", bodyPath(path)))
+	}
+	length := utf8.RuneCountInString(text)
+	if schema.MinLength > 0 && length < schema.MinLength {
+		return schemaError(fmt.Sprintf("field %s must contain at least %d character(s)", bodyPath(path), schema.MinLength))
+	}
+	if schema.MaxLength > 0 && length > schema.MaxLength {
+		return schemaError(fmt.Sprintf("field %s must contain at most %d character(s)", bodyPath(path), schema.MaxLength))
 	}
 	return nil
 }
@@ -730,25 +828,15 @@ func (v bodySchemaValidator) validateObject(schema *registry.SchemaInfo, value a
 	if !ok || obj == nil {
 		return schemaError(fmt.Sprintf("field %s must be an object", bodyPath(path)))
 	}
-	var missing []string
-	for _, name := range schema.Required {
-		child, exists := obj[name]
-		if !exists || child == nil {
-			missing = append(missing, joinBodyPath(path, name))
-		}
+	if err := v.validateRequiredProperties(schema, obj, path); err != nil {
+		return err
 	}
-	if len(missing) > 0 {
-		return schemaError(fmt.Sprintf("is missing required field(s): %s", strings.Join(missing, ", ")))
+	if err := v.validateObjectConstraints(schema, obj, path); err != nil {
+		return err
 	}
 	for name := range schema.Properties {
-		// A property that is *present with value null* is walked too. Skipping it on
-		// `child != nil` meant an explicit null never reached checkEnum or
-		// checkUint64Field — the two gates this engine exists to apply — and was
-		// marshalled onto the wire unchanged, while the same field with an
-		// out-of-vocabulary or wrongly-typed value was correctly refused. checkEnum's own
-		// docstring already said a null "cannot match any member, so reject rather than
-		// forward"; it was simply never called. The required-field walk above treats a
-		// present null as missing, so both paths now refuse it, each in its own terms.
+		// Walk present nulls too: the child schema decides whether null is a valid
+		// clearing value or a constraint violation.
 		if child, exists := obj[name]; exists {
 			childSchema := schema.Properties[name]
 			// Only root-level fields have a promoted flag; a nested field of the
@@ -765,6 +853,55 @@ func (v bodySchemaValidator) validateObject(schema *registry.SchemaInfo, value a
 	return nil
 }
 
+func (v bodySchemaValidator) validateRequiredProperties(
+	schema *registry.SchemaInfo,
+	obj map[string]any,
+	path string,
+) *output.ExitError {
+	var missing []string
+	for _, name := range schema.Required {
+		child, exists := obj[name]
+		if !exists || child == nil {
+			missing = append(missing, joinBodyPath(path, name))
+		}
+	}
+	if len(missing) > 0 {
+		return schemaError(fmt.Sprintf("is missing required field(s): %s", strings.Join(missing, ", ")))
+	}
+	return nil
+}
+
+func (v bodySchemaValidator) validateObjectConstraints(
+	schema *registry.SchemaInfo,
+	obj map[string]any,
+	path string,
+) *output.ExitError {
+	if !v.enforcePublicAPIConstraints {
+		return nil
+	}
+	if schema.MinProperties > 0 && len(obj) < schema.MinProperties {
+		if path == "" && schema.MinProperties == 1 {
+			return schemaError("must provide at least one field to update")
+		}
+		return schemaError(fmt.Sprintf("field %s must contain at least %d field(s)",
+			bodyPath(path), schema.MinProperties))
+	}
+	if schema.AdditionalProperties == nil || *schema.AdditionalProperties {
+		return nil
+	}
+	unknown := make([]string, 0)
+	for name := range obj {
+		if _, declared := schema.Properties[name]; !declared {
+			unknown = append(unknown, joinBodyPath(path, name))
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	return schemaError(fmt.Sprintf("contains unknown field(s): %s", strings.Join(unknown, ", ")))
+}
+
 func (v bodySchemaValidator) validateArray(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
 	items, ok := bodyArray(value)
 	if !ok {
@@ -772,6 +909,9 @@ func (v bodySchemaValidator) validateArray(schema *registry.SchemaInfo, value an
 	}
 	if schema.MinItems > 0 && len(items) < schema.MinItems {
 		return schemaError(fmt.Sprintf("field %s must contain at least %d item(s)", bodyPath(path), schema.MinItems))
+	}
+	if v.enforcePublicAPIConstraints && schema.MaxItems > 0 && len(items) > schema.MaxItems {
+		return schemaError(fmt.Sprintf("field %s must contain at most %d item(s)", bodyPath(path), schema.MaxItems))
 	}
 	if schema.Items == nil {
 		return nil
@@ -841,6 +981,9 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	if req.Service == "loop" {
+		return f.EmitSuccessWithMeta(body, output.EnvelopeMeta{UnwrapResource: true})
+	}
 	return f.EmitSuccess(body)
 }
 
@@ -860,6 +1003,19 @@ func normalizeResponse(f *cmdutil.Factory, rt *operationRuntime, body []byte) ([
 		return nil, output.ErrWithHint("internal", "RESPONSE_NORMALIZE", err.Error(), "report the unexpected response shape")
 	}
 	return out, nil
+}
+
+func writeOnlyBodyFields(schema *registry.SchemaInfo) []string {
+	if schema == nil {
+		return nil
+	}
+	var fields []string
+	for name := range schema.Properties {
+		if schema.Properties[name].WriteOnly {
+			fields = append(fields, name)
+		}
+	}
+	return fields
 }
 
 // --- pagination ---

@@ -51,6 +51,55 @@ func TestDo_SetsAuthAndSpaceHeaders(t *testing.T) {
 	}
 }
 
+func TestDo_LoopSelectsPublicAPIContract(t *testing.T) {
+	t.Parallel()
+
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/workspaces",
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if gotAccept != loopAcceptMediaType {
+		t.Fatalf("Accept = %q, want %q", gotAccept, loopAcceptMediaType)
+	}
+}
+
+func TestDo_LoopPreservesExplicitAccept(t *testing.T) {
+	t.Parallel()
+
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/workspaces",
+		Headers: map[string]string{"Accept": "application/json"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if gotAccept != "application/json" {
+		t.Fatalf("Accept = %q, want application/json", gotAccept)
+	}
+}
+
 func TestDo_SuppressSpaceHeader(t *testing.T) {
 	var sawSpaceHeader bool
 	var gotSpace string
@@ -152,6 +201,36 @@ func TestDo_BackendErrorParsed(t *testing.T) {
 	}
 	if ee.Type != "api_error" {
 		t.Errorf("type = %q", ee.Type)
+	}
+}
+
+func TestDo_SelectsBackendErrorProtocolByService(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+	}))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		service  string
+		wantType string
+		wantExit int
+	}{
+		{service: "loop", wantType: "validation", wantExit: 2},
+		{service: "thread", wantType: "api_error", wantExit: 1},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{Service: tc.service, Method: http.MethodGet, Path: "/error"})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("Do error = %v, want ExitError", err)
+			}
+			if ee.Type != tc.wantType || ee.ExitCode() != tc.wantExit || ee.Hint != "do better" {
+				t.Fatalf("error = %+v (exit %d), want type=%s exit=%d with server hint",
+					ee, ee.ExitCode(), tc.wantType, tc.wantExit)
+			}
+		})
 	}
 }
 
@@ -274,6 +353,79 @@ func TestDo_VerboseWritesToErrOut(t *testing.T) {
 	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if !strings.Contains(errBuf.String(), "GET") {
 		t.Errorf("verbose trace missing: %q", errBuf.String())
+	}
+}
+
+func TestDo_RedactsWriteOnlyJSONFields(t *testing.T) {
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		receivedBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var errBuf bytes.Buffer
+	c := newTestClient(srv)
+	c.options.DryRun = true
+	c.options.Verbose = true
+	c.options.ErrOut = &errBuf
+	body, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPut,
+		Path:   "/secret",
+		Body: map[string]any{
+			"signing_secret": "SUPERSECRET123456",
+			"label":          "safe",
+			"big":            json.Number("12345678901234567890"),
+			"nested":         map[string]any{"id": json.Number("9007199254740993")},
+		},
+		SensitiveJSONFields: []string{"signing_secret"},
+		Headers:             map[string]string{"authorization": "raw-secret"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if strings.Contains(string(body), "SUPERSECRET") || strings.Contains(string(body), "raw-secret") {
+		t.Fatalf("dry-run leaked a secret: %s", body)
+	}
+	if !strings.Contains(string(body), "[REDACTED]") || !strings.Contains(string(body), "***") {
+		t.Fatalf("dry-run did not redact fields and credential: %s", body)
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var dryRun map[string]any
+	if err := dec.Decode(&dryRun); err != nil {
+		t.Fatalf("decode dry-run body: %v", err)
+	}
+	dryRunBody, ok := dryRun["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("dry-run body = %#v, want object", dryRun["body"])
+	}
+	if got := dryRunBody["big"]; got != json.Number("12345678901234567890") {
+		t.Fatalf("dry-run big number = %v, want lossless value", got)
+	}
+	nested, ok := dryRunBody["nested"].(map[string]any)
+	if !ok || nested["id"] != json.Number("9007199254740993") {
+		t.Fatalf("dry-run nested number = %#v, want lossless value", dryRunBody["nested"])
+	}
+
+	c.options.DryRun = false
+	errBuf.Reset()
+	_, err = c.Do(context.Background(), &Request{
+		Method:              http.MethodPut,
+		Path:                "/secret",
+		Body:                map[string]string{"signing_secret": "SUPERSECRET123456", "label": "safe"},
+		SensitiveJSONFields: []string{"signing_secret"},
+	})
+	if err != nil {
+		t.Fatalf("verbose Do: %v", err)
+	}
+	if strings.Contains(errBuf.String(), "SUPERSECRET") || !strings.Contains(errBuf.String(), "[REDACTED]") {
+		t.Fatalf("verbose output did not redact secret: %s", errBuf.String())
+	}
+	if !strings.Contains(receivedBody, "SUPERSECRET123456") {
+		t.Fatalf("redaction changed the wire body: %s", receivedBody)
 	}
 }
 
@@ -678,6 +830,16 @@ func TestBuildURL_NoLeadingSlash(t *testing.T) {
 		t.Fatalf("buildURL: %v", err)
 	}
 	if u != "http://h/path/x" {
+		t.Errorf("buildURL = %q", u)
+	}
+}
+
+func TestBuildURL_NormalizesBoundarySlashes(t *testing.T) {
+	u, err := buildURL("https://example.com/", "/fleet/api/v1/tasks", nil)
+	if err != nil {
+		t.Fatalf("buildURL: %v", err)
+	}
+	if u != "https://example.com/fleet/api/v1/tasks" {
 		t.Errorf("buildURL = %q", u)
 	}
 }

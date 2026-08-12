@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -72,14 +73,19 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		wantType string
 	}{
 		{"UNAUTHORIZED", "auth_error"},
+		{"AUTH_REQUIRED", "auth_error"},
 		{"AUTH_UNAVAILABLE", "network"},
 		{"VALIDATION_ERROR", "validation"},
 		{"MATTER_NOT_FOUND", "api_error"},
 		{"NOT_FOUND", "api_error"},
 		{"ASSIGNEE_NOT_FOUND", "api_error"},
 		{"FORBIDDEN", "permission"},
+		{"BOT_WORKSPACE_MEMBERSHIP_REQUIRED", "permission"},
 		{"SPACE_FORBIDDEN", "permission"},
 		{"DUPLICATE_ASSIGNEE", "validation"},
+		{"DUPLICATE", "validation"},
+		{"UNSUPPORTED_MEDIA_TYPE", "validation"},
+		{"CLIENT_VERSION_TOO_OLD", "config"},
 		{"RATE_LIMITED", "rate_limited"},
 		{"UPSTREAM_UNAVAILABLE", "network"},
 		{"INTERNAL_ERROR", "api_error"},
@@ -106,6 +112,17 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 	}
 }
 
+func TestParseBackendErrorWorkspaceBotMembershipHint(t *testing.T) {
+	body := []byte(`{"error":{"code":"BOT_WORKSPACE_MEMBERSHIP_REQUIRED","message":"bot must be added to workspace members"}}`)
+	ee := ParseBackendError(http.StatusForbidden, body)
+	if ee.Code != "BOT_WORKSPACE_MEMBERSHIP_REQUIRED" || ee.Type != "permission" {
+		t.Fatalf("error = %+v", ee)
+	}
+	if ee.Hint != "ask a Workspace owner or admin to add this Bot in Workspace Members" {
+		t.Fatalf("hint = %q", ee.Hint)
+	}
+}
+
 func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 	body := []byte(`{"error":{"code":"SOMETHING_NEW","message":"nope"}}`)
 	ee := ParseBackendError(418, body)
@@ -113,13 +130,38 @@ func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 		t.Errorf("Code = %q", ee.Code)
 	}
 	if ee.Type != "api_error" {
-		t.Errorf("unknown codes should fall back to api_error, got %q", ee.Type)
+		t.Errorf("unknown legacy codes should preserve the api_error fallback, got %q", ee.Type)
 	}
 	if ee.Hint != "" {
 		t.Errorf("unknown codes should have no hint, got %q", ee.Hint)
 	}
 	if ee.Message != "nope" {
 		t.Errorf("Message = %q", ee.Message)
+	}
+}
+
+func TestParseBackendError_PreservesServerHintForUnknownCode(t *testing.T) {
+	body := []byte(`{"error":{"code":"NEW_AUTH_CODE","message":"nope","hint":"refresh the task credential"}}`)
+	ee := ParsePublicAPIError(http.StatusUnauthorized, body)
+	if ee.Type != "auth_error" || ee.Hint != "refresh the task credential" {
+		t.Fatalf("error = %+v, want status taxonomy and server hint", ee)
+	}
+}
+
+func TestParseBackendError_HintDoesNotChangeLegacyTaxonomy(t *testing.T) {
+	withoutHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing"}}`))
+	withHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+
+	if withoutHint.Type != "api_error" || withHint.Type != withoutHint.Type {
+		t.Fatalf("legacy taxonomy changed with hint: without=%+v with=%+v", withoutHint, withHint)
+	}
+	if withoutHint.ExitCode() != withHint.ExitCode() {
+		t.Fatalf("legacy exit code changed with hint: without=%d with=%d", withoutHint.ExitCode(), withHint.ExitCode())
+	}
+	if withHint.Hint != "do better" {
+		t.Fatalf("server hint was not preserved: %+v", withHint)
 	}
 }
 

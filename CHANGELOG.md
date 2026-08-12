@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
+  Public API contract across tasks, executions, experts, expert teams,
+  workspaces, runtimes, projects, skills, autopilots, attachments, comments,
+  and labels. Loop uses explicit Workspace selectors, typed Autopilot dispatch
+  fields, task lifecycle status including `in_review`, and a daemon-oriented
+  task credential policy. The shared OpenAPI registry now resolves referenced
+  parameters, request bodies, responses, nullable unions, and composed schemas.
 - **`octo-cli drive` domain** (45 commands) — network drive over octo-drive:
   spaces and members, folder/file tree and `browse`, blob registration,
   two-phase upload and signed download, online-document mounts, share links,
@@ -111,6 +118,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **Loop request validation now enforces its Public API constraints locally**,
+  including composition, closed-object semantics, minimum object sizes,
+  Unicode string lengths, and maximum array sizes. Existing service
+  domains retain their previous backend-enforced behavior.
+- **Unknown Loop Public API error codes use HTTP status taxonomy**, while
+  legacy services retain their historical `api_error` fallback. A server hint
+  remains presentation metadata and no longer changes the error type or exit
+  code by itself.
+- **The default gateway is now `https://im.deepminer.com.cn`** instead of the
+  previous localhost development endpoint. Set `OCTO_API_BASE_URL` explicitly
+  for test or self-hosted deployments.
+- **Gateway configuration is origin-only** — `OCTO_API_BASE_URL` and stored
+  profile URLs must contain only `http(s)://host[:port]`; service paths, query
+  strings, fragments, and credentials are rejected. Existing profiles with a
+  service-specific path must be updated with `octo-cli auth login` before use.
 - **A transfer may no longer connect to the local machine, on the first connection as
   well as on a redirect hop.** The `https`-or-loopback-`http` rule is now decided on the
   *resolved* address rather than on how the host is spelled, and the connection then goes
