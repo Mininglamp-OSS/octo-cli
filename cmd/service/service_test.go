@@ -24,6 +24,45 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. These tests assert on the exact request the engine builds, and
+// ambient variables rewrite it: OCTO_MARKETPLACE_API_PREFIX replaces the
+// leading /market segment (run.go marketplacePath), OCTO_API_BASE_URL and
+// OCTO_SPACE_ID feed the resolved config, OCTO_FORMAT reshapes the envelope.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX is
+// read straight from the environment with no config constant behind it, so it is
+// exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config
+// dir and a developer's stored profiles leak back in. Tests that exercise a
+// variable's effect still set it themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "octo-service-test")
+	if err != nil {
+		panic(err)
+	}
+	sweepOctoEnv()
+	os.Setenv("OCTO_CONFIG_DIR", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+// sweepOctoEnv unsets every OCTO_-prefixed variable in the process environment.
+// os.Environ returns a snapshot, so unsetting while ranging over it is safe.
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
+}
+
 // rootWithService builds a minimal cobra root wired to a real httptest server,
 // a TestFactory, and the real embedded registry. The returned TestFactory lets
 // the caller read emitted envelopes.
@@ -92,6 +131,17 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 		"message": {"edit", "read-receipt", "send", "sync"},
 		"event":   {"ack", "list"},
 	}
+
+	loop := findCmd(root, "loop")
+	for _, resource := range []string{
+		"attachment", "autopilot", "comment", "execution", "expert",
+		"expert-template", "expert-team", "label", "project", "runtime",
+		"skill", "skill-file", "task", "workspace",
+	} {
+		if findCmd(loop, resource) == nil {
+			t.Errorf("loop: missing resource %q; got %v", resource, childNames(loop))
+		}
+	}
 	for svc, wantCmds := range want {
 		svcCmd := findCmd(root, svc)
 		if svcCmd == nil {
@@ -114,6 +164,134 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	timeline := findCmd(matter, "timeline")
 	if timeline == nil || !contains(childNames(timeline), "add") || !contains(childNames(timeline), "list") || !contains(childNames(timeline), "delete") {
 		t.Errorf("matter timeline should nest add/list/delete; got %v", childNames(timeline))
+	}
+}
+
+func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
+	var gotPath, gotAuth, gotSpace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		gotSpace = r.Header.Get("X-Space-Id")
+		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL: gateway.URL,
+		BotToken:   "octo_loop_test",
+		Format:     "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_loop_test", SpaceID: "space-from-legacy-profile"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "task", "get", "task-1", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop task get: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/tasks/task-1" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer octo_loop_test" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotSpace != "" {
+		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+}
+
+func TestLoopTaskWorkspaceHeaderFlag(t *testing.T) {
+	var gotPath, gotWorkspace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{
+		APIBaseURL: gateway.URL,
+		BotToken:   "octo_pat_test",
+		Format:     "json",
+	}
+	cred := &credential.BotCredential{Token: "octo_pat_test"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop task list: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/tasks" || gotWorkspace != "workspace-1" {
+		t.Fatalf("path=%q X-Workspace-ID=%q", gotPath, gotWorkspace)
+	}
+}
+
+func TestLoopWorkspacePathHeaderFlag(t *testing.T) {
+	var gotPath, gotWorkspace string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		_, _ = w.Write([]byte(`{"id":"workspace-1"}`))
+	}))
+	defer gateway.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{APIBaseURL: gateway.URL, BotToken: "octo_pat_test", Format: "json"}
+	cred := &credential.BotCredential{Token: "octo_pat_test"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(cred)
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{"loop", "workspace", "get", "workspace-1", "--workspace-id", "workspace-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop workspace get: %v", err)
+	}
+	if gotPath != "/fleet/api/v1/workspaces/workspace-1" || gotWorkspace != "workspace-1" {
+		t.Fatalf("path=%q X-Workspace-ID=%q", gotPath, gotWorkspace)
+	}
+}
+
+func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
+	requestCount := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	})
+
+	root.SetArgs([]string{"loop", "task", "list"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "required flag(s) \"workspace-id\"") {
+		t.Fatalf("loop task list error = %v, want required workspace-id", err)
+	}
+	if requestCount != 0 {
+		t.Fatalf("request count = %d, want 0", requestCount)
+	}
+}
+
+func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("hidden workspace create command must not send a request")
+	})
+	workspace := findCmd(findCmd(root, "loop"), "workspace")
+	if workspace == nil {
+		t.Fatal("loop workspace command not registered")
+	}
+	if findCmd(workspace, "create") != nil {
+		t.Fatal("loop workspace create must not be registered")
 	}
 }
 
@@ -769,6 +947,166 @@ func TestValidateRequiredBodyFields_SkipsMultipartBinaryProperty(t *testing.T) {
 	}}
 	if err := validateRequiredBodyFields(rt, map[string]any{"label": "report"}); err != nil {
 		t.Fatalf("multipart validation must be handled by buildMultipartBody: %v", err)
+	}
+}
+
+func TestValidateRequiredBodyFields_EnforcesComposedSchemas(t *testing.T) {
+	r := registry.MustNew()
+	quickCreate, ok := r.GetOperation("task.quick_create")
+	if !ok || quickCreate.RequestBody == nil {
+		t.Fatal("task.quick_create request schema not found")
+	}
+	rt := &operationRuntime{detail: quickCreate}
+	for _, body := range []map[string]any{
+		{"prompt": "work"},
+		{"prompt": "work", "expert_id": "e1", "expert_team_id": "et1"},
+	} {
+		if err := validateRequiredBodyFields(rt, body); err == nil {
+			t.Fatalf("body should fail oneOf validation: %#v", body)
+		}
+	}
+	if err := validateRequiredBodyFields(rt, map[string]any{"prompt": "work", "expert_id": "e1"}); err != nil {
+		t.Fatalf("valid oneOf body rejected: %v", err)
+	}
+
+	secret, ok := r.GetOperation("autopilot.signing_secret.set")
+	if !ok || secret.RequestBody == nil {
+		t.Fatal("signing secret request schema not found")
+	}
+	rt = &operationRuntime{detail: secret}
+	if err := validateRequiredBodyFields(rt, map[string]any{"signing_secret": "short"}); err == nil {
+		t.Fatal("short non-empty signing secret should fail anyOf validation")
+	}
+	if err := validateRequiredBodyFields(rt, map[string]any{"signing_secret": ""}); err != nil {
+		t.Fatalf("empty signing secret should be accepted for clearing: %v", err)
+	}
+
+	numericConst := &registry.OperationDetail{
+		OperationInfo:       registry.OperationInfo{Service: "loop"},
+		RequestBodyRequired: true,
+		RequestBody: &registry.SchemaInfo{
+			Type: "object",
+			Properties: map[string]registry.SchemaInfo{
+				"value": {Const: float64(1)},
+			},
+		},
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: numericConst},
+		map[string]any{"value": json.Number("1")},
+	); err != nil {
+		t.Fatalf("numeric constant should match an equivalent JSON number: %v", err)
+	}
+}
+
+func TestValidateRequiredBodyFields_PreservesLegacyConstraintHandling(t *testing.T) {
+	r := registry.MustNew()
+	threadCreate, ok := r.GetOperation("thread.create")
+	if !ok || threadCreate.RequestBody == nil {
+		t.Fatal("thread.create request schema not found")
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: threadCreate},
+		map[string]any{"name": strings.Repeat("x", 101)},
+	); err != nil {
+		t.Fatalf("legacy service string bounds must remain backend-enforced: %v", err)
+	}
+
+	additionalProperties := false
+	legacy := &registry.OperationDetail{
+		OperationInfo:       registry.OperationInfo{Service: "thread"},
+		RequestBodyRequired: true,
+		RequestBody: &registry.SchemaInfo{
+			Type:                 "object",
+			MinProperties:        2,
+			AdditionalProperties: &additionalProperties,
+			Properties: map[string]registry.SchemaInfo{
+				"title": {Type: "string"},
+			},
+		},
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: legacy},
+		map[string]any{"title": nil, "unknown": true},
+	); err != nil {
+		t.Fatalf("legacy object constraints must remain backend-enforced: %v", err)
+	}
+}
+
+func TestValidateRequiredBodyFields_AllowsOptionalLoopNulls(t *testing.T) {
+	r := registry.MustNew()
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update request schema not found")
+	}
+	body := map[string]any{
+		"description":         nil,
+		"project_id":          nil,
+		"task_title_template": nil,
+	}
+	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {
+		t.Fatalf("optional Loop fields must be forwarded for clearing: %v", err)
+	}
+
+	taskUpdate, ok := r.GetOperation("task.update")
+	if !ok || taskUpdate.RequestBody == nil {
+		t.Fatal("task.update request schema not found")
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: taskUpdate},
+		map[string]any{"description": nil, "parent_task_id": nil},
+	); err != nil {
+		t.Fatalf("optional typed Loop fields must preserve null passthrough: %v", err)
+	}
+
+	metadataSet, ok := r.GetOperation("task.metadata.set")
+	if !ok || metadataSet.RequestBody == nil {
+		t.Fatal("task.metadata.set request schema not found")
+	}
+	if err := validateRequiredBodyFields(
+		&operationRuntime{detail: metadataSet},
+		map[string]any{"value": nil},
+	); err == nil {
+		t.Fatal("a required Loop field set to null must remain missing")
+	}
+}
+
+func TestValidateRequiredBodyFields_EnforcesLoopObjectConstraints(t *testing.T) {
+	r := registry.MustNew()
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update request schema not found")
+	}
+
+	for name, body := range map[string]map[string]any{
+		"empty update":  {},
+		"unknown field": {"unknown": true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateRequiredBodyFields(&operationRuntime{detail: update}, body)
+			if err == nil {
+				t.Fatalf("body should fail Loop object validation: %#v", body)
+			}
+			if name == "empty update" && strings.Contains(err.Error(), "<root>") {
+				t.Fatalf("root placeholder leaked into validation error: %v", err)
+			}
+		})
+	}
+
+	trigger, ok := r.GetOperation("autopilot.trigger_config.create")
+	if !ok || trigger.RequestBody == nil {
+		t.Fatal("autopilot.trigger_config.create request schema not found")
+	}
+	for name, body := range map[string]map[string]any{
+		"nested unknown field": {"kind": "webhook", "event_filters": []any{map[string]any{"event": "push", "garbage": true}}},
+		"nested missing field": {"kind": "webhook", "event_filters": []any{map[string]any{}}},
+		"nested string bound":  {"kind": "webhook", "event_filters": []any{map[string]any{"event": ""}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateRequiredBodyFields(&operationRuntime{detail: trigger}, body); err == nil {
+				t.Fatalf("nested body should fail Loop validation: %#v", body)
+			}
+		})
 	}
 }
 

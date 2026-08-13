@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "marketplace", "matter", "message", "summary", "thread"}
+	want := []string{"bot", "docs", "drive", "event", "file", "group", "html", "loop", "marketplace", "matter", "message", "summary", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
@@ -44,9 +45,11 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"bot":         6,
 		"event":       2,
 		"docs":        32,
+		"drive":       42,
 		"html":        20,
 		"marketplace": 44,
 		"summary":     4,
+		"loop":        126,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -59,6 +62,306 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestLoopWorkspaceManagementOperationsAreHidden(t *testing.T) {
+	r := MustNew()
+	hidden := []string{"workspace.create", "workspace.update", "workspace.delete"}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+		}
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
+		}
+	}
+}
+
+func TestLoopRuntimeMutationOperationsAreHidden(t *testing.T) {
+	r := MustNew()
+	hidden := []string{
+		"runtime.update",
+		"runtime.delete",
+		"runtime.archive_and_delete",
+		"runtime.update_request.create",
+		"runtime.model_request.create",
+		"runtime.local_skill_request.create",
+		"runtime.local_skill_import.create",
+	}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+		}
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
+		}
+	}
+}
+
+func TestLoopRuntimeListIsSpaceScopedAndExpertsAcceptRuntimeRef(t *testing.T) {
+	r := MustNew()
+	list, ok := r.GetOperation("runtime.list")
+	if !ok {
+		t.Fatal("runtime.list not found")
+	}
+	for _, parameter := range list.Parameters {
+		if parameter.In == "header" && parameter.Name == "X-Workspace-ID" {
+			t.Fatal("runtime.list must not require a Workspace selector")
+		}
+	}
+
+	for _, operationID := range []string{"expert.create", "expert.update"} {
+		op, ok := r.GetOperation(operationID)
+		if !ok || op.RequestBody == nil {
+			t.Fatalf("%s request body not found", operationID)
+		}
+		if _, ok := op.RequestBody.Properties["runtime_ref"]; !ok {
+			t.Fatalf("%s must accept the Space-level runtime_ref", operationID)
+		}
+	}
+}
+
+func TestLoopPublicContractResolvesSharedComponents(t *testing.T) {
+	r := MustNew()
+	create, ok := r.GetOperation("task.create")
+	if !ok {
+		t.Fatal("task.create: not found")
+	}
+	if create.Path != "/fleet/api/v1/tasks" || create.BaseURLEnv != "OCTO_API_BASE_URL" {
+		t.Fatalf("task.create route = %s (%s)", create.Path, create.BaseURLEnv)
+	}
+	if create.RequestBody == nil {
+		t.Fatal("task.create request body ref was not resolved")
+	}
+	if _, ok := create.RequestBody.Properties["title"]; !ok {
+		t.Fatalf("task.create body properties = %v", create.RequestBody.Properties)
+	}
+
+	list, ok := r.GetOperation("task.list")
+	if !ok {
+		t.Fatal("task.list: not found")
+	}
+	if len(list.Parameters) < 2 || list.Parameters[0].Name == "" {
+		t.Fatalf("task.list parameter refs were not resolved: %+v", list.Parameters)
+	}
+}
+
+func TestLoopExtendedBusinessContract(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{
+		"workspace.list",
+		"label.create",
+		"project.resource.create",
+		"comment.reaction.add",
+		"attachment.upload",
+		"loop.skill.list",
+		"runtime.update_request.get",
+		"autopilot.delivery.replay",
+		"task.team_evaluation.record",
+	} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Errorf("%s: not found", id)
+			continue
+		}
+		if op.Service != "loop" || !strings.HasPrefix(op.Path, "/fleet/api/v1/") {
+			t.Errorf("%s: got service=%q path=%q", id, op.Service, op.Path)
+		}
+	}
+
+	op, ok := r.GetOperation("label.list")
+	if !ok {
+		t.Fatal("label.list: not found")
+	}
+	foundWorkspaceHeader := false
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "X-Workspace-ID" && parameter.In == "header" && parameter.FlagName == "workspace-id" {
+			foundWorkspaceHeader = true
+		}
+	}
+	if !foundWorkspaceHeader {
+		t.Errorf("label.list parameters = %+v, want X-Workspace-ID workspace-id flag", op.Parameters)
+	}
+}
+
+func TestLoopTaskUpdateIncludesReviewStatus(t *testing.T) {
+	r := MustNew()
+	update, ok := r.GetOperation("task.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("task.update typed request body not found")
+	}
+	status, ok := update.RequestBody.Properties["status"]
+	if !ok {
+		t.Fatalf("task.update status schema missing: %+v", update.RequestBody.Properties)
+	}
+	want := []any{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+	if !reflect.DeepEqual(status.Enum, want) {
+		t.Fatalf("task.update status enum = %#v, want %#v", status.Enum, want)
+	}
+}
+
+func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
+	r := MustNew()
+	create, ok := r.GetOperation("autopilot.create")
+	if !ok || create.RequestBody == nil {
+		t.Fatal("autopilot.create typed request body not found")
+	}
+	for _, field := range []string{"title", "assignee_id", "dispatch_mode", "task_title_template"} {
+		property, ok := create.RequestBody.Properties[field]
+		if !ok || property.Type != "string" {
+			t.Errorf("autopilot.create %s = %+v, want string", field, property)
+		}
+	}
+	dispatch := create.RequestBody.Properties["dispatch_mode"]
+	if !reflect.DeepEqual(dispatch.Enum, []any{"create_task", "direct_execution"}) {
+		t.Fatalf("dispatch_mode enum = %#v", dispatch.Enum)
+	}
+	if create.RequestBody.AdditionalProperties == nil || *create.RequestBody.AdditionalProperties {
+		t.Fatalf("autopilot.create additionalProperties = %v, want false", create.RequestBody.AdditionalProperties)
+	}
+	for _, legacy := range []string{"execution_mode", "issue_title_template"} {
+		if _, ok := create.RequestBody.Properties[legacy]; ok {
+			t.Errorf("autopilot.create exposes legacy field %q", legacy)
+		}
+	}
+
+	update, ok := r.GetOperation("autopilot.update")
+	if !ok || update.RequestBody == nil {
+		t.Fatal("autopilot.update typed request body not found")
+	}
+	if _, ok := update.RequestBody.Properties["dispatch_mode"]; !ok {
+		t.Fatalf("autopilot.update request = %+v", update.RequestBody.Properties)
+	}
+	if update.RequestBody.MinProperties != 1 {
+		t.Fatalf("autopilot.update minProperties = %d, want 1", update.RequestBody.MinProperties)
+	}
+
+	trigger, ok := r.GetOperation("autopilot.trigger")
+	if !ok {
+		t.Fatal("autopilot.trigger not found")
+	}
+	if trigger.RequestBody != nil {
+		t.Fatalf("autopilot.trigger must not expose an unused request body: %+v", trigger.RequestBody)
+	}
+
+	get, ok := r.GetOperation("autopilot.get")
+	if !ok || get.ResponseSchema == nil {
+		t.Fatal("autopilot.get typed response not found")
+	}
+	data, ok := get.ResponseSchema.Properties["data"]
+	if !ok {
+		t.Fatalf("autopilot.get data schema = %+v", data)
+	}
+	for _, field := range []string{"autopilot_id", "dispatch_mode", "task_title_template", "triggers"} {
+		if _, ok := data.Properties[field]; !ok {
+			t.Errorf("autopilot.get data schema missing %s: %+v", field, data.Properties)
+		}
+	}
+}
+
+func TestLoopComposedRequestSchemas(t *testing.T) {
+	r := MustNew()
+	member, ok := r.GetOperation("expert_team.member.add")
+	if !ok || member.RequestBody == nil {
+		t.Fatal("expert_team.member.add request body not found")
+	}
+	for _, field := range []string{"member_type", "member_id", "role"} {
+		if _, ok := member.RequestBody.Properties[field]; !ok {
+			t.Errorf("composed member request missing %s: %+v", field, member.RequestBody)
+		}
+	}
+
+	secret, ok := r.GetOperation("autopilot.signing_secret.set")
+	if !ok || secret.RequestBody == nil {
+		t.Fatal("autopilot.signing_secret.set request body not found")
+	}
+	property := secret.RequestBody.Properties["signing_secret"]
+	if !property.WriteOnly || len(property.AnyOf) != 2 {
+		t.Fatalf("signing_secret schema = %+v, want writeOnly anyOf", property)
+	}
+
+	quickCreate, ok := r.GetOperation("task.quick_create")
+	if !ok || quickCreate.ResponseSchema == nil {
+		t.Fatal("task.quick_create referenced 202 response schema not resolved")
+	}
+}
+
+func TestLoopNestedReferencedRequestSchemasAreResolved(t *testing.T) {
+	r := MustNew()
+	trigger, ok := r.GetOperation("autopilot.trigger_config.create")
+	if !ok || trigger.RequestBody == nil {
+		t.Fatal("autopilot.trigger_config.create request body not found")
+	}
+	eventFilters := trigger.RequestBody.Properties["event_filters"]
+	if eventFilters.Items == nil || eventFilters.Items.Ref != "" {
+		t.Fatalf("event_filters item schema was not resolved: %+v", eventFilters.Items)
+	}
+	if eventFilters.Items.AdditionalProperties == nil || *eventFilters.Items.AdditionalProperties {
+		t.Fatalf("event_filters items must reject unknown fields: %+v", eventFilters.Items)
+	}
+	if !reflect.DeepEqual(eventFilters.Items.Required, []string{"event"}) {
+		t.Fatalf("event_filters item required fields = %#v", eventFilters.Items.Required)
+	}
+}
+
+func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
+	r := MustNew()
+	for _, info := range r.ListOperations("loop") {
+		op, ok := r.GetOperation(info.ID)
+		if !ok {
+			t.Fatalf("%s: operation disappeared", info.ID)
+		}
+
+		workspaceHeaders := 0
+		requiredWorkspaceHeaders := 0
+		for _, parameter := range op.Parameters {
+			if parameter.Name == "X-Workspace-ID" && parameter.In == "header" && parameter.FlagName == "workspace-id" {
+				workspaceHeaders++
+				if parameter.Required {
+					requiredWorkspaceHeaders++
+				}
+			}
+		}
+
+		// Workspace collection and logical Runtime list operations are
+		// Space-scoped. Workspace path operations and every other Fleet business
+		// route must send the header selector used before member validation.
+		wantHeader := strings.HasPrefix(info.Path, "/fleet/api/v1/") &&
+			info.Path != "/fleet/api/v1/workspaces" &&
+			info.Path != "/fleet/api/v1/runtimes"
+		if wantHeader && workspaceHeaders != 1 {
+			t.Errorf("%s: workspace headers = %d, want exactly one", info.ID, workspaceHeaders)
+		}
+		if wantHeader && requiredWorkspaceHeaders != 1 {
+			t.Errorf("%s: required workspace headers = %d, want exactly one", info.ID, requiredWorkspaceHeaders)
+		}
+		if !wantHeader && workspaceHeaders != 0 {
+			t.Errorf("%s: workspace headers = %d, want none", info.ID, workspaceHeaders)
+		}
+	}
+}
+
+func TestLoopOperationsDeclareRisk(t *testing.T) {
+	r := MustNew()
+	for _, info := range r.ListOperations("loop") {
+		if info.Risk == "" {
+			t.Errorf("%s does not declare x-octo-risk", info.ID)
+		}
+	}
+}
+
+func TestLoopSpecUsesSupportedBearerAuthentication(t *testing.T) {
+	raw, err := specsFS.ReadFile("specs/loop.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"octo_session"`)) {
+		t.Fatal("Loop CLI contract advertises unsupported octo_session authentication")
 	}
 }
 
@@ -152,7 +455,13 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	if !ok || docType.Items == nil {
 		t.Fatal("docs.search docType item schema missing")
 	}
-	wantTypes := []any{"doc", "sheet", "board", "html"}
+	// html_ppt is a first-class document kind in octo-docs-backend's DOC_TYPES
+	// (src/db/docType.ts, "the SINGLE source of truth"), with its own
+	// /api/v1/ppt/** routes. It matters here because the CLI now enforces this
+	// enum locally: omitting a kind the backend accepts turns a working call into
+	// exit 2. cmd/service's requestSideVocabularies pins the same set with
+	// provenance.
+	wantTypes := []any{"doc", "sheet", "board", "html", "html_ppt"}
 	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
 		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}
@@ -421,6 +730,27 @@ func TestResolvesComponentRef(t *testing.T) {
 	}
 	if _, ok := op.ResponseSchema.Properties["matter"]; !ok {
 		t.Errorf("response schema: expected matter property after ref resolution; got %v", op.ResponseSchema.Properties)
+	}
+}
+
+func TestWorkspaceListResolvesTypedCollection(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("workspace.list")
+	if !ok {
+		t.Fatal("workspace.list not found")
+	}
+	if op.ResponseSchema == nil {
+		t.Fatal("response schema: nil")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Items == nil {
+		t.Fatalf("workspace.list data schema = %+v", data)
+	}
+	if data.Items.Ref != "" || data.Items.Properties["workspace_id"].Type != "string" {
+		t.Fatalf("workspace item schema was not resolved: %+v", data.Items)
+	}
+	if _, ok := op.ResponseSchema.Properties["pagination"]; !ok {
+		t.Fatalf("workspace.list response schema = %+v, want pagination", op.ResponseSchema.Properties)
 	}
 }
 

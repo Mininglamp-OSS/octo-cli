@@ -303,7 +303,7 @@
                 "required": ["uid"],
                 "properties": {
                   "uid": { "type": "string", "description": "the uid to grant access to" },
-                  "role": { "type": "string", "enum": ["reader"], "description": "capability to grant; defaults to 'reader' when omitted" }
+                  "role": { "type": "string", "enum": ["reader", "commenter", "writer"], "description": "capability to grant; defaults to 'reader' when omitted. Matches octo-docs-html AddGrant (internal/service/grants.go), whose own 400 text is \"role must be reader|commenter|writer\" — admin is refused there because admin identity comes from creator_uid, never the grants API" }
                 }
               }
             }

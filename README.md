@@ -12,10 +12,9 @@ deterministic taxonomy. There is no interactive I/O.
 
 ## Architecture
 
-octo-cli is **metadata-driven**. The entire command tree — 105 operations
-across 9 domains — is auto-registered at startup from OpenAPI 3.x specs
-embedded into the binary. Adding or changing an endpoint means editing a
-spec, not the code.
+octo-cli is **metadata-driven**. The command tree is auto-registered at startup
+from OpenAPI 3.x specs embedded into the binary. Adding or changing an endpoint
+means editing a spec, not the code.
 
 ```
 OpenAPI specs  ──►  Registry  ──►  Service Engine  ──►  Factory  ──►  Client  ──►  Output
@@ -26,8 +25,8 @@ Key properties:
 
 - **Thin client.** All business logic lives in backend services (matters,
   dmworkim). The CLI is transport, validation, and formatting.
-- **Multi-backend routing.** Each operation declares its base URL via
-  `x-octo-base-url`; the client selects the correct service per call.
+- **Unified gateway routing.** Each operation declares its complete
+  module-qualified path and uses `OCTO_API_BASE_URL`.
 - **Factory DI.** `internal/cmdutil.Factory` is the dependency container.
   No mutable package-level globals; tests inject stubs through `ConfigFunc`
   / `CredentialFunc` / `ClientFunc` / `RegistryFunc`.
@@ -40,6 +39,7 @@ Key properties:
 |-----------|-----|----------------------------------------------------------------|
 | `docs`    | 32  | Documents, spreadsheets & whiteboards — lifecycle, full-text search, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
 | `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
+| `drive`   | 42  | Network drive — spaces & members, folder/file tree, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 45 leaves total |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
@@ -48,6 +48,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
+| `loop`    | 126 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, projects, skills, automations, attachments, comments, labels, and related resources |
 
 ## Installation
 
@@ -101,7 +102,8 @@ curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/instal
 ```bash
 # Authenticate as a bot.
 export OCTO_BOT_TOKEN="bf_your_user_bot_token"
-export OCTO_API_BASE_URL="https://api.example.com"
+# Optional for test or self-hosted deployments; production is the default.
+# export OCTO_API_BASE_URL="https://im-test.deepminer.com.cn"
 
 # NOTE: the `matter` domain is temporarily withheld (backend API stabilizing).
 
@@ -135,6 +137,9 @@ octo-cli docs content get doc-123          # returns the body + base version tok
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
+
+# Fleet/Loop uses the same gateway under /fleet/api/v1.
+octo-cli loop task list --workspace-id <workspace-id>
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # Mounted HTML documents registered in docs-backend use the same search endpoint.
@@ -184,34 +189,73 @@ octo-cli api POST /v1/messages --data @body.json
 
 ## Authentication
 
-`octo-cli` is bot-only — there is no interactive user login. `OCTO_BOT_TOKEN`
-carries an **App Bot** (`app_*`), a **User Bot** (`bf_*`), or a **user API key**
-(`uk_*`, a real-person identity used mainly for message search):
+`octo-cli` is bot-only — there is no interactive user login. The token comes
+from `OCTO_TOKEN` (preferred) or `OCTO_BOT_TOKEN`, and carries an **App Bot**
+(`app_*`), a **User Bot** (`bf_*`), a **user API key** (`uk_*`, a real-person
+identity used for message search and drive), or a short-lived **Loop task
+credential** (`octo_loop_*`):
 
 | Prefix  | Type         | DM  | Group read | Group write | Thread | Voice | Search |
 |---------|--------------|-----|------------|-------------|--------|-------|--------|
 | `app_*` | App Bot      | yes | yes        | **no**      | **no** | **no**| **no** |
 | `bf_*`  | User Bot     | yes | yes        | yes         | yes    | yes   | yes    |
 | `uk_*`  | User API key | —   | —          | —           | —      | —     | yes    |
+| `octo_loop_*` | Loop task credential | Fleet policy | Fleet policy | Fleet policy | — | — | — |
+
+(`drive` accepts all three prefixes: `uk_*` acts as the real person, `bf_*` /
+`app_*` as the bot. A bot still has to be added as a member of a shared drive
+space, exactly like a person.)
 
 The CLI does not enforce capability locally; the backend rejects unsupported
-operations with `FORBIDDEN`. The one local exception: an `app_*` token running
-`message search` is rejected with a `validation` error before any request.
-`uk_*` tokens are routed to `/v1/user/*`; a `bf_*` token can search as a real
-person with `--on-behalf-of <uid>` (OBO, requires an active grant).
+operations with `FORBIDDEN`. Two local exceptions: an `app_*` token running
+`message search`, and a credential whose kind a domain's spec does not allow
+(`TOKEN_KIND_NOT_ALLOWED`) — both are `validation` errors raised before any
+request. `uk_*` tokens are routed to `/v1/user/*`; a `bf_*` token can search as
+a real person with `--on-behalf-of <uid>` (OBO, requires an active grant).
+
+### Token variables
+
+Two variables supply the token, in this order:
+
+| Priority | Source | Notes |
+|---|---|---|
+| 1 | stored profile | `octo-cli auth login`; select with `--bot-id` / `--profile` |
+| 2 | `OCTO_TOKEN` | preferred variable; any of the three token kinds |
+| 3 | `OCTO_BOT_TOKEN` | long-standing variable, fully supported |
+
+`OCTO_TOKEN` lets you run a single command as a different identity without
+disturbing an existing setup:
+
+```bash
+OCTO_TOKEN="$UK_KEY" octo-cli drive space list      # acts as the real person
+```
+
+The success envelope's `identity.source` names the variable actually used
+(`env:OCTO_TOKEN` or `env:OCTO_BOT_TOKEN`), so a mix-up is visible.
 
 ### API Base URL
 
 All backend services are accessed through a single API base URL.
+The value is a gateway origin (`http(s)://host[:port]`) rather than a
+service-specific path; query strings, fragments, credentials, and API paths are
+rejected.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Bot token (`app_*`, `bf_*`, or `uk_*`). Required.       |
-| `OCTO_API_BASE_URL`  | Unified API base URL for all services. Required.          |
+| `OCTO_TOKEN`        | Token (`app_*`, `bf_*`, or `uk_*`). Preferred; wins over `OCTO_BOT_TOKEN`. |
+| `OCTO_BOT_TOKEN`    | Token (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`). Used when `OCTO_TOKEN` is unset. |
+| `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
+| `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
+
+Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
+isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
+the restricted CLI policy but is not a security boundary against a process that
+can rewrite its own environment. In task mode, use the injected
+`OCTO_BOT_TOKEN`; `auth` and `config` diagnostics are intentionally unavailable.
 
 ## Output
 
@@ -243,6 +287,12 @@ Every failure prints an error envelope on **stderr** and exits non-zero:
 ```
 
 Exit codes: `3` auth, `2` validation/config, `1` everything else.
+
+Some failures are raised locally, before any request is sent: a missing required
+body field or one violating `minItems` (`VALIDATION_ERROR`), a value outside a
+spec-declared `enum` (`ENUM_NOT_ALLOWED`), and a malformed or out-of-range
+`uint64` id. These checks apply to the whole resolved body — promoted flags and
+`--data` alike — and to query parameters, so a bad value costs no round trip.
 
 ### Universal flags
 
@@ -285,6 +335,9 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-messaging`](./skills/octo-messaging/SKILL.md) — messages, groups,
   threads, event polling.
 - [`octo-files`](./skills/octo-files/SKILL.md) — files and bot housekeeping.
+- [`octo-drive`](./skills/octo-drive/SKILL.md) — network drive: spaces and
+  members, folder/file tree, upload/download, online-document mounts, share
+  links, invites, IM-attachment transfer.
 - [`octo-docs`](./skills/octo-docs/SKILL.md) — documents: lifecycle plus
   progressive-disclosure references. `SKILL.md` is a slim router; task detail
   lives in sibling files loaded on demand: `sheet.md` (spreadsheets), `doc.md`
