@@ -72,7 +72,7 @@
             }
           },
           {
-            "description": "updated | relevance | (default: creation-time DESC)",
+            "description": "updated (recently edited first); anything else falls back to creation-time DESC",
             "in": "query",
             "name": "sort",
             "schema": {
@@ -146,7 +146,7 @@
         "x-octo-risk": "read"
       },
       "post": {
-        "description": "Publish a new standalone expert owned by the caller. Send the flat ExpertAgentDetail body (name/summary required) via --data.",
+        "description": "Publish a new standalone expert owned by the caller. Send the flat ExpertAgentDetail body (name/summary/category/instruction required) via --data.",
         "operationId": "expert.create",
         "requestBody": {
           "content": {
@@ -155,7 +155,9 @@
                 "type": "object",
                 "required": [
                   "name",
-                  "summary"
+                  "summary",
+                  "category",
+                  "instruction"
                 ],
                 "properties": {
                   "name": {
@@ -168,7 +170,7 @@
                   },
                   "category": {
                     "type": "string",
-                    "description": "Category NAME, resolved from expert-category list"
+                    "description": "Category NAME, resolved from expert-category list (required; empty or unknown is rejected)"
                   },
                   "tags": {
                     "type": "array",
@@ -183,7 +185,7 @@
                   },
                   "instruction": {
                     "type": "string",
-                    "description": "System instruction for the expert"
+                    "description": "System instruction for the expert (required; must be non-empty)"
                   },
                   "mcp_config": {
                     "type": "string",
@@ -303,7 +305,7 @@
             }
           },
           {
-            "description": "updated | relevance | (default: creation-time DESC)",
+            "description": "updated (recently edited first); anything else falls back to creation-time DESC",
             "in": "query",
             "name": "sort",
             "schema": {
@@ -763,7 +765,7 @@
             }
           },
           {
-            "description": "updated | relevance | (default: creation-time DESC)",
+            "description": "updated (recently edited first); anything else falls back to creation-time DESC",
             "in": "query",
             "name": "sort",
             "schema": {
@@ -837,7 +839,7 @@
         "x-octo-risk": "read"
       },
       "post": {
-        "description": "Publish a new squad owned by the caller. Body carries generic fields + leader/strategies/dependencies/permission/members (>=1). Send via --data.",
+        "description": "Publish a new squad owned by the caller. Body carries generic fields (name/summary/category required) + leader/strategies/dependencies/permission/members (>=1 member with name/role/instruction). Send via --data.",
         "operationId": "squad.create",
         "requestBody": {
           "content": {
@@ -846,7 +848,9 @@
                 "type": "object",
                 "required": [
                   "name",
-                  "summary"
+                  "summary",
+                  "category",
+                  "members"
                 ],
                 "properties": {
                   "name": {
@@ -859,7 +863,7 @@
                   },
                   "category": {
                     "type": "string",
-                    "description": "Category NAME, resolved from expert-category list --kind squad"
+                    "description": "Category NAME, resolved from expert-category list --kind squad (required; empty or unknown is rejected)"
                   },
                   "tags": {
                     "type": "array",
@@ -874,7 +878,7 @@
                   },
                   "leader": {
                     "type": "string",
-                    "description": "Leader member_key (else the first member leads)"
+                    "description": "Leader display label (free text; defaults to the leading member's name). Which member leads is set by members[].is_leader, else the first member."
                   },
                   "strategies": {
                     "type": "array",
@@ -888,15 +892,15 @@
                     "description": "Permission mode"
                   },
                   "dependencies": {
-                    "type": "object",
-                    "description": "Inter-member dependency graph"
+                    "$ref": "#/components/schemas/SquadDependencies"
                   },
                   "members": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                      "type": "object"
+                      "$ref": "#/components/schemas/SquadMemberWrite"
                     },
-                    "description": "≥ 1 member: [{member_key, name, role, is_leader, instruction, mcp_config, skills}]"
+                    "description": "≥ 1 member (required); each needs name/role/instruction"
                   }
                 }
               }
@@ -1005,7 +1009,7 @@
             }
           },
           {
-            "description": "updated | relevance | (default: creation-time DESC)",
+            "description": "updated (recently edited first); anything else falls back to creation-time DESC",
             "in": "query",
             "name": "sort",
             "schema": {
@@ -1177,7 +1181,7 @@
                   },
                   "leader": {
                     "type": "string",
-                    "description": "Leader member_key (else the first member leads)"
+                    "description": "Leader display label (free text; defaults to the leading member's name). Which member leads is set by members[].is_leader, else the first member."
                   },
                   "strategies": {
                     "type": "array",
@@ -1191,15 +1195,15 @@
                     "description": "Permission mode"
                   },
                   "dependencies": {
-                    "type": "object",
-                    "description": "Inter-member dependency graph"
+                    "$ref": "#/components/schemas/SquadDependencies"
                   },
                   "members": {
                     "type": "array",
+                    "minItems": 1,
                     "items": {
-                      "type": "object"
+                      "$ref": "#/components/schemas/SquadMemberWrite"
                     },
-                    "description": "Full member list REPLACES the stored array: [{member_key, name, role, is_leader, instruction, mcp_config, skills}]"
+                    "description": "Full member list REPLACES the stored array (≥ 1 member; each needs name/role/instruction)"
                   }
                 }
               }
@@ -4330,6 +4334,72 @@
   },
   "components": {
     "schemas": {
+      "SquadDependencies": {
+        "type": "object",
+        "properties": {
+          "blocking": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Hard prerequisites (runtimes, MCP servers, models)"
+          },
+          "recommended": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Recommended extras"
+          }
+        },
+        "description": "External dependency lists; the server rejects any key other than blocking/recommended"
+      },
+      "SquadMemberWrite": {
+        "type": "object",
+        "required": [
+          "name",
+          "role",
+          "instruction"
+        ],
+        "properties": {
+          "member_key": {
+            "type": "string",
+            "description": "Stable member key (letters/digits/[._-]; server default member_NN)"
+          },
+          "template_id": {
+            "type": "string",
+            "description": "Template id (server default expert-{squad_id}-NN)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Member display name (required)"
+          },
+          "role": {
+            "type": "string",
+            "description": "Member role label (required)"
+          },
+          "is_leader": {
+            "type": "boolean",
+            "description": "Leader flag; exactly one leader persists (else the first member)"
+          },
+          "instruction": {
+            "type": "string",
+            "description": "Member system instruction (required; must be non-empty)"
+          },
+          "mcp_config": {
+            "type": "string",
+            "description": "Raw mcpServers config as a JSON string"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Agent-Skill packages: [{name, upload_object_key?, content?, file_name?, file_size?}]"
+          }
+        },
+        "description": "One squad member on a write body"
+      },
       "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.CursorList-internal_api_handler_skill_SkillResponse": {
         "properties": {
           "data": {

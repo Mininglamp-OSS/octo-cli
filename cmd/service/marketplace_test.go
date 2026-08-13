@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
@@ -174,15 +175,101 @@ func TestMarketplaceExpertCreateRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"expert_id":"e1"}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x"}`})
+	root.SetArgs([]string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x","category":"研发工具","instruction":"你是资深后端架构师"}`})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/experts" {
 		t.Errorf("got %s %s, want POST /market/api/v1/experts", gotMethod, gotPath)
 	}
-	if gotBody["name"] != "后端架构师" || gotBody["summary"] != "x" {
+	if gotBody["name"] != "后端架构师" || gotBody["summary"] != "x" ||
+		gotBody["category"] != "研发工具" || gotBody["instruction"] != "你是资深后端架构师" {
 		t.Errorf("body = %#v", gotBody)
+	}
+}
+
+// TestMarketplaceSquadCreateRequest pins the happy path through the strict
+// nested member schema: a valid --data body (members with name/role/instruction)
+// must pass local validation and reach the wire intact.
+func TestMarketplaceSquadCreateRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"squad_id":"s1"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "squad", "create", "--data", `{
+		"name": "研发交付团",
+		"summary": "x",
+		"category": "研发工具",
+		"dependencies": {"blocking": ["git-mcp"], "recommended": []},
+		"members": [
+			{"name": "架构师", "role": "评审", "instruction": "评审服务边界", "is_leader": true},
+			{"member_key": "m2", "name": "后端", "role": "实现", "instruction": "实现接口", "skills": [{"name": "清单"}]}
+		]
+	}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/squads" {
+		t.Errorf("got %s %s, want POST /market/api/v1/squads", gotMethod, gotPath)
+	}
+	members, _ := gotBody["members"].([]any)
+	if len(members) != 2 {
+		t.Fatalf("members = %#v, want 2 entries forwarded verbatim", gotBody["members"])
+	}
+	second, _ := members[1].(map[string]any)
+	if second["member_key"] != "m2" || second["instruction"] != "实现接口" {
+		t.Errorf("members[1] = %#v", second)
+	}
+}
+
+// TestMarketplaceExpertSquadCreateRequiredFields pins the client-side schema
+// validation that mirrors the backend's write rules: expert create requires
+// category + instruction, and squad create requires >= 1 member each carrying
+// name/role/instruction. All three must fail locally, before any request.
+func TestMarketplaceExpertSquadCreateRequiredFields(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "expert create without category/instruction",
+			args: []string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x"}`},
+			want: "category",
+		},
+		{
+			name: "squad create with empty members",
+			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[]}`},
+			want: "at least 1 item",
+		},
+		{
+			name: "squad member without instruction",
+			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[{"name":"架构师","role":"评审"}]}`},
+			want: "members[0].instruction",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var backendHits atomic.Int32
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				backendHits.Add(1)
+			})
+			root.SetArgs(tc.args)
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("execute error = %v, want validation error containing %q", err, tc.want)
+			}
+			if backendHits.Load() != 0 {
+				t.Error("request must not be sent when local body validation fails")
+			}
+		})
 	}
 }
 

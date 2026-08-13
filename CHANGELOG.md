@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli marketplace expert` / `squad` families** — CRUD, `mine` lists,
+  taxonomy (`expert-category` / `expert-tag`), viewable `skillmd get`, presigned
+  `expert-skill-upload create` / `skill-download` for the Expert Marketplace
+  (专家/专家团). Write bodies are validated client-side against the backend's
+  rules before any request is sent: expert create requires
+  `name`/`summary`/`category`/`instruction`; squad create additionally requires
+  ≥ 1 `members[]` entry, each with `name`/`role`/`instruction` (errors name the
+  exact field, e.g. `members[0].instruction`). The install-to-Loop endpoints
+  (`POST /experts|squads/{id}/install`) are intentionally not exposed.
 - **`octo-cli docs search`** — permission-scoped full-text search across online
   documents, sheets, boards, and mounted HTML documents registered in docs-backend
   via `POST /v1/bot/docs/search`. Supports repeatable `--doc-type` filters, manual

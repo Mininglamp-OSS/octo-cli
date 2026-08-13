@@ -46,8 +46,8 @@ octo-cli marketplace expert get <expert-id>
   (repeat the flag to combine). `category` is a `category_id`; `all` disables
   the filter. Resolve ids and live tag names from `expert-category list` and
   `expert-tag list` for the current Space.
-- `--sort` is `updated` or `relevance` (needs a non-empty `--keyword`);
-  otherwise newest-first.
+- `--sort updated` surfaces recently edited records first; anything else
+  (including omitting the flag) sorts newest-first. There is no relevance mode.
 - Use the immutable `expert_id` / `squad_id`, never a name.
 
 The `squad` family is identical: `squad list`, `squad get <squad-id>`,
@@ -67,7 +67,8 @@ squad carries `members[]`), so submit them as JSON via `--data`. Show the target
 and the intended change, then continue only after explicit confirmation.
 
 ```bash
-# Create a standalone expert (name + summary required; new records publish public)
+# Create a standalone expert (name/summary/category/instruction required;
+# new records publish public)
 octo-cli marketplace expert create --data '{
   "name": "后端架构师",
   "summary": "评审服务边界、数据模型和可靠性方案。",
@@ -91,9 +92,14 @@ octo-cli marketplace expert update <expert-id> --data '{"summary":"新的一句�
   visibility; `system` is rejected).
 
 For a **squad**, the body adds `leader` / `strategies` / `dependencies` /
-`permission` / `members` (≥ 1 member; each member is `{member_key, name, role,
-is_leader, instruction, mcp_config, skills}`). On update, sending `members`
-**replaces the whole array** — always submit the complete member list.
+`permission` / `members`. `category` and `members` (≥ 1) are required on
+create; each member is `{member_key?, template_id?, name, role, is_leader?,
+instruction, mcp_config?, skills?}` (`?` marks the optional fields). `leader`
+is a display label (free text) — which member actually leads is chosen by
+`is_leader` (else the first member). `dependencies` accepts only
+`{blocking: [..], recommended: [..]}` string lists; any other key is
+rejected. On update, sending `members` **replaces the whole array** — always
+submit the complete member list.
 
 ## Delete (owner only, confirmed)
 
