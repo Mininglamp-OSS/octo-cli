@@ -128,6 +128,14 @@ octo-cli thread create group-abc --name "design review"
 octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
 
+# Agent Mail — policy-aware send; the server may accept it or save a Draft
+# depending on the mailbox's current outbound mode.
+octo-cli mail message send-intent \
+  --to recipient@example.com --subject "Status update" --text "Ready." \
+  --idempotency-key "send-example-001"
+octo-cli mail thread get T123
+octo-cli mail draft list
+
 # Docs — create/list/search, then read and incrementally edit the live body.
 octo-cli docs create --title "Design notes"
 octo-cli docs list --sort updatedAt:desc
@@ -181,6 +189,7 @@ octo-cli schema --list              # all operations across all domains
 octo-cli schema --list message      # operations in one domain
 octo-cli schema message.send        # request/response schema for one op
 octo-cli config show                # resolved config (token masked)
+octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile
 
 # Generic passthrough for ops that aren't auto-registered.
 octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
@@ -350,6 +359,8 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
   **separate backend** from `octo-docs`): publish immutable versions, drafts,
   share codes & per-uid grants, media assets, inline comments, agent element
   read/replace.
+- [`octo-mail`](./skills/octo-mail/SKILL.md) — Agent Mail authorization,
+  mailbox access, message handling, drafts, attachments, and delivery status.
 - [`octo-summary`](./skills/octo-summary/SKILL.md) — create owner-only summaries
   from explicit sources, then discover, read, and cite summaries visible to the
   personal Agent's human owner. **Temporarily withheld** while the create
@@ -360,6 +371,7 @@ These docs are also **embedded in the binary**, so a released `octo-cli` ships t
 
 ```bash
 octo-cli skills                       # list embedded skills
+octo-cli skills octo-mail             # load the official Agent Mail guide
 octo-cli skills octo-docs             # print one skill (SKILL.md + its references)
 octo-cli skills --install ~/.config/octo/skills   # write every skill (SKILL.md + references) to a dir
 ```

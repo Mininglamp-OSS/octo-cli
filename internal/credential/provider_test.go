@@ -11,6 +11,7 @@ import (
 func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
 	t.Setenv("OCTO_TOKEN", "")
 	t.Setenv("OCTO_BOT_TOKEN", "app_xxx")
+	t.Setenv("OCTO_BOT_ID", "robot-1")
 	t.Setenv("OCTO_SPACE_ID", "space-1")
 
 	cred, err := NewEnvProvider().Resolve()
@@ -25,6 +26,12 @@ func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
 	}
 	if cred.SpaceID != "space-1" {
 		t.Errorf("SpaceID = %q", cred.SpaceID)
+	}
+	if cred.RobotID != "robot-1" {
+		t.Errorf("RobotID = %q", cred.RobotID)
+	}
+	if cred.BotKind != "app_bot" {
+		t.Errorf("BotKind = %q", cred.BotKind)
 	}
 	if cred.Source != "env:OCTO_BOT_TOKEN" {
 		t.Errorf("Source = %q", cred.Source)
@@ -84,6 +91,7 @@ func TestEnvProvider_NoTokenReturnsNil(t *testing.T) {
 func TestEnvProvider_TrimsWhitespace(t *testing.T) {
 	t.Setenv("OCTO_TOKEN", "")
 	t.Setenv("OCTO_BOT_TOKEN", "  app_xxx  ")
+	t.Setenv("OCTO_BOT_ID", "  robot-1  ")
 
 	cred, err := NewEnvProvider().Resolve()
 	if err != nil {
@@ -91,6 +99,9 @@ func TestEnvProvider_TrimsWhitespace(t *testing.T) {
 	}
 	if cred.Token != "app_xxx" {
 		t.Errorf("Token should be trimmed, got %q", cred.Token)
+	}
+	if cred.RobotID != "robot-1" {
+		t.Errorf("RobotID should be trimmed, got %q", cred.RobotID)
 	}
 }
 

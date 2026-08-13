@@ -474,6 +474,12 @@ func TestSkipValidation(t *testing.T) {
 	if !skipValidation(findCmd("config", "show")) {
 		t.Error("config show should skip via parent")
 	}
+	if !skipValidation(findCmd("auth")) {
+		t.Error("top-level auth should skip validation")
+	}
+	if skipValidation(findCmd("mail", "auth", "login")) {
+		t.Error("nested mail auth login should NOT skip validation")
+	}
 
 	// Pick any real service leaf — should NOT skip.
 	svcLeaf := findCmd("event", "list")

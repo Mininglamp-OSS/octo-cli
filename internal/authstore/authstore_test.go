@@ -43,6 +43,28 @@ func TestStore_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestStore_UpdateProfileAPIBaseURLChangesMetadataOnly(t *testing.T) {
+	s := newTestStore(t)
+	meta := ProfileMeta{APIBaseURL: "https://old.example", RobotID: "cli_demo"}
+	if err := s.SaveProfile("prod", &meta, "app_secret_token"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.UpdateProfileAPIBaseURL("prod", "https://new.example"); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := s.LoadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profiles["prod"].APIBaseURL != "https://new.example" || profiles["prod"].RobotID != "cli_demo" {
+		t.Fatalf("profile metadata = %+v", profiles["prod"])
+	}
+	if token, err := s.GetToken("prod"); err != nil || token != "app_secret_token" {
+		t.Fatalf("stored token = %q, %v", token, err)
+	}
+}
+
 func TestStore_CiphertextHidesToken(t *testing.T) {
 	s := newTestStore(t)
 	const secret = "app_super_secret_value"

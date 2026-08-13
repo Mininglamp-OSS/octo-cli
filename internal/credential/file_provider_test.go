@@ -127,6 +127,27 @@ func TestFileProvider_ZeroProfilesFallsThrough(t *testing.T) {
 	}
 }
 
+func TestFileProvider_ZeroProfilesWithExplicitBotIDErrors(t *testing.T) {
+	s := fileTestStore(t, nil)
+	_, err := NewFileProvider(s, "", "runtime-bot").Resolve()
+	if got := exitType(t, err); got != "auth_error" {
+		t.Errorf("type = %q, want auth_error", got)
+	}
+}
+
+func TestFileProvider_ZeroProfilesWithEnvironmentBotIDFallsThrough(t *testing.T) {
+	s := fileTestStore(t, nil)
+	provider := NewFileProvider(s, "", "runtime-bot")
+	provider.AllowEmptyStoreBotIDFallback = true
+	cred, err := provider.Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if cred != nil {
+		t.Errorf("expected nil cred to fall through to env, got %+v", cred)
+	}
+}
+
 func TestFileProvider_NilStore(t *testing.T) {
 	cred, err := NewFileProvider(nil, "", "").Resolve()
 	if err != nil || cred != nil {

@@ -282,6 +282,91 @@ func TestDo_NoRetryFlag(t *testing.T) {
 	}
 }
 
+func TestDo_RequestDisableRetry(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"UPSTREAM_UNAVAILABLE","message":"x"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/mail-side-effect",
+		DisableRetry: true,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (request-level DisableRetry)", got)
+	}
+}
+
+func TestMarkResultUnknown(t *testing.T) {
+	got := output.AsExitError(markResultUnknown(output.ErrNetwork("timeout", "retry")))
+	if got == nil {
+		t.Fatal("expected ExitError")
+	}
+	if got.Code != "RESULT_UNKNOWN" {
+		t.Fatalf("code = %q, want RESULT_UNKNOWN", got.Code)
+	}
+	if !strings.Contains(got.Hint, "do not retry automatically") {
+		t.Fatalf("hint = %q", got.Hint)
+	}
+
+	apiErr := output.ErrAPI("FORBIDDEN", "denied", "")
+	if markResultUnknown(apiErr) != apiErr {
+		t.Fatal("non-network error must remain unchanged")
+	}
+}
+
+func TestDo_AmbiguousGatewayFailureReturnsResultUnknown(t *testing.T) {
+	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"code":"GATEWAY_FAILURE","message":"gateway failure"}}`))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Method:                         http.MethodPost,
+				Path:                           "/mail-side-effect",
+				DisableRetry:                   true,
+				UnknownOutcomeOnNetworkFailure: true,
+			})
+			got := output.AsExitError(err)
+			if got == nil || got.Code != "RESULT_UNKNOWN" {
+				t.Fatalf("error = %#v, want RESULT_UNKNOWN", got)
+			}
+		})
+	}
+
+	t.Run("rate limit remains definitive", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"slow down"}}`))
+		}))
+		defer srv.Close()
+
+		c := newTestClient(srv)
+		_, err := c.Do(context.Background(), &Request{
+			Method:                         http.MethodPost,
+			Path:                           "/mail-side-effect",
+			DisableRetry:                   true,
+			UnknownOutcomeOnNetworkFailure: true,
+		})
+		got := output.AsExitError(err)
+		if got == nil || got.Code == "RESULT_UNKNOWN" {
+			t.Fatalf("error = %#v, want definitive rate-limit error", got)
+		}
+	})
+}
+
 func TestDo_NoRetryOn400(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

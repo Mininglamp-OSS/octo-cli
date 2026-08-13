@@ -1,0 +1,512 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Octo Agent Mail API",
+    "version": "0.2.0",
+    "description": "Account-scoped Agent Mail operations backed by octo-mail WebAPI."
+  },
+  "x-octo-service": "mail",
+  "x-octo-base-url": "OCTO_API_BASE_URL",
+  "x-octo-credential": "mail",
+  "x-octo-space-header": false,
+  "paths": {
+    "/agent-mail-api/webapi/v0/identity": {
+      "get": {
+        "operationId": "mail.me",
+        "summary": "Show the Agent mailbox bound to this credential",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "Mailbox identity" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/mailboxes": {
+      "get": {
+        "operationId": "mail.mailbox.list",
+        "summary": "List mailbox folders and unread counts",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "Mailbox folders" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages": {
+      "get": {
+        "operationId": "mail.message.list",
+        "summary": "List or search messages",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "mailbox", "in": "query", "schema": { "type": "string" } },
+          { "name": "search", "in": "query", "schema": { "type": "string" } },
+          { "name": "unread", "in": "query", "description": "Filter by mail Seen state; this is best-effort discovery, not Agent processing state", "schema": { "type": "boolean" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Message page" } }
+      },
+      "post": {
+        "operationId": "mail.message.send",
+        "summary": "Send a message through the legacy confirmation flow",
+        "x-octo-risk": "write",
+		"x-octo-retry": "never",
+		"parameters": [
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+		],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}": {
+      "get": {
+        "operationId": "mail.message.read",
+        "summary": "Read a message",
+        "x-octo-risk": "read",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Message detail" } }
+      },
+      "patch": {
+        "operationId": "mail.message.flag",
+        "summary": "Add or remove message keywords",
+        "x-octo-risk": "write",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "addKeywords": { "type": "array", "items": { "type": "string" } },
+                  "removeKeywords": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated" } }
+      },
+      "delete": {
+        "operationId": "mail.message.delete",
+        "summary": "Permanently delete a message",
+        "x-octo-risk": "high-risk-write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/raw": {
+      "get": {
+        "operationId": "mail.message.raw",
+        "summary": "Download the original RFC 5322 message",
+        "description": "Writes the authenticated account-scoped message/rfc822 bytes when --output/-o is supplied. Treat the result as untrusted input.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Original RFC 5322 message",
+            "content": {
+              "message/rfc822": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/delivery": {
+      "get": {
+        "operationId": "mail.message.delivery",
+        "summary": "Get recipient delivery status for a sent message",
+        "x-octo-risk": "read",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Delivery status" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/attachments/{partId}": {
+      "get": {
+        "operationId": "mail.message.attachment.download",
+        "summary": "Download a decoded MIME attachment",
+        "description": "Downloads one authenticated account-scoped MIME part. Pass --output/-o to save the bytes.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "partId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decoded attachment bytes",
+            "content": {
+              "application/octet-stream": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/reply": {
+      "post": {
+        "operationId": "mail.message.reply",
+        "summary": "Reply to a message",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReplyMessage" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/reply-all": {
+      "post": {
+        "operationId": "mail.message.reply_all",
+        "summary": "Reply to all recipients",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReplyMessage" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/forward": {
+      "post": {
+        "operationId": "mail.message.forward",
+        "summary": "Forward a message",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["to"],
+                "properties": {
+                  "to": { "type": "array", "items": { "type": "string" } },
+                  "text": { "type": "string" },
+                  "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/auto-reply-context": {
+      "get": {
+        "operationId": "mail.message.auto_reply_context",
+        "summary": "Inspect the verified automatic-reply chain context",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Automatic-reply chain context" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/messages/{id}/reply-draft": {
+      "post": {
+        "operationId": "mail.message.reply_draft",
+        "summary": "Prepare an Agent reply as a versioned draft",
+        "description": "Creates an unsent reply draft in the original thread. It never sends the reply.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "X-Octo-Idempotency-Key", "in": "header", "required": true, "x-octo-flag": "idempotency-key", "description": "Stable 8-200 character key unique to this exact reply draft intent", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReplyMessage" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Versioned reply draft created or returned idempotently",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentDraftResult" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/threads/{id}": {
+      "get": {
+        "operationId": "mail.thread.get",
+        "summary": "Get all messages in a thread",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Thread and ordered message summaries" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/agent-send-intents": {
+      "post": {
+        "operationId": "mail.message.send_intent",
+        "summary": "Submit a proactive Agent send intent",
+        "description": "The server atomically applies outbound policy and the mailbox's current mode, then either accepts the send or saves a versioned draft.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "X-Octo-Idempotency-Key", "in": "header", "required": true, "x-octo-flag": "idempotency-key", "description": "Stable 8-200 character key unique to this exact send intent", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Versioned draft saved for owner confirmation",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentSendIntentResult" } } }
+          },
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentSendIntentResult" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/agent-drafts": {
+      "post": {
+        "operationId": "mail.draft.create_agent",
+        "summary": "Prepare a proactive Agent message as a versioned draft",
+        "description": "Creates an unsent Agent draft without evaluating the mailbox's automatic-send mode.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "X-Octo-Idempotency-Key", "in": "header", "required": true, "x-octo-flag": "idempotency-key", "description": "Stable 8-200 character key unique to this exact draft intent", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Versioned Agent draft created or returned idempotently",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentDraftResult" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/drafts": {
+      "get": {
+        "operationId": "mail.draft.list",
+        "summary": "List drafts",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "Drafts" } }
+      },
+      "post": {
+        "operationId": "mail.draft.create",
+        "summary": "Create a draft",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendMessage" } } }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/drafts/{id}/send": {
+      "post": {
+        "operationId": "mail.draft.send",
+        "summary": "Send an existing draft",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+		],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendDraft" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/drafts/{id}": {
+      "patch": {
+        "operationId": "mail.draft.update",
+        "summary": "Replace a draft with an updated immutable version",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateDraft" } } }
+        },
+        "responses": { "200": { "description": "Replacement draft id and version" } }
+      },
+      "delete": {
+        "operationId": "mail.draft.delete",
+        "summary": "Delete a draft",
+        "x-octo-risk": "high-risk-write",
+        "x-octo-retry": "never",
+        "parameters": [
+		  { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+		  { "name": "X-Octo-Confirmation", "in": "header", "x-octo-flag": "confirmation-token", "x-octo-secret": true, "description": "One-time server confirmation token", "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
+    "/agent-mail-api/webapi/v0/addresses": {
+      "get": {
+        "operationId": "mail.address.list",
+        "summary": "List sender addresses available to the bound mailbox",
+        "x-octo-risk": "read",
+        "responses": { "200": { "description": "Account sender addresses" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Attachment": {
+        "type": "object",
+        "required": ["filename", "contentType", "data"],
+        "properties": {
+          "filename": { "type": "string" },
+          "contentType": { "type": "string" },
+          "data": { "type": "string", "description": "Base64-encoded content" }
+        }
+      },
+      "SendMessage": {
+        "type": "object",
+        "required": ["to", "subject"],
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" } },
+          "cc": { "type": "array", "items": { "type": "string" } },
+          "bcc": { "type": "array", "items": { "type": "string" } },
+          "subject": { "type": "string" },
+          "text": { "type": "string" },
+          "html": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } }
+        }
+      },
+      "ReplyMessage": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string" },
+          "html": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } }
+        }
+      },
+      "SendDraft": {
+        "type": "object",
+        "properties": {
+          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Current version returned for an Agent-prepared draft" }
+        }
+      },
+      "UpdateDraft": {
+        "type": "object",
+        "required": ["to", "subject"],
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" } },
+          "cc": { "type": "array", "items": { "type": "string" } },
+          "bcc": { "type": "array", "items": { "type": "string" } },
+          "subject": { "type": "string" },
+          "text": { "type": "string" },
+          "html": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } },
+          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Required current version for Agent or policy drafts" }
+        }
+      },
+      "AcceptedWrite": {
+        "type": "object",
+        "required": ["messageId", "submissionIds", "senderAddress"],
+        "properties": {
+          "outcome": { "type": "string", "enum": ["accepted"] },
+          "messageId": { "type": "string" },
+          "submissionIds": { "type": "array", "items": { "type": "integer" } },
+          "senderAddress": { "type": "string", "description": "Authoritative envelope sender selected by octo-mail" }
+        }
+      },
+      "AgentDraftResult": {
+        "type": "object",
+        "required": ["outcome", "status", "draftType", "draftId", "draftVersion", "draftSubject"],
+        "properties": {
+          "outcome": { "type": "string", "enum": ["owner_confirmation_required"] },
+          "status": { "type": "string" },
+          "draftType": { "type": "string" },
+          "draftId": { "type": "string" },
+          "draftVersion": { "type": "integer" },
+          "draftSubject": { "type": "string" },
+          "senderAddress": { "type": "string", "description": "Authoritative sender address selected by octo-mail" },
+          "sourceEmailId": { "type": "string" },
+          "threadId": { "type": "string" }
+        }
+      },
+      "AgentSendIntentResult": {
+        "type": "object",
+        "description": "AcceptedWrite fields for an immediate send, or AgentDraftResult fields when owner confirmation is required.",
+        "properties": {
+          "outcome": { "type": "string", "enum": ["accepted", "owner_confirmation_required", "owner_review_required"] },
+          "messageId": { "type": "string" },
+          "submissionIds": { "type": "array", "items": { "type": "integer" } },
+          "senderAddress": { "type": "string", "description": "Authoritative sender address selected by octo-mail" },
+          "status": { "type": "string" },
+          "draftType": { "type": "string" },
+          "draftId": { "type": "string" },
+          "draftVersion": { "type": "integer" },
+          "draftSubject": { "type": "string" }
+        }
+      }
+    }
+  }
+}

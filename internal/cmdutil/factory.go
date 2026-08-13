@@ -5,10 +5,12 @@ package cmdutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -34,9 +36,9 @@ type GlobalOptions struct {
 	PageAll bool
 	PageMax int
 
-	// Profile selects a stored credential by friendly name; BotID selects (and
-	// asserts) it by robot id. BotID falls back to OCTO_BOT_ID when the flag is
-	// empty. Both feed the credential chain's FileProvider.
+	// Profile and BotID are explicit stored-profile selectors. When BotID is
+	// empty, OCTO_BOT_ID may instead label an environment credential if the
+	// profile store is empty.
 	Profile string
 	BotID   string
 }
@@ -48,10 +50,12 @@ type Factory struct {
 	IOStreams *IOStreams
 	Globals   *GlobalOptions
 
-	ConfigFunc     func() (*config.Config, error)
-	CredentialFunc func() (*credential.BotCredential, error)
-	ClientFunc     func() (*client.Client, error)
-	RegistryFunc   func() *registry.Registry
+	ConfigFunc         func() (*config.Config, error)
+	CredentialFunc     func() (*credential.BotCredential, error)
+	ClientFunc         func() (*client.Client, error)
+	MailCredentialFunc func(context.Context) (*credential.MailCredential, error)
+	MailClientFunc     func(context.Context) (*client.Client, error)
+	RegistryFunc       func() *registry.Registry
 
 	// ErrorEmitted is set to true after EmitError writes an envelope to
 	// stderr. The top-level main func checks this to avoid double-emitting
@@ -59,11 +63,17 @@ type Factory struct {
 	ErrorEmitted bool
 
 	// Cached resolutions.
-	config *config.Config
-	cred   *credential.BotCredential
-	cli    *client.Client
-	reg    *registry.Registry
-	store  *authstore.Store
+	config   *config.Config
+	cred     *credential.BotCredential
+	cli      *client.Client
+	mailCred *credential.MailCredential
+	mailCLI  *client.Client
+	// botIdentityVerified records that the active Bot id is trusted: either it
+	// was obtained from the authoritative registration endpoint or recovered
+	// from an exact local Mail binding for the active Bot-token fingerprint.
+	botIdentityVerified bool
+	reg                 *registry.Registry
+	store               *authstore.Store
 }
 
 // NewDefaultFactory wires the production providers: config from env, cred from
@@ -122,6 +132,8 @@ func NewDefaultFactory() *Factory {
 		return cli, nil
 	}
 
+	configureMailProviders(f)
+
 	f.RegistryFunc = func() *registry.Registry {
 		if f.reg != nil {
 			return f.reg
@@ -132,6 +144,79 @@ func NewDefaultFactory() *Factory {
 	}
 
 	return f
+}
+
+func configureMailProviders(f *Factory) {
+	f.MailCredentialFunc = func(ctx context.Context) (*credential.MailCredential, error) {
+		if f.mailCred != nil {
+			return f.mailCred, nil
+		}
+		// Mail credentials are stored under RobotID + SpaceID + fingerprints of
+		// the API origin and Bot token that completed authorization. Exact lookup
+		// therefore releases no mailbox credential after an origin or token swap
+		// and needs no live Bot registration call on each command (including
+		// --dry-run).
+		bot, err := f.CredentialFunc()
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := f.ConfigFunc()
+		if err != nil {
+			return nil, err
+		}
+		store, err := f.AuthStore()
+		if err != nil {
+			return nil, err
+		}
+		token, binding, err := storedMailCredential(store, bot, cfg.APIBaseURL)
+		if err != nil {
+			if errors.Is(err, authstore.ErrMailCredentialNotFound) {
+				return nil, output.ErrValidation(
+					"Agent Mail is not connected for the active Bot",
+					"complete Agent Mail authorization for the current Bot",
+				)
+			}
+			if errors.Is(err, authstore.ErrMailCredentialAmbiguous) {
+				return nil, output.ErrValidation(
+					"multiple Agent Mail connections match the active Bot",
+					"pass --space <space_id> to select one",
+				)
+			}
+			return nil, err
+		}
+		bot.RobotID = binding.RobotID
+		bot.SpaceID = binding.SpaceID
+		f.cred = bot
+		f.botIdentityVerified = true
+		f.mailCred = &credential.MailCredential{
+			Token: token, BotID: bot.RobotID, BotProfile: bot.Profile,
+			Source: "bot:" + binding.RobotID + "/" + binding.SpaceID,
+		}
+		return f.mailCred, nil
+	}
+
+	f.MailClientFunc = func(ctx context.Context) (*client.Client, error) {
+		if f.mailCLI != nil {
+			return f.mailCLI, nil
+		}
+		cfg, err := f.ConfigFunc()
+		if err != nil {
+			return nil, err
+		}
+		cred, err := f.MailCredentialFunc(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cli := client.NewMail(cfg, cred, client.Options{
+			Verbose: f.Globals.Verbose,
+			DryRun:  f.Globals.DryRun,
+			NoRetry: f.Globals.NoRetry,
+			Timeout: f.Globals.Timeout,
+			ErrOut:  f.IOStreams.ErrOut,
+		})
+		f.mailCLI = cli
+		return cli, nil
+	}
 }
 
 // buildConfig loads the env config and reflects the resolved credential into it
@@ -183,11 +268,15 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 		return nil, err
 	}
 	botID := f.Globals.BotID
+	allowEmptyStoreBotIDFallback := false
 	if botID == "" {
 		botID = os.Getenv(config.EnvBotID)
+		allowEmptyStoreBotIDFallback = strings.TrimSpace(botID) != ""
 	}
+	fileProvider := credential.NewFileProvider(store, f.Globals.Profile, botID)
+	fileProvider.AllowEmptyStoreBotIDFallback = allowEmptyStoreBotIDFallback
 	chain := credential.NewChain(
-		credential.NewFileProvider(store, f.Globals.Profile, botID),
+		fileProvider,
 		credential.NewEnvProvider(),
 	)
 	cred, err := chain.Resolve()
@@ -197,7 +286,45 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		cred.SpaceID = f.Globals.Space
 	}
+	if cred.Profile == "" && botID != "" {
+		cred.RobotID = botID
+	}
+	if cred.BotKind == "" {
+		cred.BotKind = credential.TokenKind(cred.Token)
+	}
 	return cred, nil
+}
+
+func storedMailCredential(store *authstore.Store, bot *credential.BotCredential, apiOrigin string) (string, authstore.MailBinding, error) {
+	if bot == nil {
+		return "", authstore.MailBinding{}, errors.New("Bot credential is required")
+	}
+	return store.FindMailCredential(
+		strings.TrimSpace(bot.RobotID),
+		strings.TrimSpace(bot.SpaceID),
+		bot.Token,
+		apiOrigin,
+	)
+}
+
+// MailBindingKeyForBot derives the local credential-store key without
+// persisting the Bot token itself. Mail authorization and Mail request paths
+// share this helper so Space, origin, and token binding cannot drift between
+// them.
+func MailBindingKeyForBot(bot *credential.BotCredential, apiOrigin string) (string, error) {
+	if bot == nil || strings.TrimSpace(bot.RobotID) == "" {
+		return "", output.ErrValidation(
+			"Agent Mail requires a resolved Bot id",
+			"use a stored profile or set OCTO_BOT_ID for the runtime Bot",
+		)
+	}
+	if strings.TrimSpace(bot.SpaceID) == "" {
+		return "", output.ErrValidation(
+			"Agent Mail requires a Space",
+			"pass --space <space_id> or set OCTO_SPACE_ID",
+		)
+	}
+	return authstore.MailBindingKey(bot.RobotID, bot.SpaceID, bot.Token, apiOrigin)
 }
 
 // buildTaskCredential is deliberately separate from the normal provider
@@ -282,6 +409,124 @@ func (f *Factory) Credential() (*credential.BotCredential, error) { return f.Cre
 // Client returns the resolved HTTP client (cached).
 func (f *Factory) Client() (*client.Client, error) { return f.ClientFunc() }
 
+// MailCredential returns the account-scoped Agent Mail credential.
+func (f *Factory) MailCredential(ctx context.Context) (*credential.MailCredential, error) {
+	if f.MailCredentialFunc == nil {
+		return nil, output.ErrValidation(
+			"Agent Mail credential provider is not configured",
+			"complete Agent Mail authorization for the current Bot",
+		)
+	}
+	return f.MailCredentialFunc(ctx)
+}
+
+// ClientForCredential returns the transport selected by an operation's
+// credential boundary. Mail uses a Bot-bound mailbox credential; every
+// other operation uses the active Bot credential.
+func (f *Factory) ClientForCredential(ctx context.Context, kind string) (*client.Client, error) {
+	if kind == "mail" {
+		if f.MailClientFunc == nil {
+			return nil, output.ErrValidation(
+				"Agent Mail client is not configured",
+				"complete Agent Mail authorization for the current Bot",
+			)
+		}
+		return f.MailClientFunc(ctx)
+	}
+	return f.Client()
+}
+
+// ResolveBotIdentity returns the active Bot credential with a stable RobotID.
+// Existing profiles already carry that id; token-only runtimes always resolve
+// it from the standard Bot registration endpoint. An OCTO_BOT_ID supplied next
+// to an environment token is only a claim until that endpoint confirms it.
+func (f *Factory) ResolveBotIdentity(ctx context.Context) (*credential.BotCredential, error) {
+	return f.resolveBotIdentity(ctx, false)
+}
+
+// VerifyBotIdentity resolves the authoritative Bot id even when the active
+// profile already claims one. Device authorization uses this stricter path so
+// a stale or incorrect profile can never bind a mailbox to another Bot.
+func (f *Factory) VerifyBotIdentity(ctx context.Context) (*credential.BotCredential, error) {
+	return f.resolveBotIdentity(ctx, true)
+}
+
+func (f *Factory) resolveBotIdentity(ctx context.Context, verify bool) (*credential.BotCredential, error) {
+	bot, err := f.CredentialFunc()
+	if err != nil {
+		return nil, err
+	}
+	if f.botIdentityVerified {
+		return bot, nil
+	}
+	// A stored profile is the local identity selector used by ordinary
+	// commands. A bare environment RobotID is different: it is caller input and
+	// must not select a stored mailbox credential until OCTO confirms that the
+	// active token owns it.
+	if strings.TrimSpace(bot.RobotID) != "" && bot.Profile != "" && !verify {
+		return bot, nil
+	}
+	if f.Globals != nil && f.Globals.DryRun {
+		return nil, output.ErrValidation(
+			"Bot identity verification is not executed during --dry-run",
+			"provide a stored profile or OCTO_BOT_ID to preview the Mail request locally",
+		)
+	}
+	cli, err := f.botIdentityClient()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := cli.Do(ctx, &client.Request{
+		Method: http.MethodPost,
+		Path:   "/v1/bot/register",
+		Body:   map[string]any{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		RobotID string `json:"robot_id"`
+		Data    *struct {
+			RobotID string `json:"robot_id"`
+		} `json:"data,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO returned an invalid Bot identity response",
+			"retry the command",
+		)
+	}
+	resolvedID := strings.TrimSpace(response.RobotID)
+	if resolvedID == "" && response.Data != nil {
+		resolvedID = strings.TrimSpace(response.Data.RobotID)
+	}
+	if resolvedID == "" {
+		return nil, output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO did not return the current Bot id",
+			"check the Bot token and OCTO API endpoint",
+		)
+	}
+	if claimedID := strings.TrimSpace(bot.RobotID); claimedID != "" && claimedID != resolvedID {
+		return nil, output.ErrAuth(
+			fmt.Sprintf("the active Bot token belongs to %q, not %q", resolvedID, claimedID),
+			"select the credential that belongs to the current Bot",
+		)
+	}
+	bot.RobotID = resolvedID
+	f.cred = bot
+	f.botIdentityVerified = true
+	return bot, nil
+}
+
+// botIdentityClient uses the ordinary client options. resolveBotIdentity blocks
+// this path under --dry-run, so a preview never bypasses the global no-network
+// contract by constructing a second live client.
+func (f *Factory) botIdentityClient() (*client.Client, error) {
+	return f.ClientFunc()
+}
+
 // Registry returns the spec registry (cached). Tests may inject a stub by
 // replacing RegistryFunc.
 func (f *Factory) Registry() *registry.Registry {
@@ -331,7 +576,14 @@ func (f *Factory) identityValue() any {
 		id["profile"] = f.cred.Profile
 	}
 	if f.cred.RobotID != "" {
-		id["robot_id"] = f.cred.RobotID
+		// A RobotID from OCTO_BOT_ID is caller-supplied until an authoritative
+		// lookup confirms it. Keep the claim observable without presenting it as
+		// the authenticated identity.
+		if f.cred.Profile != "" || f.botIdentityVerified {
+			id["robot_id"] = f.cred.RobotID
+		} else {
+			id["robot_id_claimed"] = f.cred.RobotID
+		}
 	}
 	if f.cred.BotKind == "agent_task" {
 		id["credential_kind"] = "agent_task"

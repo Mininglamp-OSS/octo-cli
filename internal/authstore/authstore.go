@@ -169,11 +169,59 @@ func (s *Store) SaveProfile(name string, meta *ProfileMeta, token string) error 
 	if err != nil {
 		return err
 	}
+	mailTokens, err := s.loadMailTokens()
+	if err != nil {
+		return err
+	}
+	pendingMail, err := s.loadPendingMailAuthorizations()
+	if err != nil {
+		return err
+	}
+	// A mailbox authorization belongs to the Bot credential and Space, not
+	// merely the friendly profile name. Rebinding any of those values must never
+	// inherit the previous mailbox access. A runtime Bot commonly gains Mail
+	// access before it is saved as a profile, however, and the default profile
+	// name is that same RobotID; creating that profile must preserve the
+	// already-correct binding.
+	previous, existed := profiles[name]
+	identityChanged := existed && previous.RobotID != meta.RobotID
+	scopeChanged := existed && previous.SpaceID != meta.SpaceID
+	credentialChanged := existed && tokens[name] != token
+	newProfileMayReuseLegacyName := !existed && name != meta.RobotID
+	if identityChanged || scopeChanged || credentialChanged || newProfileMayReuseLegacyName {
+		delete(mailTokens, name)
+		delete(pendingMail, name)
+		if existed && previous.RobotID != "" {
+			deleteMailBindingsForRobot(mailTokens, pendingMail, previous.RobotID)
+		}
+		if err := s.saveMailTokens(mailTokens); err != nil {
+			return err
+		}
+		if err := s.savePendingMailAuthorizations(pendingMail); err != nil {
+			return err
+		}
+	}
 	profiles[name] = *meta
 	tokens[name] = token
 	if err := s.saveTokens(tokens); err != nil {
 		return err
 	}
+	return s.saveProfiles(profiles)
+}
+
+// UpdateProfileAPIBaseURL changes only the non-secret endpoint metadata for an
+// existing profile. Bot and mailbox credentials remain untouched.
+func (s *Store) UpdateProfileAPIBaseURL(name, apiBaseURL string) error {
+	profiles, err := s.LoadProfiles()
+	if err != nil {
+		return err
+	}
+	meta, ok := profiles[name]
+	if !ok {
+		return fmt.Errorf("profile %q not found", name)
+	}
+	meta.APIBaseURL = apiBaseURL
+	profiles[name] = meta
 	return s.saveProfiles(profiles)
 }
 
@@ -192,12 +240,32 @@ func (s *Store) RemoveProfile(name string) error {
 	if err != nil {
 		return err
 	}
+	mailTokens, err := s.loadMailTokens()
+	if err != nil {
+		return err
+	}
+	pendingMail, err := s.loadPendingMailAuthorizations()
+	if err != nil {
+		return err
+	}
+	meta, existed := profiles[name]
 	delete(profiles, name)
 	delete(tokens, name)
+	delete(mailTokens, name)
+	delete(pendingMail, name)
+	if existed && meta.RobotID != "" {
+		deleteMailBindingsForRobot(mailTokens, pendingMail, meta.RobotID)
+	}
 	if err := s.saveProfiles(profiles); err != nil {
 		return err
 	}
-	return s.saveTokens(tokens)
+	if err := s.saveTokens(tokens); err != nil {
+		return err
+	}
+	if err := s.saveMailTokens(mailTokens); err != nil {
+		return err
+	}
+	return s.savePendingMailAuthorizations(pendingMail)
 }
 
 // ProfileForRobotID returns the name of the profile that records the given
