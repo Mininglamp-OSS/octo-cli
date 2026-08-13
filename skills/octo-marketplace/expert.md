@@ -150,7 +150,8 @@ octo-cli marketplace expert skillmd get <expert-id> --index <i>        # SKILL.m
 octo-cli marketplace expert skill-download <expert-id> --index <i>     # {download_url}
 ```
 
-For a squad member, add `--member <member_key>`:
+For a squad member, `--member <member_key>` is required (`--index` still
+defaults to 0):
 
 ```bash
 octo-cli marketplace squad skillmd get <squad-id> --member <member_key> --index <i>

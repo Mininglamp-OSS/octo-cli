@@ -53,7 +53,44 @@ func New() (*Registry, error) {
 		}
 		r.specs[service] = doc
 	}
+	if err := checkDuplicateOperationIDs(r.specs); err != nil {
+		return nil, err
+	}
 	return r, nil
+}
+
+// checkDuplicateOperationIDs rejects an operationId claimed by more than one
+// spec. The id namespace is global: GetOperation resolves an id by iterating
+// the service map, so a duplicate would make command routing depend on Go's
+// randomized map order — a different backend could win on every process start.
+// Mirrors the duplicate-service guard above: a collision between embedded
+// specs is a build-time bug, surfaced on first registry load. Hidden and
+// disabled operations are included because GetOperation still resolves them.
+func checkDuplicateOperationIDs(specs map[string]map[string]any) error {
+	owner := map[string]string{}
+	services := make([]string, 0, len(specs))
+	for s := range specs {
+		services = append(services, s)
+	}
+	sort.Strings(services)
+	for _, service := range services {
+		var dupErr error
+		walkOperations(specs[service], func(_, _ string, op map[string]any) {
+			id, _ := op["operationId"].(string)
+			if id == "" || dupErr != nil {
+				return
+			}
+			if prev, dup := owner[id]; dup {
+				dupErr = fmt.Errorf("registry: duplicate operationId %q (services %q and %q)", id, prev, service)
+				return
+			}
+			owner[id] = service
+		})
+		if dupErr != nil {
+			return dupErr
+		}
+	}
+	return nil
 }
 
 // MustNew is like New but panics on error — useful for package-level wiring

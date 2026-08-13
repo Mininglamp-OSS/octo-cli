@@ -17,7 +17,7 @@
     "/market/api/v1/experts": {
       "get": {
         "description": "List experts visible in the current Space (system + public + own private).",
-        "operationId": "expert.list",
+        "operationId": "marketplace.expert.list",
         "parameters": [
           {
             "description": "Case-insensitive substring match on name/summary/category/creator_name",
@@ -147,7 +147,7 @@
       },
       "post": {
         "description": "Publish a new standalone expert owned by the caller. Send the flat ExpertAgentDetail body (name/summary/category/instruction required) via --data.",
-        "operationId": "expert.create",
+        "operationId": "marketplace.expert.create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -250,7 +250,7 @@
     "/market/api/v1/experts/mine": {
       "get": {
         "description": "Every expert owned by the caller in their Space regardless of visibility.",
-        "operationId": "expert.mine.list",
+        "operationId": "marketplace.expert.mine.list",
         "parameters": [
           {
             "description": "Case-insensitive substring match on name/summary/category/creator_name",
@@ -382,7 +382,7 @@
     "/market/api/v1/experts/{expert_id}": {
       "get": {
         "description": "Full ExpertAgentDetail if visible; otherwise 404.",
-        "operationId": "expert.get",
+        "operationId": "marketplace.expert.get",
         "parameters": [
           {
             "description": "expert_id",
@@ -434,7 +434,7 @@
       },
       "patch": {
         "description": "Owner-only partial update. Send mutable fields via --data.",
-        "operationId": "expert.update",
+        "operationId": "marketplace.expert.update",
         "parameters": [
           {
             "description": "expert_id",
@@ -537,7 +537,7 @@
       },
       "delete": {
         "description": "Owner-only soft delete; the name frees up for reuse.",
-        "operationId": "expert.delete",
+        "operationId": "marketplace.expert.delete",
         "parameters": [
           {
             "description": "expert_id",
@@ -584,7 +584,7 @@
     "/market/api/v1/experts/{expert_id}/skill_md": {
       "get": {
         "description": "Return the stored SKILL.md text for the skill at index i.",
-        "operationId": "expert.skillmd.get",
+        "operationId": "marketplace.expert.skillmd.get",
         "parameters": [
           {
             "description": "expert_id",
@@ -596,7 +596,7 @@
             }
           },
           {
-            "description": "Skill index within the record",
+            "description": "Skill index within the record (server default 0 when omitted)",
             "in": "query",
             "name": "i",
             "x-octo-flag": "index",
@@ -647,7 +647,7 @@
     "/market/api/v1/experts/{expert_id}/skill_download": {
       "get": {
         "description": "Return a short-lived presigned GET URL for the skill package at index i.",
-        "operationId": "expert.skill_download",
+        "operationId": "marketplace.expert.skill_download",
         "parameters": [
           {
             "description": "expert_id",
@@ -659,7 +659,7 @@
             }
           },
           {
-            "description": "Skill index within the record",
+            "description": "Skill index within the record (server default 0 when omitted)",
             "in": "query",
             "name": "i",
             "x-octo-flag": "index",
@@ -710,7 +710,7 @@
     "/market/api/v1/squads": {
       "get": {
         "description": "List squads visible in the current Space.",
-        "operationId": "squad.list",
+        "operationId": "marketplace.squad.list",
         "parameters": [
           {
             "description": "Case-insensitive substring match on name/summary/category/creator_name",
@@ -840,7 +840,7 @@
       },
       "post": {
         "description": "Publish a new squad owned by the caller. Body carries generic fields (name/summary/category required) + leader/strategies/dependencies/permission/members (>=1 member with name/role/instruction). Send via --data.",
-        "operationId": "squad.create",
+        "operationId": "marketplace.squad.create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -954,7 +954,7 @@
     "/market/api/v1/squads/mine": {
       "get": {
         "description": "Every squad owned by the caller in their Space regardless of visibility.",
-        "operationId": "squad.mine.list",
+        "operationId": "marketplace.squad.mine.list",
         "parameters": [
           {
             "description": "Case-insensitive substring match on name/summary/category/creator_name",
@@ -1086,7 +1086,7 @@
     "/market/api/v1/squads/{squad_id}": {
       "get": {
         "description": "Full ExpertSquadDetail (with members) if visible; otherwise 404.",
-        "operationId": "squad.get",
+        "operationId": "marketplace.squad.get",
         "parameters": [
           {
             "description": "squad_id",
@@ -1138,7 +1138,7 @@
       },
       "patch": {
         "description": "Owner-only partial update. Sending members replaces the whole array. Send via --data.",
-        "operationId": "squad.update",
+        "operationId": "marketplace.squad.update",
         "parameters": [
           {
             "description": "squad_id",
@@ -1252,7 +1252,7 @@
       },
       "delete": {
         "description": "Owner-only soft delete; the name frees up for reuse.",
-        "operationId": "squad.delete",
+        "operationId": "marketplace.squad.delete",
         "parameters": [
           {
             "description": "squad_id",
@@ -1299,7 +1299,7 @@
     "/market/api/v1/squads/{squad_id}/skill_md": {
       "get": {
         "description": "Return the stored SKILL.md text for member's skill at index i.",
-        "operationId": "squad.skillmd.get",
+        "operationId": "marketplace.squad.skillmd.get",
         "parameters": [
           {
             "description": "squad_id",
@@ -1311,15 +1311,16 @@
             }
           },
           {
-            "description": "Squad member_key",
+            "description": "Squad member_key (required; the backend has no default member)",
             "in": "query",
             "name": "member",
+            "required": true,
             "schema": {
               "type": "string"
             }
           },
           {
-            "description": "Skill index within the record",
+            "description": "Skill index within the record (server default 0 when omitted)",
             "in": "query",
             "name": "i",
             "x-octo-flag": "index",
@@ -1370,7 +1371,7 @@
     "/market/api/v1/squads/{squad_id}/skill_download": {
       "get": {
         "description": "Return a short-lived presigned GET URL for member's skill package at index i.",
-        "operationId": "squad.skill_download",
+        "operationId": "marketplace.squad.skill_download",
         "parameters": [
           {
             "description": "squad_id",
@@ -1382,15 +1383,16 @@
             }
           },
           {
-            "description": "Squad member_key",
+            "description": "Squad member_key (required; the backend has no default member)",
             "in": "query",
             "name": "member",
+            "required": true,
             "schema": {
               "type": "string"
             }
           },
           {
-            "description": "Skill index within the record",
+            "description": "Skill index within the record (server default 0 when omitted)",
             "in": "query",
             "name": "i",
             "x-octo-flag": "index",
@@ -1441,7 +1443,7 @@
     "/market/api/v1/expert_categories": {
       "get": {
         "description": "Every live category with a count of records visible to the caller of the requested kind.",
-        "operationId": "expert_category.list",
+        "operationId": "marketplace.expert_category.list",
         "parameters": [
           {
             "description": "agent (experts) | squad (expert_squads); default agent",
@@ -1506,7 +1508,7 @@
     "/market/api/v1/expert_tags": {
       "get": {
         "description": "Tag suggestions aggregated from records visible to the caller, sorted by descending count.",
-        "operationId": "expert_tag.list",
+        "operationId": "marketplace.expert_tag.list",
         "parameters": [
           {
             "description": "agent (experts) | squad (expert_squads); default agent",
@@ -1599,7 +1601,7 @@
     "/market/api/v1/expert_skill_uploads": {
       "post": {
         "description": "Presign an upload for a .zip/.skill Agent-Skill package (<=20 MiB). PUT the raw bytes to the returned presigned_url with headers, then reference upload_object_key in an expert/squad create or update.",
-        "operationId": "expert_skill_upload.create",
+        "operationId": "marketplace.expert_skill_upload.create",
         "requestBody": {
           "content": {
             "application/json": {

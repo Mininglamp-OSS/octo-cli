@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
@@ -50,4 +51,50 @@ func TestRegistryConcurrentReads(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestCheckDuplicateOperationIDs pins the global-uniqueness guard in New():
+// an operationId claimed by two specs would make GetOperation's map-iteration
+// lookup (and thus command routing) non-deterministic, so registry
+// construction must fail instead. The loop-vs-marketplace `expert.*` collision
+// is the incident this guards against.
+func TestCheckDuplicateOperationIDs(t *testing.T) {
+	op := func(id string) map[string]any {
+		return map[string]any{
+			"paths": map[string]any{
+				"/things": map[string]any{
+					"get": map[string]any{"operationId": id},
+				},
+			},
+		}
+	}
+
+	if err := checkDuplicateOperationIDs(map[string]map[string]any{
+		"alpha": op("alpha.thing.list"),
+		"beta":  op("beta.thing.list"),
+	}); err != nil {
+		t.Fatalf("distinct ids: unexpected error %v", err)
+	}
+
+	err := checkDuplicateOperationIDs(map[string]map[string]any{
+		"alpha": op("thing.list"),
+		"beta":  op("thing.list"),
+	})
+	if err == nil {
+		t.Fatal("duplicate id across services must fail registry construction")
+	}
+	for _, want := range []string{"thing.list", "alpha", "beta"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q must name %q", err, want)
+		}
+	}
+}
+
+// TestEmbeddedSpecsHaveUniqueOperationIDs runs the same guard against the real
+// embedded specs via New(), so a future spec drop reintroducing a collision
+// fails this suite even before any command-level test notices.
+func TestEmbeddedSpecsHaveUniqueOperationIDs(t *testing.T) {
+	if _, err := New(); err != nil {
+		t.Fatalf("New() = %v", err)
+	}
 }
