@@ -171,6 +171,19 @@ var requestSideVocabularies = []vocabulary{
 		why:  "octo-docs-html reply status enum"},
 
 	// --- marketplace ---
+	{op: "marketplace.expert_category.list", in: "query", field: "kind",
+		want: []string{"agent", "squad"},
+		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
+			"ListCategories: `if c.Query(\"kind\") == \"squad\"` selects squads, any other value (including absent) " +
+			"means agent — two values cover every input the backend distinguishes"},
+	{op: "marketplace.expert_tag.list", in: "query", field: "kind",
+		want: []string{"agent", "squad"},
+		why:  "same kind branch in ListTags (handler.go:807) as expert_category.list"},
+	{op: "marketplace.expert_tag.list", in: "query", field: "mode",
+		want: []string{"all", "mine"},
+		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
+			"ListTags: `c.Query(\"mode\") == \"mine\"` restricts to caller-owned rows, any other value means all — " +
+			"mirrors the pinned mcp_category.list mode pair"},
 	{op: "mcp_category.list", in: "query", field: "mode",
 		want: []string{"all", "mine"},
 		why:  "marketplace swagger binding tag; generated from the backend's own definition"},

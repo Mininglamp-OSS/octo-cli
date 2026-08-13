@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli marketplace expert` / `squad` families** — CRUD, `mine` lists,
+  taxonomy (`expert-category` / `expert-tag`), viewable `skillmd get`, presigned
+  `expert-skill-upload create` / `skill-download` for the Expert Marketplace
+  (专家/专家团). Required fields and member shape are validated client-side
+  before any request is sent: expert create requires
+  `name`/`summary`/`category`/`instruction`; squad create additionally requires
+  ≥ 1 `members[]` entry, each with `name`/`role`/`instruction` (errors name the
+  exact field, e.g. `members[0].instruction`). Value-level rules (non-empty
+  strings, size caps) remain backend-enforced. The install-to-Loop endpoints
+  (`POST /experts|squads/{id}/install`) are intentionally not exposed.
 - **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,
   workspaces, runtimes, projects, skills, autopilots, attachments, comments,
