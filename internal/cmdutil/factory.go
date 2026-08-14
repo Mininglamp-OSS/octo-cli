@@ -297,7 +297,7 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 
 func storedMailCredential(store *authstore.Store, bot *credential.BotCredential, apiOrigin string) (string, authstore.MailBinding, error) {
 	if bot == nil {
-		return "", authstore.MailBinding{}, errors.New("Bot credential is required")
+		return "", authstore.MailBinding{}, errors.New("Bot credential is required") //nolint:staticcheck // Bot is the product's canonical identity term.
 	}
 	return store.FindMailCredential(
 		strings.TrimSpace(bot.RobotID),
@@ -484,29 +484,9 @@ func (f *Factory) resolveBotIdentity(ctx context.Context, verify bool) (*credent
 	if err != nil {
 		return nil, err
 	}
-	var response struct {
-		RobotID string `json:"robot_id"`
-		Data    *struct {
-			RobotID string `json:"robot_id"`
-		} `json:"data,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, output.ErrAPI(
-			"INVALID_BOT_IDENTITY_RESPONSE",
-			"OCTO returned an invalid Bot identity response",
-			"retry the command",
-		)
-	}
-	resolvedID := strings.TrimSpace(response.RobotID)
-	if resolvedID == "" && response.Data != nil {
-		resolvedID = strings.TrimSpace(response.Data.RobotID)
-	}
-	if resolvedID == "" {
-		return nil, output.ErrAPI(
-			"INVALID_BOT_IDENTITY_RESPONSE",
-			"OCTO did not return the current Bot id",
-			"check the Bot token and OCTO API endpoint",
-		)
+	resolvedID, err := botIDFromResponse(raw)
+	if err != nil {
+		return nil, err
 	}
 	if claimedID := strings.TrimSpace(bot.RobotID); claimedID != "" && claimedID != resolvedID {
 		return nil, output.ErrAuth(
@@ -518,6 +498,34 @@ func (f *Factory) resolveBotIdentity(ctx context.Context, verify bool) (*credent
 	f.cred = bot
 	f.botIdentityVerified = true
 	return bot, nil
+}
+
+func botIDFromResponse(raw []byte) (string, error) {
+	var response struct {
+		RobotID string `json:"robot_id"`
+		Data    *struct {
+			RobotID string `json:"robot_id"`
+		} `json:"data,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return "", output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO returned an invalid Bot identity response",
+			"retry the command",
+		)
+	}
+	resolvedID := strings.TrimSpace(response.RobotID)
+	if resolvedID == "" && response.Data != nil {
+		resolvedID = strings.TrimSpace(response.Data.RobotID)
+	}
+	if resolvedID == "" {
+		return "", output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO did not return the current Bot id",
+			"check the Bot token and OCTO API endpoint",
+		)
+	}
+	return resolvedID, nil
 }
 
 // botIdentityClient uses the ordinary client options. resolveBotIdentity blocks

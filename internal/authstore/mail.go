@@ -56,7 +56,7 @@ func mailBindingPrefix(version, robotID string) string {
 	return version + ":" + base64.RawURLEncoding.EncodeToString([]byte(robotID)) + ":"
 }
 
-func parseMailBindingKey(key string) (MailBinding, string, string, bool) {
+func parseMailBindingKey(key string) (binding MailBinding, originFingerprint, tokenFingerprint string, ok bool) {
 	parts := strings.Split(key, ":")
 	if len(parts) != 5 || parts[0] != "v2" || parts[1] == "" || parts[2] == "" || parts[3] == "" || parts[4] == "" {
 		return MailBinding{}, "", "", false
@@ -74,7 +74,7 @@ func parseMailBindingKey(key string) (MailBinding, string, string, bool) {
 
 func matchingMailBindings(keys []string, robotID, spaceID, botToken, apiOrigin string) ([]MailBinding, error) {
 	if botToken == "" {
-		return nil, errors.New("Bot token is required")
+		return nil, errors.New("Bot token is required") //nolint:staticcheck // Bot is the product's canonical identity term.
 	}
 	normalizedOrigin, err := config.NormalizeAPIBaseURL(apiOrigin)
 	if err != nil {

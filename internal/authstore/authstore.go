@@ -184,11 +184,7 @@ func (s *Store) SaveProfile(name string, meta *ProfileMeta, token string) error 
 	// name is that same RobotID; creating that profile must preserve the
 	// already-correct binding.
 	previous, existed := profiles[name]
-	identityChanged := existed && previous.RobotID != meta.RobotID
-	scopeChanged := existed && previous.SpaceID != meta.SpaceID
-	credentialChanged := existed && tokens[name] != token
-	newProfileMayReuseLegacyName := !existed && name != meta.RobotID
-	if identityChanged || scopeChanged || credentialChanged || newProfileMayReuseLegacyName {
+	if profileChangeInvalidatesMailBindings(name, meta, token, &previous, tokens[name], existed) {
 		delete(mailTokens, name)
 		delete(pendingMail, name)
 		if existed && previous.RobotID != "" {
@@ -207,6 +203,14 @@ func (s *Store) SaveProfile(name string, meta *ProfileMeta, token string) error 
 		return err
 	}
 	return s.saveProfiles(profiles)
+}
+
+func profileChangeInvalidatesMailBindings(name string, meta *ProfileMeta, token string, previous *ProfileMeta, previousToken string, existed bool) bool {
+	identityChanged := existed && previous.RobotID != meta.RobotID
+	scopeChanged := existed && previous.SpaceID != meta.SpaceID
+	credentialChanged := existed && previousToken != token
+	newProfileMayReuseLegacyName := !existed && name != meta.RobotID
+	return identityChanged || scopeChanged || credentialChanged || newProfileMayReuseLegacyName
 }
 
 // UpdateProfileAPIBaseURL changes only the non-secret endpoint metadata for an
