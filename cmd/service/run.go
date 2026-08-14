@@ -69,6 +69,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
 		Service:        d.Service,
+		Credential:     d.Credential,
 		Method:         d.Method,
 		Path:           urlPath,
 		Query:          q,
@@ -77,7 +78,9 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		// Suppress X-Space-Id only when the spec explicitly declares
 		// x-octo-space-header:false. An omitted flag keeps the default
 		// behaviour of sending the header when the credential has a space.
-		SuppressSpaceHeader: d.SpaceHeaderSet && !d.SpaceHeader,
+		SuppressSpaceHeader:            d.SpaceHeaderSet && !d.SpaceHeader,
+		DisableRetry:                   d.RetryMode == "never",
+		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
 		SecretValues:        collectSecrets(cobraCmd, rt, pathValues),
 		SensitiveJSONFields: writeOnlyBodyFields(d.RequestBody),
@@ -966,7 +969,7 @@ func bodyPath(path string) string {
 // emitOnce runs one request and emits the envelope. Returns the same error
 // value so cobra sets a non-zero exit code.
 func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req *client.Request) error {
-	cli, err := f.Client()
+	cli, err := f.ClientForCredential(ctx, req.Credential)
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
@@ -1047,7 +1050,7 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		return err
 	}
 
-	cli, err := f.Client()
+	cli, err := f.ClientForCredential(ctx, firstReq.Credential)
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err

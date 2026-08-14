@@ -1,8 +1,11 @@
 package cmdutil
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -65,7 +68,8 @@ func TestNewDefaultFactory_InitializesFields(t *testing.T) {
 	if f.Globals == nil {
 		t.Error("Globals should be initialized")
 	}
-	if f.ConfigFunc == nil || f.CredentialFunc == nil || f.ClientFunc == nil || f.RegistryFunc == nil {
+	if f.ConfigFunc == nil || f.CredentialFunc == nil || f.ClientFunc == nil ||
+		f.MailCredentialFunc == nil || f.MailClientFunc == nil || f.RegistryFunc == nil {
 		t.Error("all provider funcs should be set")
 	}
 }
@@ -230,6 +234,27 @@ func TestFactory_CredentialSpaceOverride(t *testing.T) {
 	}
 	if cred.SpaceID != "space-flag" {
 		t.Errorf("--space flag should override env, got %q", cred.SpaceID)
+	}
+}
+
+func TestFactory_ExplicitBotIDAndEnvironmentClaimHaveDistinctEmptyStoreSemantics(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_bot")
+
+	f := NewDefaultFactory()
+	f.Globals.BotID = "claimed-bot"
+	if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), "no profile found") {
+		t.Fatalf("explicit --bot-id fell through to environment token: %v", err)
+	}
+
+	t.Setenv(config.EnvBotID, "claimed-bot")
+	f = NewDefaultFactory()
+	cred, err := f.Credential()
+	if err != nil {
+		t.Fatalf("environment Bot claim did not fall through: %v", err)
+	}
+	if cred.Token != "app_env_bot" || cred.RobotID != "claimed-bot" || cred.Profile != "" {
+		t.Fatalf("environment credential = %+v", cred)
 	}
 }
 
@@ -565,6 +590,77 @@ func TestFactory_IdentityEcho(t *testing.T) {
 	}
 }
 
+func TestFactory_IdentityEchoLabelsUnverifiedEnvironmentBotID(t *testing.T) {
+	tf := NewTestFactory()
+	tf.cred = &credential.BotCredential{
+		Token: "app_x", RobotID: "caller-claimed", Source: "env:OCTO_BOT_TOKEN",
+	}
+	if err := tf.EmitSuccess([]byte(`{"k":"v"}`)); err != nil {
+		t.Fatalf("EmitSuccess: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, tf.Out.String())
+	}
+	id, ok := env["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity is not an object: %v", env["identity"])
+	}
+	if _, exists := id["robot_id"]; exists {
+		t.Fatalf("unverified environment Bot id was echoed as identity: %v", id)
+	}
+	if id["robot_id_claimed"] != "caller-claimed" {
+		t.Fatalf("unverified environment Bot id claim is not observable: %v", id)
+	}
+}
+
+func saveBoundMailCredential(t *testing.T, store *authstore.Store, robotID, spaceID, botToken, mailToken string) string {
+	t.Helper()
+	apiOrigin := os.Getenv(config.EnvAPIBaseURL)
+	if apiOrigin == "" {
+		apiOrigin = config.DefaultAPIBaseURL
+	}
+	key, err := authstore.MailBindingKey(robotID, spaceID, botToken, apiOrigin)
+	if err != nil {
+		t.Fatalf("MailBindingKey: %v", err)
+	}
+	if err := store.SaveMailCredential(key, mailToken); err != nil {
+		t.Fatalf("SaveMailCredential: %v", err)
+	}
+	return key
+}
+
+func TestFactory_MailCredentialRejectsDifferentAPIOrigin(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_only")
+	t.Setenv(config.EnvBotID, "runtime-bot")
+	t.Setenv(config.EnvSpaceID, "space-runtime")
+	t.Setenv(config.EnvAPIBaseURL, "https://origin-b.example")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := authstore.MailBindingKey(
+		"runtime-bot", "space-runtime", "app_env_only", "https://origin-a.example",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMailCredential(key, "omb_origin_a"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewDefaultFactory()
+	cred, err := f.MailCredential(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Agent Mail is not connected") {
+		t.Fatalf("MailCredential = %+v, %v; want origin mismatch rejection", cred, err)
+	}
+	if f.mailCred != nil {
+		t.Fatalf("mail credential was released across API origins: %+v", f.mailCred)
+	}
+}
+
 // TestFactory_IdentityDefaultsToBot verifies the envelope emits the minimal
 // identity object {type:bot} when no credential was resolved — the field is
 // always an object, never a bare string.
@@ -580,5 +676,287 @@ func TestFactory_IdentityDefaultsToBot(t *testing.T) {
 	id, ok := env["identity"].(map[string]any)
 	if !ok || id["type"] != "bot" {
 		t.Errorf("identity = %v, want {type:bot}", env["identity"])
+	}
+}
+
+func newBotIdentityTestServer(t *testing.T, wantToken, robotID string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+wantToken {
+			t.Errorf("Authorization = %q, want token for %s", got, robotID)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"robot_id": robotID})
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestFactory_MailCredentialFollowsSelectedBotProfile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(authstore.EnvConfigDir, dir)
+	t.Setenv(config.EnvBotToken, "")
+	t.Setenv(config.EnvAPIBaseURL, newBotIdentityTestServer(t, "app_bot_1", "bot-1").URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	if err := store.SaveProfile("agent", &authstore.ProfileMeta{RobotID: "bot-1", SpaceID: "space-1"}, "app_bot_1"); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+	saveBoundMailCredential(t, store, "bot-1", "space-1", "app_bot_1", "omb_mail_1")
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "agent"
+	cred, err := f.MailCredential(context.Background())
+	if err != nil {
+		t.Fatalf("MailCredential: %v", err)
+	}
+	if cred.Token != "omb_mail_1" || cred.BotID != "bot-1" || cred.BotProfile != "agent" || cred.Source != "bot:bot-1/space-1" {
+		t.Errorf("MailCredential = %+v", cred)
+	}
+}
+
+func TestFactory_MailCredentialSupportsRuntimeBotIdentity(t *testing.T) {
+	var identityCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identityCalls++
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer app_env_only" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"robot_id":"runtime-bot"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_only")
+	t.Setenv(config.EnvBotID, "runtime-bot")
+	t.Setenv(config.EnvSpaceID, "space-runtime")
+	t.Setenv(config.EnvAPIBaseURL, srv.URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	saveBoundMailCredential(t, store, "runtime-bot", "space-runtime", "app_env_only", "omb_runtime_mail")
+
+	f := NewDefaultFactory()
+	cred, err := f.MailCredential(context.Background())
+	if err != nil {
+		t.Fatalf("MailCredential: %v", err)
+	}
+	if cred.Token != "omb_runtime_mail" || cred.BotID != "runtime-bot" || cred.BotProfile != "" {
+		t.Errorf("MailCredential = %+v", cred)
+	}
+	if identityCalls != 0 {
+		t.Fatalf("Bot identity calls = %d, want 0", identityCalls)
+	}
+	identity, ok := f.identityValue().(map[string]any)
+	if !ok || identity["robot_id"] != "runtime-bot" {
+		t.Fatalf("verified runtime identity echo = %#v", identity)
+	}
+}
+
+func TestFactory_MailCredentialRejectsUnmatchedRuntimeTokenBinding(t *testing.T) {
+	var identityCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identityCalls++
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"robot_id":"actual-bot"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_not_the_victim")
+	t.Setenv(config.EnvBotID, "victim-bot")
+	t.Setenv(config.EnvSpaceID, "space-victim")
+	t.Setenv(config.EnvAPIBaseURL, srv.URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	saveBoundMailCredential(t, store, "victim-bot", "space-victim", "app_victim", "omb_victim_mail")
+
+	f := NewDefaultFactory()
+	cred, err := f.MailCredential(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Agent Mail is not connected") {
+		t.Fatalf("MailCredential = %+v, %v; want unmatched binding rejection", cred, err)
+	}
+	if identityCalls != 0 {
+		t.Fatalf("Bot identity calls = %d, want 0", identityCalls)
+	}
+	if f.mailCred != nil {
+		t.Fatalf("mail credential was released after identity mismatch: %+v", f.mailCred)
+	}
+}
+
+func TestFactory_MailCredentialRejectsStoredProfileTokenSwap(t *testing.T) {
+	var identityCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identityCalls++
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer app_bot_b" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"robot_id":"bot-b"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "")
+	t.Setenv(config.EnvBotID, "")
+	t.Setenv(config.EnvAPIBaseURL, srv.URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	// Re-login can replace the token while retaining the profile's claimed
+	// RobotID. The old mailbox credential must not be released because its
+	// encrypted-store binding carries the previous token's fingerprint.
+	if err := store.SaveProfile("agent", &authstore.ProfileMeta{RobotID: "bot-a", SpaceID: "space-a"}, "app_bot_b"); err != nil {
+		t.Fatalf("SaveProfile: %v", err)
+	}
+	saveBoundMailCredential(t, store, "bot-a", "space-a", "app_bot_a", "omb_mail_of_bot_a")
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "agent"
+	cred, err := f.MailCredential(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "Agent Mail is not connected") {
+		t.Fatalf("MailCredential = %+v, %v; want stored-profile token swap rejection", cred, err)
+	}
+	if identityCalls != 0 {
+		t.Fatalf("Bot identity calls = %d, want 0", identityCalls)
+	}
+	if f.mailCred != nil {
+		t.Fatalf("mail credential was released after stored-profile identity mismatch: %+v", f.mailCred)
+	}
+}
+
+func TestFactory_MailCredentialDryRunDoesNotVerifyRuntimeBotOverNetwork(t *testing.T) {
+	var identityCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identityCalls++
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"robot_id":"runtime-bot"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_only")
+	t.Setenv(config.EnvBotID, "runtime-bot")
+	t.Setenv(config.EnvSpaceID, "space-runtime")
+	t.Setenv(config.EnvAPIBaseURL, srv.URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveBoundMailCredential(t, store, "runtime-bot", "space-runtime", "app_env_only", "omb_runtime_mail")
+
+	f := NewDefaultFactory()
+	f.Globals.DryRun = true
+	cred, err := f.MailCredential(context.Background())
+	if err != nil {
+		t.Fatalf("MailCredential: %v", err)
+	}
+	if cred.BotID != "runtime-bot" || cred.Token != "omb_runtime_mail" {
+		t.Fatalf("MailCredential = %+v", cred)
+	}
+	if identityCalls != 0 {
+		t.Fatalf("Bot identity calls = %d, want 0 during dry-run", identityCalls)
+	}
+}
+
+func TestFactory_MailCredentialResolvesRuntimeBotIDFromToken(t *testing.T) {
+	var identityCalls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		identityCalls++
+		if r.URL.Path != "/v1/bot/register" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer app_env_only" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"robot_id":"resolved-bot"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_only")
+	t.Setenv(config.EnvBotID, "")
+	t.Setenv(config.EnvAPIBaseURL, srv.URL)
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveBoundMailCredential(t, store, "resolved-bot", "space-runtime", "app_env_only", "omb_runtime_mail")
+
+	f := NewDefaultFactory()
+	cred, err := f.MailCredential(context.Background())
+	if err != nil {
+		t.Fatalf("MailCredential: %v", err)
+	}
+	if cred.BotID != "resolved-bot" || cred.Token != "omb_runtime_mail" || cred.BotProfile != "" {
+		t.Fatalf("MailCredential = %+v", cred)
+	}
+	if identityCalls != 0 {
+		t.Fatalf("Bot identity calls = %d, want 0", identityCalls)
+	}
+}
+
+func TestFactory_MailCredentialRequiresSpaceWhenTokenHasMultipleBindings(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvBotToken, "app_env_only")
+	t.Setenv(config.EnvBotID, "runtime-bot")
+	t.Setenv(config.EnvSpaceID, "")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveBoundMailCredential(t, store, "runtime-bot", "space-a", "app_env_only", "omb_a")
+	saveBoundMailCredential(t, store, "runtime-bot", "space-b", "app_env_only", "omb_b")
+
+	f := NewDefaultFactory()
+	cred, err := f.MailCredential(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "multiple Agent Mail connections") {
+		t.Fatalf("MailCredential = %+v, %v; want Space ambiguity", cred, err)
+	}
+
+	f = NewDefaultFactory()
+	f.Globals.Space = "space-b"
+	cred, err = f.MailCredential(context.Background())
+	if err != nil {
+		t.Fatalf("MailCredential with --space: %v", err)
+	}
+	if cred.Token != "omb_b" || cred.BotID != "runtime-bot" {
+		t.Fatalf("MailCredential with --space = %+v", cred)
 	}
 }

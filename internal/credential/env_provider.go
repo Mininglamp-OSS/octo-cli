@@ -13,8 +13,9 @@ var defaultTokenVars = []string{"OCTO_TOKEN", "OCTO_BOT_TOKEN"}
 
 // EnvProvider reads the bot credential from environment variables.
 // The token comes from the first non-empty variable in TokenVars
-// (OCTO_TOKEN, then OCTO_BOT_TOKEN). OCTO_SPACE_ID is optional and only
-// required for platform-scoped bots.
+// (OCTO_TOKEN, then OCTO_BOT_TOKEN). OCTO_BOT_ID optionally asserts the Bot
+// that owns the token. OCTO_SPACE_ID is optional and only required for
+// platform-scoped bots.
 type EnvProvider struct {
 	// TokenVar pins the provider to a single env var, overriding TokenVars.
 	// Kept for callers that need an explicit variable.
@@ -22,13 +23,19 @@ type EnvProvider struct {
 	// TokenVars is the ordered variable preference; the first non-empty one
 	// wins. Empty means the default OCTO_TOKEN → OCTO_BOT_TOKEN order.
 	TokenVars []string
+	// BotIDVar is the env var holding the Bot id. Defaults to OCTO_BOT_ID.
+	BotIDVar string
 	// SpaceVar is the env var holding the space id. Defaults to OCTO_SPACE_ID.
 	SpaceVar string
 }
 
 // NewEnvProvider builds an EnvProvider with default variable names.
 func NewEnvProvider() *EnvProvider {
-	return &EnvProvider{TokenVars: defaultTokenVars, SpaceVar: "OCTO_SPACE_ID"}
+	return &EnvProvider{
+		TokenVars: defaultTokenVars,
+		BotIDVar:  "OCTO_BOT_ID",
+		SpaceVar:  "OCTO_SPACE_ID",
+	}
 }
 
 // tokenVars returns the ordered variables this provider consults.
@@ -57,6 +64,10 @@ func (e *EnvProvider) Resolve() (*BotCredential, error) {
 	if spaceVar == "" {
 		spaceVar = "OCTO_SPACE_ID"
 	}
+	botIDVar := e.BotIDVar
+	if botIDVar == "" {
+		botIDVar = "OCTO_BOT_ID"
+	}
 
 	for _, tokenVar := range e.tokenVars() {
 		token := strings.TrimSpace(os.Getenv(tokenVar))
@@ -67,6 +78,8 @@ func (e *EnvProvider) Resolve() (*BotCredential, error) {
 			Token:   token,
 			SpaceID: strings.TrimSpace(os.Getenv(spaceVar)),
 			Source:  "env:" + tokenVar,
+			RobotID: strings.TrimSpace(os.Getenv(botIDVar)),
+			BotKind: TokenKind(token),
 		}, nil
 	}
 	return nil, nil

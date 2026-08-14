@@ -283,7 +283,11 @@ type OperationDetail struct {
 	// BaseURLEnv is retained in schema output for compatibility with existing
 	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
 	// intentionally does not select a different service URL from this metadata.
-	BaseURLEnv  string `json:"base_url_env,omitempty"`
+	BaseURLEnv string `json:"base_url_env,omitempty"`
+	// Credential is the x-octo-credential boundary declared by the service.
+	// Empty means the active Bot credential; "mail" selects the mailbox token
+	// bound to the same Bot identity.
+	Credential  string `json:"credential,omitempty"`
 	SpaceHeader bool   `json:"space_header,omitempty"`
 	// SpaceHeaderSet records whether the spec declared x-octo-space-header at
 	// all. It lets the transport distinguish an explicit `false` (suppress the
@@ -304,6 +308,12 @@ type OperationDetail struct {
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	// RetryMode captures the optional x-octo-retry operation extension. Empty
+	// keeps the transport default; "never" disables automatic retries for the
+	// individual request. This is required for non-idempotent external side
+	// effects such as sending mail, where a lost response must be reported as an
+	// unknown result rather than risking a duplicate action.
+	RetryMode string `json:"retry_mode,omitempty"`
 	// AllowedTokenKinds captures x-octo-allowed-token-kinds (spec top level or
 	// per-operation override). When non-empty the CLI checks the active
 	// credential's kind against the list before sending, failing locally with
@@ -435,6 +445,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			Risk:    stringOf(op["x-octo-risk"]),
 		},
 		BaseURLEnv:  stringOf(doc["x-octo-base-url"]),
+		Credential:  stringOf(doc["x-octo-credential"]),
 		SpaceHeader: boolOf(doc["x-octo-space-header"]),
 	}
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
@@ -442,6 +453,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	d.RetryMode = stringOf(op["x-octo-retry"])
 	// Identity routing is declared at the spec top level (every operation in a
 	// domain shares one mount table) but an operation may narrow the allowed
 	// kinds. Both default to absent → no gate, no rewrite.
