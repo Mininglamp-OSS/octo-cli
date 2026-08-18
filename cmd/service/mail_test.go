@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -69,16 +70,14 @@ func TestMailRegistrySurface(t *testing.T) {
 	want := map[string]string{
 		"mail.address.list":                "/agent-mail-api/webapi/v0/addresses",
 		"mail.draft.create_agent":          "/agent-mail-api/webapi/v0/agent-drafts",
-		"mail.draft.update":                "/agent-mail-api/webapi/v0/drafts/{id}",
+		"mail.draft.list":                  "/agent-mail-api/webapi/v0/drafts",
 		"mail.me":                          "/agent-mail-api/webapi/v0/identity",
 		"mail.message.auto_reply_context":  "/agent-mail-api/webapi/v0/messages/{id}/auto-reply-context",
 		"mail.message.list":                "/agent-mail-api/webapi/v0/messages",
 		"mail.message.raw":                 "/agent-mail-api/webapi/v0/messages/{id}/raw",
 		"mail.message.reply_draft":         "/agent-mail-api/webapi/v0/messages/{id}/reply-draft",
-		"mail.message.send":                "/agent-mail-api/webapi/v0/messages",
 		"mail.message.send_intent":         "/agent-mail-api/webapi/v0/agent-send-intents",
 		"mail.message.read":                "/agent-mail-api/webapi/v0/messages/{id}",
-		"mail.message.reply":               "/agent-mail-api/webapi/v0/messages/{id}/reply",
 		"mail.message.delivery":            "/agent-mail-api/webapi/v0/messages/{id}/delivery",
 		"mail.message.attachment.download": "/agent-mail-api/webapi/v0/messages/{id}/attachments/{partId}",
 		"mail.thread.get":                  "/agent-mail-api/webapi/v0/threads/{id}",
@@ -115,18 +114,9 @@ func TestMailRegistrySurface(t *testing.T) {
 	}
 
 	for _, id := range []string{
-		"mail.message.send",
 		"mail.message.send_intent",
-		"mail.message.reply",
 		"mail.message.reply_draft",
-		"mail.message.reply_all",
-		"mail.message.forward",
-		"mail.message.delete",
-		"mail.draft.create",
 		"mail.draft.create_agent",
-		"mail.draft.update",
-		"mail.draft.send",
-		"mail.draft.delete",
 	} {
 		op, ok := reg.GetOperation(id)
 		if !ok {
@@ -147,7 +137,7 @@ func TestMailRegistrySurface(t *testing.T) {
 	}
 }
 
-func TestMailConfirmationTokensAreSecret(t *testing.T) {
+func TestMailRegistryExcludesOwnerOnlyOperationsAndDeletedConfirmationFlow(t *testing.T) {
 	reg := registry.MustNew()
 	for _, operationID := range []string{
 		"mail.message.send",
@@ -155,27 +145,24 @@ func TestMailConfirmationTokensAreSecret(t *testing.T) {
 		"mail.message.reply",
 		"mail.message.reply_all",
 		"mail.message.forward",
+		"mail.draft.create",
+		"mail.draft.update",
 		"mail.draft.send",
 		"mail.draft.delete",
 	} {
-		op, ok := reg.GetOperation(operationID)
+		if _, ok := reg.GetOperation(operationID); ok {
+			t.Errorf("owner-only operation %s must not be exposed by Agent Mail", operationID)
+		}
+	}
+	for _, info := range reg.ListOperations("mail") {
+		op, ok := reg.GetOperation(info.ID)
 		if !ok {
-			t.Errorf("missing operation %s", operationID)
-			continue
+			t.Fatalf("mail operation %s disappeared", info.ID)
 		}
-		var confirmation *registry.ParamInfo
-		for i := range op.Parameters {
-			if op.Parameters[i].Name == "X-Octo-Confirmation" && op.Parameters[i].In == "header" {
-				confirmation = &op.Parameters[i]
-				break
+		for _, parameter := range op.Parameters {
+			if parameter.Name == "X-Octo-Confirmation" || parameter.FlagName == "confirmation-token" {
+				t.Errorf("%s still exposes the deleted Agent self-confirmation flow", info.ID)
 			}
-		}
-		if confirmation == nil {
-			t.Errorf("%s has no X-Octo-Confirmation header", operationID)
-			continue
-		}
-		if !confirmation.Secret {
-			t.Errorf("%s confirmation token is not marked secret", operationID)
 		}
 	}
 }
@@ -224,6 +211,51 @@ func TestMailSendIntentUsesPolicyEndpointAndDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestMailSendIntentAttachmentUsesBackendContentField(t *testing.T) {
+	var gotContent string
+	mailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Attachments []struct {
+				Content string `json:"content"`
+			} `json:"attachments"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if len(body.Attachments) != 1 {
+			t.Fatalf("attachments = %#v", body.Attachments)
+		}
+		gotContent = body.Attachments[0].Content
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"outcome":"accepted","status":"accepted","messageId":"E1"}`))
+	}))
+	defer mailServer.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{APIBaseURL: mailServer.URL, BotToken: "app_test", Format: "json"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(&credential.BotCredential{Token: "app_test", Source: "test"})
+	mailCredential := &credential.MailCredential{Token: "omb_mail_secret", Source: "test"}
+	tf.SetMailCredential(mailCredential)
+	tf.SetMailClient(client.NewMail(cfg, mailCredential, client.Options{ErrOut: io.Discard}))
+	tf.RegistryFunc = registry.MustNew
+
+	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+	RegisterServiceCommands(root, tf.Factory)
+	root.SetArgs([]string{
+		"mail", "message", "send-intent",
+		"--data", `{"to":["recipient@example.com"],"subject":"Attachment","attachments":[{"filename":"image.png","contentType":"image/png","content":"aW1hZ2U="}]}`,
+		"--idempotency-key", "attachment-intent-0001",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute attachment send intent: %v\n%s", err, tf.ErrOut.String())
+	}
+	if gotContent != "aW1hZ2U=" {
+		t.Fatalf("attachment content = %q", gotContent)
+	}
+}
+
 func TestMailAttachmentDownloadWritesOutput(t *testing.T) {
 	mailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/agent-mail-api/webapi/v0/messages/E1/attachments/1.2" {
@@ -260,41 +292,5 @@ func TestMailAttachmentDownloadWritesOutput(t *testing.T) {
 	}
 	if string(content) != "attachment body" {
 		t.Fatalf("downloaded content = %q", content)
-	}
-}
-
-func TestMailSendForwardsServerConfirmationToken(t *testing.T) {
-	var gotConfirmation string
-	mailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotConfirmation = r.Header.Get("X-Octo-Confirmation")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"messageId":"E1","submissionIds":["S1"]}`))
-	}))
-	defer mailServer.Close()
-
-	tf := cmdutil.NewTestFactory()
-	cfg := &config.Config{APIBaseURL: mailServer.URL, BotToken: "app_test", Format: "json"}
-	tf.SetConfig(cfg)
-	tf.SetCredential(&credential.BotCredential{Token: "app_test", Source: "test"})
-	mailCredential := &credential.MailCredential{Token: "omb_mail_secret", Source: "test"}
-	tf.SetMailCredential(mailCredential)
-	tf.SetMailClient(client.NewMail(cfg, mailCredential, client.Options{ErrOut: io.Discard}))
-	tf.RegistryFunc = registry.MustNew
-
-	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
-	RegisterServiceCommands(root, tf.Factory)
-	root.SetArgs([]string{
-		"mail", "message", "send",
-		"--to", "recipient@example.com",
-		"--subject", "Confirmed",
-		"--text", "Body",
-		"--confirmation-token", "omc_once",
-	})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute confirmed send: %v\n%s", err, tf.ErrOut.String())
-	}
-	if gotConfirmation != "omc_once" {
-		t.Fatalf("X-Octo-Confirmation = %q", gotConfirmation)
 	}
 }
