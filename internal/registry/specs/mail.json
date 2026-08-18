@@ -358,7 +358,7 @@
       },
       "AcceptedWrite": {
         "type": "object",
-        "required": ["messageId", "submissionIds", "senderAddress"],
+        "required": ["outcome", "messageId", "submissionIds", "senderAddress"],
         "properties": {
           "outcome": { "type": "string", "enum": ["accepted"] },
           "messageId": { "type": "string" },

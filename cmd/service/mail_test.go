@@ -207,7 +207,8 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 		body := map[string]any{}
 		if r.Body != nil {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil && r.Method != http.MethodDelete {
-				t.Fatalf("decode %s body: %v", r.Method, err)
+				http.Error(w, "invalid test request body", http.StatusBadRequest)
+				return
 			}
 		}
 		requests = append(requests, observedRequest{
@@ -238,13 +239,29 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 	tf.SetMailClient(client.NewMail(cfg, mailCredential, client.Options{ErrOut: io.Discard}))
 	tf.RegistryFunc = registry.MustNew
 
-	run := func(args ...string) {
-		t.Helper()
+	execute := func(args ...string) error {
 		root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 		RegisterServiceCommands(root, tf.Factory)
 		root.SetArgs(args)
-		if err := root.Execute(); err != nil {
+		return root.Execute()
+	}
+	run := func(args ...string) {
+		t.Helper()
+		if err := execute(args...); err != nil {
 			t.Fatalf("execute %v: %v\n%s", args, err, tf.ErrOut.String())
+		}
+	}
+	for _, args := range [][]string{
+		{"mail", "draft", "update", "E1", "--to", "recipient@example.com", "--subject", "Updated"},
+		{"mail", "draft", "send", "E1"},
+	} {
+		before := len(requests)
+		err := execute(args...)
+		if err == nil || !strings.Contains(err.Error(), "draftVersion") {
+			t.Fatalf("execute %v error = %v, want missing draftVersion", args, err)
+		}
+		if len(requests) != before {
+			t.Fatalf("execute %v sent %d request(s), want local validation failure", args, len(requests)-before)
 		}
 	}
 	run("mail", "draft", "update", "E1", "--draft-version", "1", "--to", "recipient@example.com", "--subject", "Updated", "--text", "Body")
