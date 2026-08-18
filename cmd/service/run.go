@@ -83,9 +83,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		DisableRetry:                   d.RetryMode == "never",
 		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
-		SecretValues:        collectSecrets(cobraCmd, rt, pathValues),
-		SensitiveJSONFields: writeOnlyBodyFields(d.RequestBody),
-		ResponseUnwrap:      d.ResponseUnwrap,
+		SecretValues:         collectSecrets(cobraCmd, rt, pathValues),
+		SensitiveJSONFields:  writeOnlyBodyFields(d.RequestBody),
+		ResponseUnwrap:       d.ResponseUnwrap,
+		UnwrapRequiredFields: d.UnwrapRequiredFields,
 	}
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
@@ -671,12 +672,15 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug (the CLI generates a key when omitted), or republish an existing slug without idempotency_key")
 }
 
+// missingVariantRequiredValue treats a whitespace-only string as absent, the
+// same definition emptyAutoIdempotencyValue uses. Diverging here classified
+// slug:"   " as a republish and sent whitespace as a document reference.
 func missingVariantRequiredValue(value any) bool {
 	if value == nil {
 		return true
 	}
 	text, ok := value.(string)
-	return ok && text == ""
+	return ok && strings.TrimSpace(text) == ""
 }
 
 // applyBodyFlags merges body-flag values (--foo, --bar) into base, following the
@@ -1066,6 +1070,7 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	}
 	body, err := cli.Do(ctx, req)
 	if err != nil {
+		err = annotateIdempotencyKey(rt, req, err)
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
@@ -1075,7 +1080,7 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		return err
 	}
 	if req.ResponseUnwrap != "" && (f.Globals == nil || !f.Globals.DryRun) {
-		body, err = unwrapResponse(body, req.ResponseUnwrap)
+		body, err = unwrapResponse(body, req.ResponseUnwrap, req.UnwrapRequiredFields)
 		if err != nil {
 			unwrapErr := output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), "backend response did not match its operation spec")
 			_ = f.EmitError(unwrapErr) //nolint:errcheck // best-effort emit before returning err
@@ -1088,13 +1093,83 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	return f.EmitSuccess(body)
 }
 
-func unwrapResponse(body []byte, path string) ([]byte, error) {
-	raw, found, err := rawValueAtPath(body, path)
-	if err != nil {
-		return nil, err
+// annotateIdempotencyKey records the key a failed create was sent with, so a
+// caller whose outcome is unknown can retry the SAME creation instead of
+// minting a second document. Without it the generated key dies with the process
+// and an orphan created by a committed-but-unacknowledged request is
+// unreachable: the caller never received its doc reference, so it can neither
+// address nor delete it.
+//
+// The key is merged into any existing backend Detail rather than replacing it —
+// a 5xx often carries its own payload, and both matter to the caller. Only the
+// auto-idempotency operations carry a key, and only string keys are attached.
+func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error) error {
+	if rt == nil || rt.detail == nil || rt.detail.AutoIdempotencyKey == "" {
+		return err
 	}
-	if !found {
-		return nil, fmt.Errorf("response is missing unwrap field %q", path)
+	field := rt.detail.AutoIdempotencyKey
+	body, ok := req.Body.(map[string]any)
+	if !ok {
+		return err
+	}
+	key, ok := body[field].(string)
+	if !ok || key == "" {
+		return err
+	}
+	var exit *output.ExitError
+	if !errors.As(err, &exit) {
+		return err
+	}
+	merged := map[string]json.RawMessage{}
+	if len(exit.Detail) > 0 {
+		// A non-object payload is kept intact under a sibling key.
+		if json.Unmarshal(exit.Detail, &merged) != nil {
+			merged = map[string]json.RawMessage{"response": exit.Detail}
+		}
+	}
+	if _, taken := merged[field]; taken {
+		return err
+	}
+	quoted, marshalErr := json.Marshal(key)
+	if marshalErr != nil {
+		return err
+	}
+	merged[field] = quoted
+	detail, marshalErr := json.Marshal(merged)
+	if marshalErr != nil {
+		return err
+	}
+	exit.Detail = detail
+	exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s to resume the same creation rather than create a second document",
+		strings.ReplaceAll(field, "_", "-"), key)
+	return exit
+}
+
+// unwrapResponse lifts the spec-declared field out of a successful response.
+// It fails OPEN: an empty body, or a body without the field, passes through
+// unchanged. The server itself always writes an envelope, so this is not about
+// its own shape — it protects the case where a misconfigured intermediary
+// answers 200 with something else after the server already committed. Failing
+// closed there reports a completed delete/grant/comment as ok:false, and a
+// caller that retries on that can duplicate work.
+//
+// It still fails closed on the one shape that cannot be passed through: when
+// the 2xx schema declares required properties for the unwrapped value, a null
+// or scalar carries none of them, and reporting success would let a caller
+// persist an empty document reference.
+func unwrapResponse(body []byte, path string, required []string) ([]byte, error) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return body, nil
+	}
+	raw, found, err := rawValueAtPath(body, path)
+	if err != nil || !found {
+		return body, nil //nolint:nilerr // deliberate fail-open; see doc comment
+	}
+	if len(required) > 0 {
+		var object map[string]json.RawMessage
+		if jsonErr := json.Unmarshal(raw, &object); jsonErr != nil || object == nil {
+			return nil, fmt.Errorf("response field %q must be an object carrying %s", path, strings.Join(required, ", "))
+		}
 	}
 	return raw, nil
 }
@@ -1245,7 +1320,8 @@ func validatePaginationTransforms(rt *operationRuntime) *output.ExitError {
 	if rt == nil || rt.detail == nil {
 		return nil
 	}
-	if len(rt.detail.ResponseFieldAliases) == 0 && len(rt.detail.LosslessIDFields) == 0 {
+	if len(rt.detail.ResponseFieldAliases) == 0 && len(rt.detail.LosslessIDFields) == 0 &&
+		rt.detail.ResponseUnwrap == "" {
 		return nil
 	}
 	return output.ErrWithHint(
@@ -1253,7 +1329,7 @@ func validatePaginationTransforms(rt *operationRuntime) *output.ExitError {
 		"PAGINATION_TRANSFORM_CONFLICT",
 		"operation is paginated and also declares a response output transform; these are mutually exclusive",
 		"operation-spec bug: an op with x-octo-pagination must not also declare "+
-			"x-octo-response-fields or x-octo-lossless-id-fields",
+			"x-octo-response-fields, x-octo-lossless-id-fields or x-octo-response-unwrap",
 	)
 }
 

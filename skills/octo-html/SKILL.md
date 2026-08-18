@@ -64,7 +64,9 @@ octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html
 octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","meta":{"title":"Private draft"}}'
 
 # Publish a later immutable version. Keep the wire field name `slug` and omit
-# idempotency_key. An unknown legacy slug is rejected; it cannot create a doc.
+# idempotency_key. Pass ONLY a slug the server returned earlier: an unregistered
+# slug does not create a canonical document — it produces a legacy unregistered
+# one that never appears in the sidebar file list. Never invent a slug.
 octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
 
 # An explicit --idempotency-key <same-operation-key> is supported only for
@@ -72,6 +74,14 @@ octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runboo
 # per invocation and the HTTP retry loop reuses the same serialized request.
 # Reusing a key with different HTML returns the old document and discards the
 # new HTML. Once its document is deleted, that key is unusable.
+#
+# UNATTENDED CALLERS: supply your own stable --idempotency-key and persist it
+# before the call. A generated key lives only for that invocation, so if a
+# timeout or 5xx leaves the outcome unknown, a plain re-run creates a SECOND
+# document — and the first one's reference was never returned, so it can be
+# neither addressed nor deleted. With your own key the re-run resumes the same
+# creation. A failed create also reports the key it used in the error envelope's
+# detail (and hint), so an ambiguous failure stays recoverable either way.
 
 # List, inspect, list versions, and soft-delete.
 octo-cli html list
@@ -86,6 +96,11 @@ octo-cli html rm <doc-ref>
 Mounts (`group`, `space`, or `thread`) control placement/registration only. For
 `group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
 document-reference format.
+
+WITHOUT `mount_type` the backend skips docs-backend registration, so the HTML
+never shows up in the sidebar file list — this is the #1 "my doc didn't appear"
+gotcha. An unmounted document still receives a canonical `doc_id`; registration
+and identity are separate concerns.
 
 ## 2. Author drafts
 

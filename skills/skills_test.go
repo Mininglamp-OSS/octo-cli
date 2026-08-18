@@ -82,7 +82,8 @@ func TestOctoHTMLSkillCanonicalCreateContract(t *testing.T) {
 		"octo-docs-html#33",
 		"octo-docs-backend#166",
 		"html draft create",
-		"unknown legacy slug",
+		"Never invent a slug",
+		"never appears in the sidebar file list",
 		"different HTML returns the old document",
 		"document is deleted, that key is unusable",
 	} {

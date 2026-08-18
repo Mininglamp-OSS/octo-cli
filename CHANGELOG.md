@@ -136,9 +136,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Display names are metadata, not aliases, and same-name republish is unsupported.
   Query/body wire keys remain `slug`; path argument help now says `doc-ref` without
   changing request paths. Group, space, and thread mounts are all registered.
-  Republish requires the saved `slug` and omits `idempotency_key`; unknown legacy
-  slugs are rejected and cannot create. `html draft create` provides the canonical
-  no-reference draft flow (`POST /docs/draft`) with an idempotency key.
+  Republish requires the saved `slug` and omits `idempotency_key`. `html draft
+  create` provides the canonical no-reference draft flow (`POST /docs/draft`)
+  with an idempotency key. Unattended callers should supply their own stable
+  `--idempotency-key`: a generated key lives only for that invocation, so a
+  re-run after an ambiguous failure creates a second document. A failed create
+  reports the key it used in the error envelope so the outcome stays
+  recoverable.
   **Minimum rollout dependency:** release only after the canonical-create changes
   in octo-docs-backend#166 and octo-docs-html#33 are merged and deployed.
 - **Loop request validation now enforces its Public API constraints locally**,

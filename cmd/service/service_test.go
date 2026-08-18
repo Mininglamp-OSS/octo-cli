@@ -1567,3 +1567,109 @@ func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
 		})
 	}
 }
+
+// TestHTMLMutationUnwrapFailsOpenOnBodylessSuccess pins the fail-open direction
+// of unwrapResponse. The server already committed the mutation, so an empty
+// body, a 204, or a bare {"ok":true} must still be reported as success — the
+// earlier fail-closed behaviour told the caller a completed delete had failed.
+func TestHTMLMutationUnwrapFailsOpenOnBodylessSuccess(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "empty 200", status: 200, body: ""},
+		{name: "204 no content", status: 204, body: ""},
+		{name: "ok without data", status: 200, body: `{"ok":true}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if tt.body != "" {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				w.WriteHeader(tt.status)
+				if tt.body != "" {
+					_, _ = w.Write([]byte(tt.body))
+				}
+			})
+			root.SetArgs([]string{"html", "rm", "doc-1"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("a committed mutation was reported as failed: %v (stderr: %s)", err, tf.ErrOut.String())
+			}
+			var env map[string]any
+			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+				t.Fatalf("response: %v: %s", err, tf.Out.String())
+			}
+			if ok, _ := env["ok"].(bool); !ok {
+				t.Errorf("envelope not ok: %s", tf.Out.String())
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapRejectsNullAndScalarData pins the fail-closed direction:
+// html.publish declares doc_id and slug required, and a null or scalar data
+// carries neither. Reporting success there makes a caller persist an empty
+// document reference and lose the document it just created.
+func TestHTMLPublishUnwrapRejectsNullAndScalarData(t *testing.T) {
+	for _, body := range []string{`{"data":null}`, `{"data":"oops"}`, `{"data":123}`} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %s as success: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+		})
+	}
+}
+
+// TestHTMLCreateFailureReportsIdempotencyKey pins that an ambiguous create
+// failure surfaces the key it used. Without it the generated key dies with the
+// process and a committed-but-unacknowledged create becomes an unreachable
+// orphan the caller can neither address nor delete.
+func TestHTMLCreateFailureReportsIdempotencyKey(t *testing.T) {
+	var sent string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sent, _ = body["idempotency_key"].(string)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected the 502 to fail")
+	}
+	if sent == "" {
+		t.Fatal("no generated key reached the server")
+	}
+	if got := tf.ErrOut.String(); !strings.Contains(got, sent) {
+		t.Errorf("error envelope does not carry the idempotency key %q, so the orphan is unrecoverable: %s", sent, got)
+	}
+}
+
+// TestHTMLWhitespaceSlugIsNotTreatedAsRepublish pins the unified empty-value
+// definition: a whitespace-only slug must not classify as republish and be sent
+// as a document reference, which is what the untrimmed variant check did.
+func TestHTMLWhitespaceSlugIsNotTreatedAsRepublish(t *testing.T) {
+	var body map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"d_1","doc_id":"d_1"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--data", `{"html":"new","slug":"   "}`})
+	err := root.Execute()
+	if err == nil {
+		if key, _ := body["idempotency_key"].(string); key == "" {
+			t.Errorf("whitespace slug was sent as a republish reference with no key: %v", body)
+		}
+	}
+}
