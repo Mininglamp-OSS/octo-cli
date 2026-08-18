@@ -101,6 +101,11 @@ type Request struct {
 	// SensitiveJSONFields lists top-level writeOnly request properties that
 	// must be redacted from dry-run and verbose diagnostic output.
 	SensitiveJSONFields []string
+	// ResponseUnwrap is applied by the generated command layer on success.
+	ResponseUnwrap string
+	// UnwrapRequiredFields are the properties the success schema declares under
+	// ResponseUnwrap; a non-empty list refuses a null or scalar unwrapped value.
+	UnwrapRequiredFields []string
 }
 
 // secretMask replaces a redacted value in verbose / dry-run output. It is a

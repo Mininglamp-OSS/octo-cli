@@ -310,6 +310,364 @@ func TestRegisterServiceCommands_PreservesForeignOperationDomain(t *testing.T) {
 
 // --- operation execution (matter.list) ---
 
+func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
+	var gotPath, gotQuery string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.EscapedPath(), r.URL.RawQuery
+		if r.Body != nil {
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		// Carries the properties html.publish declares required; a stub without
+		// them is refused by the unwrap guard.
+		_, _ = w.Write([]byte(`{"data":{"doc_id":"d_1","slug":"d_1"}}`))
+	})
+
+	get := findCmd(findCmd(root, "html"), "get")
+	if get == nil {
+		t.Fatal("missing html get")
+	}
+	if get.Use != "get <doc-ref>" {
+		t.Fatalf("html get Use = %q, want %q", get.Use, "get <doc-ref>")
+	}
+	root.SetArgs([]string{"html", "get", "doc/canonical"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("html get: %v", err)
+	}
+	if gotPath != "/docs-html/v1/docs/doc%2Fcanonical" {
+		t.Errorf("get path = %q", gotPath)
+	}
+
+	gotBody = nil
+	root.SetArgs([]string{"html", "publish", "--html", "<h1>new</h1>", "--idempotency-key", "create-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("canonical html create: %v", err)
+	}
+	if gotBody["html"] != "<h1>new</h1>" || gotBody["idempotency_key"] != "create-1" {
+		t.Errorf("canonical create body = %#v", gotBody)
+	}
+	if _, hasSlug := gotBody["slug"]; hasSlug {
+		t.Errorf("canonical create body must omit slug: %#v", gotBody)
+	}
+
+	root.SetArgs([]string{"html", "comment", "list", "--slug", "doc-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("comment list: %v", err)
+	}
+	if gotQuery != "slug=doc-1" {
+		t.Errorf("comment query = %q, wire key must remain slug", gotQuery)
+	}
+
+	root.SetArgs([]string{"html", "element", "get", "--slug", "doc-1", "--aid", "a1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("element get: %v", err)
+	}
+	if gotBody["slug"] != "doc-1" {
+		t.Errorf("element body = %#v, wire key must remain slug", gotBody)
+	}
+}
+
+func TestHTMLPublishConditionalValidationAndResponseUnwrap(t *testing.T) {
+	var hits int
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1","status":"published"}}`))
+	})
+
+	invalid := [][]string{
+		{"html", "publish", "--html", "new", "--slug", "legacy-unknown", "--idempotency-key", "bad"},
+		{"html", "publish", "--data", `{"html":"new","slug":null,"idempotency_key":"bad"}`},
+		{"html", "publish", "--data", `{"html":"new","slug":"doc-1","idempotency_key":null}`},
+	}
+	for _, args := range invalid {
+		root.SetArgs(args)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("%v unexpectedly succeeded", args)
+		}
+	}
+	if hits != 0 {
+		t.Fatalf("invalid publishes reached backend %d time(s)", hits)
+	}
+
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1","status":"published"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "new", "--slug", "doc-1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("republish existing: %v", err)
+	}
+	var env map[string]any
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["slug"] != "doc-1" || data["doc_id"] != "doc-1" || data["data"] != nil {
+		t.Errorf("CLI response was not unwrapped: %s", tf.Out.String())
+	}
+}
+
+func TestHTMLMutationResponseUnwrapContract(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "delete", args: []string{"html", "rm", "doc-1"}},
+		{name: "draft save", args: []string{"html", "draft", "save", "doc-1", "--html", "updated"}},
+		{name: "unshare", args: []string{"html", "unshare", "doc-1"}},
+		{name: "grant add", args: []string{"html", "grant", "add", "doc-1", "--uid", "u1"}},
+		{name: "grant remove", args: []string{"html", "grant", "rm", "doc-1", "u1"}},
+		{name: "asset remove", args: []string{"html", "asset", "rm", "doc-1", "sum"}},
+		{name: "comment add", args: []string{"html", "comment", "add", "--slug", "doc-1", "--text", "hello"}},
+		{name: "reply", args: []string{"html", "reply", "--slug", "doc-1", "--parent-id", "c1", "--text", "hello"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"marker":"unwrapped"}}`))
+			})
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			var env map[string]any
+			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+				t.Fatalf("response: %v: %s", err, tf.Out.String())
+			}
+			data, _ := env["data"].(map[string]any)
+			if data["marker"] != "unwrapped" || data["data"] != nil {
+				t.Errorf("response was not unwrapped: %s", tf.Out.String())
+			}
+		})
+	}
+}
+
+func TestHTMLListOperationsPreserveOffsetPaginationEnvelope(t *testing.T) {
+	tests := []struct {
+		name        string
+		commandPath []string
+		args        []string
+		wantQuery   string
+	}{
+		{name: "documents", commandPath: []string{"html", "list"}, args: []string{"html", "list"}},
+		{name: "comments", commandPath: []string{"html", "comment", "list"}, args: []string{"html", "comment", "list", "--slug", "doc-1"}, wantQuery: "slug=doc-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.RawQuery != tt.wantQuery {
+					t.Errorf("query = %q, want %q", r.URL.RawQuery, tt.wantQuery)
+				}
+				_, _ = w.Write([]byte(`{"data":[{"id":"one"}],"pagination":{"total":11,"page":1,"page_size":20}}`))
+			})
+
+			cmd, _, err := root.Find(tt.commandPath)
+			if err != nil {
+				t.Fatalf("find command: %v", err)
+			}
+			for _, flag := range []string{"cursor", "limit", "page-all", "page-limit"} {
+				if cmd.Flags().Lookup(flag) != nil {
+					t.Errorf("%s unexpectedly exposes --%s", strings.Join(tt.commandPath, " "), flag)
+				}
+			}
+
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			var env map[string]any
+			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+				t.Fatalf("response: %v: %s", err, tf.Out.String())
+			}
+			if _, ok := env["data"].([]any); !ok {
+				t.Errorf("data = %T, want array: %s", env["data"], tf.Out.String())
+			}
+			pagination, ok := env["_pagination"].(map[string]any)
+			if !ok || pagination["total"] != float64(11) || pagination["page"] != float64(1) || pagination["page_size"] != float64(20) {
+				t.Errorf("_pagination = %#v, want offset pagination: %s", env["_pagination"], tf.Out.String())
+			}
+		})
+	}
+}
+
+func TestHTMLCreateGeneratesRunScopedIdempotencyKey(t *testing.T) {
+	var bodies []map[string]any
+	hits := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		hits++
+		if hits == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "new"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("request count = %d, want retry", len(bodies))
+	}
+	first, _ := bodies[0]["idempotency_key"].(string)
+	second, _ := bodies[1]["idempotency_key"].(string)
+	if first == "" || first != second {
+		t.Errorf("retry keys = %q, %q; want one generated key", first, second)
+	}
+}
+
+func TestHTMLCreateKeysDifferAcrossInvocationsAndExplicitKeyWins(t *testing.T) {
+	var keys []string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		keys = append(keys, body["idempotency_key"].(string))
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+	})
+	for _, args := range [][]string{
+		{"html", "publish", "--html", "one"},
+		{"html", "publish", "--html", "two"},
+		{"html", "publish", "--html", "three", "--idempotency-key", "caller-key"},
+	} {
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	if keys[0] == "" || keys[1] == "" || keys[0] == keys[1] {
+		t.Errorf("independent invocation keys = %q, %q", keys[0], keys[1])
+	}
+	if keys[2] != "caller-key" {
+		t.Errorf("explicit key = %q", keys[2])
+	}
+}
+
+func TestHTMLCanonicalDraftCreate(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"data":{"slug":"doc-draft","doc_id":"doc-draft"}}`))
+	})
+	root.SetArgs([]string{"html", "draft", "create", "--html", "<h1>wip</h1>"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("draft create: %v", err)
+	}
+	if key, _ := gotBody["idempotency_key"].(string); gotPath != "/docs-html/v1/docs/draft" || key == "" {
+		t.Errorf("draft create request: path=%q body=%#v", gotPath, gotBody)
+	}
+}
+
+func TestHTMLDraftCreateRejectsSlugWithoutHTTPRequest(t *testing.T) {
+	hits := 0
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	})
+	root.SetArgs([]string{"html", "draft", "create", "--data", `{"html":"wip","slug":"legacy"}`})
+	if err := root.Execute(); err == nil {
+		t.Fatal("draft create with slug unexpectedly succeeded")
+	}
+	if hits != 0 {
+		t.Fatalf("draft create with slug reached backend %d time(s)", hits)
+	}
+}
+
+func TestHTMLAutoIdempotencyReplacesEmptyValues(t *testing.T) {
+	operations := []struct {
+		name string
+		args []string
+	}{
+		{name: "publish", args: []string{"html", "publish"}},
+		{name: "draft create", args: []string{"html", "draft", "create"}},
+	}
+	inputs := []struct {
+		name  string
+		value string
+	}{
+		{name: "absent"},
+		{name: "null", value: `,"idempotency_key":null`},
+		{name: "empty", value: `,"idempotency_key":""`},
+		{name: "whitespace", value: `,"idempotency_key":"   "`},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			var keys []string
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				key, _ := body["idempotency_key"].(string)
+				keys = append(keys, key)
+				_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+			})
+			for _, input := range inputs {
+				args := append(append([]string{}, operation.args...), "--data", `{"html":"wip"`+input.value+`}`)
+				root.SetArgs(args)
+				if err := root.Execute(); err != nil {
+					t.Fatalf("%s: %v", input.name, err)
+				}
+			}
+			seen := map[string]bool{}
+			for i, key := range keys {
+				if strings.TrimSpace(key) == "" {
+					t.Errorf("%s key = %q, want generated key", inputs[i].name, key)
+				}
+				if seen[key] {
+					t.Errorf("generated key %q was reused across invocations", key)
+				}
+				seen[key] = true
+			}
+		})
+	}
+}
+
+func TestHTMLAutoIdempotencyPreservesExplicitNonEmptyValue(t *testing.T) {
+	for _, args := range [][]string{
+		{"html", "publish", "--data", `{"html":"wip","idempotency_key":"caller-key"}`},
+		{"html", "draft", "create", "--data", `{"html":"wip","idempotency_key":"caller-key"}`},
+	} {
+		var got string
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			got, _ = body["idempotency_key"].(string)
+			_, _ = w.Write([]byte(`{"data":{"doc_id":"d_1","slug":"d_1"}}`))
+		})
+		root.SetArgs(args)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if got != "caller-key" {
+			t.Errorf("%v sent key %q", args[:3], got)
+		}
+	}
+}
+
+func TestHTMLVariantsRejectEmptyRequiredStringsWithoutHTTPRequest(t *testing.T) {
+	for _, args := range [][]string{
+		{"html", "publish", "--html", ""},
+		{"html", "draft", "create", "--html", ""},
+	} {
+		hits := 0
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { hits++ })
+		root.SetArgs(args)
+		if err := root.Execute(); err == nil {
+			t.Errorf("%v unexpectedly succeeded", args)
+		}
+		if hits != 0 {
+			t.Errorf("%v reached backend %d time(s)", args, hits)
+		}
+	}
+}
+
 func TestMatterList_QueryParamsFromFlags(t *testing.T) {
 	var gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1207,6 +1565,350 @@ func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "unknown subcommand") {
 				t.Errorf("error should mention 'unknown subcommand', got %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestHTMLMutationUnwrapFailsOpenOnBodylessSuccess pins the fail-open direction
+// of unwrapResponse. The server already committed the mutation, so an empty
+// body, a 204, or a bare {"ok":true} must still be reported as success — the
+// earlier fail-closed behaviour told the caller a completed delete had failed.
+func TestHTMLMutationUnwrapFailsOpenOnBodylessSuccess(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "empty 200", status: 200, body: ""},
+		{name: "204 no content", status: 204, body: ""},
+		{name: "ok without data", status: 200, body: `{"ok":true}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if tt.body != "" {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				w.WriteHeader(tt.status)
+				if tt.body != "" {
+					_, _ = w.Write([]byte(tt.body))
+				}
+			})
+			root.SetArgs([]string{"html", "rm", "doc-1"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("a committed mutation was reported as failed: %v (stderr: %s)", err, tf.ErrOut.String())
+			}
+			var env map[string]any
+			if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+				t.Fatalf("response: %v: %s", err, tf.Out.String())
+			}
+			if ok, _ := env["ok"].(bool); !ok {
+				t.Errorf("envelope not ok: %s", tf.Out.String())
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapRejectsNullAndScalarData pins the fail-closed direction:
+// html.publish declares doc_id and slug required, and a null or scalar data
+// carries neither. Reporting success there makes a caller persist an empty
+// document reference and lose the document it just created.
+func TestHTMLPublishUnwrapRejectsNullAndScalarData(t *testing.T) {
+	for _, body := range []string{`{"data":null}`, `{"data":"oops"}`, `{"data":123}`} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %s as success: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapRejectsBlankRequiredValues pins that the guard checks the
+// value, not just the key. A present-but-empty doc_id/slug is the same lost
+// document as a missing one, and it is worse than a failure: reporting ok:true
+// also skips annotateIdempotencyKey, so the generated key dies with the process
+// and the committed document becomes an unaddressable orphan. The shapes below
+// are what an intermediary that re-encodes the envelope through a struct without
+// omitempty actually emits — the very scenario this guard exists for.
+func TestHTMLPublishUnwrapRejectsBlankRequiredValues(t *testing.T) {
+	for _, body := range []string{
+		`{"data":{"doc_id":"","slug":""}}`,
+		`{"data":{"doc_id":null,"slug":null}}`,
+		`{"data":{"doc_id":"   ","slug":"   "}}`,
+		`{"data":{"doc_id":"d1","slug":""}}`,
+		`{"data":{"doc_id":0,"slug":0}}`,
+		`{"data":{"doc_id":{},"slug":[]}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %s as a created document: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapAcceptsUsableReference is the other direction: a payload
+// that does carry both references still passes, including one padded with
+// surrounding whitespace, which is trimmed for the blankness test only and must
+// reach the caller unmodified.
+func TestHTMLPublishUnwrapAcceptsUsableReference(t *testing.T) {
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"doc_id":" d_1 ","slug":"d_1","version":1}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("a usable reference was rejected: %v (stderr: %s)", err, tf.ErrOut.String())
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			DocID string `json:"doc_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("response: %v: %s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.DocID != " d_1 " {
+		t.Errorf("envelope altered the reference: %s", tf.Out.String())
+	}
+}
+
+// TestHTMLMalformedSuccessReportsIdempotencyKey pins the recovery handle on the
+// fail-closed path this PR introduced. A malformed 2xx is the one failure where
+// the request definitely reached the server carrying the key, so the create may
+// be committed; refusing it loudly is only useful if the envelope still carries
+// the key that can address the resulting orphan. Without this the guard converts
+// a silent bad reference into an unrecoverable one, and a plain rerun mints a
+// second key and may duplicate the document.
+func TestHTMLMalformedSuccessReportsIdempotencyKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"publish", []string{"html", "publish", "--html", "<p>x</p>"}},
+		{"draft create", []string{"html", "draft", "create", "--html", "<p>x</p>"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent string
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if key, ok := body["idempotency_key"].(string); ok {
+					sent = key
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"doc_id":"","slug":""}}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err == nil {
+				t.Fatalf("malformed 2xx was accepted: %s", tf.Out.String())
+			}
+			if sent == "" {
+				t.Fatal("no auto-generated key reached the server, so this case does not exercise the recovery handle")
+			}
+			got := tf.ErrOut.String()
+			if !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+			if !strings.Contains(got, sent) {
+				t.Errorf("envelope does not carry the sent key %q, so the committed document is unrecoverable: %s", sent, got)
+			}
+			var env struct {
+				Error struct {
+					Hint   string          `json:"hint"`
+					Detail json.RawMessage `json:"detail"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+				t.Fatalf("error envelope: %v: %s", err, got)
+			}
+			var detail map[string]string
+			if err := json.Unmarshal(env.Error.Detail, &detail); err != nil {
+				t.Fatalf("detail is not an object: %v: %s", err, env.Error.Detail)
+			}
+			if detail["idempotency_key"] != sent {
+				t.Errorf("detail.idempotency_key = %q, want %q", detail["idempotency_key"], sent)
+			}
+			// The outcome genuinely is unknown here, so the hint must say to
+			// resume the same creation rather than describe the shape problem.
+			if !strings.Contains(env.Error.Hint, "outcome unknown") {
+				t.Errorf("hint does not report the unknown outcome: %q", env.Error.Hint)
+			}
+		})
+	}
+}
+
+// TestUnwrapFailureKeepsSpecHintWithoutAutoKey pins the fallback: an operation
+// with required unwrap fields but no auto-generated key has no key to retry
+// with, so it must keep the shape-diagnosis hint rather than emit an empty one.
+func TestUnwrapFailureKeepsSpecHintWithoutAutoKey(t *testing.T) {
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"doc_id":"","slug":""}}`))
+	})
+	// Republish sends a slug instead of a key, so no auto key is generated.
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>", "--slug", "existing-doc"})
+	if err := root.Execute(); err == nil {
+		t.Fatalf("malformed 2xx was accepted: %s", tf.Out.String())
+	}
+	var env struct {
+		Error struct {
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+		t.Fatalf("error envelope: %v: %s", err, tf.ErrOut.String())
+	}
+	if env.Error.Hint != "backend response did not match its operation spec" {
+		t.Errorf("hint = %q, want the spec-mismatch fallback", env.Error.Hint)
+	}
+}
+
+// TestHTMLCreateFailureReportsIdempotencyKey pins that an ambiguous create
+// failure surfaces the key it used. Without it the generated key dies with the
+// process and a committed-but-unacknowledged create becomes an unreachable
+// orphan the caller can neither address nor delete.
+func TestHTMLCreateFailureReportsIdempotencyKey(t *testing.T) {
+	var sent string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sent, _ = body["idempotency_key"].(string)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected the 502 to fail")
+	}
+	if sent == "" {
+		t.Fatal("no generated key reached the server")
+	}
+	if got := tf.ErrOut.String(); !strings.Contains(got, sent) {
+		t.Errorf("error envelope does not carry the idempotency key %q, so the orphan is unrecoverable: %s", sent, got)
+	}
+}
+
+// TestHTMLWhitespaceSlugIsNotTreatedAsRepublish pins the unified empty-value
+// definition: a whitespace-only slug must not classify as republish and be sent
+// as a document reference, which is what the untrimmed variant check did.
+func TestHTMLWhitespaceSlugIsNotTreatedAsRepublish(t *testing.T) {
+	var body map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"slug":"d_1","doc_id":"d_1"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--data", `{"html":"new","slug":"   "}`})
+	err := root.Execute()
+	if err == nil {
+		if key, _ := body["idempotency_key"].(string); key == "" {
+			t.Errorf("whitespace slug was sent as a republish reference with no key: %v", body)
+		}
+	}
+}
+
+// TestHTMLCreateFailureKeepsCuratedHintOn4xx pins that the idempotency-key
+// annotation does not claim "outcome unknown" for a definite refusal, and does
+// not clobber a hint the caller can act on. A 403 created nothing, so telling
+// the caller to retry the creation is both false and a replacement of curated
+// guidance with a misleading instruction. The key still lands in detail.
+func TestHTMLCreateFailureKeepsCuratedHintOn4xx(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		// FORBIDDEN has a curated local hint that wins over the server's; either
+		// way the point is that it survives instead of being replaced.
+		{name: "403 with curated hint", status: 403,
+			body: `{"error":{"code":"FORBIDDEN","message":"bot not a member","hint":"ask a Workspace owner to add this Bot"}}`,
+			want: "bot lacks permission; check space membership"},
+		{name: "400 with server hint", status: 400,
+			body: `{"error":{"code":"INVALID_HTML","message":"fragment","hint":"wrap the fragment in <html><body>"}}`,
+			want: "wrap the fragment in <html><body>"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var sent string
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				sent, _ = body["idempotency_key"].(string)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("expected the %d to fail", tt.status)
+			}
+			var env struct {
+				Error struct {
+					Hint   string         `json:"hint"`
+					Detail map[string]any `json:"detail"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+				t.Fatalf("error envelope: %v: %s", err, tf.ErrOut.String())
+			}
+			if env.Error.Hint != tt.want {
+				t.Errorf("curated hint was replaced: hint = %q, want %q", env.Error.Hint, tt.want)
+			}
+			if strings.Contains(env.Error.Hint, "outcome unknown") {
+				t.Errorf("a %d is a definite refusal, not an unknown outcome: %q", tt.status, env.Error.Hint)
+			}
+			if got, _ := env.Error.Detail["idempotency_key"].(string); got != sent || sent == "" {
+				t.Errorf("detail idempotency_key = %q, sent %q", got, sent)
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapRejectsDataMissingRequiredKeys pins that the guard checks
+// the properties the caller was told to read, not merely the JSON type. An empty
+// object, a body with no data field, and an unwrapped payload lacking a required
+// key all yield the same empty document reference as a null.
+func TestHTMLPublishUnwrapRejectsDataMissingRequiredKeys(t *testing.T) {
+	for _, body := range []string{
+		`{"data":{}}`,
+		`{"ok":true}`,
+		`{"doc_id":"d1","slug":"d1"}`,
+		`{"data":{"slug":"d1"}}`,
+		`{"data":[]}`,
+		``,
+	} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if body != "" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(body))
+				}
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %q as success, caller would persist an empty reference: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
 			}
 		})
 	}

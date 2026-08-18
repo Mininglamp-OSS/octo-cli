@@ -226,7 +226,7 @@
                     "spaceId": { "type": "string" },
                     "folderId": { "type": "string" },
                     "docType": { "type": "string" },
-                    "octoDocSlug": { "type": "string", "description": "HTML document slug for use with octo-cli html commands" },
+                    "octoDocSlug": { "type": "string", "description": "HTML document reference for octo-cli html commands: canonical doc_id for a newly created canonical document, or the retained legacy slug for an old document." },
                     "role": { "type": "string" },
                     "createdAt": { "type": "string" },
                     "updatedAt": { "type": "string" }

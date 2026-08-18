@@ -162,7 +162,11 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 
 	usage := verb
 	for _, p := range rt.pathParams {
-		usage += " <" + strings.ReplaceAll(p, "_", "-") + ">"
+		label := strings.ReplaceAll(p, "_", "-")
+		if d.Service == "html" && p == "doc_id" {
+			label = "doc-ref"
+		}
+		usage += " <" + label + ">"
 	}
 
 	cmd := &cobra.Command{

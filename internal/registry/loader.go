@@ -267,6 +267,13 @@ type PaginationInfo struct {
 	RejectCursorRepeats bool   `json:"reject_cursor_repeats,omitempty"`
 }
 
+// BodyVariant declares one valid conditional request-body shape.
+type BodyVariant struct {
+	Name      string   `json:"name,omitempty"`
+	Required  []string `json:"required,omitempty"`
+	Forbidden []string `json:"forbidden,omitempty"`
+}
+
 // OperationDetail is the expanded view of a single operation returned by
 // GetOperation. It embeds OperationInfo for identity/summary and adds every
 // piece of metadata the service engine needs to build a complete cobra
@@ -337,7 +344,16 @@ type OperationDetail struct {
 	// uint64 ids are emitted as decimal strings so values above 2^53 survive an
 	// Agent's JSON parser. Applied after ResponseFieldAliases, so paths name
 	// post-alias keys.
-	LosslessIDFields []string `json:"lossless_id_fields,omitempty"`
+	LosslessIDFields []string      `json:"lossless_id_fields,omitempty"`
+	BodyVariants     []BodyVariant `json:"body_variants,omitempty"`
+	// AutoIdempotencyKey names a request field generated once per command run when absent.
+	AutoIdempotencyKey string `json:"auto_idempotency_key,omitempty"`
+	// ResponseUnwrap selects a dot-separated field from successful JSON responses.
+	ResponseUnwrap string `json:"response_unwrap,omitempty"`
+	// UnwrapRequiredFields lists the properties the 2xx schema declares required
+	// under ResponseUnwrap. Non-empty means the unwrapped value must be an
+	// object, so a null or scalar cannot be reported as success.
+	UnwrapRequiredFields []string `json:"unwrap_required_fields,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -464,6 +480,26 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.MountByTokenKind = stringMapOf(doc["x-octo-mount-by-token-kind"])
 	d.ResponseFieldAliases = stringSliceMapOf(op["x-octo-response-fields"])
 	d.LosslessIDFields = stringSliceOf(op["x-octo-lossless-id-fields"])
+	unwrap, operationUnwrapSet := op["x-octo-response-unwrap"]
+	d.ResponseUnwrap = stringOf(unwrap)
+	if !operationUnwrapSet {
+		d.ResponseUnwrap = stringOf(doc["x-octo-response-unwrap"])
+	}
+	if d.ResponseUnwrap != "" {
+		d.UnwrapRequiredFields = unwrapRequiredFields(doc, op, d.ResponseUnwrap)
+	}
+	d.AutoIdempotencyKey = stringOf(op["x-octo-auto-idempotency-key"])
+	if variants, ok := op["x-octo-body-variants"].([]any); ok {
+		for _, raw := range variants {
+			variant, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.BodyVariants = append(d.BodyVariants, BodyVariant{
+				Name: stringOf(variant["name"]), Required: stringsOf(variant["required"]), Forbidden: stringsOf(variant["forbidden"]),
+			})
+		}
+	}
 	if d.BinaryResponse {
 		if resps, ok := op["responses"].(map[string]any); ok {
 			d.BinaryBody = hasSuccessBody(doc, resps)
@@ -613,6 +649,55 @@ func extractJSONSchema(body map[string]any) map[string]any {
 // spec that shares its success response does not fail-closed and silently drop
 // -o. Only one hop is followed (OpenAPI response objects do not chain refs); an
 // unresolvable ref is treated as "no body".
+
+// unwrapRequiredFields reports the properties the operation's 2xx JSON schema
+// declares required for the value that survives unwrapping. The specs describe
+// the post-unwrap shape (required sits at the schema root, not under the unwrap
+// path), so the path is only descended when the schema actually models the
+// envelope. Callers use a non-empty result to refuse a null or scalar value.
+func unwrapRequiredFields(doc, op map[string]any, path string) []string {
+	resps, ok := op["responses"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	for code, r := range resps {
+		if !strings.HasPrefix(code, "2") {
+			continue
+		}
+		rm, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if ref := stringOf(rm["$ref"]); ref != "" {
+			resolved := followResponseRef(doc, ref)
+			if resolved == nil {
+				continue
+			}
+			rm = resolved
+		}
+		schema := extractJSONSchema(rm)
+		if schema == nil {
+			continue
+		}
+		info := resolveSchema(doc, schema)
+		// Descend only when the schema models the wrapper itself. Ambiguity is
+		// possible in principle — a payload schema with its own property named
+		// like the unwrap path would match here — but no spec has one, and an
+		// explicit x-octo-response-unwrap-required is the fix if one appears.
+		for _, part := range strings.Split(path, ".") {
+			next, ok := info.Properties[part]
+			if !ok {
+				break
+			}
+			info = next
+		}
+		if len(info.Required) > 0 {
+			return append([]string(nil), info.Required...)
+		}
+	}
+	return nil
+}
+
 func hasSuccessBody(doc, resps map[string]any) bool {
 	for code, r := range resps {
 		if !strings.HasPrefix(code, "2") {
@@ -1038,6 +1123,17 @@ func stringSliceMapOf(v any) map[string][]string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func stringsOf(v any) []string {
+	values, _ := v.([]any)
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			out = append(out, text)
+		}
 	}
 	return out
 }

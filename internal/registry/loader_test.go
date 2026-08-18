@@ -46,7 +46,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"event":       2,
 		"docs":        32,
 		"drive":       42,
-		"html":        20,
+		"html":        21,
 		"marketplace": 44,
 		"mail":        24,
 		"summary":     4,
@@ -437,6 +437,63 @@ func TestGetOperationMatterList_Pagination(t *testing.T) {
 	}
 	if !foundStatus {
 		t.Error("missing status query parameter")
+	}
+}
+
+func TestHTMLMutationResponsesDeclareJSONObjects(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{
+		"html.rm", "html.draft.save", "html.unshare", "html.grant.add",
+		"html.grant.rm", "html.asset.rm", "html.comment.add", "html.reply",
+	} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Fatalf("%s not found", id)
+		}
+		if op.ResponseUnwrap != "data" {
+			t.Errorf("%s response unwrap = %q, want data", id, op.ResponseUnwrap)
+		}
+		if op.ResponseSchema == nil || op.ResponseSchema.Type != "object" {
+			t.Errorf("%s response schema = %#v, want JSON object", id, op.ResponseSchema)
+		}
+	}
+}
+
+// TestUnwrapRequiredFieldsAreDeclaredStrings guards an assumption made by the
+// unwrap guard in cmd/service: it refuses a required unwrapped value that is not
+// a string, because every such field today is a document reference. A spec that
+// declares a non-string required field under the unwrap path would be refused at
+// runtime on a valid response, so this fails here instead.
+func TestUnwrapRequiredFieldsAreDeclaredStrings(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, op := range r.ListAllOperations() {
+		d, ok := r.GetOperation(op.ID)
+		if !ok || len(d.UnwrapRequiredFields) == 0 {
+			continue
+		}
+		if d.ResponseSchema == nil {
+			t.Errorf("%s declares unwrap required fields but no success schema", op.ID)
+			continue
+		}
+		payload := *d.ResponseSchema
+		if next, ok := payload.Properties[d.ResponseUnwrap]; ok {
+			payload = next
+		}
+		for _, name := range d.UnwrapRequiredFields {
+			prop, ok := payload.Properties[name]
+			if !ok {
+				t.Errorf("%s: required unwrap field %q is not declared under %q", op.ID, name, d.ResponseUnwrap)
+				continue
+			}
+			if prop.Type != "string" {
+				t.Errorf("%s: required unwrap field %q is type %q; the runtime guard refuses non-strings", op.ID, name, prop.Type)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no required unwrap fields found; the guard this pins would be unreachable")
 	}
 }
 

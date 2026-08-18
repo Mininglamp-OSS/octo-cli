@@ -157,9 +157,9 @@ func TestPagination_NoSpecPairsWithOutputTransforms(t *testing.T) {
 			if !ok || d.Pagination == nil {
 				continue
 			}
-			if len(d.ResponseFieldAliases) > 0 || len(d.LosslessIDFields) > 0 {
+			if len(d.ResponseFieldAliases) > 0 || len(d.LosslessIDFields) > 0 || d.ResponseUnwrap != "" {
 				t.Errorf("%s declares x-octo-pagination together with an output transform; "+
-					"--page-all bypasses normalizeResponse, so the two output paths would diverge",
+					"--page-all bypasses normalizeResponse and unwrapResponse, so the two output paths would diverge",
 					info.ID)
 			}
 		}
@@ -357,5 +357,25 @@ func assertNoSecretEnum(t *testing.T, opID string, schema *registry.SchemaInfo, 
 		if prop.Items != nil && prop.Items.Type == "object" {
 			assertNoSecretEnum(t, opID, prop.Items, field+"[]")
 		}
+	}
+}
+
+// TestPagination_ResponseUnwrapConflictsWithPagination pins the runtime guard on
+// the third output transform. ResponseUnwrap is declared at document level (i.e.
+// opt-out), so a future paginated html operation would inherit it silently:
+// runPaginated never unwraps, so --page-all and single-page output would
+// diverge, and unwrapping to `data` discards the sibling pagination block.
+func TestPagination_ResponseUnwrapConflictsWithPagination(t *testing.T) {
+	d := &registry.OperationDetail{
+		OperationInfo:  registry.OperationInfo{ID: "probe.list", Service: "probe", Method: "GET", Path: "/v1/probe"},
+		Pagination:     &registry.PaginationInfo{},
+		ResponseUnwrap: "data",
+	}
+	err := validatePaginationTransforms(&operationRuntime{detail: d})
+	if err == nil {
+		t.Fatal("a paginated op declaring x-octo-response-unwrap must be refused")
+	}
+	if err.Code != "PAGINATION_TRANSFORM_CONFLICT" {
+		t.Errorf("code = %q", err.Code)
 	}
 }

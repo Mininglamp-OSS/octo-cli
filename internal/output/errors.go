@@ -15,6 +15,20 @@ type ExitError struct {
 	Message string          // human-readable message (English)
 	Hint    string          // suggested next action
 	Detail  json.RawMessage // original backend payload (optional)
+	// HTTPStatus is the response status this error was parsed from, or 0 when
+	// the error did not come from an HTTP response. It distinguishes a definite
+	// server-side refusal (4xx) from an outcome the caller cannot determine.
+	HTTPStatus int `json:"-"`
+}
+
+// OutcomeUnknown reports whether the request may have been applied despite the
+// error. A 4xx is a definite refusal; anything else — a transport failure, a
+// timeout, or a 5xx after the server may have committed — is ambiguous.
+func (e *ExitError) OutcomeUnknown() bool {
+	if e == nil {
+		return false
+	}
+	return e.HTTPStatus < 400 || e.HTTPStatus > 499
 }
 
 // Error satisfies the error interface. Prefer the envelope renderer over Error()
@@ -144,7 +158,7 @@ var backendErrorMapping = map[string]struct {
 // shape, then dmworkim {msg,status}, falling back to a raw dump. The status
 // code is used as a signal when the body is unparseable.
 func ParseBackendError(status int, body []byte) *ExitError {
-	return parseBackendError(status, body, false)
+	return withStatus(parseBackendError(status, body, false), status)
 }
 
 // ParsePublicAPIError parses a Fleet Public API error envelope. Unlike the
@@ -152,7 +166,16 @@ func ParseBackendError(status int, body []byte) *ExitError {
 // fallback. The protocol is selected by the caller; a presentation-only field
 // such as hint must never change an agent's exit code.
 func ParsePublicAPIError(status int, body []byte) *ExitError {
-	return parseBackendError(status, body, true)
+	return withStatus(parseBackendError(status, body, true), status)
+}
+
+// withStatus stamps the originating HTTP status so callers can tell a definite
+// refusal from an ambiguous outcome.
+func withStatus(err *ExitError, status int) *ExitError {
+	if err != nil {
+		err.HTTPStatus = status
+	}
+	return err
 }
 
 func parseBackendError(status int, body []byte, publicAPI bool) *ExitError {
