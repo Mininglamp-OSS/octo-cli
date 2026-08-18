@@ -232,6 +232,60 @@
         "responses": { "200": { "description": "Drafts" } }
       }
     },
+    "/agent-mail-api/webapi/v0/drafts/{id}/send": {
+      "post": {
+        "operationId": "mail.draft.send",
+        "summary": "Send an Agent-prepared draft",
+        "description": "Explicitly sends the current version of a draft created through the Agent Draft workflow.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendDraft" } } }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted for delivery",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AcceptedWrite" } } }
+          }
+        }
+      }
+    },
+    "/agent-mail-api/webapi/v0/drafts/{id}": {
+      "patch": {
+        "operationId": "mail.draft.update",
+        "summary": "Replace an Agent-prepared draft with an updated version",
+        "description": "Updates the current immutable Agent Draft version and returns its replacement id and version.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateDraft" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Replacement draft id and version",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DraftVersionResult" } } }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "mail.draft.delete",
+        "summary": "Delete an Agent-prepared draft",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "204": { "description": "Deleted" } }
+      }
+    },
     "/agent-mail-api/webapi/v0/addresses": {
       "get": {
         "operationId": "mail.address.list",
@@ -271,6 +325,45 @@
           "text": { "type": "string" },
           "html": { "type": "string" },
           "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } }
+        }
+      },
+      "SendDraft": {
+        "type": "object",
+        "required": ["draftVersion"],
+        "properties": {
+          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Current version returned for the Agent-prepared draft" }
+        }
+      },
+      "UpdateDraft": {
+        "type": "object",
+        "required": ["to", "subject", "draftVersion"],
+        "properties": {
+          "to": { "type": "array", "items": { "type": "string" } },
+          "cc": { "type": "array", "items": { "type": "string" } },
+          "bcc": { "type": "array", "items": { "type": "string" } },
+          "subject": { "type": "string" },
+          "text": { "type": "string" },
+          "html": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/Attachment" } },
+          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Current version returned for the Agent-prepared draft" }
+        }
+      },
+      "DraftVersionResult": {
+        "type": "object",
+        "required": ["id", "draftVersion"],
+        "properties": {
+          "id": { "type": "string" },
+          "draftVersion": { "type": "integer" }
+        }
+      },
+      "AcceptedWrite": {
+        "type": "object",
+        "required": ["messageId", "submissionIds", "senderAddress"],
+        "properties": {
+          "outcome": { "type": "string", "enum": ["accepted"] },
+          "messageId": { "type": "string" },
+          "submissionIds": { "type": "array", "items": { "type": "integer" } },
+          "senderAddress": { "type": "string", "description": "Authoritative envelope sender selected by octo-mail" }
         }
       },
       "AgentDraftResult": {

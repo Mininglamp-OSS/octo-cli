@@ -105,7 +105,7 @@ octo-cli mail      me
                        flag|delivery|auto-reply-context
                        state|changes
                        attachment download
-               draft list|create-agent
+               draft list|create-agent|update|send|delete
 
 octo-cli auth      login | status | update | logout | list
 octo-cli schema [--list [domain] | <operation-id>]

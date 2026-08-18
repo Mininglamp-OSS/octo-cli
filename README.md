@@ -135,6 +135,10 @@ octo-cli mail message send-intent \
   --idempotency-key "send-example-001"
 octo-cli mail thread get T123
 octo-cli mail draft list
+octo-cli mail draft update E123 --draft-version 1 \
+  --to recipient@example.com --subject "Updated draft" --text "Updated body"
+octo-cli mail draft send E124 --draft-version 2
+octo-cli mail draft delete E125
 
 # Docs — create/list/search, then read and incrementally edit the live body.
 octo-cli docs create --title "Design notes"
