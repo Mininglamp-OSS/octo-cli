@@ -77,14 +77,14 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 	if oerr != nil {
 		return nil, oerr
 	}
-	if verr := assertSameOrigin(u, origin); verr != nil {
+	if verr := assertSameOrigin(u, origin, shareLinkPolicy); verr != nil {
 		return nil, verr
 	}
 
 	switch {
 	case strings.HasPrefix(u.Path, blobSharePathPrefix):
 		token := strings.TrimPrefix(u.Path, blobSharePathPrefix)
-		if verr := assertShareIDSegment("share token", token); verr != nil {
+		if verr := assertShareIDSegment("share token", token, shareLinkPolicy); verr != nil {
 			return nil, verr
 		}
 		return &parsedShareURL{
@@ -96,7 +96,7 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 
 	case strings.HasPrefix(u.Path, docSharePathPrefix):
 		docID := strings.TrimPrefix(u.Path, docSharePathPrefix)
-		if verr := assertShareIDSegment("document id", docID); verr != nil {
+		if verr := assertShareIDSegment("document id", docID, shareLinkPolicy); verr != nil {
 			return nil, verr
 		}
 		docSpaceID := strings.TrimSpace(u.Query().Get(docSpaceQueryParam))
@@ -122,8 +122,29 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 		blobSharePathPrefix, docSharePathPrefix))
 }
 
+// linkPolicy names the kind of link being parsed and how to fail it, so the two
+// enforcement helpers below can be shared by every command that accepts a link
+// someone else handed over.
+//
+// It exists because the rules — not the wording — are the load-bearing part. A
+// second link surface (`docs invite accept`, cmd/docs_inviteurl.go) needs the
+// identical same-origin and segment checks, and the alternative to a parameter
+// here was a second copy that a future hardening of this one would not reach.
+// The drive spellings are the zero value of this indirection: shareLinkPolicy
+// reproduces the previous strings and code exactly.
+type linkPolicy struct {
+	// noun is how the link is named in a diagnostic ("share link").
+	noun string
+	// fail builds the rejection, and owns the error code and hint.
+	fail func(msg string) *output.ExitError
+}
+
+// shareLinkPolicy is the drive share-link spelling: INVALID_SHARE_URL, worded
+// as before.
+var shareLinkPolicy = linkPolicy{noun: "share link", fail: invalidShareURL}
+
 // assertSameOrigin enforces the "compare, never contact" rule for an incoming
-// share link. A site-relative link has no authority to check. An absolute one
+// link. A site-relative link has no authority to check. An absolute one
 // must match the configured origin exactly — same scheme, and host equal
 // (comparison is case-insensitive but includes the port, so a link on another
 // port is a different origin) — and must carry no userinfo, which would
@@ -138,25 +159,25 @@ func parseShareURL(cfg *config.Config, raw string) (*parsedShareURL, *output.Exi
 // Percent-encoding in the path is refused rather than decoded: %2F would decode
 // to a slash and let a crafted link pass the later shape check while actually
 // addressing a different path.
-func assertSameOrigin(u, origin *url.URL) *output.ExitError {
+func assertSameOrigin(u, origin *url.URL, p linkPolicy) *output.ExitError {
 	if u.IsAbs() || u.Host != "" {
 		if u.User != nil {
-			return invalidShareURL("the share link must not embed credentials")
+			return p.fail("the " + p.noun + " must not embed credentials")
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
-			return invalidShareURL(fmt.Sprintf("unsupported scheme %q", u.Scheme))
+			return p.fail(fmt.Sprintf("unsupported scheme %q", u.Scheme))
 		}
 		if !strings.EqualFold(u.Scheme, origin.Scheme) {
-			return invalidShareURL(fmt.Sprintf(
-				"the share link scheme %q is not the configured Octo origin's scheme %q", u.Scheme, origin.Scheme))
+			return p.fail(fmt.Sprintf(
+				"the %s scheme %q is not the configured Octo origin's scheme %q", p.noun, u.Scheme, origin.Scheme))
 		}
 		if !strings.EqualFold(u.Host, origin.Host) {
-			return invalidShareURL(fmt.Sprintf(
-				"the share link host %q is not the configured Octo origin %q", u.Host, origin.Host))
+			return p.fail(fmt.Sprintf(
+				"the %s host %q is not the configured Octo origin %q", p.noun, u.Host, origin.Host))
 		}
 	}
 	if u.EscapedPath() != u.Path {
-		return invalidShareURL("the share link path must not be percent-encoded")
+		return p.fail("the " + p.noun + " path must not be percent-encoded")
 	}
 	return nil
 }
@@ -170,19 +191,19 @@ func assertSameOrigin(u, origin *url.URL) *output.ExitError {
 // url.PathEscape does not escape it, so a segment that is exactly "." or ".."
 // would reach the URL as a real dot segment — see rejectDotSegments in
 // cmd/service for why that matters on a DELETE.
-func assertShareIDSegment(what, seg string) *output.ExitError {
+func assertShareIDSegment(what, seg string, p linkPolicy) *output.ExitError {
 	if seg == "" {
-		return invalidShareURL("the " + what + " is missing from the link")
+		return p.fail("the " + what + " is missing from the link")
 	}
 	if strings.Contains(seg, "/") {
-		return invalidShareURL("the link has extra path segments after the " + what)
+		return p.fail("the link has extra path segments after the " + what)
 	}
 	if seg == "." || seg == ".." {
-		return invalidShareURL(fmt.Sprintf("the %s must be an id, not the path segment %q", what, seg))
+		return p.fail(fmt.Sprintf("the %s must be an id, not the path segment %q", what, seg))
 	}
 	for i := 0; i < len(seg); i++ {
 		if !isShareIDChar(seg[i]) {
-			return invalidShareURL(fmt.Sprintf("the %s contains an unexpected character %q", what, string(seg[i])))
+			return p.fail(fmt.Sprintf("the %s contains an unexpected character %q", what, string(seg[i])))
 		}
 	}
 	return nil

@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli docs invite` family** (4 commands) — link invites for an online
+  document, generated from `docs.json`: `invite create` mints a token granting
+  `reader` | `commenter` | `writer` | `admin` (default `writer`) for 1–7 days
+  (`--expiresInDays`, default 3) with an optional accept cap (`--maxUses`,
+  `0` = unlimited),
+  `invite list` shows a doc's live invites with their usage counters,
+  `invite revoke` kills one, and `invite accept` claims one for the credential in
+  use. Three details differ from the `drive invite` family and are pinned by
+  tests: the role vocabulary is the full docs member ladder
+  `reader|commenter|writer|admin` (docs-backend's invite `parseRole` accepts all
+  four — only an *omitted* role takes the `writer` default, and an unrecognised
+  one is a `400`, never a downgrade), the lifetime is `expiresInDays` and not
+  `expires_in_seconds`, and **revoke is addressed by the invite token**
+  (`--invite-token`) because the docs backend stores no separate invite id.
+  Accept is idempotent — repeating it, or accepting into a document you already
+  belong to, is still `200` with the resulting role and never downgrades a higher
+  role already held; an unknown, revoked, expired or exhausted token is
+  `410 invite_invalid`.
+  - **`invite accept` also takes the whole invite link.** The web app serves
+    invites at `{octo web origin}/docs/invite/<token>`, so pasting that link
+    works. It is parsed locally under the same strict same-origin rules as
+    `drive share access` and is **never fetched**: the host is only compared
+    against `OCTO_API_BASE_URL`, and a link on another host, with embedded
+    credentials, a downgraded scheme, a percent-encoded path or extra segments is
+    refused with `INVALID_INVITE_URL` (exit 2) before any request.
+  - **Invite tokens are credential-equivalent** and declared `x-octo-secret`, so
+    they are masked in `--dry-run` and `--verbose` traces and never echoed in a
+    rejection message. `invite create`'s success envelope necessarily carries the
+    token in full — it is the deliverable — so that output is not safe to paste
+    into a ticket.
 - **`octo-cli marketplace expert` / `squad` families** — CRUD, `mine` lists,
   taxonomy (`expert-category` / `expert-tag`), viewable `skillmd get`, presigned
   `expert-skill-upload create` / `skill-download` for the Expert Marketplace

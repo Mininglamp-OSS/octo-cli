@@ -280,7 +280,7 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 		// same situation as the document branch's ref_id: hold it to the charset
 		// the consuming side enforces so this command cannot emit a share_url that
 		// `share access` would then refuse.
-		if verr := assertShareIDSegment("share token", share.ID); verr != nil {
+		if verr := assertShareIDSegment("share token", share.ID, shareLinkPolicy); verr != nil {
 			return failErr(f, verr)
 		}
 		return emitJSON(f, shareTarget{
@@ -379,7 +379,7 @@ func emitDocShareTarget(f *cmdutil.Factory, origin *url.URL, entry *driveEntryRe
 	// (assertShareIDSegment, used by `share access`) so this command cannot hand
 	// out a link its own parser would refuse — a `?`, `#`, space or slash in a
 	// ref_id would otherwise produce a structurally different URL.
-	if verr := assertShareIDSegment("document id", docID); verr != nil {
+	if verr := assertShareIDSegment("document id", docID, shareLinkPolicy); verr != nil {
 		return failErr(f, verr)
 	}
 	return emitJSON(f, shareTarget{

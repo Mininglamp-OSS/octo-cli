@@ -6,6 +6,7 @@ you need:
 - [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
 - [Versions](#versions) — snapshot / preview / rename / delete / restore
 - [Members & sharing](#members--sharing) — roles, forward-grant
+- [Invite links](#invite-links) — create/list/revoke/accept a link that grants a role
 - [Attachments](#attachments) — presign + upload file/image bytes
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
@@ -111,10 +112,10 @@ Schema: `octo-cli schema docs.versions.restore`.
 
 ```bash
 octo-cli docs members list   <docId>                             # admin
-octo-cli docs members set    <docId> --uid <uid> --role writer   # add/upsert; role: reader|writer|admin
+octo-cli docs members set    <docId> --uid <uid> --role writer   # add/upsert; role: reader|commenter|writer|admin
 octo-cli docs members remove <docId> <uid>                       # admin; owner cannot be removed
 
-# Grant-only forward access (never downgrades). Only reader|writer are grantable.
+# Grant-only forward access (never downgrades). Grantable: reader|commenter|writer (admin is not).
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 
 # Space-level share scope — read/set who in the space can reach the doc.
@@ -139,6 +140,75 @@ Error codes: `400 invalid_scope` (unknown scope), `400 invalid_role`
 (anyone_in_space with a missing/invalid role), `403` (caller not admin/owner),
 `404` (missing or cross-space doc), `409` (archived doc). Schema:
 `octo-cli schema docs.share.set`.
+
+---
+
+## Invite links
+
+An invite is a **link token** that grants a role to whoever accepts it. Use it
+when you cannot name the recipients up front (`members set` needs a uid); use
+`members set` when you can.
+
+```bash
+# Create (admin). Prints {inviteToken, role, expiresAt}.
+octo-cli docs invite create <docId> [--role writer] [--expiresInDays 3] [--maxUses 0]
+
+# List the live invites of a doc (admin): token, role, maxUses, usedCount, expiresAt.
+octo-cli docs invite list <docId>
+
+# Revoke (admin). NOTE: addressed by the TOKEN — docs has no separate invite id.
+octo-cli docs invite revoke <docId> <inviteToken>
+octo-cli docs invite revoke <docId> --invite-token <inviteToken>   # token starting with "-"
+
+# Accept as the credential in use. Takes the bare token OR the whole invite link.
+octo-cli docs invite accept <inviteToken>
+octo-cli docs invite accept "$OCTO_API_BASE_URL/docs/invite/<inviteToken>"
+```
+
+**Role.** `reader` | `commenter` | `writer` | `admin` — the same member-role
+ladder as `docs members set`, in increasing order of capability. **Omitting**
+`--role` is what selects the `writer` default; an unrecognised value is rejected
+by the backend with `400 role must be reader|commenter|writer|admin`, and the CLI
+refuses it locally first (`ENUM_NOT_ALLOWED`, exit 2) so it costs no round trip.
+Note that `commenter` sits **between** `reader` and `writer` despite its stored
+numeric code being `4` — that number is historical, the rank is not.
+
+**Lifetime.** `--expiresInDays` is 1–7 days, default 3. There is no permanent
+invite link; a value outside the range is clamped by the backend without an
+error, so pass something in range if you care which. `--maxUses 0` (the default)
+means unlimited accepts.
+
+**Accept is idempotent.** Accepting twice, or accepting into a document you are
+already a member of, is still `200` with the resulting role, and never downgrades
+a higher role you already hold. An unknown, revoked, expired or exhausted token
+is **`410 invite_invalid`** — not 404. Revoking does not remove members who
+already accepted; it only stops further accepts.
+
+**The link form.** The web app serves invites at
+`{octo web origin}/docs/invite/<inviteToken>`, and `invite accept` takes that
+whole link so you can paste what someone sent you. The CLI **never fetches the
+link**: it parses out the token locally, requires the link's host to match the
+configured `OCTO_API_BASE_URL` origin, and calls the configured API. A link on
+any other host, with embedded credentials, with a percent-encoded path, or with
+extra path segments is refused (`INVALID_INVITE_URL`, exit 2).
+
+> **The inviteToken is a credential.** Anyone holding it can claim the role on
+> that document. Hand it over out of band, never paste `invite create` /
+> `invite list` output into a ticket or a shared channel, and revoke it when the
+> invite has served its purpose. The CLI masks the token in `--dry-run` and
+> `--verbose` traces for exactly this reason — but `invite create`'s success
+> output necessarily contains it in full, because it is the thing you asked for.
+
+```bash
+# Typical flow: mint a reader link good for a day, hand over the URL, revoke later.
+TOKEN=$(octo-cli docs invite create d_1 --role reader --expiresInDays 1 \
+  -q '.data.inviteToken' | tr -d '"')
+echo "$OCTO_API_BASE_URL/docs/invite/$TOKEN"    # hand this over out of band
+octo-cli docs invite revoke d_1 -- "$TOKEN"
+```
+
+Schemas: `octo-cli schema docs.invite.create` | `docs.invite.list` |
+`docs.invite.revoke` | `docs.invite.accept`.
 
 ---
 

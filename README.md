@@ -37,7 +37,7 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 32  | Documents, spreadsheets & whiteboards — lifecycle, full-text search, body content, sheet cells (paged read), board scenes, members, comments, versions, attachments |
+| `docs`    | 36  | Documents, spreadsheets & whiteboards — lifecycle, full-text search, body content, sheet cells (paged read), board scenes, members, invite links, comments, versions, attachments |
 | `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `drive`   | 42  | Network drive — spaces & members, folder/file tree, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 45 leaves total |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |

@@ -84,6 +84,7 @@ octo-cli docs      create | list | search | get | rename | delete | forward-gran
                scene    get|edit|export
                members  list|set|remove
                share    get|set
+               invite   create|list|revoke|accept
                comments list|add|edit|delete
                versions list|create|state|rename|delete|restore
                attachments presign|get|resolve
