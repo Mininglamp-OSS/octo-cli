@@ -101,11 +101,11 @@ octo-cli mail      me
                mailbox list
                address list
                thread get
-               message list|read|raw|send|send-intent|reply|reply-draft
-                       reply-all|forward|flag|delete|delivery|auto-reply-context
+               message list|read|raw|send-intent|reply-draft
+                       flag|delivery|auto-reply-context
                        state|changes
                        attachment download
-               draft list|create|create-agent|update|send|delete
+               draft list|create-agent
 
 octo-cli auth      login | status | update | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
