@@ -1,6 +1,6 @@
 ---
 name: octo-html
-version: 0.1.0
+version: 0.2.0
 description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
 metadata:
   requires:
@@ -52,6 +52,30 @@ deployed before this CLI is released.
   `{ok:false,error:{type,code,message,hint,detail}}` envelope.
 
 ## 1. Create and publish
+
+**Documents are declarative: no JavaScript.** The backend rejects any publish or
+draft whose HTML carries script, with `400` and the stable code
+`html_contains_javascript`. This is not advisory — there is no flag to opt out.
+When generating a document, never emit:
+
+- `<script>` elements (including inside `<svg>`),
+- `on*` event-handler attributes (`onclick`, `onload`, `onerror`, …),
+- `javascript:` / `vbscript:` / scriptable `data:` URLs in `href`, `src`,
+  `xlink:href`, `action`, `formaction`, `object[data]`, or a non-empty `srcdoc`.
+
+Express interaction with CSS instead — `:hover`, `:target`, `:checked` +
+sibling selectors, `<details>`/`<summary>`, transitions and animations all work
+and cover most of what a document needs. Do not assume script is merely inert:
+the host application embeds documents in a sandboxed iframe, but the document's
+own version URL serves the stored HTML as a top-level page, so script that got
+stored would execute for every reader who opens that link. CSS, inline `style`,
+`<iframe>`, `<noscript>` and `<meta http-equiv=refresh>` are all still allowed.
+
+On rejection the error `details.violations` lists every offending construct with
+its `kind`, `tag`, `attr` and 1-based `line`. Fix all of them in one pass — the
+list is complete (capped at 50, with `details.truncated` set when it overflows).
+Do not retry the same document unchanged, and do not try to work around the gate
+by encoding or splitting the script.
 
 ```bash
 # Canonical create: no --slug. The CLI generates the idempotency key.
@@ -169,6 +193,10 @@ an element's tag or nearby heading unless necessary.
 - `401 / 403` — missing or insufficient capability.
 - `404` — document reference (canonical doc_id or legacy slug), comment, or aid
   not found.
+- `400 html_contains_javascript` — the published or draft HTML carries
+  JavaScript (see the no-JavaScript rule in §1). `details.violations` names every
+  offending construct with its `kind` / `tag` / `attr` / `line`; regenerate the
+  document without script rather than retrying it unchanged.
 - Element replacement rejects multiple top-level elements, scripts/styles,
   inline event handlers, and `javascript:` URLs.
 
