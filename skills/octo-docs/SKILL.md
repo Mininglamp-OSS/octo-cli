@@ -25,7 +25,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
 | Continue from a searchable **HTML document** (`doc_type: html`): resolve its slug, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
-| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload) | **`common.md`** |
+| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **invite links**, **attachments** (presign/upload) | **`common.md`** |
 
 > The first four split by `doc_type` (what kind of document you're handling);
 > `common.md` holds the features that apply across kinds. Read a reference with
@@ -48,7 +48,8 @@ addressed by `slug`, not `docId`: if a search hit does not include a slug, run
   `octo-cli config show`.
 - **Do not pass a space flag for docs.** The bot mount resolves the space
   server-side from the token and deliberately ignores any client-supplied space
-  header (anti-spoof). Role enforcement (reader / writer / admin) also happens
+  header (anti-spoof). Role enforcement (reader / commenter / writer / admin)
+  also happens
   server-side, so the CLI surfaces the backend's `403`/`404` envelopes unchanged.
 
 ## Document lifecycle

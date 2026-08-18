@@ -794,8 +794,8 @@
     "/v1/bot/docs/{docId}/forward-grant": {
       "post": {
         "operationId": "docs.forward-grant",
-        "summary": "Grant (never downgrade) a single uid reader/writer access (needs admin)",
-        "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader or writer is grantable here; admin is not forward-grantable.",
+        "summary": "Grant (never downgrade) a single uid reader/commenter/writer access (needs admin)",
+        "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader, commenter or writer is grantable here; admin is not forward-grantable.",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -816,6 +816,147 @@
           }
         },
         "responses": { "200": { "description": "Grant result (final role + changed flag)" } }
+      }
+    },
+    "/v1/bot/docs/{docId}/invites": {
+      "post": {
+        "operationId": "docs.invite.create",
+        "summary": "Create a document invite link token (needs admin)",
+        "description": "Mints a high-entropy inviteToken that grants the chosen role to whoever accepts it. The backend returns the token, the granted role and the computed expiry — never a URL: the share link is built by the frontend from its own origin as {octo web origin}/docs/invite/<inviteToken>. Anyone holding the token can claim the role, so treat it as a credential: hand it over out of band and revoke it when done.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": { "type": "string", "enum": ["reader", "commenter", "writer", "admin"], "default": "writer", "description": "role the invite grants — the full member-role ladder, in increasing order of capability. Matches octo-docs-backend parseRole (src/api/routes/invites.ts), which accepts exactly reader|commenter|writer|admin. Omitting role entirely is what selects the writer default; an unrecognised value is rejected by the backend with 400 'role must be reader|commenter|writer|admin', never downgraded. Note that commenter ranks BETWEEN reader and writer (roleRank in src/permission/role.ts: reader 10, commenter 20, writer 30, admin 40) even though its stored numeric code is 4 for historical reasons — read the ladder, not the code" },
+                  "expiresInDays": { "type": "integer", "default": 3, "minimum": 1, "maximum": 7, "description": "invite lifetime in days. The backend clamps to [1, 7] silently (never 400) and a missing/non-integer value becomes the default 3; there is no permanent invite link" },
+                  "maxUses": { "type": "integer", "default": 0, "description": "how many times the invite may be accepted; 0 (the default) means unlimited. A negative or non-integer value is treated as 0 by the backend" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created invite",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A freshly minted invite. The docs backend addresses an invite by its token alone — there is no invite id to hand back, which is why revoke also takes the token.",
+                  "properties": {
+                    "inviteToken": { "type": "string", "x-octo-secret": true, "description": "the invite secret; pass it to invite accept, or embed it in {octo web origin}/docs/invite/<inviteToken>. x-octo-secret marks the name credential-equivalent, which is what keeps every CLI surface that masks spec-declared secrets (the revoke/accept path parameters, verbose and dry-run traces) treating it as one. The create response necessarily carries the value in full — it is the whole deliverable — so do not paste this output into a ticket or a shared channel" },
+                    "role": { "type": "string", "description": "role the invite grants, as the backend resolved it: reader, commenter, writer or admin. It echoes what was requested; only an omitted role resolves to the writer default (an unrecognised one is 400, not a downgrade)" },
+                    "expiresAt": { "type": "string", "description": "ISO-8601 expiry the backend computed from expiresInDays; always set (there is no permanent invite)" }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "forbidden (caller is not a doc admin)" },
+          "404": { "description": "not_found (missing or cross-space doc)" }
+        }
+      },
+      "get": {
+        "operationId": "docs.invite.list",
+        "summary": "List a document's live invites (needs admin)",
+        "description": "Returns the still-active invites as {items:[…]}, each with its inviteToken, granted role, maxUses (0 = unlimited), usedCount and expiry. There is no {data, pagination} envelope, so --page-all does not apply. Every listed inviteToken is credential-equivalent: this output hands the document over to anyone who reads it.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active invites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "One live invite. Same token `invite create` returned, plus its usage counters.",
+                        "properties": {
+                          "inviteToken": { "type": "string", "x-octo-secret": true, "description": "the invite secret; pass it to invite accept or invite revoke. Credential-equivalent — anyone holding it can claim the role" },
+                          "role": { "type": "string", "description": "role this invite grants: reader, commenter, writer or admin" },
+                          "maxUses": { "type": "integer", "description": "accept limit; 0 means unlimited" },
+                          "usedCount": { "type": "integer", "description": "how many times it has been accepted so far" },
+                          "expiresAt": { "type": "string", "description": "ISO-8601 expiry" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "forbidden (caller is not a doc admin)" },
+          "404": { "description": "not_found (missing or cross-space doc)" }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/invites/{inviteToken}": {
+      "delete": {
+        "operationId": "docs.invite.revoke",
+        "summary": "Revoke an invite (needs admin)",
+        "description": "Revocation is addressed by the inviteToken itself — the docs backend stores no separate invite id, so unlike `drive invite revoke` (which takes an invite_id) this command needs the same secret value the invitees were given. A token that does not belong to this document is 404. Members who already accepted keep their access; revoking only stops further accepts.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "inviteToken", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "x-octo-flag": "invite-token", "description": "inviteToken from invite create / invite list (docs has no separate invite id). The docs backend mints hex tokens, so the leading-\"-\" hazard of base64url ids does not apply here; --invite-token <token> (or a value after a \"--\" separator) is still available if that ever changes" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "ok": { "type": "boolean" } }
+                }
+              }
+            }
+          },
+          "403": { "description": "forbidden (caller is not a doc admin)" },
+          "404": { "description": "not_found (unknown token, or a token belonging to another document)" }
+        }
+      }
+    },
+    "/v1/bot/docs/invites/{inviteToken}/accept": {
+      "post": {
+        "operationId": "docs.invite.accept",
+        "summary": "Accept a document invite as the current identity (idempotent)",
+        "description": "Claims the invite for the credential in use and returns {docId, documentName, role}. Idempotent: accepting again — or accepting into a document you already belong to — is still 200 with the resulting role, and never downgrades a higher role already held. A token that is unknown, revoked, expired or exhausted is 410 invite_invalid, not 404. Accepts either the bare inviteToken or the whole web invite link ({octo web origin}/docs/invite/<inviteToken>); the link is parsed locally against the configured origin and is never fetched.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "inviteToken", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "x-octo-flag": "invite-token", "description": "inviteToken from invite create / invite list, or the whole invite link. The docs backend mints hex tokens, so the leading-\"-\" hazard of base64url ids does not apply here; --invite-token <token> (or a value after a \"--\" separator) is still available if that ever changes" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted (or already a member — the same shape either way)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "documentName": { "type": "string" },
+                    "role": { "type": "string", "description": "the role now held on the document, which may outrank the invite's role when a higher one was already held" }
+                  }
+                }
+              }
+            }
+          },
+          "410": { "description": "invite_invalid — unknown, revoked, expired or exhausted token, or the document is gone" }
+        }
       }
     },
     "/v1/bot/docs/{docId}/comments": {

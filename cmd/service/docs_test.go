@@ -5,10 +5,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -42,6 +49,7 @@ func TestDocs_TreeShape(t *testing.T) {
 		"scene":       {"get", "edit", "export"},
 		"members":     {"list", "set", "remove"},
 		"share":       {"get", "set"},
+		"invite":      {"create", "list", "revoke", "accept"},
 		"comments":    {"list", "add", "edit", "delete"},
 		"versions":    {"list", "create", "state", "rename", "delete", "restore"},
 		"attachments": {"presign", "get", "resolve"},
@@ -69,24 +77,30 @@ func TestDocs_RegistryShape(t *testing.T) {
 
 	type want struct{ method, path string }
 	cases := map[string]want{
-		"docs.create":              {"POST", "/v1/bot/docs"},
-		"docs.list":                {"GET", "/v1/bot/docs"},
-		"docs.search":              {"POST", "/v1/bot/docs/search"},
-		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
-		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
-		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
-		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
-		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
-		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
-		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
-		"docs.scene.get":           {"GET", "/v1/bot/docs/{docId}/scene"},
-		"docs.scene.edit":          {"PATCH", "/v1/bot/docs/{docId}/scene"},
-		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
-		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
-		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
-		"docs.share.get":           {"GET", "/v1/bot/docs/{docId}/share"},
-		"docs.share.set":           {"PUT", "/v1/bot/docs/{docId}/share"},
-		"docs.forward-grant":       {"POST", "/v1/bot/docs/{docId}/forward-grant"},
+		"docs.create":         {"POST", "/v1/bot/docs"},
+		"docs.list":           {"GET", "/v1/bot/docs"},
+		"docs.search":         {"POST", "/v1/bot/docs/search"},
+		"docs.get":            {"GET", "/v1/bot/docs/{docId}"},
+		"docs.rename":         {"PATCH", "/v1/bot/docs/{docId}"},
+		"docs.delete":         {"DELETE", "/v1/bot/docs/{docId}"},
+		"docs.content.get":    {"GET", "/v1/bot/docs/{docId}/content"},
+		"docs.content.edit":   {"PATCH", "/v1/bot/docs/{docId}/content"},
+		"docs.sheet.get":      {"GET", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.edit":     {"PATCH", "/v1/bot/docs/{docId}/sheet"},
+		"docs.scene.get":      {"GET", "/v1/bot/docs/{docId}/scene"},
+		"docs.scene.edit":     {"PATCH", "/v1/bot/docs/{docId}/scene"},
+		"docs.members.list":   {"GET", "/v1/bot/docs/{docId}/members"},
+		"docs.members.set":    {"PUT", "/v1/bot/docs/{docId}/members"},
+		"docs.members.remove": {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
+		"docs.share.get":      {"GET", "/v1/bot/docs/{docId}/share"},
+		"docs.share.set":      {"PUT", "/v1/bot/docs/{docId}/share"},
+		"docs.forward-grant":  {"POST", "/v1/bot/docs/{docId}/forward-grant"},
+		"docs.invite.create":  {"POST", "/v1/bot/docs/{docId}/invites"},
+		"docs.invite.list":    {"GET", "/v1/bot/docs/{docId}/invites"},
+		// revoke is addressed by the token, not by an id: the docs backend stores
+		// no separate invite id, which is the one shape difference from drive.
+		"docs.invite.revoke":       {"DELETE", "/v1/bot/docs/{docId}/invites/{inviteToken}"},
+		"docs.invite.accept":       {"POST", "/v1/bot/docs/invites/{inviteToken}/accept"},
 		"docs.comments.list":       {"GET", "/v1/bot/docs/{docId}/comments"},
 		"docs.comments.add":        {"POST", "/v1/bot/docs/{docId}/comments"},
 		"docs.comments.edit":       {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
@@ -658,6 +672,240 @@ func TestDocsShareSet_FlagAliases(t *testing.T) {
 		if set.Flags().Lookup(bad) != nil {
 			t.Errorf("docs share set: --%s must NOT exist (aliased to --scope/--role)", bad)
 		}
+	}
+}
+
+// --- invites ---
+//
+// The invite family is spec-driven like the rest of docs, but it is the first
+// docs surface whose path values are credential-equivalent, and its shape
+// deliberately diverges from drive's invite family on points a copy-paste would
+// get wrong. These tests pin each divergence on the wire rather than in prose.
+
+// TestDocsInviteCreate_BodyAndPath pins the create request: a POST to the
+// document's /invites collection carrying the three body fields under their
+// backend names. expiresInDays is the docs spelling — drive's invite create
+// takes expires_in_seconds, and sending that here would be ignored, silently
+// leaving the invite on the backend's 3-day default.
+func TestDocsInviteCreate_BodyAndPath(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"inviteToken":"tok-fake-1","role":"reader","expiresAt":"2030-01-01T00:00:00.000Z"}`))
+	})
+	root.SetArgs([]string{"docs", "invite", "create", "d1",
+		"--role", "reader", "--expiresInDays", "5", "--maxUses", "3"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/bot/docs/d1/invites" {
+		t.Errorf("got %s %s, want POST /v1/bot/docs/d1/invites", gotMethod, gotPath)
+	}
+	if gotBody["role"] != "reader" {
+		t.Errorf("body role = %v, want reader", gotBody["role"])
+	}
+	if gotBody["expiresInDays"] != float64(5) {
+		t.Errorf("body expiresInDays = %v, want 5", gotBody["expiresInDays"])
+	}
+	if gotBody["maxUses"] != float64(3) {
+		t.Errorf("body maxUses = %v, want 3", gotBody["maxUses"])
+	}
+	if _, bad := gotBody["expires_in_seconds"]; bad {
+		t.Errorf("body carries drive's expires_in_seconds, which docs ignores: %v", gotBody)
+	}
+}
+
+// TestDocsInviteCreate_RoleVocabularyIsTheFullLadder pins the invite role set.
+//
+// An earlier round pinned reader|writer|admin here, transcribed from a local
+// octo-docs-backend checkout that was ~86 commits behind origin. On origin/main
+// parseRole (src/api/routes/invites.ts) accepts the whole Role union —
+// reader|commenter|writer|admin — so the narrow set turned a call the backend
+// accepts into a hard local exit 2 with no way through except `octo-cli api`.
+// The other half is equally load-bearing: an unrecognised value is a backend 400
+// ("role must be reader|commenter|writer|admin"), never a silent downgrade, so
+// the local gate must refuse it before it costs a round trip.
+func TestDocsInviteCreate_RoleVocabularyIsTheFullLadder(t *testing.T) {
+	for _, role := range []string{"reader", "commenter", "writer", "admin"} {
+		t.Run("accepts "+role, func(t *testing.T) {
+			var called bool
+			var gotRole any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				gotRole = body["role"]
+				w.WriteHeader(201)
+				_, _ = w.Write([]byte(`{"inviteToken":"tok-fake-1","role":"` + role + `"}`))
+			})
+			root.SetArgs([]string{"docs", "invite", "create", "d1", "--role", role})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if !called {
+				t.Fatal("a role the backend accepts must reach the backend")
+			}
+			if gotRole != role {
+				t.Errorf("body role = %v, want %q sent through unchanged", gotRole, role)
+			}
+		})
+	}
+
+	for _, bad := range []string{"bogus", "owner"} {
+		t.Run("refuses "+bad, func(t *testing.T) {
+			var called bool
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+			root.SetArgs([]string{"docs", "invite", "create", "d1", "--role", bad})
+			err := root.Execute()
+			var exitErr *output.ExitError
+			if !errors.As(err, &exitErr) || exitErr.Code != "ENUM_NOT_ALLOWED" {
+				t.Fatalf("error = %#v, want ENUM_NOT_ALLOWED: the backend answers 400 for an unknown role", err)
+			}
+			if called {
+				t.Error("the rejected role must not reach the backend")
+			}
+		})
+	}
+}
+
+// TestDocsInviteList_ReadPath pins the list request: a GET on the same
+// collection, with no request body.
+func TestDocsInviteList_ReadPath(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody []byte
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"items":[{"inviteToken":"tok-fake-1","role":"writer","maxUses":0,"usedCount":2}]}`))
+	})
+	root.SetArgs([]string{"docs", "invite", "list", "d1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/bot/docs/d1/invites" {
+		t.Errorf("got %s %s, want GET /v1/bot/docs/d1/invites", gotMethod, gotPath)
+	}
+	if len(gotBody) != 0 {
+		t.Errorf("GET must send an empty request body; got %q", gotBody)
+	}
+}
+
+// TestDocsInviteRevoke_AddressedByToken pins the shape difference from drive:
+// docs revoke takes the invite TOKEN in the path (the docs backend stores no
+// separate invite id), so the flag form is --invite-token, not drive's
+// --invite-id. Both spellings of the value must reach the same URL.
+func TestDocsInviteRevoke_AddressedByToken(t *testing.T) {
+	const token = "tok-fake-1"
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"positional", []string{"docs", "invite", "revoke", "d1", token}},
+		{"flag form", []string{"docs", "invite", "revoke", "d1", "--invite-token", token}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.Path
+				w.WriteHeader(200)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/invites/"+token {
+				t.Errorf("got %s %s, want DELETE /v1/bot/docs/d1/invites/%s", gotMethod, gotPath, token)
+			}
+		})
+	}
+
+	// The drive spelling must not exist here, or a caller following the drive
+	// recipe passes the token to an unrecognised flag.
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {})
+	revoke := findCmd(findCmd(findCmd(root, "docs"), "invite"), "revoke")
+	if revoke == nil {
+		t.Fatal("missing docs invite revoke leaf")
+	}
+	if revoke.Flags().Lookup("invite-token") == nil {
+		t.Error("docs invite revoke: expected --invite-token")
+	}
+	if revoke.Flags().Lookup("invite-id") != nil {
+		t.Error("docs invite revoke: --invite-id must NOT exist (docs addresses an invite by its token)")
+	}
+}
+
+// TestDocsInviteAccept_PathAndSpaceHeader pins accept: it hangs off the
+// collection-level /invites path with no docId — the token identifies the
+// document — and, like the rest of docs, sends no X-Space-Id.
+func TestDocsInviteAccept_PathAndSpaceHeader(t *testing.T) {
+	const token = "tok-fake-1"
+	var gotMethod, gotPath, gotSpace string
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotSpace = r.Header.Get("X-Space-Id")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"docId":"d1","documentName":"Plan","role":"writer"}`))
+	})
+	root.SetArgs([]string{"docs", "invite", "accept", token})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/bot/docs/invites/"+token+"/accept" {
+		t.Errorf("got %s %s, want POST /v1/bot/docs/invites/%s/accept", gotMethod, gotPath, token)
+	}
+	if gotSpace != "" {
+		t.Errorf("X-Space-Id = %q; docs declares x-octo-space-header:false", gotSpace)
+	}
+}
+
+// TestDocsInvite_TokensAreMaskedInDryRun is the disclosure guard for the family.
+// Both token-addressed operations put a credential-equivalent value in the URL
+// path, and --dry-run prints that path — so without x-octo-secret on those two
+// parameters the CLI's own "safe to paste" output hands the document over.
+func TestDocsInvite_TokensAreMaskedInDryRun(t *testing.T) {
+	const token = "tok-fake-1"
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"revoke", []string{"docs", "invite", "revoke", "d1", token}},
+		{"accept", []string{"docs", "invite", "accept", token}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+			t.Cleanup(srv.Close)
+
+			tf := cmdutil.NewTestFactory()
+			cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
+			tf.SetConfig(cfg)
+			cred := &credential.BotCredential{Token: "app_test", Source: "test"}
+			tf.SetCredential(cred)
+			tf.SetClient(client.New(cfg, cred, client.Options{DryRun: true, ErrOut: io.Discard}))
+			tf.RegistryFunc = registry.MustNew
+
+			root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+			RegisterServiceCommands(root, tf.Factory)
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if called {
+				t.Error("--dry-run must not hit the network")
+			}
+			out := tf.Out.String()
+			if strings.Contains(out, token) {
+				t.Errorf("the invite token appears in plaintext in the dry-run envelope:\n%s", out)
+			}
+			if !strings.Contains(out, `"dry_run": true`) {
+				t.Errorf("not a dry-run envelope:\n%s", out)
+			}
+		})
 	}
 }
 

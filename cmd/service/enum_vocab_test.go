@@ -158,6 +158,15 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.versions.list", in: "query", field: "kind",
 		want: []string{"all", "auto", "manual"},
 		why:  "octo-docs-backend version kind filter"},
+	{op: "docs.invite.create", in: "body", field: "role",
+		want: []string{"reader", "commenter", "writer", "admin"},
+		why: "octo-docs-backend origin/main src/api/routes/invites.ts parseRole accepts exactly " +
+			"reader|commenter|writer|admin (the Role union in src/permission/role.ts); it is the same ladder as " +
+			"docs.members.set, not a narrower invite-only set. An UNRECOGNISED value is a 400 from the route " +
+			"(\"role must be reader|commenter|writer|admin\"), not a downgrade — only an OMITTED role takes " +
+			"parseRole's writer default. An earlier round pinned three values on the strength of a local " +
+			"checkout that was ~86 commits behind origin, which is the exact failure mode the remote-ref rule " +
+			"in this file's header exists to prevent"},
 
 	// --- html ---
 	{op: "html.grant.add", in: "body", field: "role",
@@ -288,6 +297,9 @@ func TestEnum_NoEnabledVocabularyIsNarrowerThanItsBackend(t *testing.T) {
 	}{
 		{"docs.members.set", "body", "role", "commenter",
 			"role.ts isMemberRole accepts it; it is a stored role with rank 20, deliberately between reader and writer"},
+		{"docs.invite.create", "body", "role", "commenter",
+			"invites.ts parseRole accepts the whole Role union; the stored code 4 is historical numbering, not a rank — " +
+				"roleRank puts commenter at 20, between reader and writer"},
 		{"docs.forward-grant", "body", "role", "commenter",
 			"role.ts isForwardGrantRole accepts it"},
 		{"docs.search", "body[]", "docType", "html_ppt",
