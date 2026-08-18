@@ -13,10 +13,11 @@ import (
 // --space or OCTO_SPACE_ID to populate it. Source is a human tag (e.g.
 // "env:OCTO_BOT_TOKEN") used in verbose output and error messages.
 //
-// Profile, RobotID and BotKind are populated only when the credential is
-// resolved from a stored profile (see FileProvider); they feed the identity
-// echo in the success envelope. Credentials resolved from the environment leave
-// them empty — a raw env token carries no verifiable identity.
+// Profile is populated only for stored credentials. RobotID may come from a
+// stored profile or OCTO_BOT_ID, while BotKind is derived from the token prefix.
+// An OCTO_BOT_ID beside an environment token remains an unverified claim: it is
+// emitted as robot_id_claimed rather than robot_id and can select only a Mail
+// credential whose encrypted local binding matches the active token.
 type BotCredential struct {
 	Token   string
 	SpaceID string

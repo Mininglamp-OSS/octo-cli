@@ -425,10 +425,13 @@ func TestAPI_AStringValueAtASecretPropertyStillWorks(t *testing.T) {
 
 // TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask is round-16 P2-2's tripwire.
 //
-// `api` recovers secrets by matching the concrete path and walking the body, which leaves
-// two declarations it would silently ignore: a secret in *query* or *header* position (
-// pathSegments drops the query component and headers are not read at all), and a secret on a
-// non-string schema, which the request side now refuses outright rather than masks.
+// `api` recovers secrets by matching the concrete path and walking the body, which leaves a
+// secret in *query* position unmasked because pathSegments drops the query component. A
+// header declaration is safe here: the generic command has no arbitrary-header input, so
+// there is no caller-supplied header value for it to collect; generated commands collect
+// those values from their bound flags. If `api` ever gains a header option, its own tests must
+// extend apiSecretsForRequest before that option ships. A secret on a non-string schema is
+// likewise unsupported because the request side refuses it outright rather than masking it.
 //
 // No embedded spec declares either today, which is why neither is a live leak — but nothing
 // pinned that, so adding one would produce an unmasked credential-equivalent value with no
@@ -448,10 +451,10 @@ func TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask(t *testing.T) {
 				if !p.Secret {
 					continue
 				}
-				if p.In != "path" {
+				if p.In != "path" && p.In != "header" {
 					t.Errorf("%s declares x-octo-secret on a %s parameter %q, but `api` only "+
-						"collects path and body secrets — teach apiSecretsForRequest to read %s "+
-						"position before shipping this declaration", info.ID, p.In, p.Name, p.In)
+						"collects path and body secrets and cannot safely recover a %s value",
+						info.ID, p.In, p.Name, p.In)
 				}
 				if p.Type != "" && p.Type != "string" {
 					t.Errorf("%s declares x-octo-secret on a %s-typed parameter %q; the masker's "+

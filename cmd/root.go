@@ -63,6 +63,8 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	root.AddCommand(newAuthCmd(f))
 	root.AddCommand(newSheetCellCmd(f))
 	service.RegisterServiceCommands(root, f)
+	attachMailAuthCmd(root, f)
+	attachMailJMAPCommands(root, f)
 	registerDocsImportCmd(root, f)
 	registerDocsExportCmd(root, f)
 	registerDriveCmds(root, f)
@@ -132,8 +134,15 @@ func skipValidation(cmd *cobra.Command) bool {
 	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "skills", "auth", "sheet-cell", "":
+		case "version", "help", "schema", "config", "completion", "skills", "sheet-cell", "":
 			return true
+		case "auth":
+			// Only the top-level `octo-cli auth` is credential-free. Nested
+			// service auth flows such as `mail auth login` require the active
+			// Bot credential and must pass the normal validation gate.
+			if c.Parent() != nil && c.Parent().Parent() == nil {
+				return true
+			}
 		}
 	}
 	return false

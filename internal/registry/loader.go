@@ -53,7 +53,44 @@ func New() (*Registry, error) {
 		}
 		r.specs[service] = doc
 	}
+	if err := checkDuplicateOperationIDs(r.specs); err != nil {
+		return nil, err
+	}
 	return r, nil
+}
+
+// checkDuplicateOperationIDs rejects an operationId claimed by more than one
+// spec. The id namespace is global: GetOperation resolves an id by iterating
+// the service map, so a duplicate would make command routing depend on Go's
+// randomized map order — a different backend could win on every process start.
+// Mirrors the duplicate-service guard above: a collision between embedded
+// specs is a build-time bug, surfaced on first registry load. Hidden and
+// disabled operations are included because GetOperation still resolves them.
+func checkDuplicateOperationIDs(specs map[string]map[string]any) error {
+	owner := map[string]string{}
+	services := make([]string, 0, len(specs))
+	for s := range specs {
+		services = append(services, s)
+	}
+	sort.Strings(services)
+	for _, service := range services {
+		var dupErr error
+		walkOperations(specs[service], func(_, _ string, op map[string]any) {
+			id, _ := op["operationId"].(string)
+			if id == "" || dupErr != nil {
+				return
+			}
+			if prev, dup := owner[id]; dup {
+				dupErr = fmt.Errorf("registry: duplicate operationId %q (services %q and %q)", id, prev, service)
+				return
+			}
+			owner[id] = service
+		})
+		if dupErr != nil {
+			return dupErr
+		}
+	}
+	return nil
 }
 
 // MustNew is like New but panics on error — useful for package-level wiring
@@ -253,7 +290,11 @@ type OperationDetail struct {
 	// BaseURLEnv is retained in schema output for compatibility with existing
 	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
 	// intentionally does not select a different service URL from this metadata.
-	BaseURLEnv  string `json:"base_url_env,omitempty"`
+	BaseURLEnv string `json:"base_url_env,omitempty"`
+	// Credential is the x-octo-credential boundary declared by the service.
+	// Empty means the active Bot credential; "mail" selects the mailbox token
+	// bound to the same Bot identity.
+	Credential  string `json:"credential,omitempty"`
 	SpaceHeader bool   `json:"space_header,omitempty"`
 	// SpaceHeaderSet records whether the spec declared x-octo-space-header at
 	// all. It lets the transport distinguish an explicit `false` (suppress the
@@ -274,6 +315,12 @@ type OperationDetail struct {
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	// RetryMode captures the optional x-octo-retry operation extension. Empty
+	// keeps the transport default; "never" disables automatic retries for the
+	// individual request. This is required for non-idempotent external side
+	// effects such as sending mail, where a lost response must be reported as an
+	// unknown result rather than risking a duplicate action.
+	RetryMode string `json:"retry_mode,omitempty"`
 	// AllowedTokenKinds captures x-octo-allowed-token-kinds (spec top level or
 	// per-operation override). When non-empty the CLI checks the active
 	// credential's kind against the list before sending, failing locally with
@@ -410,6 +457,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			Risk:    stringOf(op["x-octo-risk"]),
 		},
 		BaseURLEnv:  stringOf(doc["x-octo-base-url"]),
+		Credential:  stringOf(doc["x-octo-credential"]),
 		SpaceHeader: boolOf(doc["x-octo-space-header"]),
 	}
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
@@ -417,6 +465,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	d.RetryMode = stringOf(op["x-octo-retry"])
 	// Identity routing is declared at the spec top level (every operation in a
 	// domain shares one mount table) but an operation may narrow the allowed
 	// kinds. Both default to absent → no gate, no rewrite.

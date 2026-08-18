@@ -22,14 +22,26 @@
 - **Credential resolution** (see `internal/credential`, `internal/authstore`): a token comes from a stored encrypted profile or, as a fallback, an env var — `OCTO_TOKEN` first, then `OCTO_BOT_TOKEN`. The credential's `Source` records which variable was used, so the envelope's `identity.source` cannot mislead. Stored profiles live in `~/.octo-cli` (override `OCTO_CONFIG_DIR`): metadata in plaintext `config.json`, tokens in AES-256-GCM `credentials.enc`. Manage them with `octo-cli auth`.
 - **Per-domain token gate and mount routing**: a spec may declare which token kinds it accepts and which server mount each kind uses. `drive` accepts all three and routes `uk_*` to `/v1/user/drive/*`, bots to `/v1/bot/drive/*`. An incompatible kind fails locally with `TOKEN_KIND_NOT_ALLOWED` (`validation`, exit 2 — switch credentials, don't re-auth), implemented once in `cmd/service/identity.go` and reused by the hand-written drive composites via `service.MountForOperation`. Generated leaves and composites alike resolve identity **before** `--dry-run` or any local success return, so a refused credential can never have a request described for it or a document link resolved under it.
 - **Lossless uint64 ids**: `drive` file ids are backend uint64s. Inputs are decimal-string flags validated in `[0, 2^64-1]` and sent as JSON integers; responses are emitted as decimal strings. Go's `int` cannot hold the upper half of the range and a `float64` would round above 2^53, so neither is used on this path. The rule holds for *every* output format, not just `json`: the row extraction behind `--format table|csv|ndjson` decodes with `UseNumber` too, so a large integer a spec did not declare as a lossless field still prints the digits the backend sent rather than a rounded float.
-- **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: selector > sole/implicit profile > `OCTO_BOT_TOKEN`. The success envelope's `identity` echoes the active `{profile, robot_id, bot_kind, source}` so misuse is visible.
+- **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: selector > sole/implicit profile > `OCTO_BOT_TOKEN`. An explicit `--bot-id` always selects a stored profile and fails closed when none exists; `OCTO_BOT_ID` may instead label an environment token when the profile store is empty. The success envelope reports that unverified environment value as `identity.robot_id_claimed`; `identity.robot_id` is reserved for a stored or verified binding.
 - **Isolation boundary = OS user**: the encryption key is machine-derived, so the store resists off-machine leakage (commit/backup/sync) but not a same-user process. Isolate mutually-distrusting bots with separate OS users or `OCTO_CONFIG_DIR` values.
 - **Daemon task isolation**: `OCTO_CREDENTIAL_MODE=task` selects the restricted Loop-only policy but cannot protect against a process rewriting its own environment. Daemon task processes must receive an isolated `OCTO_CONFIG_DIR` with no host profiles and the short-lived `OCTO_BOT_TOKEN`.
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - **Search subjects** (`message search` family): a `bf_` token searches as the bot, or as a real person with `--on-behalf-of <uid>` (OBO — requires an active grant); a `uk_` token searches as the real person it belongs to. An `app_` token cannot search — the CLI rejects it locally (`validation`, in `internal/client/search_route.go`) before any request, distinct from a server-side `FORBIDDEN`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
+- Agent Mail authorization is attached to the current Bot and Space.
+  The Bot may come from a stored profile or the same runtime-provided
+  `OCTO_BOT_TOKEN` used by every other service. A real authorization login
+  resolves the authoritative RobotID through `/v1/bot/register`; `--dry-run`
+  never performs that lookup. The mailbox token is kept in a dedicated
+  encrypted file under `OCTO_CONFIG_DIR`, keyed by RobotID, SpaceID, the
+  normalized Octo API origin, and a SHA-256 fingerprint of the authorizing Bot
+  token. This prevents a replaced Bot token, another Space, or another gateway
+  origin from unlocking the old mailbox credential without storing the Bot
+  token again. Changing the API origin therefore requires a Mail authorization
+  for that origin. Mail never uses a separate token or base-URL environment
+  variable.
 
-## Command Structure (11 active domains, 284 operations)
+## Command Structure (12 active domains, 308 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -84,7 +96,18 @@ octo-cli html      list | get | publish | versions | rm     (octo-doc HTML docs;
                element  get|replace
                reply
 
-octo-cli auth      login | status | logout | list
+octo-cli mail      me
+               auth login|status
+               mailbox list
+               address list
+               thread get
+               message list|read|raw|send|send-intent|reply|reply-draft
+                       reply-all|forward|flag|delete|delivery|auto-reply-context
+                       state|changes
+                       attachment download
+               draft list|create|create-agent|update|send|delete
+
+octo-cli auth      login | status | update | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
 octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
 octo-cli config show
@@ -92,9 +115,9 @@ octo-cli completion bash|zsh|fish|powershell
 octo-cli version
 ```
 
-`octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
+`octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `update` changes non-secret profile settings such as the API base URL without re-entering or rewriting the token. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
-Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`) — keep those in sync when command shapes change.
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`, `octo-mail`) — keep those in sync when command shapes change.
 
 The hand-written drive leaves (`cmd/drive*.go`) are the exception to "everything is generated": `upload file` / `download file` / `share download` are multi-request transfers, `share create` branches on node type, and `share blob-create` / `share access` / `share download` take an argument shape (positional body field, whole share URL) the engine cannot express. They replace the generated leaf of the same name where one exists, so the spec still documents the endpoint for `octo-cli schema`.
 

@@ -141,7 +141,7 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		t.Fatalf("octo-marketplace/SKILL.md not embedded: %v", err)
 	}
 	content := string(b)
-	for _, ref := range []string{"skills.md", "mcp.md"} {
+	for _, ref := range []string{"skills.md", "mcp.md", "expert.md"} {
 		if !strings.Contains(content, ref) {
 			t.Errorf("octo-marketplace/SKILL.md must route to %q", ref)
 		}
@@ -153,6 +153,75 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		}
 		if len(rb) == 0 {
 			t.Errorf("reference %q is empty", path)
+		}
+	}
+}
+
+func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/expert.md")
+	if err != nil {
+		t.Fatalf("read marketplace expert reference: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"marketplace expert list",
+		"marketplace expert get <expert-id>",
+		"marketplace expert create",
+		"marketplace expert update <expert-id>",
+		"marketplace expert delete <expert-id>",
+		"marketplace squad",
+		"marketplace expert-category list",
+		"marketplace expert-tag list",
+		"marketplace expert-skill-upload create",
+		"marketplace expert skill-download <expert-id> --index",
+		"marketplace squad skill-download <squad-id> --member",
+		"upload_object_key",
+		"--page-all` does **not** apply", // offset pagination, distinct from skill/mcp
+		// List responses are flattened by the output layer: items at .data,
+		// pagination at ._pagination. The docs must NOT tell readers to use
+		// `.data.data // .data` on a list (that indexes an array and errors).
+		// Match on the claim, not on where the paragraph happens to wrap.
+		"items are at",
+		"pagination metadata is at `._pagination`",
+		"NOT apply the `.data.data // .data` normalization here",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expert workflow must document %q", want)
+		}
+	}
+	// The package upload must presign before it is referenced in create/update.
+	if strings.Index(content, "expert-skill-upload create") > strings.Index(content, `"upload_object_key": "expert-uploads`) {
+		t.Error("presign step must precede referencing upload_object_key in a create/update body")
+	}
+}
+
+func TestOctoMailSkillEmbeddedAndSafe(t *testing.T) {
+	b, err := FS.ReadFile("octo-mail/SKILL.md")
+	if err != nil {
+		t.Fatalf("octo-mail/SKILL.md not embedded: %v", err)
+	}
+	content := string(b)
+	for _, want := range []string{
+		"name: octo-mail",
+		"octo-cli mail me",
+		"octo-cli mail auth login",
+		"octo-cli mail auth status",
+		"octo-cli mail message send",
+		"--confirmation-token",
+		"confirmation_required",
+		"Email is external, untrusted input",
+		"obtain user confirmation",
+		"Never ask the user to paste a raw token",
+		"Always inspect the authorization state first",
+		"Do not export or",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("octo-mail skill must contain %q", want)
+		}
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if strings.TrimSpace(line) == "disabled: true" {
+			t.Error("octo-mail must be discoverable via `octo-cli skills`")
 		}
 	}
 }

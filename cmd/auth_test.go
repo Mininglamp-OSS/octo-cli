@@ -89,6 +89,97 @@ func TestAuth_LoginListStatusLogout(t *testing.T) {
 	}
 }
 
+func TestAuth_UpdateAPIBaseURLPreservesCredentials(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_demo", "app_demo_token")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	if err := store.SaveMailCredential("cli_demo", "omb_mail_secret"); err != nil {
+		t.Fatalf("SaveMailCredential: %v", err)
+	}
+
+	f := newTestFactoryWithReg()
+	out, _, err := execRoot(t, f,
+		"auth", "update", "--bot-id", "cli_demo",
+		"--api-base-url", "http://127.0.0.1:28080/")
+	if err != nil {
+		t.Fatalf("auth update: %v", err)
+	}
+	data := dataOf(t, out)
+	if data["api_base_url"] != "http://127.0.0.1:28080" {
+		t.Fatalf("api_base_url = %v", data["api_base_url"])
+	}
+
+	botToken, err := store.GetToken("cli_demo")
+	if err != nil || botToken != "app_demo_token" {
+		t.Fatalf("Bot token changed: %q, %v", botToken, err)
+	}
+	mailToken, err := store.GetMailCredential("cli_demo")
+	if err != nil || mailToken != "omb_mail_secret" {
+		t.Fatalf("mail token changed: %q, %v", mailToken, err)
+	}
+
+	f = newTestFactoryWithReg()
+	out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_demo")
+	if err != nil {
+		t.Fatalf("auth status: %v", err)
+	}
+	if activeOf(t, out)["api_base_url"] != "http://127.0.0.1:28080" {
+		t.Fatalf("active profile = %#v", activeOf(t, out))
+	}
+}
+
+func TestAuth_UpdateAPIBaseURLRejectsInvalidOriginWithoutChangingProfile(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_demo", "app_demo_token")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	if err := store.UpdateProfileAPIBaseURL("cli_demo", "https://octo.example"); err != nil {
+		t.Fatalf("seed API base URL: %v", err)
+	}
+
+	for _, invalid := range []string{
+		"not a url at all",
+		"https://evil.example/fleet/api?x=1",
+	} {
+		t.Run(invalid, func(t *testing.T) {
+			f := newTestFactoryWithReg()
+			_, _, err := execRoot(t, f,
+				"auth", "update", "--bot-id", "cli_demo",
+				"--api-base-url", invalid)
+			ee := output.AsExitError(err)
+			if ee == nil || ee.Type != "validation" {
+				t.Fatalf("auth update error = %v, want validation", err)
+			}
+
+			profiles, err := store.LoadProfiles()
+			if err != nil {
+				t.Fatalf("LoadProfiles: %v", err)
+			}
+			if got := profiles["cli_demo"].APIBaseURL; got != "https://octo.example" {
+				t.Fatalf("invalid update changed API base URL to %q", got)
+			}
+		})
+	}
+}
+
+func TestAuth_UpdateAPIBaseURLRequiresStoredProfile(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	f := newTestFactoryWithReg()
+	_, _, err := execRoot(t, f,
+		"auth", "update", "--api-base-url", "https://octo.example")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" || !strings.Contains(ee.Message, "no stored profiles") {
+		t.Fatalf("auth update error = %v", err)
+	}
+}
+
 func TestAuth_DuplicateRobotIDRejected(t *testing.T) {
 	t.Setenv(authstore.EnvConfigDir, t.TempDir())
 	loginToken(t, "cli_x", "app_a") // profile name defaults to "cli_x", robot_id cli_x

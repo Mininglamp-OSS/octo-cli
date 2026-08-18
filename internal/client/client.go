@@ -53,7 +53,12 @@ type Options struct {
 // For non-JSON payloads (e.g. multipart uploads) set RawBody + ContentType.
 // When RawBody is non-nil, Body is ignored and no JSON marshaling is performed.
 type Request struct {
-	Service     string
+	Service string
+	// Credential selects the authorization boundary used by the command layer.
+	// Empty means the active Bot credential; "mail" means the Agent Mail token
+	// bound to that same Bot identity. The transport itself never resolves
+	// secrets.
+	Credential  string
 	Method      string
 	Path        string
 	Query       url.Values
@@ -76,6 +81,17 @@ type Request struct {
 	// server-side). The default (false) preserves the historical behaviour of
 	// sending X-Space-Id whenever the credential has a space.
 	SuppressSpaceHeader bool
+	// DisableRetry prevents transport-level retries for this individual
+	// request. Use it for operations whose external side effect may already
+	// have succeeded when the response is lost (for example, sending mail).
+	// It is independent of the global --no-retry switch and deliberately lives
+	// on Request so operation metadata can enforce the safety contract.
+	DisableRetry bool
+	// UnknownOutcomeOnNetworkFailure changes a transport failure or an ambiguous
+	// gateway 502/503/504 into a machine-readable RESULT_UNKNOWN error. It is for
+	// side effects where the server may have accepted the request before the
+	// response was lost.
+	UnknownOutcomeOnNetworkFailure bool
 	// SecretValues holds literal values that must never be written to a log:
 	// share tokens, invite tokens, and share passwords, declared in the spec via
 	// x-octo-secret. Every occurrence is replaced with a mask in --verbose
@@ -731,6 +747,17 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 	}
 }
 
+// NewMail constructs a client using an account-scoped Agent Mail credential.
+// The conversion is private to the transport boundary so mail credentials
+// cannot be selected by the Bot credential provider or echoed as a Bot kind.
+func NewMail(cfg *config.Config, cred *credential.MailCredential, opts Options) *Client {
+	var transportCredential *credential.BotCredential
+	if cred != nil {
+		transportCredential = &credential.BotCredential{Token: cred.Token, Source: cred.Source}
+	}
+	return New(cfg, transportCredential, opts)
+}
+
 // Do performs req against the service URL, applying auth, retry, and dry-run.
 // Returns the raw response body on 2xx; an *output.ExitError on non-2xx or
 // transport failure.
@@ -763,6 +790,7 @@ func redactError(err error, secrets []string) error {
 		return &retryableErr{
 			ExitError:  redactExitError(re.ExitError, secrets),
 			retryAfter: re.retryAfter,
+			status:     re.status,
 		}
 	}
 	var ee *output.ExitError
@@ -852,7 +880,11 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
-	return c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+	result, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+	if err != nil && req.UnknownOutcomeOnNetworkFailure {
+		return nil, markResultUnknown(err)
+	}
+	return result, err
 }
 
 func headerValue(headers map[string]string, name string) string {
@@ -867,7 +899,7 @@ func headerValue(headers map[string]string, name string) string {
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
 func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) {
 	maxRetries := defaultMaxRetries
-	if c.options.NoRetry {
+	if c.options.NoRetry || req.DisableRetry {
 		maxRetries = 0
 	}
 
@@ -948,7 +980,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}
 		return nil, &retryableErr{
-			ExitError: output.ErrNetwork(msg, "transport error; will retry"),
+			ExitError: output.ErrNetwork(msg, "transport error"),
 		}
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
@@ -1042,7 +1074,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	ee := parseError(resp.StatusCode, redactedBody)
 
 	if isRetryableStatus(resp.StatusCode) {
-		re := &retryableErr{ExitError: ee}
+		re := &retryableErr{ExitError: ee, status: resp.StatusCode}
 		if ra := parseRetryAfter(resp.Header.Get("Retry-After")); ra > 0 {
 			re.retryAfter = ra
 		}
@@ -1211,6 +1243,7 @@ func truncate(s string, n int) string {
 type retryableErr struct {
 	*output.ExitError
 	retryAfter time.Duration
+	status     int
 }
 
 // Unwrap lets errors.As reach the embedded *ExitError so callers (e.g.
@@ -1236,6 +1269,25 @@ func extractRetryAfterFromErr(err error) (time.Duration, bool) {
 		return re.retryAfter, true
 	}
 	return 0, false
+}
+
+// markResultUnknown preserves ordinary API/validation errors but makes a
+// network failure or ambiguous gateway failure explicit for callers that must
+// not blindly repeat an external side effect. Copying the ExitError avoids
+// mutating an error that may also be retained by retry bookkeeping.
+func markResultUnknown(err error) error {
+	ee := output.AsExitError(err)
+	var re *retryableErr
+	ambiguousGatewayStatus := errors.As(err, &re) &&
+		(re.status == http.StatusBadGateway || re.status == http.StatusServiceUnavailable || re.status == http.StatusGatewayTimeout)
+	if ee == nil || (ee.Type != "network" && !ambiguousGatewayStatus) {
+		return err
+	}
+	unknown := *ee
+	unknown.Code = "RESULT_UNKNOWN"
+	unknown.Message = "the request may have been accepted, but no definitive response was received"
+	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
+	return &unknown
 }
 
 func isRetryableStatus(status int) bool {

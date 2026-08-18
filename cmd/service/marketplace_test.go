@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
@@ -41,6 +42,28 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"mcp.update":               {http.MethodPatch, "/market/api/v1/mcps/{mcp_id}"},
 		"mcp.delete":               {http.MethodDelete, "/market/api/v1/mcps/{mcp_id}"},
 		"mcp_icon_upload.create":   {http.MethodPost, "/market/api/v1/mcp_icon_uploads"},
+
+		// Expert Marketplace (docs/api/expert-v1.md): experts + squads + the
+		// dedicated expert taxonomy and skill-package upload surface.
+		"marketplace.expert.list":                {http.MethodGet, "/market/api/v1/experts"},
+		"marketplace.expert.create":              {http.MethodPost, "/market/api/v1/experts"},
+		"marketplace.expert.mine.list":           {http.MethodGet, "/market/api/v1/experts/mine"},
+		"marketplace.expert.get":                 {http.MethodGet, "/market/api/v1/experts/{expert_id}"},
+		"marketplace.expert.update":              {http.MethodPatch, "/market/api/v1/experts/{expert_id}"},
+		"marketplace.expert.delete":              {http.MethodDelete, "/market/api/v1/experts/{expert_id}"},
+		"marketplace.expert.skillmd.get":         {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_md"},
+		"marketplace.expert.skill_download":      {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_download"},
+		"marketplace.squad.list":                 {http.MethodGet, "/market/api/v1/squads"},
+		"marketplace.squad.create":               {http.MethodPost, "/market/api/v1/squads"},
+		"marketplace.squad.mine.list":            {http.MethodGet, "/market/api/v1/squads/mine"},
+		"marketplace.squad.get":                  {http.MethodGet, "/market/api/v1/squads/{squad_id}"},
+		"marketplace.squad.update":               {http.MethodPatch, "/market/api/v1/squads/{squad_id}"},
+		"marketplace.squad.delete":               {http.MethodDelete, "/market/api/v1/squads/{squad_id}"},
+		"marketplace.squad.skillmd.get":          {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_md"},
+		"marketplace.squad.skill_download":       {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_download"},
+		"marketplace.expert_category.list":       {http.MethodGet, "/market/api/v1/expert_categories"},
+		"marketplace.expert_tag.list":            {http.MethodGet, "/market/api/v1/expert_tags"},
+		"marketplace.expert_skill_upload.create": {http.MethodPost, "/market/api/v1/expert_skill_uploads"},
 	}
 
 	if got := len(r.ListOperations("marketplace")); got != len(wants) {
@@ -86,6 +109,243 @@ func TestMarketplaceSkillSearchRequest(t *testing.T) {
 	}
 	if strings.Contains(gotQuery, "offset=") {
 		t.Errorf("query = %q, must not use removed offset pagination", gotQuery)
+	}
+}
+
+// TestMarketplaceExpertListRequest pins the query-flag wiring for the new
+// offset-paginated expert list AND the envelope flattening the skill docs rely
+// on: a backend {data:[...],pagination:{...}} response surfaces items at CLI
+// .data (already an array) and pagination at ._pagination.
+func TestMarketplaceExpertListRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"expert_id":"e1"}],"pagination":{"total":1,"page":2,"page_size":20}}`))
+	})
+
+	root.SetArgs([]string{
+		"marketplace", "expert", "list",
+		"--keyword", "架构", "--category", "dev-tools", "--tag", "可靠性",
+		"--visibility", "public", "--created-by-type", "human",
+		"--sort", "updated", "--page", "2", "--page-size", "20",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts" {
+		t.Errorf("got %s %s, want GET /market/api/v1/experts", gotMethod, gotPath)
+	}
+	for _, want := range []string{
+		"keyword=%E6%9E%B6%E6%9E%84", "category=dev-tools", "tag=%E5%8F%AF%E9%9D%A0%E6%80%A7",
+		"visibility=public", "created_by_type=human", "sort=updated", "page=2", "page_size=20",
+	} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want %q", gotQuery, want)
+		}
+	}
+
+	// Envelope flattening: items at .data (array), pagination at ._pagination.
+	var env struct {
+		Data       []map[string]any `json:"data"`
+		Pagination map[string]any   `json:"_pagination"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
+	}
+	if len(env.Data) != 1 || env.Data[0]["expert_id"] != "e1" {
+		t.Errorf(".data must be the item array, got %s", tf.Out.String())
+	}
+	if env.Pagination["total"] == nil {
+		t.Errorf("._pagination must carry backend pagination, got %s", tf.Out.String())
+	}
+}
+
+// TestMarketplaceExpertCreateRequest pins the create path/method and that the
+// --data JSON body is forwarded verbatim.
+func TestMarketplaceExpertCreateRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"expert_id":"e1"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x","category":"研发工具","instruction":"你是资深后端架构师"}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/experts" {
+		t.Errorf("got %s %s, want POST /market/api/v1/experts", gotMethod, gotPath)
+	}
+	if gotBody["name"] != "后端架构师" || gotBody["summary"] != "x" ||
+		gotBody["category"] != "研发工具" || gotBody["instruction"] != "你是资深后端架构师" {
+		t.Errorf("body = %#v", gotBody)
+	}
+}
+
+// TestMarketplaceSquadCreateRequest pins the happy path through the strict
+// nested member schema: a valid --data body (members with name/role/instruction)
+// must pass local validation and reach the wire intact.
+func TestMarketplaceSquadCreateRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"squad_id":"s1"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "squad", "create", "--data", `{
+		"name": "研发交付团",
+		"summary": "x",
+		"category": "研发工具",
+		"dependencies": {"blocking": ["git-mcp"], "recommended": []},
+		"members": [
+			{"name": "架构师", "role": "评审", "instruction": "评审服务边界", "is_leader": true},
+			{"member_key": "m2", "name": "后端", "role": "实现", "instruction": "实现接口", "skills": [{"name": "清单"}]}
+		]
+	}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/squads" {
+		t.Errorf("got %s %s, want POST /market/api/v1/squads", gotMethod, gotPath)
+	}
+	members, _ := gotBody["members"].([]any)
+	if len(members) != 2 {
+		t.Fatalf("members = %#v, want 2 entries forwarded verbatim", gotBody["members"])
+	}
+	second, _ := members[1].(map[string]any)
+	if second["member_key"] != "m2" || second["instruction"] != "实现接口" {
+		t.Errorf("members[1] = %#v", second)
+	}
+}
+
+// TestMarketplaceExpertSquadCreateRequiredFields pins the client-side schema
+// validation that mirrors the backend's write rules: expert create requires
+// category + instruction, and squad create requires >= 1 member each carrying
+// name/role/instruction. All three must fail locally, before any request.
+func TestMarketplaceExpertSquadCreateRequiredFields(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "expert create without category/instruction",
+			args: []string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x"}`},
+			want: "category",
+		},
+		{
+			name: "squad create with empty members",
+			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[]}`},
+			want: "at least 1 item",
+		},
+		{
+			name: "squad member without instruction",
+			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[{"name":"架构师","role":"评审"}]}`},
+			want: "members[0].instruction",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var backendHits atomic.Int32
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				backendHits.Add(1)
+			})
+			root.SetArgs(tc.args)
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("execute error = %v, want validation error containing %q", err, tc.want)
+			}
+			if backendHits.Load() != 0 {
+				t.Error("request must not be sent when local body validation fails")
+			}
+		})
+	}
+}
+
+// TestMarketplaceExpertSkillUploadRequest pins the presign endpoint and that
+// its promoted --file-name / --file-size flags reach the body.
+func TestMarketplaceExpertSkillUploadRequest(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"upload_object_key":"expert-uploads/x"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert-skill-upload", "create", "--file-name", "skill.zip", "--file-size", "12345"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/expert_skill_uploads" {
+		t.Errorf("got %s %s, want POST /market/api/v1/expert_skill_uploads", gotMethod, gotPath)
+	}
+	if gotBody["file_name"] != "skill.zip" {
+		t.Errorf("file_name = %#v", gotBody["file_name"])
+	}
+	if n, ok := gotBody["file_size"].(float64); !ok || int(n) != 12345 {
+		t.Errorf("file_size = %#v, want 12345", gotBody["file_size"])
+	}
+}
+
+// TestMarketplaceExpertSkillmdRequest pins the only non-obvious flag mapping in
+// the expert surface: query param `i` is fronted by `--index` via x-octo-flag.
+// A rename of that override would otherwise sail through the shape tests.
+func TestMarketplaceExpertSkillmdRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"content":"# SKILL"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "expert", "skillmd", "get", "e1", "--index", "2"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts/e1/skill_md" {
+		t.Errorf("got %s %s, want GET /market/api/v1/experts/e1/skill_md", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotQuery, "i=2") {
+		t.Errorf("query = %q, want i=2 (--index maps to wire param i)", gotQuery)
+	}
+}
+
+// TestMarketplaceSquadSkillDownloadRequest pins the squad-only `--member`
+// selector alongside the `--index`→`i` mapping on the download path.
+func TestMarketplaceSquadSkillDownloadRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"download_url":"https://example.invalid/x.zip"}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "squad", "skill-download", "s1", "--member", "m1", "--index", "0"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/squads/s1/skill_download" {
+		t.Errorf("got %s %s, want GET /market/api/v1/squads/s1/skill_download", gotMethod, gotPath)
+	}
+	for _, want := range []string{"i=0", "member=m1"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want %q", gotQuery, want)
+		}
 	}
 }
 
@@ -230,6 +490,13 @@ func TestMarketplaceCommandTree(t *testing.T) {
 		"skill-icon-upload": {"create"},
 		"mcp":               {"list", "mine", "create", "probe", "get", "update", "delete"},
 		"mcp-icon-upload":   {"create"},
+
+		// Expert Marketplace command groups.
+		"expert":              {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
+		"squad":               {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
+		"expert-category":     {"list"},
+		"expert-tag":          {"list"},
+		"expert-skill-upload": {"create"},
 	}
 	for domain, children := range domains {
 		domainCmd := findCmd(marketplace, domain)
