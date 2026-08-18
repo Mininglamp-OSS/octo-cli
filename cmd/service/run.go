@@ -1082,7 +1082,17 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	if req.ResponseUnwrap != "" && (f.Globals == nil || !f.Globals.DryRun) {
 		body, err = unwrapResponse(body, req.ResponseUnwrap, req.UnwrapRequiredFields)
 		if err != nil {
-			unwrapErr := output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), "backend response did not match its operation spec")
+			// A malformed 2xx means the request reached the server carrying the
+			// key, so the create may be committed — the same ambiguity a 5xx
+			// has, and the key is the only handle on the resulting orphan. The
+			// hint is left empty so annotateIdempotencyKey can supply the
+			// retry-with-this-key wording it reserves for an unknown outcome;
+			// the fallback covers an operation with required unwrap fields but
+			// no auto key, where there is no key to retry with.
+			unwrapErr := annotateIdempotencyKey(rt, req, output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), ""))
+			if exit := output.AsExitError(unwrapErr); exit != nil && exit.Hint == "" {
+				exit.Hint = "backend response did not match its operation spec"
+			}
 			_ = f.EmitError(unwrapErr) //nolint:errcheck // best-effort emit before returning err
 			return unwrapErr
 		}

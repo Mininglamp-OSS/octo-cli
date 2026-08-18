@@ -1691,6 +1691,97 @@ func TestHTMLPublishUnwrapAcceptsUsableReference(t *testing.T) {
 	}
 }
 
+// TestHTMLMalformedSuccessReportsIdempotencyKey pins the recovery handle on the
+// fail-closed path this PR introduced. A malformed 2xx is the one failure where
+// the request definitely reached the server carrying the key, so the create may
+// be committed; refusing it loudly is only useful if the envelope still carries
+// the key that can address the resulting orphan. Without this the guard converts
+// a silent bad reference into an unrecoverable one, and a plain rerun mints a
+// second key and may duplicate the document.
+func TestHTMLMalformedSuccessReportsIdempotencyKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"publish", []string{"html", "publish", "--html", "<p>x</p>"}},
+		{"draft create", []string{"html", "draft", "create", "--html", "<p>x</p>"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sent string
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				if key, ok := body["idempotency_key"].(string); ok {
+					sent = key
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"doc_id":"","slug":""}}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err == nil {
+				t.Fatalf("malformed 2xx was accepted: %s", tf.Out.String())
+			}
+			if sent == "" {
+				t.Fatal("no auto-generated key reached the server, so this case does not exercise the recovery handle")
+			}
+			got := tf.ErrOut.String()
+			if !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+			if !strings.Contains(got, sent) {
+				t.Errorf("envelope does not carry the sent key %q, so the committed document is unrecoverable: %s", sent, got)
+			}
+			var env struct {
+				Error struct {
+					Hint   string          `json:"hint"`
+					Detail json.RawMessage `json:"detail"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+				t.Fatalf("error envelope: %v: %s", err, got)
+			}
+			var detail map[string]string
+			if err := json.Unmarshal(env.Error.Detail, &detail); err != nil {
+				t.Fatalf("detail is not an object: %v: %s", err, env.Error.Detail)
+			}
+			if detail["idempotency_key"] != sent {
+				t.Errorf("detail.idempotency_key = %q, want %q", detail["idempotency_key"], sent)
+			}
+			// The outcome genuinely is unknown here, so the hint must say to
+			// resume the same creation rather than describe the shape problem.
+			if !strings.Contains(env.Error.Hint, "outcome unknown") {
+				t.Errorf("hint does not report the unknown outcome: %q", env.Error.Hint)
+			}
+		})
+	}
+}
+
+// TestUnwrapFailureKeepsSpecHintWithoutAutoKey pins the fallback: an operation
+// with required unwrap fields but no auto-generated key has no key to retry
+// with, so it must keep the shape-diagnosis hint rather than emit an empty one.
+func TestUnwrapFailureKeepsSpecHintWithoutAutoKey(t *testing.T) {
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"doc_id":"","slug":""}}`))
+	})
+	// Republish sends a slug instead of a key, so no auto key is generated.
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>", "--slug", "existing-doc"})
+	if err := root.Execute(); err == nil {
+		t.Fatalf("malformed 2xx was accepted: %s", tf.Out.String())
+	}
+	var env struct {
+		Error struct {
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+		t.Fatalf("error envelope: %v: %s", err, tf.ErrOut.String())
+	}
+	if env.Error.Hint != "backend response did not match its operation spec" {
+		t.Errorf("hint = %q, want the spec-mismatch fallback", env.Error.Hint)
+	}
+}
+
 // TestHTMLCreateFailureReportsIdempotencyKey pins that an ambiguous create
 // failure surfaces the key it used. Without it the generated key dies with the
 // process and a committed-but-unacknowledged create becomes an unreachable
