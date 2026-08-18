@@ -680,7 +680,10 @@ func unwrapRequiredFields(doc, op map[string]any, path string) []string {
 			continue
 		}
 		info := resolveSchema(doc, schema)
-		// Descend only when the schema models the wrapper itself.
+		// Descend only when the schema models the wrapper itself. Ambiguity is
+		// possible in principle — a payload schema with its own property named
+		// like the unwrap path would match here — but no spec has one, and an
+		// explicit x-octo-response-unwrap-required is the fix if one appears.
 		for _, part := range strings.Split(path, ".") {
 			next, ok := info.Properties[part]
 			if !ok {

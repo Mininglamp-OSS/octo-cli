@@ -1100,9 +1100,12 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 // unreachable: the caller never received its doc reference, so it can neither
 // address nor delete it.
 //
-// The key is merged into any existing backend Detail rather than replacing it —
-// a 5xx often carries its own payload, and both matter to the caller. Only the
-// auto-idempotency operations carry a key, and only string keys are attached.
+// The key always lands in Detail — that is what makes the orphan recoverable,
+// and it costs nothing on a definite refusal. The hint is only rewritten when
+// the outcome is genuinely ambiguous (transport failure, timeout, 5xx) AND no
+// hint was set: a 4xx created nothing, so claiming "outcome unknown" there
+// would be false, and clobbering a curated hint like "ask a Workspace owner to
+// add this Bot" replaces actionable guidance with a misleading retry.
 func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error) error {
 	if rt == nil || rt.detail == nil || rt.detail.AutoIdempotencyKey == "" {
 		return err
@@ -1140,8 +1143,10 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 		return err
 	}
 	exit.Detail = detail
-	exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s to resume the same creation rather than create a second document",
-		strings.ReplaceAll(field, "_", "-"), key)
+	if exit.Hint == "" && exit.OutcomeUnknown() {
+		exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s to resume the same creation rather than create a second document",
+			strings.ReplaceAll(field, "_", "-"), key)
+	}
 	return exit
 }
 
@@ -1153,22 +1158,33 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 // closed there reports a completed delete/grant/comment as ok:false, and a
 // caller that retries on that can duplicate work.
 //
-// It still fails closed on the one shape that cannot be passed through: when
-// the 2xx schema declares required properties for the unwrapped value, a null
-// or scalar carries none of them, and reporting success would let a caller
-// persist an empty document reference.
+// It still fails closed when the value cannot carry what the caller was told to
+// read from it: when the 2xx schema declares required properties, an absent
+// field, a null, a scalar, or an object missing those keys all yield an empty
+// reference. The check is on the properties that matter, not on JSON type.
 func unwrapResponse(body []byte, path string, required []string) ([]byte, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
+		if len(required) > 0 {
+			return nil, fmt.Errorf("response is empty but %q must carry %s", path, strings.Join(required, ", "))
+		}
 		return body, nil
 	}
 	raw, found, err := rawValueAtPath(body, path)
 	if err != nil || !found {
+		if len(required) > 0 {
+			return nil, fmt.Errorf("response is missing field %q carrying %s", path, strings.Join(required, ", "))
+		}
 		return body, nil //nolint:nilerr // deliberate fail-open; see doc comment
 	}
 	if len(required) > 0 {
 		var object map[string]json.RawMessage
 		if jsonErr := json.Unmarshal(raw, &object); jsonErr != nil || object == nil {
 			return nil, fmt.Errorf("response field %q must be an object carrying %s", path, strings.Join(required, ", "))
+		}
+		for _, name := range required {
+			if _, ok := object[name]; !ok {
+				return nil, fmt.Errorf("response field %q is missing required %q", path, name)
+			}
 		}
 	}
 	return raw, nil

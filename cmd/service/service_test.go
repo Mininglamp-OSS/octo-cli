@@ -319,7 +319,9 @@ func TestHTMLDocIDUseAndOutboundWireCompatibility(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{}}`))
+		// Carries the properties html.publish declares required; a stub without
+		// them is refused by the unwrap guard.
+		_, _ = w.Write([]byte(`{"data":{"doc_id":"d_1","slug":"d_1"}}`))
 	})
 
 	get := findCmd(findCmd(root, "html"), "get")
@@ -637,7 +639,7 @@ func TestHTMLAutoIdempotencyPreservesExplicitNonEmptyValue(t *testing.T) {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			got, _ = body["idempotency_key"].(string)
-			_, _ = w.Write([]byte(`{"data":{}}`))
+			_, _ = w.Write([]byte(`{"data":{"doc_id":"d_1","slug":"d_1"}}`))
 		})
 		root.SetArgs(args)
 		if err := root.Execute(); err != nil {
@@ -1671,5 +1673,93 @@ func TestHTMLWhitespaceSlugIsNotTreatedAsRepublish(t *testing.T) {
 		if key, _ := body["idempotency_key"].(string); key == "" {
 			t.Errorf("whitespace slug was sent as a republish reference with no key: %v", body)
 		}
+	}
+}
+
+// TestHTMLCreateFailureKeepsCuratedHintOn4xx pins that the idempotency-key
+// annotation does not claim "outcome unknown" for a definite refusal, and does
+// not clobber a hint the caller can act on. A 403 created nothing, so telling
+// the caller to retry the creation is both false and a replacement of curated
+// guidance with a misleading instruction. The key still lands in detail.
+func TestHTMLCreateFailureKeepsCuratedHintOn4xx(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		// FORBIDDEN has a curated local hint that wins over the server's; either
+		// way the point is that it survives instead of being replaced.
+		{name: "403 with curated hint", status: 403,
+			body: `{"error":{"code":"FORBIDDEN","message":"bot not a member","hint":"ask a Workspace owner to add this Bot"}}`,
+			want: "bot lacks permission; check space membership"},
+		{name: "400 with server hint", status: 400,
+			body: `{"error":{"code":"INVALID_HTML","message":"fragment","hint":"wrap the fragment in <html><body>"}}`,
+			want: "wrap the fragment in <html><body>"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var sent string
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				sent, _ = body["idempotency_key"].(string)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("expected the %d to fail", tt.status)
+			}
+			var env struct {
+				Error struct {
+					Hint   string         `json:"hint"`
+					Detail map[string]any `json:"detail"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal(tf.ErrOut.Bytes(), &env); err != nil {
+				t.Fatalf("error envelope: %v: %s", err, tf.ErrOut.String())
+			}
+			if env.Error.Hint != tt.want {
+				t.Errorf("curated hint was replaced: hint = %q, want %q", env.Error.Hint, tt.want)
+			}
+			if strings.Contains(env.Error.Hint, "outcome unknown") {
+				t.Errorf("a %d is a definite refusal, not an unknown outcome: %q", tt.status, env.Error.Hint)
+			}
+			if got, _ := env.Error.Detail["idempotency_key"].(string); got != sent || sent == "" {
+				t.Errorf("detail idempotency_key = %q, sent %q", got, sent)
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapRejectsDataMissingRequiredKeys pins that the guard checks
+// the properties the caller was told to read, not merely the JSON type. An empty
+// object, a body with no data field, and an unwrapped payload lacking a required
+// key all yield the same empty document reference as a null.
+func TestHTMLPublishUnwrapRejectsDataMissingRequiredKeys(t *testing.T) {
+	for _, body := range []string{
+		`{"data":{}}`,
+		`{"ok":true}`,
+		`{"doc_id":"d1","slug":"d1"}`,
+		`{"data":{"slug":"d1"}}`,
+		`{"data":[]}`,
+		``,
+	} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if body != "" {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(body))
+				}
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %q as success, caller would persist an empty reference: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+		})
 	}
 }
