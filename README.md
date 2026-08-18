@@ -175,8 +175,8 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.
 # Canonical create has no doc reference: omit --slug. The CLI generates a key.
-octo-cli html publish --html '<h1>hi</h1>' \
-  --mount-type group --group-no <group_no> --data '{"meta":{"title":"Launch page"}}'
+octo-cli html publish --html '<h1>hi</h1>' --title 'Launch page' \
+  --mount-type group --group-no <group_no>
 # Save data.slug from the publish response. For a new document data.slug == data.doc_id, mounted or
 # unmounted. Every later operation uses data.slug. Old documents keep their legacy
 # slug as data.slug; do not infer this from mount_type or doc_id being non-empty.
@@ -184,8 +184,9 @@ octo-cli html publish --html '<h1>hi</h1>' \
 # legacy slug is rejected and cannot create a document.
 octo-cli html list
 octo-cli html versions <doc-ref>
-octo-cli html draft create --html '<h1>wip</h1>'
-octo-cli html draft save <doc-ref> --data '{"html":"<h1>wip</h1>"}'   # then: html draft promote <doc-ref>
+octo-cli html draft create --html '<h1>wip</h1>' --title 'WIP page'
+octo-cli html draft save <doc-ref> --html '<h1>wip</h1>'             # then: html draft promote <doc-ref>
+# --title sets the display name (metadata, never identity) on publish/draft create/save/promote.
 octo-cli html share <doc-ref>                                        # mint a reader share code
 octo-cli html grant add <doc-ref> --data '{"uid":"u-1"}'             # per-uid authorization
 octo-cli html element get --slug <doc-ref> --aid <content-hash>      # wire flag remains named slug
