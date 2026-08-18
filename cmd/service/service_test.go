@@ -1632,6 +1632,65 @@ func TestHTMLPublishUnwrapRejectsNullAndScalarData(t *testing.T) {
 	}
 }
 
+// TestHTMLPublishUnwrapRejectsBlankRequiredValues pins that the guard checks the
+// value, not just the key. A present-but-empty doc_id/slug is the same lost
+// document as a missing one, and it is worse than a failure: reporting ok:true
+// also skips annotateIdempotencyKey, so the generated key dies with the process
+// and the committed document becomes an unaddressable orphan. The shapes below
+// are what an intermediary that re-encodes the envelope through a struct without
+// omitempty actually emits — the very scenario this guard exists for.
+func TestHTMLPublishUnwrapRejectsBlankRequiredValues(t *testing.T) {
+	for _, body := range []string{
+		`{"data":{"doc_id":"","slug":""}}`,
+		`{"data":{"doc_id":null,"slug":null}}`,
+		`{"data":{"doc_id":"   ","slug":"   "}}`,
+		`{"data":{"doc_id":"d1","slug":""}}`,
+		`{"data":{"doc_id":0,"slug":0}}`,
+		`{"data":{"doc_id":{},"slug":[]}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			})
+			root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+			if err := root.Execute(); err == nil {
+				t.Fatalf("accepted %s as a created document: %s", body, tf.Out.String())
+			}
+			if got := tf.ErrOut.String(); !strings.Contains(got, "RESPONSE_UNWRAP") {
+				t.Errorf("error was not RESPONSE_UNWRAP: %s", got)
+			}
+		})
+	}
+}
+
+// TestHTMLPublishUnwrapAcceptsUsableReference is the other direction: a payload
+// that does carry both references still passes, including one padded with
+// surrounding whitespace, which is trimmed for the blankness test only and must
+// reach the caller unmodified.
+func TestHTMLPublishUnwrapAcceptsUsableReference(t *testing.T) {
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"doc_id":" d_1 ","slug":"d_1","version":1}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "<p>x</p>"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("a usable reference was rejected: %v (stderr: %s)", err, tf.ErrOut.String())
+	}
+	var env struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			DocID string `json:"doc_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("response: %v: %s", err, tf.Out.String())
+	}
+	if !env.OK || env.Data.DocID != " d_1 " {
+		t.Errorf("envelope altered the reference: %s", tf.Out.String())
+	}
+}
+
 // TestHTMLCreateFailureReportsIdempotencyKey pins that an ambiguous create
 // failure surfaces the key it used. Without it the generated key dies with the
 // process and a committed-but-unacknowledged create becomes an unreachable

@@ -1182,12 +1182,33 @@ func unwrapResponse(body []byte, path string, required []string) ([]byte, error)
 			return nil, fmt.Errorf("response field %q must be an object carrying %s", path, strings.Join(required, ", "))
 		}
 		for _, name := range required {
-			if _, ok := object[name]; !ok {
+			value, ok := object[name]
+			if !ok {
 				return nil, fmt.Errorf("response field %q is missing required %q", path, name)
+			}
+			if unusableUnwrapReference(value) {
+				return nil, fmt.Errorf("response field %q carries an unusable %q", path, name)
 			}
 		}
 	}
 	return raw, nil
+}
+
+// unusableUnwrapReference reports whether a required unwrapped value cannot be
+// handed back as a document reference. A present-but-empty key is the same
+// failure as a missing one: null, a non-string, and a blank string all read as
+// "no reference", and the misconfigured intermediary this guard exists for —
+// one that re-encodes the envelope through a struct without omitempty — emits
+// exactly those. Blankness is trimmed, matching missingVariantRequiredValue on
+// the request side. Every required unwrap field in every embedded spec is
+// declared type:string; TestUnwrapRequiredFieldsAreDeclaredStrings trips if a
+// future spec declares a non-string one, since this would refuse it.
+func unusableUnwrapReference(raw json.RawMessage) bool {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return true
+	}
+	return strings.TrimSpace(text) == ""
 }
 
 // normalizeResponse applies the operation's spec-declared output transforms

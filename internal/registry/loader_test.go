@@ -459,6 +459,44 @@ func TestHTMLMutationResponsesDeclareJSONObjects(t *testing.T) {
 	}
 }
 
+// TestUnwrapRequiredFieldsAreDeclaredStrings guards an assumption made by the
+// unwrap guard in cmd/service: it refuses a required unwrapped value that is not
+// a string, because every such field today is a document reference. A spec that
+// declares a non-string required field under the unwrap path would be refused at
+// runtime on a valid response, so this fails here instead.
+func TestUnwrapRequiredFieldsAreDeclaredStrings(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, op := range r.ListAllOperations() {
+		d, ok := r.GetOperation(op.ID)
+		if !ok || len(d.UnwrapRequiredFields) == 0 {
+			continue
+		}
+		if d.ResponseSchema == nil {
+			t.Errorf("%s declares unwrap required fields but no success schema", op.ID)
+			continue
+		}
+		payload := *d.ResponseSchema
+		if next, ok := payload.Properties[d.ResponseUnwrap]; ok {
+			payload = next
+		}
+		for _, name := range d.UnwrapRequiredFields {
+			prop, ok := payload.Properties[name]
+			if !ok {
+				t.Errorf("%s: required unwrap field %q is not declared under %q", op.ID, name, d.ResponseUnwrap)
+				continue
+			}
+			if prop.Type != "string" {
+				t.Errorf("%s: required unwrap field %q is type %q; the runtime guard refuses non-strings", op.ID, name, prop.Type)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no required unwrap fields found; the guard this pins would be unreachable")
+	}
+}
+
 func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("docs.search")
