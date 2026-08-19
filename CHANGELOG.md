@@ -25,11 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields, task lifecycle status including `in_review`, and a daemon-oriented
   task credential policy. The shared OpenAPI registry now resolves referenced
   parameters, request bodies, responses, nullable unions, and composed schemas.
-- **`octo-cli drive` domain** (45 commands) — network drive over octo-drive:
-  spaces and members, folder/file tree and `browse`, blob registration,
+- **`octo-cli drive` domain** (46 commands) — network drive over octo-drive:
+  spaces and members, folder/file tree and `browse`, full-text `search`, blob registration,
   two-phase upload and signed download, online-document mounts, share links,
-  invites, and IM-attachment transfer. 39 leaves are generated from the new
-  `drive.json` spec (42 operations); six are hand-written because they are not a
+  invites, and IM-attachment transfer. 40 leaves are generated from the new
+  `drive.json` spec (43 operations); six are hand-written because they are not a
   single request or take an argument shape the engine cannot express:
   `upload file` (prepare → presigned PUT → confirm, with best-effort cancel on
   failure), `download file` and `share download` (signed URL → atomic local

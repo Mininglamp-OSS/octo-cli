@@ -155,6 +155,18 @@ octo-cli drive file copy   "$FILE" --parent-id "$FOLDER"
 
 `browse` returns the complete listing; its `page` object is an envelope, not a database page, so `--page-index` / `--page-size` do not actually narrow the result yet.
 
+### Full-text search
+
+`drive search` is full-text search across every space the caller can see (name + blob/doc body via OpenSearch), scoped by the caller's own membership — a bot only sees spaces it was added to. `--page-index` here IS a real page (0-based).
+
+```bash
+octo-cli drive search --q "报销单"                              # all visible spaces
+octo-cli drive search --q "预算" --scope space --space-id "$SPACE"
+octo-cli drive search --q "合同" --data '{"filters":{"type":"blob","owner_scope":"me"}}'
+```
+
+Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope` (me|others), `updated_after` (RFC3339), `size_min`/`size_max` (bytes). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
+
 ## 4. Upload and download in detail
 
 `drive upload file` runs prepare → PUT to object storage → confirm. The PUT goes out on a separate HTTP client that carries **no** Octo credential — the presigned URL is its own authorisation. If anything fails after the pending row exists, the CLI cancels it and the error reports the `file_id` plus the cancel outcome:
@@ -228,6 +240,7 @@ octo-cli drive folder delete "$FOLDER" --dry-run
 
 ```
 drive browse
+drive search
 drive space       create | list | ensure-personal | get | rename | delete
 drive member      list | add | set-role | remove
 drive folder      create | list | rename | move | delete

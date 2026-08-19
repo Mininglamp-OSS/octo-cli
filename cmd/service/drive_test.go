@@ -68,6 +68,8 @@ func TestDrive_RegistryShape(t *testing.T) {
 		"drive.member.remove":   {"DELETE", "/v1/bot/drive/spaces/{space_id}/members/{uid}"},
 		// browse (1)
 		"drive.browse": {"GET", "/v1/bot/drive/browse"},
+		// search (1)
+		"drive.search": {"POST", "/v1/bot/drive/search"},
 		// folder (5)
 		"drive.folder.create": {"POST", "/v1/bot/drive/folders"},
 		"drive.folder.list":   {"GET", "/v1/bot/drive/folders/{space_id}/{parent_id}"},
