@@ -1,7 +1,7 @@
 // Package cmd — drive composite commands.
 //
-// Thirty-nine of the drive leaves are generated from
-// internal/registry/specs/drive.json (42 spec operations, 3 of them detached).
+// Forty of the drive leaves are generated from
+// internal/registry/specs/drive.json (43 spec operations, 3 of them detached).
 // The six in this file and its siblings are hand-written because they are not a
 // single request: `upload file` runs prepare → object PUT → confirm, `download
 // file` and `share download` fetch a presigned URL and then write bytes to disk,

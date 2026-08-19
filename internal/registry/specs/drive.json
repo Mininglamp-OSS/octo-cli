@@ -239,6 +239,44 @@
         }
       }
     },
+    "/v1/bot/drive/search": {
+      "post": {
+        "operationId": "drive.search",
+        "summary": "Full-text search files, folders and mounted documents across the caller's drive spaces",
+        "description": "Full-text search over the caller's visible drive. Matches file/folder names and blob/doc bodies (OCR/extracted text) via OpenSearch, gated by the spaces the caller is a member of. Same command for a real person (uk_, routed to /v1/user/drive/search) and a bot (bf_/app_, routed to /v1/bot/drive/search); results are always scoped to what the active identity's uid can see, so a bot only sees spaces it was added to. Scalar options are flags; the advanced --filters object (type / owner_scope / updated_after / size_min / size_max) is passed via --data. Requires the drive search backend (OpenSearch) to be configured on the server, otherwise it returns 503 unavailable.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["items[].file_id", "items[].parent_id"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["q"],
+                "properties": {
+                  "q": { "type": "string", "description": "full-text query; matches names (weighted higher) and blob/doc bodies. Required and non-empty." },
+                  "scope": { "type": "string", "enum": ["all", "space"], "default": "all", "description": "search radius: all visible spaces (default) or one space (requires --space-id)" },
+                  "space_id": { "type": "string", "description": "drive space id to restrict to; required when --scope=space, ignored otherwise" },
+                  "page_index": { "type": "integer", "default": 0, "description": "0-based page number" },
+                  "page_size": { "type": "integer", "default": 20, "description": "page size (server caps to its max, default max 50)" },
+                  "filters": { "type": "object", "description": "advanced filters, pass via --data. Fields: type (folder|doc|blob), owner_scope (me|others), updated_after (RFC3339 timestamp, matches items updated at/after it), size_min and size_max (bytes, uint64). Example: --data '{\"filters\":{\"type\":\"blob\",\"owner_scope\":\"me\"}}'" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results. total is a lower-bound estimate of the union across the name and body indexes; truncated=true means the visible-doc set or an index page hit an internal cap and some body hits may be missing.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SearchResult" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/drive/folders": {
       "post": {
         "operationId": "drive.folder.create",
@@ -976,6 +1014,51 @@
           "granted_by": { "type": "string", "description": "uid that granted the role, or \"system\"" },
           "created_at": { "type": "string" },
           "updated_at": { "type": "string" }
+        }
+      },
+      "SearchResult": {
+        "type": "object",
+        "description": "drive search response. items is this page's hits; total is a lower-bound estimate of the union count (name index + body index deduped), suitable for a 'N results' label but not an exact count.",
+        "properties": {
+          "total": { "type": "integer", "description": "lower-bound estimate of total matches across the caller's visible spaces" },
+          "truncated": { "type": "boolean", "description": "true when an internal cap (visible-doc set or an index page) was hit and some body hits may be missing" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "one search hit. file_id and parent_id are emitted as decimal strings (see x-octo-lossless-id-fields) because the backend uses uint64; size is a plain integer (files are capped well below 2^53). Display names for owner/updater/space are NOT included — resolve uid via octo-server the same way browse does.",
+              "properties": {
+                "file_id": { "type": "string", "description": "unified drive node id, decimal string" },
+                "space_id": { "type": "string", "description": "drive space id the hit lives in" },
+                "parent_id": { "type": "string", "description": "immediate parent folder id, decimal string; \"0\" is the space root" },
+                "path": { "type": "array", "items": { "type": "string" }, "description": "breadcrumb of folder names from the space root to the immediate parent, exclusive of the item itself; [] for root-level hits" },
+                "name": { "type": "string" },
+                "type": { "type": "string", "enum": ["folder", "doc", "blob"] },
+                "ext": { "type": "string", "description": "file extension, when known" },
+                "size": { "type": "integer", "format": "uint64", "description": "byte count; absent/0 for folders and docs. uint64 on the wire but files are capped well below 2^53, so it is emitted as a plain JSON number (not a lossless decimal string)" },
+                "owner_uid": { "type": "string" },
+                "updater_uid": { "type": "string", "description": "uid of last editor; empty string means never edited" },
+                "created_at": { "type": "string" },
+                "updated_at": { "type": "string" },
+                "highlights": {
+                  "type": "object",
+                  "description": "matched fragments with <mark>…</mark> around hits",
+                  "properties": {
+                    "name": { "type": "array", "items": { "type": "string" } },
+                    "body": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "content_meta": {
+                  "type": "object",
+                  "description": "present on body hits: how the searched text was extracted",
+                  "properties": {
+                    "extractor": { "type": "string" },
+                    "truncated": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "DriveEntry": {

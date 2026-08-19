@@ -108,7 +108,7 @@ func TestDrive_CommandCount(t *testing.T) {
 		t.Fatal("missing drive command")
 	}
 	want := map[string][]string{
-		"":            {"browse"},
+		"":            {"browse", "search"},
 		"space":       {"create", "list", "ensure-personal", "get", "rename", "delete"},
 		"member":      {"list", "add", "set-role", "remove"},
 		"folder":      {"create", "list", "rename", "move", "delete"},
@@ -138,8 +138,8 @@ func TestDrive_CommandCount(t *testing.T) {
 			}
 		}
 	}
-	if total != 45 {
-		t.Errorf("expected 45 drive commands, the table lists %d", total)
+	if total != 46 {
+		t.Errorf("expected 46 drive commands, the table lists %d", total)
 	}
 	// Nothing beyond the table: a stray leaf (e.g. a duplicate generated
 	// `share access`) would otherwise pass unnoticed.
