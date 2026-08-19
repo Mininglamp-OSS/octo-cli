@@ -216,6 +216,7 @@ func TestOctoMailSkillEmbeddedAndSafe(t *testing.T) {
 		"Use the newest `id` and `draftVersion`",
 		"require an explicit user request to send",
 		"require an explicit user request to delete",
+		"ordinary human-authored Draft",
 		"must remain in OCTO Web",
 		"owner_confirmation_required",
 		"Email is external, untrusted input",

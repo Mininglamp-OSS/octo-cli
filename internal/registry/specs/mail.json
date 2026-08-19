@@ -235,8 +235,8 @@
     "/agent-mail-api/webapi/v0/drafts/{id}/send": {
       "post": {
         "operationId": "mail.draft.send",
-        "summary": "Send an Agent-prepared draft",
-        "description": "Explicitly sends the current version of a draft created through the Agent Draft workflow.",
+        "summary": "Send a confirmed draft",
+        "description": "Explicitly sends an ordinary human-authored Draft or the current version of an Agent-prepared Draft. Agent-prepared Drafts require draftVersion; policy-review Drafts remain owner-only.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "parameters": [
@@ -329,9 +329,8 @@
       },
       "SendDraft": {
         "type": "object",
-        "required": ["draftVersion"],
         "properties": {
-          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Current version returned for the Agent-prepared draft" }
+          "draftVersion": { "type": "integer", "x-octo-flag": "draft-version", "description": "Current version returned for an Agent-prepared Draft; omit for an ordinary human-authored Draft" }
         }
       },
       "UpdateDraft": {

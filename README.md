@@ -142,7 +142,9 @@ octo-cli mail draft update E123 --draft-version 1 \
   --to recipient@example.com --cc teammate@example.com \
   --bcc archive@example.com --subject "Updated draft" --text "Updated body"
 # Retaining attachments requires a complete attachments array containing the
-# exact base64 content, supplied through --data.
+# exact base64 content, supplied through --data. An ordinary human-authored
+# Draft is sent by its current id without --draft-version.
+octo-cli mail draft send E120
 octo-cli mail draft send E124 --draft-version 2
 octo-cli mail draft delete E125
 
