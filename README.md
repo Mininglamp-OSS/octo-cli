@@ -135,6 +135,16 @@ octo-cli mail message send-intent \
   --idempotency-key "send-example-001"
 octo-cli mail thread get T123
 octo-cli mail draft list
+# Draft update replaces the entire Draft. Read it first and resend every field
+# that must remain; omitted cc/bcc/text/html/attachments are removed.
+octo-cli mail message read E123
+octo-cli mail draft update E123 --draft-version 1 \
+  --to recipient@example.com --cc teammate@example.com \
+  --bcc archive@example.com --subject "Updated draft" --text "Updated body"
+# Retaining attachments requires a complete attachments array containing the
+# exact base64 content, supplied through --data.
+octo-cli mail draft send E124 --draft-version 2
+octo-cli mail draft delete E125
 
 # Docs — create/list/search, then read and incrementally edit the live body.
 octo-cli docs create --title "Design notes"

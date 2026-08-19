@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -70,7 +71,10 @@ func TestMailRegistrySurface(t *testing.T) {
 	want := map[string]string{
 		"mail.address.list":                "/agent-mail-api/webapi/v0/addresses",
 		"mail.draft.create_agent":          "/agent-mail-api/webapi/v0/agent-drafts",
+		"mail.draft.delete":                "/agent-mail-api/webapi/v0/drafts/{id}",
 		"mail.draft.list":                  "/agent-mail-api/webapi/v0/drafts",
+		"mail.draft.send":                  "/agent-mail-api/webapi/v0/drafts/{id}/send",
+		"mail.draft.update":                "/agent-mail-api/webapi/v0/drafts/{id}",
 		"mail.me":                          "/agent-mail-api/webapi/v0/identity",
 		"mail.message.auto_reply_context":  "/agent-mail-api/webapi/v0/messages/{id}/auto-reply-context",
 		"mail.message.list":                "/agent-mail-api/webapi/v0/messages",
@@ -117,6 +121,9 @@ func TestMailRegistrySurface(t *testing.T) {
 		"mail.message.send_intent",
 		"mail.message.reply_draft",
 		"mail.draft.create_agent",
+		"mail.draft.update",
+		"mail.draft.send",
+		"mail.draft.delete",
 	} {
 		op, ok := reg.GetOperation(id)
 		if !ok {
@@ -137,7 +144,7 @@ func TestMailRegistrySurface(t *testing.T) {
 	}
 }
 
-func TestMailRegistryExcludesOwnerOnlyOperationsAndDeletedConfirmationFlow(t *testing.T) {
+func TestMailRegistryExposesAgentDraftOperationsWithoutConfirmationFlow(t *testing.T) {
 	reg := registry.MustNew()
 	for _, operationID := range []string{
 		"mail.message.send",
@@ -146,12 +153,35 @@ func TestMailRegistryExcludesOwnerOnlyOperationsAndDeletedConfirmationFlow(t *te
 		"mail.message.reply_all",
 		"mail.message.forward",
 		"mail.draft.create",
-		"mail.draft.update",
-		"mail.draft.send",
-		"mail.draft.delete",
 	} {
 		if _, ok := reg.GetOperation(operationID); ok {
 			t.Errorf("owner-only operation %s must not be exposed by Agent Mail", operationID)
+		}
+	}
+	for operationID, method := range map[string]string{
+		"mail.draft.update": http.MethodPatch,
+		"mail.draft.send":   http.MethodPost,
+		"mail.draft.delete": http.MethodDelete,
+	} {
+		op, ok := reg.GetOperation(operationID)
+		if !ok {
+			t.Errorf("explicit Agent Draft operation %s must be exposed", operationID)
+			continue
+		}
+		if op.Method != method {
+			t.Errorf("%s method = %q, want %q", operationID, op.Method, method)
+		}
+		if op.RetryMode != "never" {
+			t.Errorf("%s retry mode = %q, want never", operationID, op.RetryMode)
+		}
+	}
+	for _, operationID := range []string{"mail.draft.update", "mail.draft.send"} {
+		op, ok := reg.GetOperation(operationID)
+		if !ok {
+			continue
+		}
+		if op.RequestBody == nil || !slices.Contains(op.RequestBody.Required, "draftVersion") {
+			t.Errorf("%s must require draftVersion", operationID)
 		}
 	}
 	for _, info := range reg.ListOperations("mail") {
@@ -163,6 +193,102 @@ func TestMailRegistryExcludesOwnerOnlyOperationsAndDeletedConfirmationFlow(t *te
 			if parameter.Name == "X-Octo-Confirmation" || parameter.FlagName == "confirmation-token" {
 				t.Errorf("%s still exposes the deleted Agent self-confirmation flow", info.ID)
 			}
+		}
+	}
+}
+
+func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
+	type observedRequest struct {
+		method, path, confirmation, automation string
+		body                                   map[string]any
+	}
+	var requests []observedRequest
+	mailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := map[string]any{}
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil && r.Method != http.MethodDelete {
+				http.Error(w, "invalid test request body", http.StatusBadRequest)
+				return
+			}
+		}
+		requests = append(requests, observedRequest{
+			method: r.Method, path: r.URL.Path,
+			confirmation: r.Header.Get("X-Octo-Confirmation"),
+			automation:   r.Header.Get("X-Octo-Automation"),
+			body:         body,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodPatch:
+			_, _ = w.Write([]byte(`{"id":"E2","draftVersion":2}`))
+		case http.MethodPost:
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"outcome":"accepted","messageId":"E9","submissionIds":[1],"senderAddress":"agent@example.com"}`))
+		case http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer mailServer.Close()
+
+	tf := cmdutil.NewTestFactory()
+	cfg := &config.Config{APIBaseURL: mailServer.URL, BotToken: "app_test", Format: "json"}
+	tf.SetConfig(cfg)
+	tf.SetCredential(&credential.BotCredential{Token: "app_test", Source: "test"})
+	mailCredential := &credential.MailCredential{Token: "omb_mail_secret", Source: "test"}
+	tf.SetMailCredential(mailCredential)
+	tf.SetMailClient(client.NewMail(cfg, mailCredential, client.Options{ErrOut: io.Discard}))
+	tf.RegistryFunc = registry.MustNew
+
+	execute := func(args ...string) error {
+		root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
+		RegisterServiceCommands(root, tf.Factory)
+		root.SetArgs(args)
+		return root.Execute()
+	}
+	run := func(args ...string) {
+		t.Helper()
+		if err := execute(args...); err != nil {
+			t.Fatalf("execute %v: %v\n%s", args, err, tf.ErrOut.String())
+		}
+	}
+	for _, args := range [][]string{
+		{"mail", "draft", "update", "E1", "--to", "recipient@example.com", "--subject", "Updated"},
+		{"mail", "draft", "send", "E1"},
+	} {
+		before := len(requests)
+		err := execute(args...)
+		if err == nil || !strings.Contains(err.Error(), "draftVersion") {
+			t.Fatalf("execute %v error = %v, want missing draftVersion", args, err)
+		}
+		if len(requests) != before {
+			t.Fatalf("execute %v sent %d request(s), want local validation failure", args, len(requests)-before)
+		}
+	}
+	run("mail", "draft", "update", "E1", "--draft-version", "1", "--to", "recipient@example.com", "--subject", "Updated", "--text", "Body")
+	run("mail", "draft", "send", "E2", "--draft-version", "2")
+	run("mail", "draft", "delete", "E3")
+
+	want := []struct {
+		method, path string
+		version      float64
+	}{
+		{http.MethodPatch, "/agent-mail-api/webapi/v0/drafts/E1", 1},
+		{http.MethodPost, "/agent-mail-api/webapi/v0/drafts/E2/send", 2},
+		{http.MethodDelete, "/agent-mail-api/webapi/v0/drafts/E3", 0},
+	}
+	if len(requests) != len(want) {
+		t.Fatalf("requests = %#v, want %d", requests, len(want))
+	}
+	for i, expected := range want {
+		got := requests[i]
+		if got.method != expected.method || got.path != expected.path {
+			t.Errorf("request %d = %s %s, want %s %s", i, got.method, got.path, expected.method, expected.path)
+		}
+		if got.confirmation != "" || got.automation != "" {
+			t.Errorf("request %d unexpectedly carries confirmation=%q automation=%q", i, got.confirmation, got.automation)
+		}
+		if expected.version > 0 && got.body["draftVersion"] != expected.version {
+			t.Errorf("request %d draftVersion = %#v, want %v", i, got.body["draftVersion"], expected.version)
 		}
 	}
 }
