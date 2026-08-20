@@ -175,14 +175,19 @@ func TestMailRegistryExposesAgentDraftOperationsWithoutConfirmationFlow(t *testi
 			t.Errorf("%s retry mode = %q, want never", operationID, op.RetryMode)
 		}
 	}
-	for _, operationID := range []string{"mail.draft.update", "mail.draft.send"} {
-		op, ok := reg.GetOperation(operationID)
-		if !ok {
-			continue
-		}
-		if op.RequestBody == nil || !slices.Contains(op.RequestBody.Required, "draftVersion") {
-			t.Errorf("%s must require draftVersion", operationID)
-		}
+	update, ok := reg.GetOperation("mail.draft.update")
+	if !ok || update.RequestBody == nil || !slices.Contains(update.RequestBody.Required, "draftVersion") {
+		t.Error("mail.draft.update must require draftVersion")
+	}
+	send, ok := reg.GetOperation("mail.draft.send")
+	if !ok || send.RequestBody == nil {
+		t.Fatal("mail.draft.send must expose its request body")
+	}
+	if slices.Contains(send.RequestBody.Required, "draftVersion") {
+		t.Error("mail.draft.send must allow an ordinary human Draft without draftVersion")
+	}
+	if send.RequestBodyRequired {
+		t.Error("mail.draft.send must allow the ordinary Draft request body to be omitted")
 	}
 	for _, info := range reg.ListOperations("mail") {
 		op, ok := reg.GetOperation(info.ID)
@@ -197,7 +202,7 @@ func TestMailRegistryExposesAgentDraftOperationsWithoutConfirmationFlow(t *testi
 	}
 }
 
-func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
+func TestMailDraftCommandsPreserveDraftSendContracts(t *testing.T) {
 	type observedRequest struct {
 		method, path, confirmation, automation string
 		body                                   map[string]any
@@ -205,7 +210,7 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 	var requests []observedRequest
 	mailServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body := map[string]any{}
-		if r.Body != nil {
+		if r.Body != nil && r.ContentLength != 0 {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil && r.Method != http.MethodDelete {
 				http.Error(w, "invalid test request body", http.StatusBadRequest)
 				return
@@ -218,6 +223,13 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 			body:         body,
 		})
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/agent-mail-api/webapi/v0/drafts/E-agent/send" {
+			if _, ok := body["draftVersion"]; !ok {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":{"code":"draft_version_conflict","message":"the draft changed; reload the current version"}}`))
+				return
+			}
+		}
 		switch r.Method {
 		case http.MethodPatch:
 			_, _ = w.Write([]byte(`{"id":"E2","draftVersion":2}`))
@@ -251,30 +263,32 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 			t.Fatalf("execute %v: %v\n%s", args, err, tf.ErrOut.String())
 		}
 	}
-	for _, args := range [][]string{
-		{"mail", "draft", "update", "E1", "--to", "recipient@example.com", "--subject", "Updated"},
-		{"mail", "draft", "send", "E1"},
-	} {
-		before := len(requests)
-		err := execute(args...)
-		if err == nil || !strings.Contains(err.Error(), "draftVersion") {
-			t.Fatalf("execute %v error = %v, want missing draftVersion", args, err)
-		}
-		if len(requests) != before {
-			t.Fatalf("execute %v sent %d request(s), want local validation failure", args, len(requests)-before)
-		}
+	args := []string{"mail", "draft", "update", "E-update", "--to", "recipient@example.com", "--subject", "Updated"}
+	before := len(requests)
+	err := execute(args...)
+	if err == nil || !strings.Contains(err.Error(), "draftVersion") {
+		t.Fatalf("execute %v error = %v, want missing draftVersion", args, err)
 	}
-	run("mail", "draft", "update", "E1", "--draft-version", "1", "--to", "recipient@example.com", "--subject", "Updated", "--text", "Body")
-	run("mail", "draft", "send", "E2", "--draft-version", "2")
-	run("mail", "draft", "delete", "E3")
+	if len(requests) != before {
+		t.Fatalf("execute %v sent %d request(s), want local validation failure", args, len(requests)-before)
+	}
+	run("mail", "draft", "update", "E-update", "--draft-version", "1", "--to", "recipient@example.com", "--subject", "Updated", "--text", "Body")
+	run("mail", "draft", "send", "E-human")
+	if err := execute("mail", "draft", "send", "E-agent"); err == nil {
+		t.Fatal("unversioned Agent Draft send succeeded, want server draft_version_conflict")
+	}
+	run("mail", "draft", "send", "E-agent", "--draft-version", "2")
+	run("mail", "draft", "delete", "E-delete")
 
 	want := []struct {
 		method, path string
 		version      float64
 	}{
-		{http.MethodPatch, "/agent-mail-api/webapi/v0/drafts/E1", 1},
-		{http.MethodPost, "/agent-mail-api/webapi/v0/drafts/E2/send", 2},
-		{http.MethodDelete, "/agent-mail-api/webapi/v0/drafts/E3", 0},
+		{http.MethodPatch, "/agent-mail-api/webapi/v0/drafts/E-update", 1},
+		{http.MethodPost, "/agent-mail-api/webapi/v0/drafts/E-human/send", 0},
+		{http.MethodPost, "/agent-mail-api/webapi/v0/drafts/E-agent/send", 0},
+		{http.MethodPost, "/agent-mail-api/webapi/v0/drafts/E-agent/send", 2},
+		{http.MethodDelete, "/agent-mail-api/webapi/v0/drafts/E-delete", 0},
 	}
 	if len(requests) != len(want) {
 		t.Fatalf("requests = %#v, want %d", requests, len(want))
@@ -289,6 +303,11 @@ func TestMailDraftCommandsUseVersionedAgentDraftEndpoints(t *testing.T) {
 		}
 		if expected.version > 0 && got.body["draftVersion"] != expected.version {
 			t.Errorf("request %d draftVersion = %#v, want %v", i, got.body["draftVersion"], expected.version)
+		}
+		if expected.version == 0 {
+			if _, exists := got.body["draftVersion"]; exists {
+				t.Errorf("request %d unexpectedly includes draftVersion %#v", i, got.body["draftVersion"])
+			}
 		}
 	}
 }
