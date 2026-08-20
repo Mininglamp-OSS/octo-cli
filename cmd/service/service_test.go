@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -563,6 +564,172 @@ func TestHTMLCanonicalDraftCreate(t *testing.T) {
 	}
 	if key, _ := gotBody["idempotency_key"].(string); gotPath != "/docs-html/v1/docs/draft" || key == "" {
 		t.Errorf("draft create request: path=%q body=%#v", gotPath, gotBody)
+	}
+}
+
+// TestHTMLTitleFlagPromotesTopLevelTitle pins the html domain's first-class
+// --title flag on every write operation. Before this, title existed only as a
+// nested property of the `meta` OBJECT, and registerBodyFlags/promotableKind
+// skip object properties outright — so html was the one domain with no --title
+// while the server has always read (and preferred) a top-level `title`.
+//
+// The assertion is deliberately two-sided: the emitted body must carry a
+// top-level "title", and it must NOT wrap it back into a `meta` object. The CLI
+// promotes the wire field as declared; the legacy meta.title path stays
+// reachable only through an explicit --data.
+func TestHTMLTitleFlagPromotesTopLevelTitle(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantPath string
+	}{
+		{
+			name:     "publish",
+			args:     []string{"html", "publish", "--html", "<h1>doc</h1>", "--title", "X"},
+			wantPath: "/docs-html/v1/docs",
+		},
+		{
+			name:     "draft create",
+			args:     []string{"html", "draft", "create", "--html", "<h1>wip</h1>", "--title", "X"},
+			wantPath: "/docs-html/v1/docs/draft",
+		},
+		{
+			name:     "draft save",
+			args:     []string{"html", "draft", "save", "doc-1", "--html", "<h1>wip</h1>", "--title", "X"},
+			wantPath: "/docs-html/v1/docs/doc-1/draft",
+		},
+		{
+			name:     "draft promote",
+			args:     []string{"html", "draft", "promote", "doc-1", "--title", "X"},
+			wantPath: "/docs-html/v1/docs/doc-1/draft/promote",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotPath string
+			var gotBody map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.EscapedPath()
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+			})
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if gotPath != tt.wantPath {
+				t.Errorf("path = %q, want %q", gotPath, tt.wantPath)
+			}
+			if gotBody["title"] != "X" {
+				t.Errorf("body must carry a top-level title: %#v", gotBody)
+			}
+			if _, wrapped := gotBody["meta"]; wrapped {
+				t.Errorf("--title must not be wrapped into meta: %#v", gotBody)
+			}
+		})
+	}
+}
+
+// TestHTMLDraftPromoteBodyOptionality is the regression guard for adding a
+// requestBody to html.draft.promote purely so --title becomes available. A bare
+// promote must still send NO body at all — same bytes on the wire as before the
+// spec grew the field. A regression here would start sending `{}` (or fail
+// validation) on every existing promote call.
+//
+// What actually protects that is the EMPTY `required` list on the schema, not
+// the `required: false` flag on the requestBody: resolveBody returns a nil body
+// whenever the merged base is empty, so the only way to break a bare promote is
+// to make a field required. Flipping requestBody.required to true alone changes
+// nothing (bodySchemaValidator finds no required field to complain about); it is
+// adding `title` to schema.required that turns a bare promote into a
+// VALIDATION_ERROR. This test pins that boundary, so keep it green rather than
+// relying on the `required: false` declaration to hold the line.
+func TestHTMLDraftPromoteBodyOptionality(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		wantBody  string
+		wantCType string
+	}{
+		{
+			name:     "bare promote sends no body",
+			args:     []string{"html", "draft", "promote", "doc-1"},
+			wantBody: "",
+		},
+		{
+			name:      "promote with --title sends only title",
+			args:      []string{"html", "draft", "promote", "doc-1", "--title", "X"},
+			wantBody:  `{"title":"X"}`,
+			wantCType: "application/json",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotRaw []byte
+			var gotCType string
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotRaw, _ = io.ReadAll(r.Body)
+				gotCType = r.Header.Get("Content-Type")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","version":3}}`))
+			})
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if string(gotRaw) != tt.wantBody {
+				t.Errorf("request body = %q, want %q", string(gotRaw), tt.wantBody)
+			}
+			if gotCType != tt.wantCType {
+				t.Errorf("Content-Type = %q, want %q", gotCType, tt.wantCType)
+			}
+		})
+	}
+}
+
+// TestHTMLTitleFlagOverridesData pins the engine's documented precedence
+// (architecture §5.2: individual flags override --data) for the new field, and
+// records the observed shape of the legacy path: --data's `meta` object is left
+// untouched next to the promoted top-level title, because the CLI merges by
+// wire key and meta.title is a different key. The server resolves the two
+// (top-level title wins, meta.title is the back-compat fallback), so shipping
+// both is safe; only the same-key case is a CLI-side override.
+func TestHTMLTitleFlagOverridesData(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantMeta any
+	}{
+		{
+			name:     "legacy meta.title kept alongside the promoted title",
+			args:     []string{"html", "publish", "--data", `{"html":"x","meta":{"title":"legacy"}}`, "--title", "flag"},
+			wantMeta: map[string]any{"title": "legacy"},
+		},
+		{
+			name: "same-key --data title loses to the flag",
+			args: []string{"html", "publish", "--data", `{"html":"x","title":"from-data"}`, "--title", "flag"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+			})
+			root.SetArgs(tt.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if gotBody["title"] != "flag" {
+				t.Errorf("--title must win over --data: %#v", gotBody)
+			}
+			if !reflect.DeepEqual(gotBody["meta"], tt.wantMeta) {
+				t.Errorf("meta = %#v, want %#v", gotBody["meta"], tt.wantMeta)
+			}
+		})
 	}
 }
 

@@ -20,15 +20,15 @@ All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the standard
 ## Document-reference contract
 
 - **Canonical create has no document reference.** Omit `slug` and provide
-  `html`. The CLI generates `idempotency_key`; an explicit key is optional. A display name belongs in `meta.title`;
-  it is metadata, not identity.
+  `html`. The CLI generates `idempotency_key`; an explicit key is optional. Set a
+  display name with the first-class `--title` flag; it is metadata, not identity.
 - **Save `data.slug` from the response.** New documents always return
   `data.doc_id` and `data.slug`, with `data.slug == data.doc_id`, whether mounted
   or unmounted. Use `data.slug` for every later operation.
 - **Legacy documents keep their old reference.** For an old document, use its
   legacy slug wherever this skill says `<doc-ref>`.
 - **No alias identity and no same-name republish.** Creating again with the same
-  `meta.title` creates a different document. To publish another version, supply
+  `--title` creates a different document. To publish another version, supply
   the saved `data.slug` in the server's legacy-named `slug` field.
 - Do not infer a mode from `mount_type`, `registered`, `status`, or whether
   `data.doc_id` is non-empty. `registered` and `status` report operational state,
@@ -50,6 +50,20 @@ deployed before this CLI is released.
 - Write operations require author/write capability. Reads need at least reader
   capability; backend failures are normalized into the CLI's
   `{ok:false,error:{type,code,message,hint,detail}}` envelope.
+
+## Display name (`--title`)
+
+`html publish`, `html draft create`, `html draft save`, and `html draft promote`
+all take `--title "<name>"`. It sets the human display name shown in listings
+and the sidebar. It is **metadata, never identity** — the document reference
+(`data.slug` / `data.doc_id`) is the only identity, so passing the same title
+again does not address an existing document.
+
+On `publish` and `draft create` the legacy `meta.title` inside `--data` is still
+accepted as a fallback; when both are present the top-level `--title` wins.
+Prefer `--title`. On `draft save` / `draft promote`, omit `--title` to leave the
+current display name unchanged — a bare `html draft promote <doc-ref>` sends no
+body, exactly as before.
 
 ## 1. Create and publish
 
@@ -79,19 +93,19 @@ by encoding or splitting the script.
 
 ```bash
 # Canonical create: no --slug. The CLI generates the idempotency key.
-octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html>","meta":{"title":"Runbook"},"mount_type":"group","group_no":"<group_no>"}'
+octo-cli html publish --title 'Runbook' --data '{"html":"<html><body><h1>Runbook</h1></body></html>","mount_type":"group","group_no":"<group_no>"}'
 # → data: { doc_id, slug, version, url, share_url, size, aids,
 #           merged_comments, registered, status }
 # Save data.slug; for this new document data.slug == data.doc_id.
 
 # Unmounted creation follows the same identity contract and also gets doc_id.
-octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","meta":{"title":"Private draft"}}'
+octo-cli html publish --html '<html><body><h1>Private draft</h1></body></html>' --title 'Private draft'
 
 # Publish a later immutable version. Keep the wire field name `slug` and omit
 # idempotency_key. Pass ONLY a slug the server returned earlier: an unregistered
 # slug does not create a canonical document — it produces a legacy unregistered
 # one that never appears in the sidebar file list. Never invent a slug.
-octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
+octo-cli html publish --slug '<doc-ref>' --title 'Runbook' --html '<html><body><h1>Runbook v2</h1></body></html>'
 
 # An explicit --idempotency-key <same-operation-key> is supported only for
 # retrying this exact creation operation. The CLI-generated key is created once
@@ -133,10 +147,12 @@ until promoted.
 
 ```bash
 # Create a canonical draft without a document reference. Save response data.slug.
-octo-cli html draft create --html '<html><body><h1>WIP</h1></body></html>'
+octo-cli html draft create --html '<html><body><h1>WIP</h1></body></html>' --title 'WIP runbook'
 
-octo-cli html draft save <doc-ref> --data '{"html":"<html><body><h1>WIP</h1></body></html>"}'
+# Retitle while saving, or leave --title off to keep the current display name.
+octo-cli html draft save <doc-ref> --html '<html><body><h1>WIP</h1></body></html>' --title 'Runbook (draft)'
 octo-cli html draft promote <doc-ref>
+octo-cli html draft promote <doc-ref> --title 'Runbook'
 ```
 
 ## 3. Sharing and grants

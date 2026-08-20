@@ -102,9 +102,13 @@
                     "type": "integer",
                     "description": "optional explicit version; omit to auto-increment"
                   },
+                  "title": {
+                    "type": "string",
+                    "description": "Human display name shown in listings and the sidebar. Metadata only, NOT identity: identity is the document reference (data.slug / doc_id), so passing the same title again does not address an existing document and same-name republish is not supported. Legacy callers may still send the title inside the meta object; when both are present this top-level title wins."
+                  },
                   "meta": {
                     "type": "object",
-                    "description": "optional metadata (e.g. {\"title\":\"...\"})",
+                    "description": "optional metadata (e.g. {\"title\":\"...\"}); legacy fallback for the display name — prefer the top-level title, which wins when both are present",
                     "properties": {
                       "title": {
                         "type": "string"
@@ -225,9 +229,13 @@
                     "type": "string",
                     "description": "Optional caller key for retrying the same creation operation; otherwise the CLI generates one per invocation."
                   },
+                  "title": {
+                    "type": "string",
+                    "description": "Human display name for the new draft's document. Metadata only, NOT identity: identity is the returned document reference (data.slug / doc_id), so a repeated title never addresses an existing document. Legacy callers may still send the title inside the meta object; when both are present this top-level title wins."
+                  },
                   "meta": {
                     "type": "object",
-                    "description": "Optional document metadata such as display title.",
+                    "description": "Optional document metadata such as display title; legacy fallback for the display name — prefer the top-level title, which wins when both are present.",
                     "properties": {
                       "title": {
                         "type": "string"
@@ -436,6 +444,10 @@
                   "html": {
                     "type": "string",
                     "description": "the draft HTML body"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Optional new human display name for the document. Metadata only, NOT identity: identity stays the document reference in the path, so retitling never creates or re-points a document. Omit to leave the current display name unchanged."
                   }
                 }
               }
@@ -473,6 +485,22 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "Optional human display name to stamp on the promoted version. Metadata only, NOT identity: identity stays the document reference in the path. Omit to keep the current display name; with nothing supplied the CLI sends no body at all, exactly as before this field existed."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Promoted",
