@@ -3,67 +3,44 @@ package service
 import (
 	"encoding/json"
 	"net/http"
-	"reflect"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
+// TestMarketplaceRegistryShape pins every unified-plugin operationId to its
+// method+path and the marketplace-wide invariants (OCTO_API_BASE_URL, space
+// header). The legacy per-type endpoints (/experts, /squads, /mcps, /skills)
+// are intentionally gone: they read frozen pre-migration tables, so the CLI now
+// drives the unified /plugins/* surface. Only the type-agnostic helper
+// pipelines (probe, skill upload/parse, icon presign) are retained verbatim.
 func TestMarketplaceRegistryShape(t *testing.T) {
 	r := registry.MustNew()
 	wants := map[string]struct {
 		method string
 		path   string
 	}{
-		"skill_category.list":      {http.MethodGet, "/market/api/v1/skill_categories"},
-		"mcp_category.list":        {http.MethodGet, "/market/api/v1/mcp_categories"},
-		"skill.list":               {http.MethodGet, "/market/api/v1/skills"},
-		"skill.mine.list":          {http.MethodGet, "/market/api/v1/skills/mine"},
-		"skill.tag.list":           {http.MethodGet, "/market/api/v1/skills/tags"},
-		"skill.publish":            {http.MethodPost, "/market/api/v1/bot/skills/publish"},
-		"skill.get":                {http.MethodGet, "/market/api/v1/skills/{skill_id}"},
-		"skill.update":             {http.MethodPatch, "/market/api/v1/skills/{skill_id}"},
-		"skill.delete":             {http.MethodDelete, "/market/api/v1/skills/{skill_id}"},
-		"skill.skillmd.get":        {http.MethodGet, "/market/api/v1/skills/{skill_id}/skill_md"},
-		"skill.download":           {http.MethodGet, "/market/api/v1/skills/{skill_id}/download"},
-		"skill.reupload.create":    {http.MethodPost, "/market/api/v1/skills/{skill_id}/reuploads"},
-		"skill.version.list":       {http.MethodGet, "/market/api/v1/skills/{skill_id}/versions"},
+		"plugin.list":          {http.MethodGet, "/market/api/v1/plugins"},
+		"plugin.get":           {http.MethodGet, "/market/api/v1/plugins/detail"},
+		"plugin.version.list":  {http.MethodGet, "/market/api/v1/plugins/versions"},
+		"plugin.skillmd":       {http.MethodGet, "/market/api/v1/plugins/skill_md"},
+		"plugin.download":      {http.MethodGet, "/market/api/v1/plugins/download"},
+		"plugin_category.list": {http.MethodGet, "/market/api/v1/plugin_categories"},
+		"plugin_tag.list":      {http.MethodGet, "/market/api/v1/plugin_tags"},
+		"plugin.upsert":        {http.MethodPost, "/market/api/v1/plugins/upsert"},
+		"plugin.delete":        {http.MethodPost, "/market/api/v1/plugins/delete"},
+		"plugin.publish":       {http.MethodPost, "/market/api/v1/plugins/publish"},
+		"plugin.install":       {http.MethodPost, "/market/api/v1/plugins/install"},
+		"plugin.import":        {http.MethodPost, "/market/api/v1/plugins/import"},
+
+		// Retained helper pipelines (unchanged endpoints).
+		"mcp.probe":                {http.MethodPost, "/market/api/v1/mcps/_probe"},
 		"skill_upload.create":      {http.MethodPost, "/market/api/v1/skill_uploads"},
 		"skill_upload.parse":       {http.MethodPost, "/market/api/v1/skill_uploads/{skill_upload_id}/parse"},
 		"skill_parse_task.get":     {http.MethodGet, "/market/api/v1/skill_parse_tasks/{skill_parse_task_id}"},
 		"skill_icon_upload.create": {http.MethodPost, "/market/api/v1/skill_icon_uploads"},
-		"mcp.list":                 {http.MethodGet, "/market/api/v1/mcps"},
-		"mcp.mine.list":            {http.MethodGet, "/market/api/v1/mcps/mine"},
-		"mcp.create":               {http.MethodPost, "/market/api/v1/mcps"},
-		"mcp.probe":                {http.MethodPost, "/market/api/v1/mcps/_probe"},
-		"mcp.get":                  {http.MethodGet, "/market/api/v1/mcps/{mcp_id}"},
-		"mcp.update":               {http.MethodPatch, "/market/api/v1/mcps/{mcp_id}"},
-		"mcp.delete":               {http.MethodDelete, "/market/api/v1/mcps/{mcp_id}"},
 		"mcp_icon_upload.create":   {http.MethodPost, "/market/api/v1/mcp_icon_uploads"},
-
-		// Expert Marketplace (docs/api/expert-v1.md): experts + squads + the
-		// dedicated expert taxonomy and skill-package upload surface.
-		"marketplace.expert.list":                {http.MethodGet, "/market/api/v1/experts"},
-		"marketplace.expert.create":              {http.MethodPost, "/market/api/v1/experts"},
-		"marketplace.expert.mine.list":           {http.MethodGet, "/market/api/v1/experts/mine"},
-		"marketplace.expert.get":                 {http.MethodGet, "/market/api/v1/experts/{expert_id}"},
-		"marketplace.expert.update":              {http.MethodPatch, "/market/api/v1/experts/{expert_id}"},
-		"marketplace.expert.delete":              {http.MethodDelete, "/market/api/v1/experts/{expert_id}"},
-		"marketplace.expert.skillmd.get":         {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_md"},
-		"marketplace.expert.skill_download":      {http.MethodGet, "/market/api/v1/experts/{expert_id}/skill_download"},
-		"marketplace.squad.list":                 {http.MethodGet, "/market/api/v1/squads"},
-		"marketplace.squad.create":               {http.MethodPost, "/market/api/v1/squads"},
-		"marketplace.squad.mine.list":            {http.MethodGet, "/market/api/v1/squads/mine"},
-		"marketplace.squad.get":                  {http.MethodGet, "/market/api/v1/squads/{squad_id}"},
-		"marketplace.squad.update":               {http.MethodPatch, "/market/api/v1/squads/{squad_id}"},
-		"marketplace.squad.delete":               {http.MethodDelete, "/market/api/v1/squads/{squad_id}"},
-		"marketplace.squad.skillmd.get":          {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_md"},
-		"marketplace.squad.skill_download":       {http.MethodGet, "/market/api/v1/squads/{squad_id}/skill_download"},
-		"marketplace.expert_category.list":       {http.MethodGet, "/market/api/v1/expert_categories"},
-		"marketplace.expert_tag.list":            {http.MethodGet, "/market/api/v1/expert_tags"},
-		"marketplace.expert_skill_upload.create": {http.MethodPost, "/market/api/v1/expert_skill_uploads"},
 	}
 
 	if got := len(r.ListOperations("marketplace")); got != len(wants) {
@@ -84,68 +61,48 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 			t.Errorf("%s must send the space header", id)
 		}
 	}
-}
 
-func TestMarketplaceSkillSearchRequest(t *testing.T) {
-	var gotPath, gotQuery string
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotQuery = r.URL.RawQuery
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[],"pagination":{"has_more":false}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "skill", "list", "--q", "deep miner", "--tag", "cli", "--sort", "latest", "--page-size", "20"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if gotPath != "/market/api/v1/skills" {
-		t.Errorf("path = %q", gotPath)
-	}
-	for _, want := range []string{"q=deep+miner", "tag=cli", "sort=latest", "page_size=20"} {
-		if !strings.Contains(gotQuery, want) {
-			t.Errorf("query = %q, want %q", gotQuery, want)
+	// The retired legacy operations must be gone so the CLI can never read the
+	// frozen per-type tables again.
+	for _, gone := range []string{
+		"skill.list", "skill.get", "skill.download", "skill.publish",
+		"mcp.list", "mcp.create", "marketplace.expert.list", "marketplace.squad.create",
+	} {
+		if _, ok := r.GetOperation(gone); ok {
+			t.Errorf("legacy operation %q must be retired", gone)
 		}
 	}
-	if strings.Contains(gotQuery, "offset=") {
-		t.Errorf("query = %q, must not use removed offset pagination", gotQuery)
-	}
 }
 
-// TestMarketplaceExpertListRequest pins the query-flag wiring for the new
-// offset-paginated expert list AND the envelope flattening the skill docs rely
-// on: a backend {data:[...],pagination:{...}} response surfaces items at CLI
-// .data (already an array) and pagination at ._pagination.
-func TestMarketplaceExpertListRequest(t *testing.T) {
+// TestMarketplacePluginListRequest pins the unified list path, the required
+// scene_code+plugin_type query flags, and the {data:[...],pagination} envelope
+// flattening (items at .data, pagination at ._pagination).
+func TestMarketplacePluginListRequest(t *testing.T) {
 	var gotMethod, gotPath, gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"expert_id":"e1"}],"pagination":{"total":1,"page":2,"page_size":20}}`))
+		_, _ = w.Write([]byte(`{"data":[{"plugin_id":"p1"}],"pagination":{"total":1,"page":2,"page_size":20}}`))
 	})
 
 	root.SetArgs([]string{
-		"marketplace", "expert", "list",
-		"--keyword", "架构", "--category", "dev-tools", "--tag", "可靠性",
-		"--visibility", "public", "--created-by-type", "human",
-		"--sort", "updated", "--page", "2", "--page-size", "20",
+		"marketplace", "plugin", "list",
+		"--scene-code", "default", "--plugin-type", "skill",
+		"--q", "deep miner", "--tag", "cli", "--category-id", "dev-tools",
+		"--sort", "newest", "--page", "2", "--page-size", "20",
 	})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts" {
-		t.Errorf("got %s %s, want GET /market/api/v1/experts", gotMethod, gotPath)
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/plugins" {
+		t.Errorf("got %s %s, want GET /market/api/v1/plugins", gotMethod, gotPath)
 	}
-	for _, want := range []string{
-		"keyword=%E6%9E%B6%E6%9E%84", "category=dev-tools", "tag=%E5%8F%AF%E9%9D%A0%E6%80%A7",
-		"visibility=public", "created_by_type=human", "sort=updated", "page=2", "page_size=20",
-	} {
+	for _, want := range []string{"scene_code=default", "plugin_type=skill", "q=deep+miner", "tag=cli", "category_id=dev-tools", "sort=newest", "page=2", "page_size=20"} {
 		if !strings.Contains(gotQuery, want) {
 			t.Errorf("query = %q, want %q", gotQuery, want)
 		}
 	}
 
-	// Envelope flattening: items at .data (array), pagination at ._pagination.
 	var env struct {
 		Data       []map[string]any `json:"data"`
 		Pagination map[string]any   `json:"_pagination"`
@@ -153,7 +110,7 @@ func TestMarketplaceExpertListRequest(t *testing.T) {
 	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
 		t.Fatalf("parse envelope: %v -- out=%s", err, tf.Out.String())
 	}
-	if len(env.Data) != 1 || env.Data[0]["expert_id"] != "e1" {
+	if len(env.Data) != 1 || env.Data[0]["plugin_id"] != "p1" {
 		t.Errorf(".data must be the item array, got %s", tf.Out.String())
 	}
 	if env.Pagination["total"] == nil {
@@ -161,9 +118,44 @@ func TestMarketplaceExpertListRequest(t *testing.T) {
 	}
 }
 
-// TestMarketplaceExpertCreateRequest pins the create path/method and that the
-// --data JSON body is forwarded verbatim.
-func TestMarketplaceExpertCreateRequest(t *testing.T) {
+// TestMarketplacePluginListRequiresSceneAndType pins that the backend-required
+// scene_code and plugin_type are enforced locally before any request is sent.
+func TestMarketplacePluginListRequiresSceneAndType(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("request must not be sent when required flags are missing")
+	})
+	root.SetArgs([]string{"marketplace", "plugin", "list", "--plugin-type", "skill"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "scene-code") {
+		t.Fatalf("execute error = %v, want a required scene-code error", err)
+	}
+}
+
+// TestMarketplacePluginGetRequest pins the detail path and its query flags.
+func TestMarketplacePluginGetRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
+	})
+
+	root.SetArgs([]string{"marketplace", "plugin", "get", "--plugin-id", "p1", "--include-relations"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/plugins/detail" {
+		t.Errorf("got %s %s, want GET /market/api/v1/plugins/detail", gotMethod, gotPath)
+	}
+	for _, want := range []string{"plugin_id=p1", "include_relations=true"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want %q", gotQuery, want)
+		}
+	}
+}
+
+// TestMarketplacePluginImportRequest pins the skill finalize path and that the
+// promoted body flags (parse_task_id etc.) reach the JSON body.
+func TestMarketplacePluginImportRequest(t *testing.T) {
 	var gotMethod, gotPath string
 	var gotBody map[string]any
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -172,140 +164,74 @@ func TestMarketplaceExpertCreateRequest(t *testing.T) {
 			t.Errorf("decode body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"expert_id":"e1"}}`))
+		_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x","category":"研发工具","instruction":"你是资深后端架构师"}`})
+	root.SetArgs([]string{"marketplace", "plugin", "import", "--parse-task-id", "task-1", "--name", "全栈清单", "--version", "1.0.0"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/experts" {
-		t.Errorf("got %s %s, want POST /market/api/v1/experts", gotMethod, gotPath)
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/plugins/import" {
+		t.Errorf("got %s %s, want POST /market/api/v1/plugins/import", gotMethod, gotPath)
 	}
-	if gotBody["name"] != "后端架构师" || gotBody["summary"] != "x" ||
-		gotBody["category"] != "研发工具" || gotBody["instruction"] != "你是资深后端架构师" {
+	if gotBody["parse_task_id"] != "task-1" || gotBody["name"] != "全栈清单" || gotBody["version"] != "1.0.0" {
 		t.Errorf("body = %#v", gotBody)
 	}
 }
 
-// TestMarketplaceSquadCreateRequest pins the happy path through the strict
-// nested member schema: a valid --data body (members with name/role/instruction)
-// must pass local validation and reach the wire intact.
-func TestMarketplaceSquadCreateRequest(t *testing.T) {
-	var gotMethod, gotPath string
+// TestMarketplacePluginInstallRequest pins the install body wiring.
+func TestMarketplacePluginInstallRequest(t *testing.T) {
+	var gotPath string
 	var gotBody map[string]any
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
+		gotPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"squad_id":"s1"}}`))
+		_, _ = w.Write([]byte(`{"data":{"agent_id":"a1"}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "squad", "create", "--data", `{
-		"name": "研发交付团",
-		"summary": "x",
-		"category": "研发工具",
-		"dependencies": {"blocking": ["git-mcp"], "recommended": []},
-		"members": [
-			{"name": "架构师", "role": "评审", "instruction": "评审服务边界", "is_leader": true},
-			{"member_key": "m2", "name": "后端", "role": "实现", "instruction": "实现接口", "skills": [{"name": "清单"}]}
-		]
-	}`})
+	root.SetArgs([]string{"marketplace", "plugin", "install", "--plugin-id", "p1", "--workspace-id", "ws", "--runtime-id", "rt"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/squads" {
-		t.Errorf("got %s %s, want POST /market/api/v1/squads", gotMethod, gotPath)
+	if gotPath != "/market/api/v1/plugins/install" {
+		t.Errorf("path = %q", gotPath)
 	}
-	members, _ := gotBody["members"].([]any)
-	if len(members) != 2 {
-		t.Fatalf("members = %#v, want 2 entries forwarded verbatim", gotBody["members"])
-	}
-	second, _ := members[1].(map[string]any)
-	if second["member_key"] != "m2" || second["instruction"] != "实现接口" {
-		t.Errorf("members[1] = %#v", second)
+	if gotBody["plugin_id"] != "p1" || gotBody["workspace_id"] != "ws" || gotBody["runtime_id"] != "rt" {
+		t.Errorf("body = %#v", gotBody)
 	}
 }
 
-// TestMarketplaceExpertSquadCreateRequiredFields pins the client-side schema
-// validation that mirrors the backend's write rules: expert create requires
-// category + instruction, and squad create requires >= 1 member each carrying
-// name/role/instruction. All three must fail locally, before any request.
-func TestMarketplaceExpertSquadCreateRequiredFields(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{
-			name: "expert create without category/instruction",
-			args: []string{"marketplace", "expert", "create", "--data", `{"name":"后端架构师","summary":"x"}`},
-			want: "category",
-		},
-		{
-			name: "squad create with empty members",
-			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[]}`},
-			want: "at least 1 item",
-		},
-		{
-			name: "squad member without instruction",
-			args: []string{"marketplace", "squad", "create", "--data", `{"name":"研发团","summary":"x","category":"研发工具","members":[{"name":"架构师","role":"评审"}]}`},
-			want: "members[0].instruction",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var backendHits atomic.Int32
-			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-				backendHits.Add(1)
-			})
-			root.SetArgs(tc.args)
-			err := root.Execute()
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("execute error = %v, want validation error containing %q", err, tc.want)
-			}
-			if backendHits.Load() != 0 {
-				t.Error("request must not be sent when local body validation fails")
-			}
-		})
-	}
-}
-
-// TestMarketplaceExpertSkillUploadRequest pins the presign endpoint and that
-// its promoted --file-name / --file-size flags reach the body.
-func TestMarketplaceExpertSkillUploadRequest(t *testing.T) {
-	var gotMethod, gotPath string
+// TestMarketplacePluginPublishRequest pins the publish body wiring.
+func TestMarketplacePluginPublishRequest(t *testing.T) {
+	var gotPath string
 	var gotBody map[string]any
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
+		gotPath = r.URL.Path
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"upload_object_key":"expert-uploads/x"}}`))
+		_, _ = w.Write([]byte(`{"data":{"version":"1.0.0"}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "expert-skill-upload", "create", "--file-name", "skill.zip", "--file-size", "12345"})
+	root.SetArgs([]string{"marketplace", "plugin", "publish", "--plugin-id", "p1", "--version", "1.0.0", "--changelog", "init"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/expert_skill_uploads" {
-		t.Errorf("got %s %s, want POST /market/api/v1/expert_skill_uploads", gotMethod, gotPath)
+	if gotPath != "/market/api/v1/plugins/publish" {
+		t.Errorf("path = %q", gotPath)
 	}
-	if gotBody["file_name"] != "skill.zip" {
-		t.Errorf("file_name = %#v", gotBody["file_name"])
-	}
-	if n, ok := gotBody["file_size"].(float64); !ok || int(n) != 12345 {
-		t.Errorf("file_size = %#v, want 12345", gotBody["file_size"])
+	if gotBody["plugin_id"] != "p1" || gotBody["version"] != "1.0.0" || gotBody["changelog"] != "init" {
+		t.Errorf("body = %#v", gotBody)
 	}
 }
 
-// TestMarketplaceExpertSkillmdRequest pins the only non-obvious flag mapping in
-// the expert surface: query param `i` is fronted by `--index` via x-octo-flag.
-// A rename of that override would otherwise sail through the shape tests.
-func TestMarketplaceExpertSkillmdRequest(t *testing.T) {
+// TestMarketplaceSkillmdRequest pins the unified skill_md endpoint keyed by
+// plugin_id (experts/teams resolve the relation target first).
+func TestMarketplaceSkillmdRequest(t *testing.T) {
 	var gotMethod, gotPath, gotQuery string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
@@ -313,67 +239,47 @@ func TestMarketplaceExpertSkillmdRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"content":"# SKILL"}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "expert", "skillmd", "get", "e1", "--index", "2"})
+	root.SetArgs([]string{"marketplace", "plugin", "skillmd", "--plugin-id", "p1"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/experts/e1/skill_md" {
-		t.Errorf("got %s %s, want GET /market/api/v1/experts/e1/skill_md", gotMethod, gotPath)
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/plugins/skill_md" {
+		t.Errorf("got %s %s, want GET /market/api/v1/plugins/skill_md", gotMethod, gotPath)
 	}
-	if !strings.Contains(gotQuery, "i=2") {
-		t.Errorf("query = %q, want i=2 (--index maps to wire param i)", gotQuery)
+	if !strings.Contains(gotQuery, "plugin_id=p1") {
+		t.Errorf("query = %q, want plugin_id=p1", gotQuery)
 	}
 }
 
-// TestMarketplaceSquadSkillDownloadRequest pins the squad-only `--member`
-// selector alongside the `--index`→`i` mapping on the download path.
-func TestMarketplaceSquadSkillDownloadRequest(t *testing.T) {
-	var gotMethod, gotPath, gotQuery string
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"download_url":"https://example.invalid/x.zip"}}`))
+// TestMarketplaceDownloadRequest pins the unified download path, the plugin_id
+// query, and the space header on the binary-response endpoint.
+func TestMarketplaceDownloadRequest(t *testing.T) {
+	var gotPath, gotQuery, gotSpace string
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotSpace = r.Header.Get("X-Space-Id")
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write([]byte("PK\x03\x04"))
 	})
 
-	root.SetArgs([]string{"marketplace", "squad", "skill-download", "s1", "--member", "m1", "--index", "0"})
+	root.SetArgs([]string{"marketplace", "plugin", "download", "--plugin-id", "p1"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/squads/s1/skill_download" {
-		t.Errorf("got %s %s, want GET /market/api/v1/squads/s1/skill_download", gotMethod, gotPath)
+	if gotPath != "/market/api/v1/plugins/download" {
+		t.Errorf("path = %q", gotPath)
 	}
-	for _, want := range []string{"i=0", "member=m1"} {
-		if !strings.Contains(gotQuery, want) {
-			t.Errorf("query = %q, want %q", gotQuery, want)
-		}
+	if !strings.Contains(gotQuery, "plugin_id=p1") {
+		t.Errorf("query = %q, want plugin_id=p1", gotQuery)
 	}
-}
-
-func TestMarketplaceMCPSearchFiltersRequest(t *testing.T) {
-	var gotQuery map[string][]string
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.Query()
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "mcp", "list", "--transport", "stdio", "--visibility", "public", "--source", "space", "--created-by-type", "bot", "--tag", "cli", "--tag", "devops", "--sort", "relevance"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	want := map[string][]string{
-		"transport":       {"stdio"},
-		"visibility":      {"public"},
-		"source":          {"space"},
-		"created_by_type": {"bot"},
-		"tag":             {"cli", "devops"},
-		"sort":            {"relevance"},
-	}
-	if !reflect.DeepEqual(gotQuery, want) {
-		t.Errorf("query = %#v, want %#v", gotQuery, want)
+	if gotSpace != "space-1" {
+		t.Errorf("X-Space-Id = %q, want space-1", gotSpace)
 	}
 }
 
+// TestMarketplaceLocalPrefixOverride pins the local-dev prefix rewrite:
+// /market/api/v1/... maps to the standalone service's /api/v1/... routes.
 func TestMarketplaceLocalPrefixOverride(t *testing.T) {
 	t.Setenv("OCTO_MARKETPLACE_API_PREFIX", "")
 	var gotPath string
@@ -383,95 +289,12 @@ func TestMarketplaceLocalPrefixOverride(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "mcp", "list"})
+	root.SetArgs([]string{"marketplace", "plugin", "list", "--scene-code", "default", "--plugin-type", "connector"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if gotPath != "/api/v1/mcps" {
-		t.Fatalf("path = %q, want /api/v1/mcps", gotPath)
-	}
-}
-
-func TestMarketplaceMCPCategoryFiltersRequest(t *testing.T) {
-	var gotQuery string
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotQuery = r.URL.RawQuery
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[]}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "mcp-category", "list", "--mode", "mine", "--created-by-type", "bot"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	for _, want := range []string{"mode=mine", "created_by_type=bot"} {
-		if !strings.Contains(gotQuery, want) {
-			t.Errorf("query = %q, want %q", gotQuery, want)
-		}
-	}
-}
-
-func TestMarketplaceBotSkillPublishRequest(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"skill_id":"skill-1"}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "skill", "publish", "--skill-upload-id", "upload-1", "--visibility", "space", "--changelog", "Initial release"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if gotPath != "/market/api/v1/bot/skills/publish" {
-		t.Errorf("path = %q", gotPath)
-	}
-	if gotBody["skill_upload_id"] != "upload-1" || gotBody["visibility"] != "space" || gotBody["changelog"] != "Initial release" {
-		t.Errorf("body = %#v", gotBody)
-	}
-}
-
-func TestMarketplaceHumanSkillCreateIsHidden(t *testing.T) {
-	r := registry.MustNew()
-	if _, ok := r.GetOperation("skill.create"); ok {
-		t.Fatal("skill.create must not be exposed by the Bot-only CLI")
-	}
-
-	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
-	skill := findCmd(findCmd(root, "marketplace"), "skill")
-	if skill == nil {
-		t.Fatal("missing marketplace skill command group")
-	}
-	if findCmd(skill, "create") != nil {
-		t.Fatal("marketplace skill create must be hidden; Bots must use skill publish")
-	}
-}
-
-func TestMarketplaceMCPUpdateRequest(t *testing.T) {
-	var gotMethod, gotPath string
-	var gotBody map[string]any
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotMethod, gotPath = r.Method, r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"mcp_id":"mcp-1"}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "mcp", "update", "mcp-1", "--slogan", "Updated"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if gotMethod != http.MethodPatch || gotPath != "/market/api/v1/mcps/mcp-1" {
-		t.Errorf("request = %s %s", gotMethod, gotPath)
-	}
-	if gotBody["slogan"] != "Updated" {
-		t.Errorf("body = %#v", gotBody)
+	if gotPath != "/api/v1/plugins" {
+		t.Fatalf("path = %q, want /api/v1/plugins", gotPath)
 	}
 }
 
@@ -482,21 +305,14 @@ func TestMarketplaceCommandTree(t *testing.T) {
 		t.Fatal("missing marketplace command")
 	}
 	domains := map[string][]string{
-		"skill-category":    {"list"},
-		"mcp-category":      {"list"},
-		"skill":             {"list", "mine", "tag", "publish", "get", "update", "delete", "download", "reupload", "version", "skillmd"},
+		"plugin":            {"list", "get", "skillmd", "download", "upsert", "delete", "publish", "install", "import"},
+		"plugin-category":   {"list"},
+		"plugin-tag":        {"list"},
+		"mcp":               {"probe"},
 		"skill-upload":      {"create", "parse"},
 		"skill-parse-task":  {"get"},
 		"skill-icon-upload": {"create"},
-		"mcp":               {"list", "mine", "create", "probe", "get", "update", "delete"},
 		"mcp-icon-upload":   {"create"},
-
-		// Expert Marketplace command groups.
-		"expert":              {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
-		"squad":               {"list", "create", "mine", "get", "update", "delete", "skillmd", "skill-download"},
-		"expert-category":     {"list"},
-		"expert-tag":          {"list"},
-		"expert-skill-upload": {"create"},
 	}
 	for domain, children := range domains {
 		domainCmd := findCmd(marketplace, domain)
@@ -510,78 +326,43 @@ func TestMarketplaceCommandTree(t *testing.T) {
 			}
 		}
 	}
+	// `plugin version list` is a nested subgroup, checked separately.
+	if pv := findCmd(findCmd(marketplace, "plugin"), "version"); pv == nil || findCmd(pv, "list") == nil {
+		t.Error("missing marketplace plugin version list command")
+	}
 	if got := childNames(marketplace); len(got) != len(domains) {
-		t.Errorf("marketplace domains = %v, want %v", got, domains)
+		t.Errorf("marketplace domains = %v, want %d groups", got, len(domains))
 	}
 }
 
-func TestMarketplaceSkillTagsAreStrings(t *testing.T) {
+// TestMarketplacePluginTypeEnum pins the plugin_type enum the list/detail
+// filters accept, matching the backend's four unified types.
+func TestMarketplacePluginTypeEnum(t *testing.T) {
 	r := registry.MustNew()
-	for _, id := range []string{"skill.publish", "skill.update"} {
-		op, ok := r.GetOperation(id)
-		if !ok || op.RequestBody == nil {
-			t.Fatalf("%s request body not found", id)
-		}
-		tags, ok := op.RequestBody.Properties["tags"]
-		if !ok || tags.Type != "array" || tags.Items == nil || tags.Items.Type != "string" {
-			t.Errorf("%s tags schema = %+v, want string array", id, tags)
-		}
-		if tags.MaxItems != 10 || tags.Items.MaxLength != 10 {
-			t.Errorf("%s tags limits = maxItems %d, item maxLength %d; want 10 and 10", id, tags.MaxItems, tags.Items.MaxLength)
+	op, ok := r.GetOperation("plugin.list")
+	if !ok {
+		t.Fatal("plugin.list not found")
+	}
+	var enum []any
+	for i := range op.Parameters {
+		if op.Parameters[i].Name == "plugin_type" {
+			enum = op.Parameters[i].Enum
 		}
 	}
-}
-
-func TestMarketplaceVisibilityEnumsMatchBackend(t *testing.T) {
-	r := registry.MustNew()
-	for _, tc := range []struct {
-		id   string
-		want []string
-	}{
-		{"skill.update", []string{"public", "private", "space"}},
-		{"skill.publish", []string{"public", "private", "space"}},
-		{"mcp.create", []string{"public", "private"}},
-		{"mcp.update", []string{"public", "private"}},
-	} {
-		op, ok := r.GetOperation(tc.id)
-		if !ok || op.RequestBody == nil {
-			t.Fatalf("%s request body not found", tc.id)
-		}
-		visibility, ok := op.RequestBody.Properties["visibility"]
-		if !ok {
-			t.Fatalf("%s visibility schema not found", tc.id)
-		}
-		got := make([]string, 0, len(visibility.Enum))
-		for _, value := range visibility.Enum {
-			got = append(got, value.(string))
-		}
-		if !reflect.DeepEqual(got, tc.want) {
-			t.Errorf("%s visibility enum = %v, want %v", tc.id, visibility.Enum, tc.want)
-		}
+	if enum == nil {
+		t.Fatal("plugin_type parameter not found")
 	}
-}
-
-func TestMarketplaceDownloadRequest(t *testing.T) {
-	var gotPath, gotQuery, gotSpace string
-	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotQuery = r.URL.RawQuery
-		gotSpace = r.Header.Get("X-Space-Id")
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"download_url":"https://example.invalid/skill.zip","file_sha256":"abc"}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "skill", "download", "skill-1", "--response-format", "json"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
+	got := make([]string, 0, len(enum))
+	for _, v := range enum {
+		got = append(got, v.(string))
 	}
-	if gotPath != "/market/api/v1/skills/skill-1/download" {
-		t.Errorf("path = %q", gotPath)
+	want := map[string]bool{"skill": true, "connector": true, "expert": true, "expert_team": true}
+	if len(got) != len(want) {
+		t.Fatalf("plugin_type enum = %v, want the four unified types", got)
 	}
-	if !strings.Contains(gotQuery, "format=json") {
-		t.Errorf("query = %q, want format=json", gotQuery)
-	}
-	if gotSpace != "space-1" {
-		t.Errorf("X-Space-Id = %q, want space-1", gotSpace)
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected plugin_type %q", g)
+		}
 	}
 }

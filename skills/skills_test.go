@@ -168,34 +168,26 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 	}
 	content := string(b)
 	for _, want := range []string{
-		"marketplace expert list",
-		"marketplace expert get <expert-id>",
-		"marketplace expert create",
-		"marketplace expert update <expert-id>",
-		"marketplace expert delete <expert-id>",
-		"marketplace squad",
-		"marketplace expert-category list",
-		"marketplace expert-tag list",
-		"marketplace expert-skill-upload create",
-		"marketplace expert skill-download <expert-id> --index",
-		"marketplace squad skill-download <squad-id> --member",
-		"upload_object_key",
-		"--page-all` does **not** apply", // offset pagination, distinct from skill/mcp
-		// List responses are flattened by the output layer: items at .data,
-		// pagination at ._pagination. The docs must NOT tell readers to use
-		// `.data.data // .data` on a list (that indexes an array and errors).
-		// Match on the claim, not on where the paragraph happens to wrap.
-		"items are at",
-		"pagination metadata is at `._pagination`",
-		"NOT apply the `.data.data // .data` normalization here",
+		"--plugin-type expert",
+		"--plugin-type expert_team",
+		"plugin get --plugin-id <plugin-id> --include-relations",
+		"plugin upsert",
+		"plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>",
+		"plugin delete --plugin-id <id>",
+		"plugin publish --plugin-id",
+		"AGENTS.md",                    // expert instruction / team collaboration doc
+		"expert_skill",                 // member skills are relations
+		"CLI `.data` + `._pagination`", // list flattening, not .data.data
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("expert workflow must document %q", want)
 		}
 	}
-	// The package upload must presign before it is referenced in create/update.
-	if strings.Index(content, "expert-skill-upload create") > strings.Index(content, `"upload_object_key": "expert-uploads`) {
-		t.Error("presign step must precede referencing upload_object_key in a create/update body")
+	// The legacy per-type surface must be gone from the doc.
+	for _, gone := range []string{"marketplace expert list", "expert-skill-upload", "skill-download", "upload_object_key"} {
+		if strings.Contains(content, gone) {
+			t.Errorf("expert workflow must not reference the retired %q surface", gone)
+		}
 	}
 }
 
@@ -259,24 +251,28 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 	}
 	content := string(b)
 	for _, want := range []string{
-		"or an accessible Skill",
+		"or an accessible skill directory",
 		"mktemp -d",
-		"Never modify the source directory",
-		"skill mine list --q <name> --page-all",
-		"package `id` equals that Skill's `skill_id`",
-		"name conflict",
-		"soft-deleted Skill may still reserve the name",
-		"do not initialize or upload before it",
+		"--mode mine --q <name>", // owned-name lookup on the unified list
+		"skill-upload create --file-name",
+		"skill-upload parse <skill_upload_id>",
+		"skill-parse-task get <parse_task_id>",
+		"plugin import --parse-task-id",
+		"never duplicated",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("publish workflow must contain %q", want)
 		}
 	}
-	if strings.Index(content, "skill mine list --q <name> --page-all") > strings.Index(content, "skill-upload create --file-name") {
+	// The owned-name ownership check must precede upload initialization.
+	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
 		t.Error("owned-name lookup must happen before upload initialization")
 	}
-	if strings.Index(content, "skill-category list") > strings.Index(content, "one final plan") {
-		t.Error("category lookup must happen before the final confirmation plan")
+	// The retired synchronous publish path must be gone.
+	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url"} {
+		if strings.Contains(content, gone) {
+			t.Errorf("skills workflow must not reference the retired %q surface", gone)
+		}
 	}
 }
 

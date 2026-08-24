@@ -301,7 +301,7 @@ func TestRegisterServiceCommands_PreservesForeignOperationDomain(t *testing.T) {
 	if marketplace == nil {
 		t.Fatal("missing marketplace service command")
 	}
-	for _, domain := range []string{"skill", "mcp"} {
+	for _, domain := range []string{"plugin", "mcp"} {
 		if findCmd(marketplace, domain) == nil {
 			t.Errorf("marketplace must preserve %q from the operationId", domain)
 		}

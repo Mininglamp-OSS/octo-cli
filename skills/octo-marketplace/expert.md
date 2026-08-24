@@ -1,164 +1,89 @@
-# octo-marketplace — Expert workflows
+# octo-marketplace — Expert and Squad workflows
 
 Read `SKILL.md` first for authentication, payload normalization, and the shared
-safety rule. This file covers the **专家市场**: two symmetric entities —
-`expert` (专家, a single agent) and `squad` (专家团, an expert team). Every verb,
-flag, and envelope below is identical between them; only the payload shape and
-the id argument name (`<expert-id>` / `<squad-id>`) differ.
+safety rule. This file covers the **专家市场**: `expert` (专家, a single agent,
+`plugin_type=expert`) and `squad` (专家团, an expert team,
+`plugin_type=expert_team`). Both are plugins; only the type and package shape
+differ.
 
-## Pagination is offset-based (not cursor)
-
-Unlike the cursor-based `skill list` / `skill mine list`, the expert lists page
-by number, so `--page-all` does **not** apply (the same offset scheme as
-`mcp list`). Walk pages with `--page` (one-based) and `--page-size` (max 100):
-
-```bash
-octo-cli marketplace expert list --page 1 --page-size 20
-```
-
-The backend returns `{data:[...], pagination:{total,page,page_size}}`, and the
-CLI output layer flattens that shape onto the envelope: list **items are at
-`.data`** (already an array) and pagination metadata is at `._pagination`. Do
-NOT apply the `.data.data // .data` normalization here — `.data` is the array,
-so indexing it errors.
-
-```bash
-items=$(octo-cli marketplace expert list --keyword "架构" | jq -c '.data')
-total=$(octo-cli marketplace expert list --keyword "架构" | jq '._pagination.total')
-```
-
-Single-record and non-paginated reads (`expert get`, `expert-category list`,
-`expert-tag list`) return no `pagination` key, so they are NOT flattened —
-apply the shared `.data.data // .data` rule from `SKILL.md` to those instead.
+An expert's instruction lives in the package's root `AGENTS.md`; an
+expert_team is a single `AGENTS.md` describing collaboration/dispatch, and its
+members and their skills/connectors are expressed as **relations** (fetch with
+`--include-relations`).
 
 ## Search
 
 ```bash
-octo-cli marketplace expert-category list --kind agent      # kind: agent | squad
-octo-cli marketplace expert-tag list --kind agent --q "<tag>"
-octo-cli marketplace expert list \
-  --keyword "<kw>" --category <category_id> --tag "<tag>" \
-  --visibility public --created-by-type human --sort updated --page 1
-octo-cli marketplace expert get <expert-id>
+octo-cli marketplace plugin-category list --scene-code default --plugin-type expert
+octo-cli marketplace plugin-tag list --plugin-type expert --q "<tag>"
+octo-cli marketplace plugin list --scene-code default --plugin-type expert \
+  --q "<kw>" --category-id <id> --tag "<tag>" --sort updated --page 1 --page-size 20
+octo-cli marketplace plugin get --plugin-id <plugin-id> --include-relations
 ```
 
-- `--category` / `--tag` / `--visibility` / `--created-by-type` are repeatable
-  (repeat the flag to combine). `category` is a `category_id`; `all` disables
-  the filter. Resolve ids and live tag names from `expert-category list` and
-  `expert-tag list` for the current Space.
-- `--sort updated` surfaces recently edited records first; anything else
-  (including omitting the flag) sorts newest-first. There is no relevance mode.
-- Use the immutable `expert_id` / `squad_id`, never a name.
+Squads are identical with `--plugin-type expert_team`. `plugin list` is
+page-paginated (CLI `.data` + `._pagination`); add `--mode mine` for owned
+records of any visibility. Use the immutable `plugin_id`, never a name.
 
-The `squad` family is identical: `squad list`, `squad get <squad-id>`,
-`squad mine list`, and `--kind squad` on the taxonomy commands.
+## Read member skills
 
-## View owned records
+`plugin get --include-relations` returns the relations. For an expert_team, each
+member is an `expert_team_expert` relation; a member/expert's skills are
+`expert_skill` relations whose target is a skill plugin. Read a skill's document
+by its own plugin id:
 
 ```bash
-octo-cli marketplace expert mine list --page 1     # own records, any visibility
-octo-cli marketplace squad  mine list --page 1
+octo-cli marketplace plugin skillmd --plugin-id <skill-plugin-id>
+octo-cli marketplace plugin download --plugin-id <skill-plugin-id> -o <tmp>/skill.zip
 ```
 
 ## Create / update
 
-Bodies are nested (an expert carries `instruction` / `mcp_config` / `skills`; a
-squad carries `members[]`), so submit them as JSON via `--data`. Show the target
-and the intended change, then continue only after explicit confirmation.
+Create or edit through the unified write path. Show the target and intended
+change, then continue only after explicit confirmation:
 
 ```bash
-# Create a standalone expert (name/summary/category/instruction required;
-# new records publish public)
-octo-cli marketplace expert create --data '{
-  "name": "后端架构师",
-  "summary": "评审服务边界、数据模型和可靠性方案。",
-  "category": "研发工具",
-  "tags": ["架构评审", "可靠性"],
-  "instruction": "你是资深后端架构师……",
-  "mcp_config": "{\"mcpServers\":{}}",
-  "skills": [{"name": "架构评审清单"}]
-}'
-
-# Partial update — owner only; send only mutable fields
-octo-cli marketplace expert update <expert-id> --data '{"summary":"新的一句话简介"}'
+octo-cli marketplace plugin upsert --data @plugin.json
 ```
 
-- `category` is the category **NAME** (e.g. `研发工具`), resolved from
-  `expert-category list`; an empty or unknown name is rejected.
-- `mcp_config` is the raw `mcpServers` config as a JSON **string**; validated as
-  well-formed JSON and size-capped, stored verbatim. Use the
-  `__OCTO_SECRET_PLACEHOLDER__` sentinel instead of real tokens.
-- A `visibility` field is ignored on write (records stay their current
-  visibility; `system` is rejected).
+The `--data` body is `{"plugin":{plugin_name, plugin_type, visibility,
+category_id, tags, manifest_json, plugin_json}, "relations":[...]}`:
 
-For a **squad**, the body adds `leader` / `strategies` / `dependencies` /
-`permission` / `members`. `category` and `members` (≥ 1) are required on
-create; each member is `{member_key?, template_id?, name, role, is_leader?,
-instruction, mcp_config?, skills?}` (`?` marks the optional fields). `leader`
-is a display label (free text) — which member actually leads is chosen by
-`is_leader` (else the first member). `dependencies` accepts only
-`{blocking: [..], recommended: [..]}` string lists; any other key is
-rejected. On update, sending `members` **replaces the whole array** — always
-submit the complete member list.
+- **expert**: `plugin_json` carries a root `AGENTS.md` (the instruction) and,
+  when it uses connectors, a root `mcp.json` with `${VAR}` placeholders for
+  consumer secrets.
+- **expert_team**: `plugin_json` is a single `AGENTS.md` rendering the
+  collaboration/dispatch, leader, strategies, dependencies, and permissions.
+  Members and their skills are `relations` entries
+  (`expert_team_expert` / `expert_skill` / `expert_connector`); the leader is
+  the member relation with `is_leader`.
+
+Set `plugin.plugin_id` to update; sending `relations` replaces the relation set,
+so submit the complete list. Publish an immutable version separately:
+
+```bash
+octo-cli marketplace plugin publish --plugin-id <id> --version 1.1.0 --changelog "…"
+```
+
+## Install into a Loop workspace
+
+Provision an expert or expert_team into a Loop workspace/runtime (creates the
+agent or squad, acting as the caller against octo-fleet, with rollback):
+
+```bash
+octo-cli marketplace plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>
+```
+
+The response carries `agent_id` (expert) or `squad_id` (expert_team).
 
 ## Delete (owner only, confirmed)
 
-Soft delete; the name frees up for reuse:
+Soft delete; the name frees for reuse:
 
 ```bash
-octo-cli marketplace expert delete <expert-id>
-octo-cli marketplace squad  delete <squad-id>
+octo-cli marketplace plugin delete --plugin-id <id>
 ```
 
-## Skills are whole Agent-Skill packages
-
-A skill on an expert/squad is a `.zip`/`.skill` package containing `SKILL.md`.
-Publishing one is a three-step client-side flow — never send raw bytes through
-`--data`:
-
-1. **Presign** an upload (`.zip`/`.skill`, ≤ 20 MiB):
-
-   ```bash
-   octo-cli marketplace expert-skill-upload create \
-     --file-name "架构评审清单.zip" --file-size <bytes>
-   ```
-
-   Returns `{upload_object_key, presigned_url, method, headers, expires_in}`.
-2. **PUT** the raw package bytes to `presigned_url` using the returned HTTP
-   `method` and `headers`. Never print the presigned URL or its headers.
-3. **Reference** the key in a create/update `skills[]` entry — the server
-   extracts `SKILL.md`, derives the authoritative skill `name`, stores the
-   package, and records the file manifest:
-
-   ```json
-   { "skills": [ { "name": "架构评审清单",
-                   "upload_object_key": "expert-uploads/…",
-                   "file_name": "架构评审清单.zip", "file_size": 12345 } ] }
-   ```
-
-   A name-only skill is `{ "name": "…" }`; inline `SKILL.md` text is
-   `{ "name": "…", "content": "…" }`. Sending only a name on update preserves
-   the existing stored package.
-
-### Read / download a stored skill package
-
-On read, each `skills[]` item carries `has_content` / `can_download` /
-`file_name` / `file_size` / `files`. Fetch by index `i`:
-
-```bash
-octo-cli marketplace expert skillmd get <expert-id> --index <i>        # SKILL.md text
-octo-cli marketplace expert skill-download <expert-id> --index <i>     # {download_url}
-```
-
-For a squad member, `--member <member_key>` is required (`--index` still
-defaults to 0):
-
-```bash
-octo-cli marketplace squad skillmd get <squad-id> --member <member_key> --index <i>
-octo-cli marketplace squad skill-download <squad-id> --member <member_key> --index <i>
-```
-
-`skill-download` returns a short-lived presigned GET `download_url`; download
-into a fresh temp dir and never infer or log the URL. Apply the same archive
-safety checks as Skill install (`skills.md`): reject absolute paths, `..`
-traversal, links, and devices before extraction.
+Skill packages attached to an expert/team are themselves `skill` plugins — to
+publish or update one, follow the upload → parse → import flow in `skills.md`,
+then wire it with an `expert_skill` relation in `plugin upsert`.

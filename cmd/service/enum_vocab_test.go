@@ -176,53 +176,24 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"applied", "partial", "question"},
 		why:  "octo-docs-html reply status enum"},
 
-	// --- marketplace ---
-	{op: "marketplace.expert_category.list", in: "query", field: "kind",
-		want: []string{"agent", "squad"},
-		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
-			"ListCategories: `if c.Query(\"kind\") == \"squad\"` selects squads, any other value (including absent) " +
-			"means agent — two values cover every input the backend distinguishes"},
-	{op: "marketplace.expert_tag.list", in: "query", field: "kind",
-		want: []string{"agent", "squad"},
-		why:  "same kind branch in ListTags (handler.go:807) as expert_category.list"},
-	{op: "marketplace.expert_tag.list", in: "query", field: "mode",
-		want: []string{"all", "mine"},
-		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
-			"ListTags: `c.Query(\"mode\") == \"mine\"` restricts to caller-owned rows, any other value means all — " +
-			"mirrors the pinned mcp_category.list mode pair"},
-	{op: "mcp_category.list", in: "query", field: "mode",
-		want: []string{"all", "mine"},
-		why:  "marketplace swagger binding tag; generated from the backend's own definition"},
-	{op: "mcp.create", in: "body", field: "visibility",
-		want: []string{"public", "private"},
-		why: "octo-marketplace internal/service/mcp.go validatePublicCreateVisibility accepts only \"\"|public|private. " +
-			"model.Visibility has four values, but internal/model/mcp.go says \"system never appears in a client write\" " +
-			"and VisibilitySpace is unused by the mcp service — so the two-value set is right for an mcp write even " +
-			"though skill's is three"},
-	{op: "mcp.update", in: "body", field: "visibility",
-		want: []string{"public", "private"},
-		why:  "same validatePublicCreateVisibility gate as mcp.create; a system row additionally refuses any visibility patch"},
-	{op: "mcp.create", in: "body", field: "transport",
-		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "octo-marketplace internal/model/mcp.go ValidTransport — exactly these three"},
-	{op: "mcp.update", in: "body", field: "transport",
-		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "same ValidTransport gate"},
+	// --- marketplace (unified plugin surface) ---
 	{op: "mcp.probe", in: "body", field: "transport",
 		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "same ValidTransport gate"},
-	{op: "skill.publish", in: "body", field: "visibility",
-		want: []string{"public", "private", "space"},
-		why: "octo-marketplace model.Visibility minus system (never a client write); the skill service does use " +
-			"VisibilitySpace (internal/service/skill/service.go), which is why skill's set is wider than mcp's"},
-	{op: "skill.update", in: "body", field: "visibility",
-		want: []string{"public", "private", "space"},
-		why:  "same set as skill.publish"},
-	{op: "skill.publish", in: "body", field: "publish_mode",
-		want: []string{"create"},
-		why: "backend-enforced single value: octo-marketplace internal/api/handler/upload/handler.go rejects anything " +
-			"else with \"only publish_mode=create is supported\". A one-value enum is the shape that made " +
-			"html.grant.add wrong, so this one was checked at source rather than assumed"},
+		why:  "octo-marketplace internal/model/mcp.go ValidTransport — the retained connectivity probe still takes these three"},
+	{op: "plugin.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why: "octo-marketplace internal/model plugin types; the list handler rejects any other value. " +
+			"Legacy per-type surface maps mcp->connector and squad->expert_team"},
+	{op: "plugin_category.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why:  "same plugin_type set as plugin.list"},
+	{op: "plugin_tag.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why:  "same plugin_type set as plugin.list (optional filter here)"},
+	{op: "plugin.import", in: "body", field: "visibility",
+		want: []string{"public", "space", "private"},
+		why: "octo-marketplace model.PluginVisibility minus system (never a client write); the skill import " +
+			"path accepts these three"},
 
 	// --- message ---
 	{op: "message.search", in: "body", field: "sort",

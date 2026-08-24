@@ -47,7 +47,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"docs":        32,
 		"drive":       43,
 		"html":        21,
-		"marketplace": 44,
+		"marketplace": 18,
 		"mail":        18,
 		"summary":     4,
 		"loop":        126,
@@ -562,7 +562,7 @@ func TestServiceSpaceHeaderContract(t *testing.T) {
 	}{
 		{"message", "message.send", true},
 		{"matter", "matter.create", true},
-		{"marketplace", "skill.get", true},
+		{"marketplace", "plugin.get", true},
 		{"summary", "summary.list", false},
 		{"docs", "docs.create", false},
 		{"bot", "bot.register", false},
