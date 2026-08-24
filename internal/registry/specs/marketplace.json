@@ -602,7 +602,6 @@
                   "visibility": {
                     "type": "string",
                     "enum": [
-                      "public",
                       "space",
                       "private"
                     ]

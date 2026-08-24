@@ -73,8 +73,8 @@ func attachOperation(svcCmd *cobra.Command, f *cmdutil.Factory, d *registry.Oper
 	}
 	// Most specs use an operationId whose first segment matches the registry
 	// service (docs.create under service docs). A multi-domain backend may expose
-	// several resource families from one service, for example skill.list and
-	// mcp.list under service marketplace. Preserve that first segment as a
+	// several resource families from one service, for example plugin.list and
+	// mcp.probe under service marketplace. Preserve that first segment as a
 	// resource group when it differs from the service name so both operations
 	// become addressable instead of colliding as marketplace list.
 	start := 1

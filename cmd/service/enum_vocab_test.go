@@ -191,9 +191,10 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"skill", "connector", "expert", "expert_team"},
 		why:  "same plugin_type set as plugin.list (optional filter here)"},
 	{op: "plugin.import", in: "body", field: "visibility",
-		want: []string{"public", "space", "private"},
-		why: "octo-marketplace model.PluginVisibility minus system (never a client write); the skill import " +
-			"path accepts these three"},
+		want: []string{"space", "private"},
+		why: "octo-marketplace internal/service/plugin/import.go rejects public on the import path " +
+			"(TestImportRejectsPublicVisibility); a skill import accepts only space (default) or private, " +
+			"and system is admin-only — so the client set is these two"},
 
 	// --- message ---
 	{op: "message.search", in: "body", field: "sort",
