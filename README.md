@@ -158,6 +158,10 @@ octo-cli docs get doc-123
 octo-cli docs content get doc-123          # returns the body + base version token
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
+# Boards: portable export and point/element comments.
+octo-cli docs scene export board-7 --image-format excalidraw -o ./board.excalidraw
+octo-cli docs comments add board-7 --body "Review this" --point 120,240
+# For --element-id anchors, dry-run still reads the live board scene to resolve geometry.
 octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.

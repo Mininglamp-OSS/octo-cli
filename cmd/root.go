@@ -67,6 +67,8 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	attachMailJMAPCommands(root, f)
 	registerDocsImportCmd(root, f)
 	registerDocsExportCmd(root, f)
+	registerDocsExcalidrawExportCmd(root, f)
+	registerDocsBoardCommentCmd(root, f)
 	registerDriveCmds(root, f)
 	withholdDisabledServices(root, f)
 

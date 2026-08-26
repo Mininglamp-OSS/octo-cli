@@ -1086,6 +1086,12 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	return nil, ee
 }
 
+// WriteFileAtomic exposes the client's all-or-nothing local file writer for
+// commands that assemble export bytes locally.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeFileAtomic(path, data, perm)
+}
+
 // writeFileAtomic writes data to path atomically: it streams the bytes into a
 // temp file in the same directory, then renames it over path. Because rename
 // within a directory is atomic, path is only ever the old file (untouched) or

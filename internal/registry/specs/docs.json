@@ -273,14 +273,14 @@
     "/v1/bot/docs/{docId}/export": {
       "get": {
         "operationId": "docs.scene.export",
-        "summary": "Export a whiteboard's live scene as a PNG or SVG image (needs reader)",
-        "description": "Renders the LIVE Excalidraw scene of a doc_type 'board' to an image on the server: `--image-format png` (default) returns a PNG, `--image-format svg` returns an SVG. The body is binary, so pass --output/-o to save it to a file (e.g. `docs scene export <docId> --image-format png -o board.png`); without --output the command only reports the response status, content-type and size. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
+        "summary": "Export a whiteboard's live scene as PNG, SVG, or portable Excalidraw (needs reader)",
+        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o. For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
         "x-octo-risk": "read",
         "x-octo-risk-note": "read reflects the server-side effect: this is a GET that renders and returns the live scene as an image without mutating any doc state. The optional --output/-o writes to a local, user-chosen path (client side, analogous to curl -o) and does not change the API risk class.",
         "x-octo-binary-response": true,
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "format", "in": "query", "x-octo-flag": "image-format", "schema": { "type": "string", "enum": ["png", "svg"], "default": "png" }, "description": "image format (one of: png, svg); default png. Exposed as --image-format so it does not shadow the global --format output flag." }
+          { "name": "format", "in": "query", "x-octo-flag": "image-format", "schema": { "type": "string", "enum": ["png", "svg", "excalidraw"], "default": "png" }, "description": "image format (one of: png, svg, excalidraw); default png. Exposed as --image-format so it does not shadow the global --format output flag." }
         ],
         "responses": {
           "200": {
@@ -573,6 +573,7 @@
                     "docId": { "type": "string" },
                     "elements": { "type": "array", "items": { "type": "object" }, "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node" },
                     "files": { "type": "object", "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene" },
+                    "appState": { "type": "object", "description": "live Excalidraw application state, including portable board appearance fields" },
                     "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`" },
                     "schemaVersion": { "type": "integer", "description": "whiteboard schema version the scene was decoded with" }
                   }
@@ -850,7 +851,7 @@
       "post": {
         "operationId": "docs.comments.add",
         "summary": "Add a root comment (anchored) or a reply (needs reader)",
-        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor: either the opaque base64 Yjs positions anchorStart/anchorEnd (from a live editor selection), or anchorText — the selected text — which the backend resolves against the document. When anchorText matches more than one place the request fails with 422 ambiguous_anchor; narrow it with blockPath (the block's child-index path, e.g. 0,2) and/or occurrence (1-based match index). For a doc_type 'sheet' anchorText is rejected with 409 unsupported_doc_type (a sheet has no text fragment): anchor to a cell instead by passing the base64 of the cell key `${sheetId}!${row}:${col}` (row/col 0-based, e.g. base64 of `default!0:0`) as BOTH anchorStart and anchorEnd, with the A1 label in anchorText (display only).",
+        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor. For boards, `docs comments add` accepts --body plus exactly one of --point X,Y or repeatable --element-id; these board anchor flags are mutually exclusive with --data and the reply/rich-document anchor flags, and element-anchor dry runs still read the live scene. Other callers, replies, and advanced scenarios use --data with opaque base64 anchorStart/anchorEnd from a live editor selection, or anchorText for rich documents; ambiguous text anchors fail with 422 ambiguous_anchor and can be narrowed with blockPath/occurrence. For sheets, pass the base64 cell key as both anchors.",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -865,8 +866,8 @@
                 "properties": {
                   "body": { "type": "string", "description": "comment text" },
                   "parentId": { "type": "integer", "description": "thread root id to reply to (omit for a root comment)" },
-                  "anchorStart": { "type": "string", "description": "root only: base64-encoded Yjs start position (from a live editor selection)" },
-                  "anchorEnd": { "type": "string", "description": "root only: base64-encoded Yjs end position (from a live editor selection)" },
+                  "anchorStart": { "type": "string", "description": "root only: opaque base64 anchor start; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor" },
+                  "anchorEnd": { "type": "string", "description": "root only: opaque base64 anchor end; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor" },
                   "anchorText": { "type": "string", "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)" },
                   "blockPath": { "type": "string", "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)" },
                   "occurrence": { "type": "integer", "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates" }
