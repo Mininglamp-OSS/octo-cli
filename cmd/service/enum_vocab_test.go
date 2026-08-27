@@ -177,22 +177,40 @@ var requestSideVocabularies = []vocabulary{
 		why:  "octo-docs-html reply status enum"},
 
 	// --- marketplace (unified plugin surface) ---
+	// Backend definitions pinned to octo-marketplace feat/unified-plugin-backend@99f6c28
+	// (the fork branch carrying the unified /plugins/* API this spec targets; not yet on
+	// Mininglamp-OSS/octo-marketplace main). Open that ref to verify a value.
 	{op: "mcp.probe", in: "body", field: "transport",
 		want: []string{"stdio", "streamable-http", "sse"},
 		why:  "octo-marketplace internal/model/mcp.go ValidTransport — the retained connectivity probe still takes these three"},
 	{op: "plugin.list", in: "query", field: "plugin_type",
 		want: []string{"skill", "connector", "expert", "expert_team"},
-		why: "octo-marketplace internal/model plugin types; the list handler rejects any other value. " +
+		why: "octo-marketplace feat/unified-plugin-backend@99f6c28 internal/model/plugin.go PluginType constants + internal/service/plugin/validation.go:71 validPluginType; the list handler rejects any other value. " +
 			"Legacy per-type surface maps mcp->connector and squad->expert_team"},
+	{op: "plugin.list", in: "query", field: "mode",
+		want: []string{"mine"},
+		why: "octo-marketplace feat/unified-plugin-backend@99f6c28 internal/api/handler/plugin/handler.go:297 — the list handler accepts only \"\" or \"mine\" and 400s on anything else, so the sole explicit value is \"mine\" (omit for the full catalog). " +
+			"Deliberately NOT [all,mine]: the unified backend rejects mode=all, unlike the retired per-type surface"},
 	{op: "plugin_category.list", in: "query", field: "plugin_type",
 		want: []string{"skill", "connector", "expert", "expert_team"},
 		why:  "same plugin_type set as plugin.list"},
 	{op: "plugin_tag.list", in: "query", field: "plugin_type",
 		want: []string{"skill", "connector", "expert", "expert_team"},
 		why:  "same plugin_type set as plugin.list (optional filter here)"},
+	{op: "plugin_tag.list", in: "query", field: "mode",
+		want: []string{"mine"},
+		why:  "same mode gate as plugin.list (handler.go:593 mirrors handler.go:297); \"\" or \"mine\" only"},
+	{op: "plugin.upsert", in: "body", field: "plugin.plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why: "octo-marketplace feat/unified-plugin-backend@99f6c28 internal/service/plugin/validation.go:71 validPluginType, enforced on every write via buildWrite (service.go:561). " +
+			"Same set as the read filters; typed here so the write path gates plugin_type client-side too"},
+	{op: "plugin.upsert", in: "body", field: "plugin.visibility",
+		want: []string{"space", "private"},
+		why: "octo-marketplace feat/unified-plugin-backend@99f6c28 internal/service/plugin/validation.go:80 validVisibility, enforced on create+update via buildWrite (service.go:561). " +
+			"A tenant caller on /plugins/upsert may set only space or private; system is admin-surface only and public is retired on the write path — same client set as plugin.import"},
 	{op: "plugin.import", in: "body", field: "visibility",
 		want: []string{"space", "private"},
-		why: "octo-marketplace internal/service/plugin/import.go rejects public on the import path " +
+		why: "octo-marketplace feat/unified-plugin-backend@99f6c28 internal/service/plugin/import.go rejects public on the import path " +
 			"(TestImportRejectsPublicVisibility); a skill import accepts only space (default) or private, " +
 			"and system is admin-only — so the client set is these two"},
 

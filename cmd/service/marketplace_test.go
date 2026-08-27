@@ -229,6 +229,65 @@ func TestMarketplacePluginPublishRequest(t *testing.T) {
 	}
 }
 
+// TestMarketplacePluginUpsertRequest pins the unified write path: a full
+// document passed via --data reaches POST /plugins/upsert with the plugin
+// object intact, and the newly-typed nested enums gate visibility/plugin_type
+// client-side so the retired `public` value and unknown types never leave.
+func TestMarketplacePluginUpsertRequest(t *testing.T) {
+	// Happy path: the full document is forwarded and the plugin sub-document
+	// survives verbatim.
+	var gotMethod, gotPath string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
+	})
+	root.SetArgs([]string{
+		"marketplace", "plugin", "upsert",
+		"--data", `{"plugin":{"plugin_name":"deep miner","plugin_type":"connector","visibility":"private"}}`,
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/plugins/upsert" {
+		t.Errorf("got %s %s, want POST /market/api/v1/plugins/upsert", gotMethod, gotPath)
+	}
+	plugin, ok := gotBody["plugin"].(map[string]any)
+	if !ok || plugin["plugin_name"] != "deep miner" || plugin["plugin_type"] != "connector" || plugin["visibility"] != "private" {
+		t.Errorf("body.plugin = %#v", gotBody["plugin"])
+	}
+
+	// Each of these documents must be rejected locally before any request is
+	// sent: the retired `public` visibility (the gate must not be bypassable
+	// from upsert the way it is blocked on import), an unknown plugin_type, and
+	// a document missing a required nested field.
+	for _, tc := range []struct {
+		name string
+		data string
+	}{
+		{"public visibility", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"public"}}`},
+		{"unknown plugin_type", `{"plugin":{"plugin_name":"x","plugin_type":"nonsense","visibility":"private"}}`},
+		{"missing plugin_type", `{"plugin":{"plugin_name":"x","visibility":"private"}}`},
+	} {
+		sent := false
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			sent = true
+			t.Errorf("%s: request must not be sent", tc.name)
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "upsert", "--data", tc.data})
+		if err := root.Execute(); err == nil {
+			t.Errorf("%s: expected a local validation error, got nil", tc.name)
+		}
+		if sent {
+			t.Errorf("%s: no request should have left the client", tc.name)
+		}
+	}
+}
+
 // TestMarketplaceSkillmdRequest pins the unified skill_md endpoint keyed by
 // plugin_id (experts/teams resolve the relation target first).
 func TestMarketplaceSkillmdRequest(t *testing.T) {

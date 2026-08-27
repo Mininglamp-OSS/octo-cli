@@ -8,16 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`octo-cli marketplace expert` / `squad` families** — CRUD, `mine` lists,
-  taxonomy (`expert-category` / `expert-tag`), viewable `skillmd get`, presigned
-  `expert-skill-upload create` / `skill-download` for the Expert Marketplace
-  (专家/专家团). Required fields and member shape are validated client-side
-  before any request is sent: expert create requires
-  `name`/`summary`/`category`/`instruction`; squad create additionally requires
-  ≥ 1 `members[]` entry, each with `name`/`role`/`instruction` (errors name the
-  exact field, e.g. `members[0].instruction`). Value-level rules (non-empty
-  strings, size caps) remain backend-enforced. The install-to-Loop endpoints
-  (`POST /experts|squads/{id}/install`) are intentionally not exposed.
+- **`octo-cli marketplace plugin` family (unified plugin surface)** — one command
+  family over the backend's unified `/plugins/*` API, replacing the retired
+  per-type `skill` / `mcp` / `marketplace expert` / `marketplace squad` surfaces
+  (44 legacy ops → 18). Resource kind is selected with `--plugin-type`
+  (`skill` / `connector` / `expert` / `expert_team`; the old `mcp` maps to
+  `connector`, `squad` to `expert_team`): `plugin list` / `get` / `version list`
+  / `skillmd` / `download` / `upsert` / `delete` / `publish` / `install` /
+  `import`, plus `plugin-category list` / `plugin-tag list`. The skill
+  upload→parse→import pipeline (`skill-upload`, `skill-parse-task`) and icon
+  presign helpers are retained. Client-side gates before any request is sent:
+  `plugin list` requires `--scene-code` and `--plugin-type`; `plugin upsert`
+  requires a `plugin` document with `plugin_name` / `plugin_type` / `visibility`
+  and gates `plugin_type` and `visibility` (`space` / `private`; the retired
+  `public` is refused, matching `plugin import`); `mode` accepts only `mine`.
+  Value-level rules remain backend-enforced.
+- **`octo-cli marketplace plugin install`** — installs an `expert` /
+  `expert_team` plugin into a Loop workspace (`--workspace-id`, `--runtime-id`)
+  through the unified API. This exposes the install-to-Loop capability that the
+  retired per-type surface deliberately withheld; it is gated backend-side and
+  provisions through octo-fleet.
 - **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,
   workspaces, runtimes, projects, skills, autopilots, attachments, comments,

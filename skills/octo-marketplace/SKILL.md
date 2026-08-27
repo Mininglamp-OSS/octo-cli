@@ -34,6 +34,11 @@ octo-cli marketplace plugin get --plugin-id <id> --include-relations
 `scene-code` is `default`. `plugin list` and `plugin-category list` require both
 `--scene-code` and `--plugin-type`. Use the immutable `plugin_id`, never a name.
 
+`plugin list` is offset-paged: walk `--page` (with `--page-size`) yourself until
+a short page. There is no `--page-all`, and the only server-side filters are
+`--category-id`, `--q`, `--tag`, `--mode`, `--sort`; narrow anything else (e.g.
+by connector transport or visibility) client-side over the returned rows.
+
 Load only the reference matching the task; each covers the type-specific detail
 (connector `mcp.json` + probe, skill file tree + upload/import, expert/team
 `AGENTS.md` + install).

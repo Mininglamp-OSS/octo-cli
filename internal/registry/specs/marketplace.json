@@ -75,9 +75,12 @@
             "name": "mode",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "mine"
+              ]
             },
-            "description": "Set to \"mine\" to list only the caller-owned plugins"
+            "description": "Set to \"mine\" to list only the caller-owned plugins; omit to list the full catalog"
           },
           {
             "name": "sort",
@@ -352,9 +355,12 @@
             "name": "mode",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "mine"
+              ]
             },
-            "description": "Set to \"mine\" to only aggregate the caller-owned plugins"
+            "description": "Set to \"mine\" to only aggregate the caller-owned plugins; omit to aggregate the full catalog"
           },
           {
             "name": "limit",
@@ -385,6 +391,7 @@
         "summary": "Create or update a plugin",
         "description": "Create (plugin.plugin_id empty) or update a plugin. Body: {\"plugin\":{plugin_name,plugin_type,visibility,manifest_json,plugin_json,tags,category_id,icon},\"relations\":[...]}. Pass the full document with --data. For skills prefer the upload+import flow instead.",
         "x-octo-risk": "write",
+        "x-octo-retry": "never",
         "requestBody": {
           "required": true,
           "content": {
@@ -394,7 +401,61 @@
                 "properties": {
                   "plugin": {
                     "type": "object",
-                    "description": "Plugin write document (plugin_name, plugin_type, visibility, manifest_json, plugin_json, tags, category_id, icon)"
+                    "description": "Plugin write document. Pass the full document for both create and update; the backend validates name, plugin_type and visibility on every write.",
+                    "properties": {
+                      "plugin_id": {
+                        "type": "string",
+                        "description": "Set to update an existing plugin; omit to create"
+                      },
+                      "plugin_name": {
+                        "type": "string"
+                      },
+                      "plugin_type": {
+                        "type": "string",
+                        "enum": [
+                          "skill",
+                          "connector",
+                          "expert",
+                          "expert_team"
+                        ]
+                      },
+                      "visibility": {
+                        "type": "string",
+                        "enum": [
+                          "space",
+                          "private"
+                        ],
+                        "description": "space or private. public is retired on the write path; system is minted only by the admin surface, not this tenant CLI."
+                      },
+                      "category_id": {
+                        "type": "string"
+                      },
+                      "tags": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "publisher": {
+                        "type": "string"
+                      },
+                      "icon": {
+                        "type": "string"
+                      },
+                      "manifest_json": {
+                        "type": "object",
+                        "description": "Type-specific manifest document"
+                      },
+                      "plugin_json": {
+                        "type": "object",
+                        "description": "Type-specific plugin package document"
+                      }
+                    },
+                    "required": [
+                      "plugin_name",
+                      "plugin_type",
+                      "visibility"
+                    ]
                   },
                   "relations": {
                     "type": "array",
@@ -521,6 +582,7 @@
         "operationId": "plugin.install",
         "summary": "Install an expert / expert_team plugin into a Loop workspace",
         "x-octo-risk": "write",
+        "x-octo-retry": "never",
         "requestBody": {
           "required": true,
           "content": {
@@ -567,6 +629,7 @@
         "summary": "Import a skill plugin from a completed parse task",
         "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin.",
         "x-octo-risk": "write",
+        "x-octo-retry": "never",
         "requestBody": {
           "required": true,
           "content": {

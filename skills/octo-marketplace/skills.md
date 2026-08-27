@@ -96,8 +96,11 @@ the new package and `plugin import --plugin-id <id> --parse-task-id <id>
 
 ## Update metadata / manage owned skills
 
-Metadata-only edits reuse `plugin import` with the existing `--plugin-id` and no
-version bump, or `plugin upsert` for advanced edits. Deletion is destructive and
+Metadata-only edits (name, category, tags, icon, visibility) go through `plugin
+upsert` with the existing `plugin_id` in the document — pass the full plugin
+write document with `--data`. `plugin import` is **not** a metadata-only path:
+its `--parse-task-id` is required, so reusing it always means a fresh
+upload+parse cycle to ship new package content. Deletion is destructive and
 confirmed:
 
 ```bash
