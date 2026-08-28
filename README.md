@@ -162,7 +162,11 @@ octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 octo-cli docs scene export board-7 --image-format excalidraw -o ./board.excalidraw
 octo-cli docs comments add board-7 --body "Review this" --point 120,240
 # For --element-id anchors, dry-run still reads the live board scene to resolve geometry.
-octo-cli docs members set doc-123 --data '{"uid":"u-1","role":"writer"}'
+octo-cli docs members set doc-123 --uid u-1 --role writer
+# Member mutations are Space-qualified. Set defaults to the authenticated Bot
+# Space when omitted; removal always requires the exact principal Space.
+octo-cli docs members set doc-123 --uid u-1 --role writer --principal-space-id space-2
+octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
 octo-cli loop task list --workspace-id <workspace-id>

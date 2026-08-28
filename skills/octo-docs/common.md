@@ -110,9 +110,10 @@ Schema: `octo-cli schema docs.versions.restore`.
 ## Members & sharing
 
 ```bash
-octo-cli docs members list   <docId>                             # admin
-octo-cli docs members set    <docId> --uid <uid> --role writer   # add/upsert; role: reader|writer|admin
-octo-cli docs members remove <docId> <uid>                       # admin; owner cannot be removed
+octo-cli docs members list   <docId>                             # admin; items include principalSpaceId
+octo-cli docs members set    <docId> --uid <uid> --role writer   # authenticated Bot Space; role: reader|commenter|writer|admin
+octo-cli docs members set    <docId> --uid <uid> --role writer --principal-space-id <spaceId>
+octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # required; owner cannot be removed
 
 # Grant-only forward access (never downgrades). Only reader|writer are grantable.
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
@@ -124,9 +125,15 @@ octo-cli docs share set <docId> --scope anyone_in_space --role read   # admin; e
 octo-cli docs share set <docId> --scope anyone_in_space --role edit   # admin; every space member gets edit
 ```
 
-`docs members set` is a PUT-upsert: it adds the member if absent or changes the
-role if already present. The target uid must be a real Octo user — a miss returns
-`404 user_not_found` and writes no ghost member. Schema: `octo-cli schema docs.members.set`.
+`docs members set` is a Space-qualified Bot mutation. Omit
+`--principal-space-id` to use the authenticated Bot Space, or pass that same
+Space explicitly; either form can add a member or update an existing role. A
+foreign Space is never queried through the directory and can only update an
+existing exact `(docId, uid, principalSpaceId)` row; if that row is absent, the
+backend returns `404`. A uid can have distinct member rows in multiple Spaces,
+so `docs members remove` always requires `--principal-space-id` and deletes the
+exact qualified row. Schemas:
+`octo-cli schema docs.members.set` and `octo-cli schema docs.members.remove`.
 
 `docs share set` changes the space-level share scope. Two scopes: `restricted`
 (only the owner and explicit members reach the doc — the default) and

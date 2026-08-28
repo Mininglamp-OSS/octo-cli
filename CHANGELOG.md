@@ -128,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **`octo-cli docs members remove` now requires `--principal-space-id`** — Bot
+  membership deletion is an exact Space-qualified mutation. Requiring the
+  principal Space prevents an ambiguous uid from deleting the wrong row when
+  the same uid has memberships in multiple Spaces.
 - **`octo-cli html` adopts canonical create and document references** — create
   omits `slug`; the CLI generates `idempotency_key` once per invocation and
   reuses it across transport retries (an explicit key remains supported). It returns `data.doc_id` plus

@@ -122,6 +122,86 @@ func TestDocs_RegistryShape(t *testing.T) {
 			t.Errorf("%s: first segment must be the service; got %q", id, segs[0])
 		}
 	}
+
+	list, ok := reg.GetOperation("docs.members.list")
+	if !ok || list.ResponseSchema == nil {
+		t.Fatal("docs.members.list response schema missing")
+	}
+	items, ok := list.ResponseSchema.Properties["items"]
+	if !ok || items.Items == nil {
+		t.Fatalf("docs.members.list items schema = %#v, want array item schema", items)
+	}
+	principalSpaceID, ok := items.Items.Properties["principalSpaceId"]
+	if !ok || principalSpaceID.Type != "string" {
+		t.Fatalf("docs.members.list item principalSpaceId = %#v, want string", principalSpaceID)
+	}
+}
+
+func TestDocsMembersSet_PrincipalSpaceIDIsOptionalBodyField(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantSpace string
+	}{
+		{name: "defaults to authenticated Bot Space", args: []string{"docs", "members", "set", "doc-1", "--uid", "user-1", "--role", "writer"}},
+		{name: "sends explicit principal Space", args: []string{"docs", "members", "set", "doc-1", "--uid", "user-1", "--role", "writer", "--principal-space-id", "space-2"}, wantSpace: "space-2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			got, present := body["principalSpaceId"]
+			if tc.wantSpace == "" {
+				if present {
+					t.Fatalf("omitted --principal-space-id must leave Bot Space resolution to the backend: %v", body)
+				}
+				return
+			}
+			if got != tc.wantSpace {
+				t.Fatalf("principalSpaceId = %v, want %q", got, tc.wantSpace)
+			}
+		})
+	}
+}
+
+func TestDocsMembersRemove_RequiresAndSendsPrincipalSpaceID(t *testing.T) {
+	t.Run("requires principal Space", func(t *testing.T) {
+		requests := 0
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			requests++
+		})
+		root.SetArgs([]string{"docs", "members", "remove", "doc-1", "user-1"})
+		if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "required flag") {
+			t.Fatalf("missing --principal-space-id error = %v, want required flag error", err)
+		}
+		if requests != 0 {
+			t.Fatalf("missing required flag sent %d requests, want 0", requests)
+		}
+	})
+
+	t.Run("sends exact principal Space", func(t *testing.T) {
+		var gotQuery url.Values
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		})
+		root.SetArgs([]string{"docs", "members", "remove", "doc-1", "user-1", "--principal-space-id", "space-2"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if got := gotQuery.Get("principalSpaceId"); got != "space-2" {
+			t.Fatalf("principalSpaceId query = %q, want space-2", got)
+		}
+	})
 }
 
 // TestDocsSceneExport_ImageFormatFlagNoGlobalShadow pins the fix for the
@@ -543,18 +623,22 @@ func TestDocsMembersSet_PutUpsertBody(t *testing.T) {
 
 // TestDocsMembersRemove_TwoPathArgs checks both positional args land in the path.
 func TestDocsMembersRemove_TwoPathArgs(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotSpace string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotSpace = r.URL.Query().Get("principalSpaceId")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
-	root.SetArgs([]string{"docs", "members", "remove", "d1", "u9"})
+	root.SetArgs([]string{"docs", "members", "remove", "d1", "u9", "--principal-space-id", "s1"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/members/u9" {
 		t.Errorf("got %s %s, want DELETE /v1/bot/docs/d1/members/u9", gotMethod, gotPath)
+	}
+	if gotSpace != "s1" {
+		t.Errorf("principalSpaceId = %q, want s1", gotSpace)
 	}
 }
 

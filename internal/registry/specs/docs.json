@@ -668,6 +668,7 @@
                         "type": "object",
                         "properties": {
                           "uid": { "type": "string" },
+                          "principalSpaceId": { "type": "string", "description": "principal Space id that qualifies this membership" },
                           "role": { "type": "string" },
                           "source": { "type": "string" },
                           "grantedBy": { "type": "string" }
@@ -684,7 +685,7 @@
       "put": {
         "operationId": "docs.members.set",
         "summary": "Add or change a member's role by uid (upsert; needs admin)",
-        "description": "PUT-upsert: adds the member if absent or changes the role if present. The target uid must be a real Octo user or the backend returns 404 user_not_found.",
+        "description": "Space-qualified PUT mutation for Bot callers. When principalSpaceId is omitted, the backend uses the authenticated Bot Space. That Space may also be supplied explicitly and supports add or role update. A foreign principalSpaceId performs no directory lookup and can only update an existing exact (docId, uid, principalSpaceId) membership; a missing exact row returns 404.",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
@@ -697,7 +698,8 @@
                 "type": "object",
                 "required": ["uid", "role"],
                 "properties": {
-                  "uid": { "type": "string", "description": "target user uid" },
+                  "uid": { "type": "string", "description": "uid in the Space-qualified membership key" },
+                  "principalSpaceId": { "type": "string", "x-octo-flag": "principal-space-id", "description": "principal Space id; for Bot calls, omission defaults to the authenticated Bot Space, an explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup" },
                   "role": { "type": "string", "enum": ["reader", "commenter", "writer", "admin"], "description": "role to grant. Matches octo-docs-backend isMemberRole (src/permission/role.ts); commenter is a stored role ranked between reader and writer, so omitting it made the local enum gate reject a call the backend accepts" }
                 }
               }
@@ -710,11 +712,13 @@
     "/v1/bot/docs/{docId}/members/{uid}": {
       "delete": {
         "operationId": "docs.members.remove",
-        "summary": "Remove a member (needs admin; the owner cannot be removed)",
+        "summary": "Remove a Space-qualified member (needs admin; the owner cannot be removed)",
+        "description": "Bot exact-delete mutation for the membership identified by (docId, uid, principalSpaceId). principalSpaceId is required because one uid can have distinct memberships in multiple Spaces.",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "principalSpaceId", "in": "query", "required": true, "x-octo-flag": "principal-space-id", "schema": { "type": "string" }, "description": "principal Space id of the membership to remove; required to disambiguate the same uid across Spaces" }
         ],
         "responses": { "200": { "description": "Removed" } }
       }
