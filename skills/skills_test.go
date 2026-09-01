@@ -174,7 +174,7 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 		"plugin upsert",
 		"plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>",
 		"plugin delete --plugin-id <id>",
-		"plugin version list",         // version snapshots live behind version list
+		"plugin version list",          // version snapshots live behind version list
 		"AGENTS.md",                    // expert instruction / team collaboration doc
 		"expert_skill",                 // member skills are relations
 		"CLI `.data` + `._pagination`", // list flattening, not .data.data
