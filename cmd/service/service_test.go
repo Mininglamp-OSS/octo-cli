@@ -167,6 +167,50 @@ func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
 	}
 }
 
+func TestLoopExpertTeamEvaluateCommandShape(t *testing.T) {
+	var gotMethod, gotPath, gotWorkspace string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"evaluation-1"}`))
+	})
+	loop := findCmd(root, "loop")
+	expertTeam := findCmd(loop, "expert-team")
+	if expertTeam == nil || findCmd(expertTeam, "evaluate") == nil {
+		t.Fatal("loop expert-team evaluate command not registered")
+	}
+	task := findCmd(loop, "task")
+	if task != nil && findCmd(task, "team-evaluation") != nil {
+		t.Fatal("legacy loop task team-evaluation hierarchy must not be generated")
+	}
+
+	root.SetArgs([]string{
+		"loop", "expert-team", "evaluate", "task-1",
+		"--workspace-id", "workspace-1",
+		"--outcome", "no_action",
+		"--reason", "nothing to dispatch",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop expert-team evaluate: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/fleet/api/v1/tasks/task-1/expert_team_evaluations" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotWorkspace != "workspace-1" {
+		t.Fatalf("X-Workspace-ID = %q", gotWorkspace)
+	}
+	if gotBody["outcome"] != "no_action" || gotBody["reason"] != "nothing to dispatch" {
+		t.Fatalf("request body = %#v", gotBody)
+	}
+}
+
 func TestLoopTaskWorkspaceHeaderFlag(t *testing.T) {
 	var gotPath, gotWorkspace string
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -6338,14 +6338,14 @@
         }
       }
     },
-    "/fleet/api/v1/tasks/{task_id}/expert_team_evaluation": {
+    "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations": {
       "post": {
-        "summary": "Record expert team evaluation",
-        "description": "Record expert team evaluation in the authenticated workspace.",
+        "summary": "Evaluate a task as expert team leader",
+        "description": "Record the authenticated Expert Team Leader's evaluation outcome for the current Task execution.",
         "tags": [
           "tasks"
         ],
-        "operationId": "task.team_evaluation.record",
+        "operationId": "expert_team.evaluate",
         "parameters": [
           {
             "name": "task_id",
@@ -6362,7 +6362,24 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "outcome"
+                ],
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "action",
+                      "no_action",
+                      "failed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
