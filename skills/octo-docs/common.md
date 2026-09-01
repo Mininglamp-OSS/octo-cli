@@ -6,7 +6,7 @@ you need:
 - [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
 - [Versions](#versions) — snapshot / preview / rename / delete / restore
 - [Members & sharing](#members--sharing) — roles, forward-grant
-- [Attachments](#attachments) — presign + upload file/image bytes
+- [Attachments](#attachments) — presign/upload local bytes and ingest external images
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
@@ -182,3 +182,46 @@ Once uploaded, reference the `attachId` from a document body's image node (see
 `doc.md`) or a whiteboard file ref (see `board.md`). NOTE: a spreadsheet's floating
 images do NOT use this attachment flow — they inline the base64 bytes in the
 drawing's `source` field (see `sheet.md`). Schema: `octo-cli schema docs.attachments.presign`.
+
+### External image URLs (including SVG)
+
+Never persist an arbitrary external URL as an image node's only `src`. Current
+Octo clients render images only from trusted storage hosts, so a node such as
+`{"type":"image","attrs":{"src":"https://third-party.example/image.svg"}}`
+can be stored but renders as **Image unavailable**.
+
+Re-host a public HTTP(S) image under the target document first. The ingest
+endpoint is not yet a generated `docs attachments` subcommand, so call it
+through the generic API passthrough:
+
+```bash
+octo-cli api POST /v1/bot/docs/<docId>/attachments/ingest \
+  --data '{"urls":["https://source.example/diagram.svg"]}'
+```
+
+Read the new document-scoped `attachId` from `data.mappings`; treat an entry in
+`data.notIngested` as a failed image import and keep it as a normal hyperlink or
+text instead of writing a broken image node. The backend fetches the source with
+SSRF protections, validates that the bytes are an allowed image, and stores the
+successful result in Octo object storage.
+
+After either upload or ingest succeeds, write the image node using its durable
+`attachId`. Omit `src` (or set it to `null`): the client resolves a fresh signed
+display URL from the attachment. Also provide a positive pixel `width`; current
+clients can collapse an agent-created image with `width: null` to `0x0`. Use the
+known display width when available, otherwise `300` is a safe compatibility
+default:
+
+```json
+{
+  "type": "image",
+  "attrs": {
+    "attachId": "att_xxx",
+    "width": 300,
+    "alt": "Diagram"
+  }
+}
+```
+
+The `attachId` must belong to the same target document; a foreign or unknown
+attachment is rejected with `422 attachment_not_found`.

@@ -43,14 +43,17 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	if !strings.Contains(strings.ToLower(content), "whiteboard") {
 		t.Error("SKILL.md must mention the whiteboard/board surface")
 	}
+	if !strings.Contains(content, "external-image ingest") {
+		t.Error("SKILL.md must route external-image ingest guidance to common.md")
+	}
 
 	// The reference files are embedded (ride the */*.md glob) and each leads with
 	// its surface's read/edit commands.
 	refChecks := map[string][]string{
-		"octo-docs/doc.md":    {"docs content get", "docs content edit"},
+		"octo-docs/doc.md":    {"docs content get", "docs content edit", `"attachId": "att_xxx"`, `"width": 300`},
 		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit"},
 		"octo-docs/board.md":  {"docs scene get", "docs scene edit"},
-		"octo-docs/common.md": {"docs comments add", "docs versions restore", "docs members set", "docs attachments presign"},
+		"octo-docs/common.md": {"docs comments add", "docs versions restore", "docs members set", "docs attachments presign", "/attachments/ingest", `"attachId": "att_xxx"`, `"width": 300`},
 	}
 	for path, needles := range refChecks {
 		rb, err := FS.ReadFile(path)

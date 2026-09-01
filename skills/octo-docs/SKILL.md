@@ -25,7 +25,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
 | Continue from a searchable **HTML document** (`doc_type: html`): resolve its document reference, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
-| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload) | **`common.md`** |
+| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload and external-image ingest) | **`common.md`** |
 
 > The first four split by `doc_type` (what kind of document you're handling);
 > `common.md` holds the features that apply across kinds. Read a reference with
