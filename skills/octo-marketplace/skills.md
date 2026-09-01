@@ -1,10 +1,10 @@
 # octo-marketplace — Skill workflows
 
-Read `SKILL.md` first for authentication, payload normalization, and the shared
-safety rule. Skills are `plugin_type=skill`. A skill package is a **flat
-attachment tree**: `plugin_json.attachments` is the file list, one attachment
-per file (text inline as `raw`, binary as `storage`), always including a root
-`SKILL.md`.
+Read `SKILL.md` first for authentication, payload normalization, versioning, the
+no-separate-publish rule, and the shared safety rule. Skills are
+`plugin_type=skill`. A skill package is a **flat attachment tree**:
+`plugin_json.attachments` is the file list, one attachment per file (text inline
+as `raw`, binary as `storage`), always including a root `SKILL.md`.
 
 ## Search
 
@@ -18,8 +18,9 @@ octo-cli marketplace plugin get --plugin-id <plugin-id>
 
 `plugin list` is page-paginated (`{data:[...],pagination}` → CLI `.data` +
 `._pagination`). Add `--mode mine` to list only owned skills. Sort may be
-`newest`/`oldest`/`updated`/`name`/`downloads`/`views`/`comprehensive`. A skill
-has at most 10 tags, each at most 10 characters.
+`newest`/`oldest`/`updated`/`name`/`placement`/`downloads`/`views`/
+`installs`/`comprehensive`. A skill has at most 10 tags, each at most 10
+characters.
 
 ## Read content without downloading
 
@@ -57,8 +58,7 @@ Do not search the machine or guess a path.
    `.git`, caches, build output; keep `SKILL.md`, referenced files, README,
    LICENSE). Default a missing `version` to `1.0.0` in the staged `SKILL.md`.
 2. Inspect without executing; read `name`/`version` from the root `SKILL.md`.
-3. Check ownership: `plugin list --scene-code default --plugin-type skill
-   --mode mine --q <name>`, compare exact names. Decide create vs. update.
+3. Check ownership: `plugin list --scene-code default --plugin-type skill --mode mine --q <name>`, compare exact names. Decide create vs. update.
 4. Show the final plan (path, name, version, visibility, category) and get one
    confirmation.
 5. Presign + upload + parse + import:
@@ -72,39 +72,48 @@ Do not search the machine or guess a path.
      --name "<name>" --visibility space --version 1.0.0
    ```
 
-   `plugin import` builds the attachment tree server-side. Omit `--plugin-id` to
-   create; set it to update an existing owned skill. Optional `--category-id`,
-   `--tags`, `--icon`, `--changelog`.
+   `plugin import` finalizes through the unified write path: it builds the
+   attachment tree server-side, snapshots a new version, and attaches the
+   default market placement so the skill is immediately listable. Omit
+   `--plugin-id` to create; set it to update an existing owned skill. Optional
+   `--category-id`, `--tags`, `--icon`, `--changelog`.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <id>` to verify.
 
 If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. If
-import returns a gateway timeout, re-check `plugin list --mode mine` before
+import returns a gateway timeout or RESULT_UNKNOWN, re-check `plugin list --scene-code default --plugin-type skill --mode mine --q <name>` before
 retrying so a created skill is never duplicated.
 
 ## Release a new version
 
-A published skill version is immutable:
+Every save is a version snapshot. To ship new content, re-run the upload / parse
+pipeline for the new package and `plugin import --plugin-id <id>
+--parse-task-id <id> --version <new-version> --changelog "…"` — that is what
+creates the new snapshot and bumps `current_version`. There is no separate
+"publish" step.
 
 ```bash
-octo-cli marketplace plugin publish --plugin-id <id> --version 1.1.0 --changelog "…"
 octo-cli marketplace plugin version list --plugin-id <id>
 ```
 
-To ship new content in that version, first re-run the upload/parse pipeline for
-the new package and `plugin import --plugin-id <id> --parse-task-id <id>
---version 1.1.0`, then confirm.
-
 ## Update metadata / manage owned skills
 
-Metadata-only edits (name, category, tags, icon, visibility) go through `plugin
-upsert` with the existing `plugin_id` in the document — pass the full plugin
-write document with `--data`. `plugin import` is **not** a metadata-only path:
-its `--parse-task-id` is required, so reusing it always means a fresh
-upload+parse cycle to ship new package content. Deletion is destructive and
-confirmed:
+Metadata-only edits (name, category, tags, icon, visibility, version label) go
+through `plugin upsert` with the existing `plugin.plugin_id` in the document —
+pass the full plugin write document with `--data`, including the existing
+`manifest_json` and `plugin_json` (the backend rejects an upsert that omits
+either). `plugin import` is **not** a metadata-only path: its `--parse-task-id`
+is required, so reusing it always means a fresh upload+parse cycle to ship new
+package content.
+
+Deletion is destructive and confirmed:
 
 ```bash
 octo-cli marketplace plugin delete --plugin-id <id>
 ```
+
+> **Relations and expert/team edits:** every upsert replaces the relation set.
+> When updating an `expert` or `expert_team` that carries relations, always
+> resubmit the complete list — omitting the `relations` key soft-deletes all
+> relations on save.
 
 Skill icon upload is a presigned flow: `marketplace skill-icon-upload create`.

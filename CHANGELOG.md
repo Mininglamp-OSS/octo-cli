@@ -11,22 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`octo-cli marketplace plugin` family (unified plugin surface)** — one command
   family over the backend's unified `/plugins/*` API, replacing the retired
   per-type `skill` / `mcp` / `marketplace expert` / `marketplace squad` surfaces
-  (44 legacy ops → 18). Resource kind is selected with `--plugin-type`
+  (44 legacy ops → 17). Resource kind is selected with `--plugin-type`
   (`skill` / `connector` / `expert` / `expert_team`; the old `mcp` maps to
   `connector`, `squad` to `expert_team`): `plugin list` / `get` / `version list`
-  / `skillmd` / `download` / `upsert` / `delete` / `publish` / `install` /
+  / `skillmd` / `download` / `upsert` / `delete` / `install` /
   `import`, plus `plugin-category list` / `plugin-tag list`. The skill
   upload→parse→import pipeline (`skill-upload`, `skill-parse-task`) and icon
   presign helpers are retained. Client-side gates before any request is sent:
   `plugin list` requires `--scene-code` and `--plugin-type`; `plugin upsert`
-  requires a `plugin` document with `plugin_name` / `plugin_type` / `visibility`
-  and gates `plugin_type` and `visibility` (`space` / `private`; the retired
-  `public` is refused, matching `plugin import`); `mode` accepts only `mine`.
+  requires a full `plugin` document (`plugin_name` / `plugin_type` /
+  `visibility` / `manifest_json` / `plugin_json`) and gates `plugin_type`,
+  `visibility` (`space` / `private`; the retired `public` is refused, matching
+  `plugin import`), the `sort` vocabulary, and relations' `relation_type`
+  (`expert_team_expert` / `expert_skill` / `expert_connector`);
+  `mode` accepts only `mine`. Write ops (`upsert` / `delete` / `install` /
+  `import`) set `x-octo-retry: never` so ambiguous gateway failures surface as
+  `RESULT_UNKNOWN` instead of auto-replaying a non-idempotent mutation.
   Value-level rules remain backend-enforced.
-- **`octo-cli marketplace plugin install`** — installs an `expert` /
-  `expert_team` plugin into a Loop workspace (`--workspace-id`, `--runtime-id`)
-  through the unified API. This exposes the install-to-Loop capability that the
-  retired per-type surface deliberately withheld; it is gated backend-side and
+- **The backend has no separate publish step.** After unification every
+  `plugin upsert` (and `plugin import`) IS a version snapshot — each save
+  appends an auto-increment `plugin_versions` row; `plugin.version` is the
+  human-readable `current_version` label, not a separate release action. The
+  previous spec carried a `plugin publish` op that the backend retired in
+  `refactor(plugin): drop formal publish; every save is a version snapshot`;
+  the CLI no longer exposes it, the agent docs no longer reference it, and a
+  fresh create attaches (and update self-heals) the default market placement so
+  a saved plugin is immediately listable.
+- **`octo-cli marketplace plugin install`** — installs an `expert` / `expert_team`
+  plugin into a Loop workspace (`--workspace-id`, `--runtime-id`) through the
+  unified API. This exposes the install-to-Loop capability that the retired
+  per-type surface deliberately withheld; it is gated backend-side and
   provisions through octo-fleet.
 - **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,

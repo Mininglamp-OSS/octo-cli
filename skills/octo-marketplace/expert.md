@@ -1,10 +1,10 @@
 # octo-marketplace — Expert and Squad workflows
 
-Read `SKILL.md` first for authentication, payload normalization, and the shared
-safety rule. This file covers the **专家市场**: `expert` (专家, a single agent,
-`plugin_type=expert`) and `squad` (专家团, an expert team,
-`plugin_type=expert_team`). Both are plugins; only the type and package shape
-differ.
+Read `SKILL.md` first for authentication, payload normalization, versioning, the
+no-separate-publish rule, and the shared safety rule. This file covers the
+**专家市场**: `expert` (专家, a single agent, `plugin_type=expert`) and `squad`
+(专家团, an expert team, `plugin_type=expert_team`). Both are plugins; only the
+type and package shape differ.
 
 An expert's instruction lives in the package's root `AGENTS.md`; an
 expert_team is a single `AGENTS.md` describing collaboration/dispatch, and its
@@ -39,31 +39,42 @@ octo-cli marketplace plugin download --plugin-id <skill-plugin-id> -o <tmp>/skil
 
 ## Create / update
 
-Create or edit through the unified write path. Show the target and intended
-change, then continue only after explicit confirmation:
+Create or edit through the unified write path. Every save is a version snapshot
+and attaches/self-heals the default market placement, so a created expert or
+team is listable immediately — there is no separate publish step. Show the
+target and intended change, then continue only after explicit confirmation:
 
 ```bash
 octo-cli marketplace plugin upsert --data @plugin.json
 ```
 
 The `--data` body is `{"plugin":{plugin_name, plugin_type, visibility,
-category_id, tags, manifest_json, plugin_json}, "relations":[...]}`:
+category_id, tags, icon, version?, manifest_json, plugin_json},
+"relations":[...]}`. Both `manifest_json` and `plugin_json` are required on
+every write:
 
 - **expert**: `plugin_json` carries a root `AGENTS.md` (the instruction) and,
   when it uses connectors, a root `mcp.json` with `${VAR}` placeholders for
   consumer secrets.
 - **expert_team**: `plugin_json` is a single `AGENTS.md` rendering the
   collaboration/dispatch, leader, strategies, dependencies, and permissions.
-  Members and their skills are `relations` entries
-  (`expert_team_expert` / `expert_skill` / `expert_connector`); the leader is
-  the member relation with `is_leader`.
+  Members and their skills are `relations` entries; valid `relation_type`
+  values are `expert_team_expert` (team → member expert), `expert_skill`
+  (expert → skill), and `expert_connector` (expert → connector). The team
+  leader is the member relation whose `data.is_leader` is true; every
+  relation requires `target_plugin_id` and `relation_type`.
 
-Set `plugin.plugin_id` to update; sending `relations` replaces the relation set,
-so submit the complete list. Publish an immutable version separately:
+Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin version list --plugin-id <id>` after a release.
 
-```bash
-octo-cli marketplace plugin publish --plugin-id <id> --version 1.1.0 --changelog "…"
-```
+> **Every upsert replaces the relation set.** Always resubmit the complete list
+> — including on metadata-only edits. Omitting the `relations` key is identical
+> to submitting `[]` and soft-deletes every live relation (team members,
+> attached skills, attached connectors) on save. Echo `relation_id` for rows
+> you want to keep verbatim.
+
+Bumping `plugin.version` (and adding a changelog via the import flow for
+skill-bearing experts) is how a new release is recorded; there is no separate
+publish command.
 
 ## Install into a Loop workspace
 
@@ -74,7 +85,8 @@ agent or squad, acting as the caller against octo-fleet, with rollback):
 octo-cli marketplace plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>
 ```
 
-The response carries `agent_id` (expert) or `squad_id` (expert_team).
+The response carries exactly one of `agent_id` (expert) or `squad_id`
+(expert_team), depending on the plugin's type.
 
 ## Delete (owner only, confirmed)
 
@@ -85,5 +97,7 @@ octo-cli marketplace plugin delete --plugin-id <id>
 ```
 
 Skill packages attached to an expert/team are themselves `skill` plugins — to
-publish or update one, follow the upload → parse → import flow in `skills.md`,
-then wire it with an `expert_skill` relation in `plugin upsert`.
+release a new version of one, re-run the upload → parse → import flow in
+[`skills.md`](skills.md) with the existing `--plugin-id`; wire or re-wire it
+with an `expert_skill` relation in a subsequent `plugin upsert` that resubmits
+the full relation list.

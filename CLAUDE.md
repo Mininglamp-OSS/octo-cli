@@ -41,7 +41,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 315 operations)
+## Command Structure (12 active domains, 314 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 

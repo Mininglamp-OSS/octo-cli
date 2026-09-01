@@ -174,7 +174,7 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 		"plugin upsert",
 		"plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>",
 		"plugin delete --plugin-id <id>",
-		"plugin publish --plugin-id",
+		"plugin version list",         // version snapshots live behind version list
 		"AGENTS.md",                    // expert instruction / team collaboration doc
 		"expert_skill",                 // member skills are relations
 		"CLI `.data` + `._pagination`", // list flattening, not .data.data
@@ -268,8 +268,10 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
 		t.Error("owned-name lookup must happen before upload initialization")
 	}
-	// The retired synchronous publish path must be gone.
-	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url"} {
+	// The retired synchronous publish path and the unified plugin.publish op
+	// (removed from the backend in refactor "drop formal publish; every save is
+	// a version snapshot") must both be gone from the workflow docs.
+	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url", "plugin publish --plugin-id"} {
 		if strings.Contains(content, gone) {
 			t.Errorf("skills workflow must not reference the retired %q surface", gone)
 		}

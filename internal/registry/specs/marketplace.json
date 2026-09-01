@@ -3,7 +3,7 @@
   "info": {
     "title": "Octo Marketplace API",
     "version": "1.0.0",
-    "description": "Unified plugin marketplace API. All catalog operations go through /plugins/*; the legacy per-type endpoints (/experts, /squads, /mcps, /skills) are retired here because they read frozen pre-migration tables.",
+    "description": "Unified plugin marketplace API. All catalog operations go through /plugins/*; the legacy per-type endpoints (/experts, /squads, /mcps, /skills) are retired on this client because the unified model is the source of truth and legacy handlers do not read rows created after unification.",
     "contact": {
       "name": "OCTO API Team",
       "url": "https://github.com/Mininglamp-OSS/octo-marketplace"
@@ -17,7 +17,7 @@
       "get": {
         "operationId": "plugin.list",
         "summary": "List marketplace plugins",
-        "description": "List plugins visible in the current Space, filtered by scene and type. Replaces the legacy /experts, /squads, /mcps, /skills list endpoints (all now read frozen legacy tables).",
+        "description": "List plugins visible in the current Space, filtered by scene and type. A non-empty scene_code joins the visible placement table so only catalog-placed plugins appear. Replaces the legacy /experts, /squads, /mcps, /skills list endpoints.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -86,9 +86,20 @@
             "name": "sort",
             "in": "query",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "newest",
+                "oldest",
+                "updated",
+                "name",
+                "placement",
+                "views",
+                "installs",
+                "downloads",
+                "comprehensive"
+              ]
             },
-            "description": "newest (default) / oldest / updated / name / placement / views / installs / downloads / comprehensive"
+            "description": "Sort order (default newest); placement requires scene_code"
           },
           {
             "name": "page",
@@ -388,8 +399,8 @@
     "/market/api/v1/plugins/upsert": {
       "post": {
         "operationId": "plugin.upsert",
-        "summary": "Create or update a plugin",
-        "description": "Create (plugin.plugin_id empty) or update a plugin. Body: {\"plugin\":{plugin_name,plugin_type,visibility,manifest_json,plugin_json,tags,category_id,icon},\"relations\":[...]}. Pass the full document with --data. For skills prefer the upload+import flow instead.",
+        "summary": "Create or update a plugin (every save is a version snapshot)",
+        "description": "Create (plugin.plugin_id empty) or update a plugin. Every save appends an auto-increment plugin_versions snapshot and a default market placement is attached/self-healed so the plugin is visible in scene-scoped lists. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skills prefer the upload+import flow (which finalizes through upsert).",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "requestBody": {
@@ -401,7 +412,7 @@
                 "properties": {
                   "plugin": {
                     "type": "object",
-                    "description": "Plugin write document. Pass the full document for both create and update; the backend validates name, plugin_type and visibility on every write.",
+                    "description": "Plugin write document. Pass the full document for both create and update; the backend validates name, plugin_type, visibility, manifest_json and plugin_json on every write. A save is a version snapshot (auto-increment label); plugin.version sets the current_version display label and defaults to 1.0.0.",
                     "properties": {
                       "plugin_id": {
                         "type": "string",
@@ -442,27 +453,67 @@
                       "icon": {
                         "type": "string"
                       },
+                      "version": {
+                        "type": "string",
+                        "description": "Current-version label; defaults to 1.0.0. Independent of the per-save auto-increment snapshot label."
+                      },
                       "manifest_json": {
                         "type": "object",
-                        "description": "Type-specific manifest document"
+                        "description": "Type-specific manifest document (required on every write)"
                       },
                       "plugin_json": {
                         "type": "object",
-                        "description": "Type-specific plugin package document"
+                        "description": "Type-specific plugin package document (required on every write)"
                       }
                     },
                     "required": [
                       "plugin_name",
                       "plugin_type",
-                      "visibility"
+                      "visibility",
+                      "manifest_json",
+                      "plugin_json"
                     ]
                   },
                   "relations": {
                     "type": "array",
                     "items": {
-                      "type": "object"
+                      "type": "object",
+                      "properties": {
+                        "relation_id": {
+                          "type": "string",
+                          "description": "Empty to create; a live relation's ID to update; live relations omitted are deleted."
+                        },
+                        "source_plugin_id": {
+                          "type": "string",
+                          "description": "Must address the plugin being upserted when supplied."
+                        },
+                        "target_plugin_id": {
+                          "type": "string",
+                          "description": "Target plugin id (required)."
+                        },
+                        "relation_type": {
+                          "type": "string",
+                          "enum": [
+                            "expert_team_expert",
+                            "expert_skill",
+                            "expert_connector"
+                          ],
+                          "description": "Relation type. The matrix is fixed: expert_team -> expert (expert_team_expert); expert -> skill (expert_skill); expert -> connector (expert_connector)."
+                        },
+                        "sort_order": {
+                          "type": "integer"
+                        },
+                        "data": {
+                          "type": "object",
+                          "description": "Optional type-specific payload (e.g. is_leader for team members)."
+                        }
+                      },
+                      "required": [
+                        "target_plugin_id",
+                        "relation_type"
+                      ]
                     },
-                    "description": "Optional relation rows"
+                    "description": "Relation rows. EVERY upsert replaces the relation set — resubmit the complete list even on metadata-only edits; omitting the key soft-deletes all relations on save."
                   }
                 },
                 "required": [
@@ -490,7 +541,9 @@
       "post": {
         "operationId": "plugin.delete",
         "summary": "Delete a plugin",
+        "description": "Soft-delete a caller-owned plugin. The name frees for reuse. This is a non-idempotent mutation when the response is ambiguous, so the client does not auto-retry.",
         "x-octo-risk": "write",
+        "x-octo-retry": "never",
         "requestBody": {
           "required": true,
           "content": {
@@ -505,59 +558,6 @@
                 },
                 "required": [
                   "plugin_id"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/market/api/v1/plugins/publish": {
-      "post": {
-        "operationId": "plugin.publish",
-        "summary": "Publish a plugin version",
-        "description": "Release an immutable version and rebuild placements. Body: {plugin_id, version, changelog?, placements?}.",
-        "x-octo-risk": "write",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "plugin_id": {
-                    "type": "string"
-                  },
-                  "version": {
-                    "type": "string",
-                    "description": "Semver version string (immutable once published)"
-                  },
-                  "changelog": {
-                    "type": "string"
-                  },
-                  "placements": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    },
-                    "description": "Placement rows; omit for the default placement"
-                  }
-                },
-                "required": [
-                  "plugin_id",
-                  "version"
                 ]
               }
             }
@@ -1285,6 +1285,13 @@
     }
   },
   "components": {
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
     "schemas": {
       "github_com_Mininglamp-OSS_octo-marketplace_internal_api_response.Data-github_com_Mininglamp-OSS_octo-marketplace_internal_service_ProbeResponse": {
         "properties": {

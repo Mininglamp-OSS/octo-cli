@@ -12,8 +12,8 @@ import (
 // TestMarketplaceRegistryShape pins every unified-plugin operationId to its
 // method+path and the marketplace-wide invariants (OCTO_API_BASE_URL, space
 // header). The legacy per-type endpoints (/experts, /squads, /mcps, /skills)
-// are intentionally gone: they read frozen pre-migration tables, so the CLI now
-// drives the unified /plugins/* surface. Only the type-agnostic helper
+// are intentionally gone: they cannot read rows created after unification, so
+// the CLI drives the unified /plugins/* surface. Only the type-agnostic helper
 // pipelines (probe, skill upload/parse, icon presign) are retained verbatim.
 func TestMarketplaceRegistryShape(t *testing.T) {
 	r := registry.MustNew()
@@ -30,7 +30,6 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"plugin_tag.list":      {http.MethodGet, "/market/api/v1/plugin_tags"},
 		"plugin.upsert":        {http.MethodPost, "/market/api/v1/plugins/upsert"},
 		"plugin.delete":        {http.MethodPost, "/market/api/v1/plugins/delete"},
-		"plugin.publish":       {http.MethodPost, "/market/api/v1/plugins/publish"},
 		"plugin.install":       {http.MethodPost, "/market/api/v1/plugins/install"},
 		"plugin.import":        {http.MethodPost, "/market/api/v1/plugins/import"},
 
@@ -62,11 +61,13 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		}
 	}
 
-	// The retired legacy operations must be gone so the CLI can never read the
-	// frozen per-type tables again.
+	// Unified plugin backend has no "frozen tables" — legacy handlers still
+	// exist server-side but cannot read rows created after unification, so the
+	// CLI is scoped to the unified surface only.
 	for _, gone := range []string{
 		"skill.list", "skill.get", "skill.download", "skill.publish",
 		"mcp.list", "mcp.create", "marketplace.expert.list", "marketplace.squad.create",
+		"plugin.publish",
 	} {
 		if _, ok := r.GetOperation(gone); ok {
 			t.Errorf("legacy operation %q must be retired", gone)
@@ -204,31 +205,6 @@ func TestMarketplacePluginInstallRequest(t *testing.T) {
 	}
 }
 
-// TestMarketplacePluginPublishRequest pins the publish body wiring.
-func TestMarketplacePluginPublishRequest(t *testing.T) {
-	var gotPath string
-	var gotBody map[string]any
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"version":"1.0.0"}}`))
-	})
-
-	root.SetArgs([]string{"marketplace", "plugin", "publish", "--plugin-id", "p1", "--version", "1.0.0", "--changelog", "init"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if gotPath != "/market/api/v1/plugins/publish" {
-		t.Errorf("path = %q", gotPath)
-	}
-	if gotBody["plugin_id"] != "p1" || gotBody["version"] != "1.0.0" || gotBody["changelog"] != "init" {
-		t.Errorf("body = %#v", gotBody)
-	}
-}
-
 // TestMarketplacePluginUpsertRequest pins the unified write path: a full
 // document passed via --data reaches POST /plugins/upsert with the plugin
 // object intact, and the newly-typed nested enums gate visibility/plugin_type
@@ -248,7 +224,7 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 	})
 	root.SetArgs([]string{
 		"marketplace", "plugin", "upsert",
-		"--data", `{"plugin":{"plugin_name":"deep miner","plugin_type":"connector","visibility":"private"}}`,
+		"--data", `{"plugin":{"plugin_name":"deep miner","plugin_type":"connector","visibility":"private","manifest_json":{},"plugin_json":{"connector":{"type":"stdio"},"mcpServers":{}}}}`,
 	})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -269,9 +245,12 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 		name string
 		data string
 	}{
-		{"public visibility", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"public"}}`},
-		{"unknown plugin_type", `{"plugin":{"plugin_name":"x","plugin_type":"nonsense","visibility":"private"}}`},
-		{"missing plugin_type", `{"plugin":{"plugin_name":"x","visibility":"private"}}`},
+		{"public visibility", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"public","manifest_json":{},"plugin_json":{}}}`},
+		{"unknown plugin_type", `{"plugin":{"plugin_name":"x","plugin_type":"nonsense","visibility":"private","manifest_json":{},"plugin_json":{}}}`},
+		{"missing plugin_type", `{"plugin":{"plugin_name":"x","visibility":"private","manifest_json":{},"plugin_json":{}}}`},
+		{"missing manifest_json", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","plugin_json":{}}}`},
+		{"missing plugin_json", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","manifest_json":{}}}`},
+		{"unknown relation_type", `{"plugin":{"plugin_name":"x","plugin_type":"expert","visibility":"private","manifest_json":{},"plugin_json":{}},"relations":[{"target_plugin_id":"p2","relation_type":"bogus"}]}`},
 	} {
 		sent := false
 		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +343,7 @@ func TestMarketplaceCommandTree(t *testing.T) {
 		t.Fatal("missing marketplace command")
 	}
 	domains := map[string][]string{
-		"plugin":            {"list", "get", "skillmd", "download", "upsert", "delete", "publish", "install", "import"},
+		"plugin":            {"list", "get", "skillmd", "download", "upsert", "delete", "install", "import"},
 		"plugin-category":   {"list"},
 		"plugin-tag":        {"list"},
 		"mcp":               {"probe"},
