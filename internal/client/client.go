@@ -160,8 +160,8 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 	}
 
 	headers := cloneHeaders(req.Headers)
-	if req.Service == "loop" && headerValue(headers, "Accept") == "" {
-		headers["Accept"] = publicAPIMediaType
+	if req.Service == "loop" {
+		setHeader(headers, "Accept", publicAPIMediaType)
 	}
 
 	if c.options.DryRun {
@@ -179,13 +179,13 @@ func cloneHeaders(headers map[string]string) map[string]string {
 	return cloned
 }
 
-func headerValue(headers map[string]string, name string) string {
-	for key, value := range headers {
+func setHeader(headers map[string]string, name, value string) {
+	for key := range headers {
 		if strings.EqualFold(key, name) {
-			return value
+			delete(headers, key)
 		}
 	}
-	return ""
+	headers[name] = value
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
