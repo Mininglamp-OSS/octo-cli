@@ -58,7 +58,13 @@ Do not search the machine or guess a path.
    `.git`, caches, build output; keep `SKILL.md`, referenced files, README,
    LICENSE). Default a missing `version` to `1.0.0` in the staged `SKILL.md`.
 2. Inspect without executing; read `name`/`version` from the root `SKILL.md`.
-3. Check ownership: `plugin list --scene-code default --plugin-type skill --mode mine --q <name>`, compare exact names. Decide create vs. update.
+3. Check ownership exhaustively: `plugin list --scene-code default --plugin-type
+   skill --mode mine --q <name> --page 1`, then walk `--page` until a short page
+   (there is no `--page-all`, and the default page size is 20). `--q` is a
+   substring match against `plugin_name` only — not the display name set by
+   `--name` — so search the registry name and compare exact names across every
+   page. Checking only page 1 when the owner has more than 20 keyword matches
+   reports a false "no match" and creates a duplicate. Decide create vs. update.
 4. Show the final plan (path, name, version, visibility, category) and get one
    confirmation.
 5. Presign + upload + parse + import:
@@ -79,9 +85,13 @@ Do not search the machine or guess a path.
    `--category-id`, `--tags`, `--icon`, `--changelog`.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <id>` to verify.
 
-If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. If
-import returns a gateway timeout or RESULT_UNKNOWN, re-check `plugin list --scene-code default --plugin-type skill --mode mine --q <name>` before
-retrying so a created skill is never duplicated.
+If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. Parse
+itself is not idempotent: re-triggering an already-parsed upload returns `409
+CONFLICT` rather than the original task, so poll `skill-parse-task get` instead
+of re-posting. If import returns a gateway timeout or RESULT_UNKNOWN, re-check
+`plugin list --scene-code default --plugin-type skill --mode mine --q <name>`,
+walking `--page` until a short page as in step 3, before retrying so a created
+skill is never duplicated.
 
 ## Release a new version
 
@@ -98,12 +108,24 @@ octo-cli marketplace plugin version list --plugin-id <id>
 ## Update metadata / manage owned skills
 
 Metadata-only edits (name, category, tags, icon, visibility, version label) go
-through `plugin upsert` with the existing `plugin.plugin_id` in the document —
-pass the full plugin write document with `--data`, including the existing
-`manifest_json` and `plugin_json` (the backend rejects an upsert that omits
-either). `plugin import` is **not** a metadata-only path: its `--parse-task-id`
-is required, so reusing it always means a fresh upload+parse cycle to ship new
+through `plugin upsert` with the existing `plugin.plugin_id` in the document.
+`plugin import` is **not** a metadata-only path: its `--parse-task-id` is
+required, so reusing it always means a fresh upload+parse cycle to ship new
 package content.
+
+> **`plugin upsert` replaces the row; it does not patch it.** There is no
+> metadata-only PATCH on this API. The backend rebuilds the whole plugin from
+> your document, keeping only `created_at`, the version history and the creator
+> identity. An omitted `category_id`, `publisher` or `icon` is accepted as empty
+> and **clears the stored value** — editing one field by sending only that field
+> silently wipes the rest. Always read-modify-write: `plugin get --plugin-id
+> <id>` first, rebuild the full write document from what it returns (the read
+> shape is flat; the write shape is `{"plugin":{...},"relations":[...]}`), change
+> the one field, and send the whole document via `--data @plugin.json`.
+> `manifest_json` and `plugin_json` are required on every write, and
+> `manifest_json` must agree with the outer fields (see the invariant in
+> `expert.md`). Note `plugin import` behaves the *opposite* way — omitted fields
+> there fall back to the existing row — so do not carry habits between the two.
 
 Deletion is destructive and confirmed:
 

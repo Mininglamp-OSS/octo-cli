@@ -129,7 +129,7 @@ func TestNewRootCmd_LeafStillRequiresAuth(t *testing.T) {
 //
 // The `-q` shorthand of `--jq` is deliberately absent from the reserved set:
 // pflag keeps shorthands in a separate namespace, so a spec param legitimately
-// named `q` (matter.list, marketplace skill.list) does not shadow it.
+// named `q` (matter.list, marketplace plugin.list) does not shadow it.
 func TestNewRootCmd_ReservedGlobalFlagNamesMatchPersistentFlags(t *testing.T) {
 	f := cmdutil.NewTestFactory()
 	f.SetConfig(&config.Config{Format: "json"})

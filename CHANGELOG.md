@@ -25,16 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `plugin import`), the `sort` vocabulary, and relations' `relation_type`
   (`expert_team_expert` / `expert_skill` / `expert_connector`);
   `mode` accepts only `mine`. Write ops (`upsert` / `delete` / `install` /
-  `import`) set `x-octo-retry: never` so ambiguous gateway failures surface as
+  `import`, plus the non-idempotent `skill-upload parse`) set
+  `x-octo-retry: never` so ambiguous gateway failures surface as
   `RESULT_UNKNOWN` instead of auto-replaying a non-idempotent mutation.
   Value-level rules remain backend-enforced.
 - **The backend has no separate publish step.** After unification every
   `plugin upsert` (and `plugin import`) IS a version snapshot — each save
   appends an auto-increment `plugin_versions` row; `plugin.version` is the
   human-readable `current_version` label, not a separate release action. The
-  previous spec carried a `plugin publish` op that the backend retired in
-  `refactor(plugin): drop formal publish; every save is a version snapshot`;
-  the CLI no longer exposes it, the agent docs no longer reference it, and a
+  op removed here is `skill.publish` (`POST /market/api/v1/bot/skills/publish`),
+  the only publish operation the previous spec carried; it is replaced by the
+  upload→parse→`plugin import` pipeline, which snapshots the version itself. A
   fresh create attaches (and update self-heals) the default market placement so
   a saved plugin is immediately listable.
 - **`octo-cli marketplace plugin install`** — installs an `expert` / `expert_team`
@@ -156,6 +157,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   membership deletion is an exact Space-qualified mutation. Requiring the
   principal Space prevents an ambiguous uid from deleting the wrong row when
   the same uid has memberships in multiple Spaces.
+- **BREAKING (marketplace): `plugin list` loses `--page-all`.** The retired
+  `skill.list` / `skill.mine.list` operations declared `x-octo-pagination` and
+  could be exhausted in one invocation. The unified `/plugins` endpoint is
+  offset-paged (`--page` / `--page-size`, default 20, max 100, out-of-range
+  rejected with 400 rather than clamped) and does not advertise the cursor
+  extension, so `--page-all` is not registered. Callers that relied on it must
+  walk `--page` until a short page. This matters most for the owned-name
+  duplicate check: `--q` is a substring match against `plugin_name` only, so a
+  single unpaged probe can report a false "not found".
+- **BREAKING (marketplace): `plugin upsert` replaces the plugin row; it does not
+  patch it.** There is no metadata-only PATCH on the unified API. The backend
+  rebuilds the whole plugin from the submitted document, preserving only
+  `created_at`, the version history and the creator identity — an omitted
+  `category_id`, `publisher` or `icon` is accepted as empty and clears the
+  stored value, and an omitted `relations` key soft-deletes every live relation.
+  `plugin import` deliberately has the opposite semantics (omitted fields fall
+  back to the existing row). The spec field descriptions and the
+  `octo-marketplace` skill docs now state both, and prescribe read-modify-write
+  via `plugin get`. Additionally, `manifest_json` must agree with the outer
+  `plugin` fields (`plugin_name`, `plugin_type`, and `labels` == `tags` in the
+  same order); every disagreement returns one opaque
+  `400 VALIDATION_ERROR {"field":"body","reason":"invalid"}`.
 - **`octo-cli html` adopts canonical create and document references** — create
   omits `slug`; the CLI generates `idempotency_key` once per invocation and
   reuses it across transport retries (an explicit key remains supported). It returns `data.doc_id` plus

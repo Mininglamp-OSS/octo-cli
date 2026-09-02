@@ -30,9 +30,9 @@ func TestFlags_GlobalFlagNamesAreReserved(t *testing.T) {
 	}
 	// The `-q` shorthand of `--jq` must stay out: pflag keeps shorthands in a
 	// separate namespace, so a spec param named `q` (matter.list,
-	// marketplace skill.list) does not shadow it and must remain registrable.
+	// marketplace plugin.list) does not shadow it and must remain registrable.
 	if reservedFlagNames["q"] {
-		t.Error(`"q" must not be reserved: it is --jq's shorthand, and matter.list / skill.list ` +
+		t.Error(`"q" must not be reserved: it is --jq's shorthand, and matter.list / plugin.list ` +
 			`declare a query param named q that would lose its flag`)
 	}
 }

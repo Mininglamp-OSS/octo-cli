@@ -66,11 +66,48 @@ every write:
 
 Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin version list --plugin-id <id>` after a release.
 
+> **`manifest_json` must agree with the outer `plugin` fields.** The backend
+> rejects the write unless all three hold:
+> `manifest_json.plugin_name == plugin.plugin_name`,
+> `manifest_json.plugin_type == plugin.plugin_type`, and
+> `manifest_json.labels == plugin.tags` **in the same order** (they are compared
+> as canonical JSON arrays, not as sets, so reordering, a duplicate or an
+> untrimmed label fails). Every violation returns the same opaque
+> `400 VALIDATION_ERROR` with `details {"field":"body","reason":"invalid"}` and
+> no hint as to which field disagreed — check all three before retrying.
+>
+> ```jsonc
+> {
+>   "plugin": {
+>     "plugin_name": "deep-miner",
+>     "plugin_type": "expert",
+>     "visibility": "space",
+>     "tags": ["research", "analysis"],
+>     "manifest_json": {
+>       "plugin_name": "deep-miner",        // == plugin.plugin_name
+>       "plugin_type": "expert",            // == plugin.plugin_type
+>       "labels": ["research", "analysis"]  // == plugin.tags, same order
+>     },
+>     "plugin_json": { "attachments": [] }
+>   },
+>   "relations": []
+> }
+> ```
+
+> **Upsert replaces the row; it does not patch it.** The backend rebuilds the
+> whole plugin from your document, preserving only `created_at`, the version
+> history and the creator identity. An omitted `category_id`, `publisher` or
+> `icon` is accepted as empty and **clears the stored value**. Read-modify-write
+> with `plugin get` and resubmit the complete document on every edit. (`plugin
+> import` is the opposite — it falls back to the existing row — so do not carry
+> habits between the two paths.)
+
 > **Every upsert replaces the relation set.** Always resubmit the complete list
 > — including on metadata-only edits. Omitting the `relations` key is identical
 > to submitting `[]` and soft-deletes every live relation (team members,
-> attached skills, attached connectors) on save. Echo `relation_id` for rows
-> you want to keep verbatim.
+> attached skills, attached connectors) on save. Nothing validates this locally,
+> so the destruction is silent. Echo `relation_id` for rows you want to keep
+> verbatim.
 
 Bumping `plugin.version` (and adding a changelog via the import flow for
 skill-bearing experts) is how a new release is recorded; there is no separate

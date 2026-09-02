@@ -58,7 +58,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Search keyword"
+            "description": "Search keyword. Case-folded substring match against plugin_name ONLY — not the display name, description, tags or publisher. A skill imported with a display --name is therefore not findable by that name."
           },
           {
             "name": "tag",
@@ -115,7 +115,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Page size, default 20, max 100"
+            "description": "Page size, default 20, max 100. Out-of-range values are rejected with 400, not clamped. There is no --page-all on this offset-paged endpoint: walk --page yourself until a short page."
           }
         ],
         "responses": {
@@ -200,7 +200,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Page size, default 20, max 100"
+            "description": "Page size, default 20, max 100. Out-of-range values are rejected with 400, not clamped. There is no --page-all on this offset-paged endpoint: walk --page yourself until a short page."
           }
         ],
         "responses": {
@@ -412,14 +412,15 @@
                 "properties": {
                   "plugin": {
                     "type": "object",
-                    "description": "Plugin write document. Pass the full document for both create and update; the backend validates name, plugin_type, visibility, manifest_json and plugin_json on every write. A save is a version snapshot (auto-increment label); plugin.version sets the current_version display label and defaults to 1.0.0.",
+                    "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin get -> edit the document -> plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save is a version snapshot (auto-increment label); plugin.version sets the current_version display label, defaults to 1.0.0, and is preserved when left blank on update.",
                     "properties": {
                       "plugin_id": {
                         "type": "string",
                         "description": "Set to update an existing plugin; omit to create"
                       },
                       "plugin_name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Must be byte-identical to manifest_json.plugin_name after trimming, or the write is rejected."
                       },
                       "plugin_type": {
                         "type": "string",
@@ -428,7 +429,8 @@
                           "connector",
                           "expert",
                           "expert_team"
-                        ]
+                        ],
+                        "description": "Must equal manifest_json.plugin_type, or the write is rejected. Legacy names map as mcp -> connector, squad -> expert_team."
                       },
                       "visibility": {
                         "type": "string",
@@ -439,19 +441,23 @@
                         "description": "space or private. public is retired on the write path; system is minted only by the admin surface, not this tenant CLI."
                       },
                       "category_id": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Omitting this on update clears the stored category (and the default market placement's category). Echo the current value to keep it."
                       },
                       "tags": {
                         "type": "array",
                         "items": {
                           "type": "string"
-                        }
+                        },
+                        "description": "Must match manifest_json.labels exactly, INCLUDING ORDER — the backend compares the two as canonical JSON arrays, not as sets. Entries are trimmed and de-duplicated on this side only, so a labels array carrying duplicates or untrimmed values is rejected even when the equivalent tags value normalizes cleanly."
                       },
                       "publisher": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Omitting this on update clears the stored publisher. Echo the current value to keep it."
                       },
                       "icon": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Omitting this on update clears the stored icon. Echo the current value to keep it."
                       },
                       "version": {
                         "type": "string",
@@ -459,7 +465,7 @@
                       },
                       "manifest_json": {
                         "type": "object",
-                        "description": "Type-specific manifest document (required on every write)"
+                        "description": "Type-specific manifest document (required on every write). It must agree with the outer plugin fields: manifest_json.plugin_name == plugin.plugin_name, manifest_json.plugin_type == plugin.plugin_type, and manifest_json.labels == plugin.tags in the same order. Every disagreement returns the same opaque 400 VALIDATION_ERROR with details {\"field\":\"body\",\"reason\":\"invalid\"} and no indication of which field differed, so check all three before retrying."
                       },
                       "plugin_json": {
                         "type": "object",
@@ -513,7 +519,7 @@
                         "relation_type"
                       ]
                     },
-                    "description": "Relation rows. EVERY upsert replaces the relation set — resubmit the complete list even on metadata-only edits; omitting the key soft-deletes all relations on save."
+                    "description": "Relation rows. EVERY upsert replaces the relation set — resubmit the complete list even on metadata-only edits; omitting the key is identical to sending [] and soft-deletes every live relation (team members, attached skills, attached connectors) on save. The key stays optional because skills and connectors never carry relations, so nothing here is validated locally: on an expert or expert_team, forgetting it destroys the whole membership graph without any client-side error. Echo relation_id for rows you want to keep verbatim."
                   }
                 },
                 "required": [
@@ -627,7 +633,7 @@
       "post": {
         "operationId": "plugin.import",
         "summary": "Import a skill plugin from a completed parse task",
-        "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin.",
+        "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "requestBody": {
@@ -645,10 +651,12 @@
                     "description": "Set to update an existing skill plugin; omit to create"
                   },
                   "plugin_name": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Registry identifier written to the plugin_name column and to manifest_json.plugin_name. Distinct from name, not a synonym. Leave it empty and it inherits name; there is no fallback in the other direction. On update an omitted value falls back to the existing row."
                   },
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Human display name written to manifest_json.name and to the SKILL.md frontmatter. Distinct from plugin_name, not a synonym. On update an omitted value falls back to the existing row. Note plugin list --q searches plugin_name only, so a display name set here is not searchable."
                   },
                   "description": {
                     "type": "string"
@@ -890,7 +898,7 @@
     },
     "/market/api/v1/skill_uploads/{skill_upload_id}/parse": {
       "post": {
-        "description": "Start parsing a previously initialized Skill archive upload.",
+        "description": "Start parsing a previously initialized Skill archive upload. Not idempotent: the task must be pending, so a re-POST against an already-parsed upload returns 409 CONFLICT rather than the original parse-task ID. Poll skill_parse_task.get instead of re-triggering.",
         "operationId": "skill_upload.parse",
         "parameters": [
           {
@@ -1003,6 +1011,7 @@
         "tags": [
           "skill_upload"
         ],
+        "x-octo-retry": "never",
         "x-octo-risk": "write"
       }
     },

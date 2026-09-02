@@ -75,6 +75,41 @@ consumer-filled value written as a `${VAR}` placeholder (never a real secret).
 Set `plugin.plugin_id` to update; omit to create. Validate changed connection
 fields with `mcp probe` first.
 
+> **`manifest_json` must agree with the outer `plugin` fields.** The backend
+> rejects the write unless `manifest_json.plugin_name == plugin.plugin_name`,
+> `manifest_json.plugin_type == plugin.plugin_type` (`"connector"`), and
+> `manifest_json.labels == plugin.tags` **in the same order** — compared as
+> canonical JSON arrays, not as sets. Every violation returns the same opaque
+> `400 VALIDATION_ERROR` with `details {"field":"body","reason":"invalid"}`, so
+> check all three before retrying.
+>
+> ```jsonc
+> {
+>   "plugin": {
+>     "plugin_name": "github-mcp",
+>     "plugin_type": "connector",
+>     "visibility": "space",
+>     "tags": ["vcs", "github"],
+>     "manifest_json": {
+>       "plugin_name": "github-mcp",   // == plugin.plugin_name
+>       "plugin_type": "connector",    // == plugin.plugin_type
+>       "labels": ["vcs", "github"]    // == plugin.tags, same order
+>     },
+>     "plugin_json": {
+>       "connector": { "type": "stdio" },
+>       "mcpServers": { "github": { "env": { "TOKEN": "${GITHUB_TOKEN}" } } }
+>     }
+>   }
+> }
+> ```
+
+> **Upsert replaces the row; it does not patch it.** The backend rebuilds the
+> whole plugin from your document, preserving only `created_at`, the version
+> history and the creator identity. An omitted `category_id`, `publisher` or
+> `icon` is accepted as empty and **clears the stored value** — so a
+> "metadata-only" edit that sends just the changed field wipes the others.
+> Read-modify-write with `plugin get` and resubmit the complete document.
+
 Re-read with `plugin get --plugin-id <id>` and verify the `${VAR}` placeholders
 round-trip. Delete only after showing the owned record and confirming:
 

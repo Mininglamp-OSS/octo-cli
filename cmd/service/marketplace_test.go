@@ -3,6 +3,8 @@ package service
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -58,6 +60,31 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		}
 		if !op.SpaceHeader {
 			t.Errorf("%s must send the space header", id)
+		}
+	}
+
+	// Non-idempotent operations must opt out of transport retries: an ambiguous
+	// gateway failure has to surface as RESULT_UNKNOWN rather than replay a
+	// mutation the backend may already have committed. skill_upload.parse counts
+	// because the backend requires a pending task and answers a re-POST with 409
+	// CONFLICT instead of the original parse-task ID.
+	neverRetry := map[string]bool{
+		"plugin.upsert":      true,
+		"plugin.delete":      true,
+		"plugin.install":     true,
+		"plugin.import":      true,
+		"skill_upload.parse": true,
+	}
+	for id := range wants {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			continue
+		}
+		switch {
+		case neverRetry[id] && op.RetryMode != "never":
+			t.Errorf("%s retry mode = %q, want never", id, op.RetryMode)
+		case !neverRetry[id] && op.RetryMode == "never":
+			t.Errorf("%s retry mode = never, want the default retry policy", id)
 		}
 	}
 
@@ -121,13 +148,82 @@ func TestMarketplacePluginListRequest(t *testing.T) {
 
 // TestMarketplacePluginListRequiresSceneAndType pins that the backend-required
 // scene_code and plugin_type are enforced locally before any request is sent.
+// Both branches are exercised: the enforcement is per-flag, so covering only
+// one would leave the other free to regress.
 func TestMarketplacePluginListRequiresSceneAndType(t *testing.T) {
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("request must not be sent when required flags are missing")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"missing scene-code", []string{"--plugin-type", "skill"}, "scene-code"},
+		{"missing plugin-type", []string{"--scene-code", "default"}, "plugin-type"},
+		{"missing both", nil, "required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("request must not be sent when required flags are missing")
+			})
+			root.SetArgs(append([]string{"marketplace", "plugin", "list"}, tc.args...))
+			if err := root.Execute(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("execute error = %v, want an error mentioning %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestMarketplacePluginDeleteRequest pins the destructive op's path, body and
+// space header. plugin.delete is the one op that cannot be re-driven to check
+// its own outcome, so its wiring is pinned explicitly.
+func TestMarketplacePluginDeleteRequest(t *testing.T) {
+	var gotMethod, gotPath, gotSpace string
+	var body map[string]any
+	root, _, _ := rootWithServiceSpaced(t, "space-1", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotSpace = r.Method, r.URL.Path, r.Header.Get("X-Space-Id")
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{}}`))
 	})
-	root.SetArgs([]string{"marketplace", "plugin", "list", "--plugin-type", "skill"})
-	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "scene-code") {
-		t.Fatalf("execute error = %v, want a required scene-code error", err)
+
+	root.SetArgs([]string{"marketplace", "plugin", "delete", "--plugin-id", "p1"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/plugins/delete" {
+		t.Errorf("request = %s %s, want POST /market/api/v1/plugins/delete", gotMethod, gotPath)
+	}
+	if body["plugin_id"] != "p1" {
+		t.Errorf("body plugin_id = %v, want p1", body["plugin_id"])
+	}
+	if gotSpace != "space-1" {
+		t.Errorf("X-Space-Id = %q, want space-1", gotSpace)
+	}
+}
+
+// TestMarketplacePluginVersionListRequest pins the nested `plugin version list`
+// command onto the versions path with its pagination query.
+func TestMarketplacePluginVersionListRequest(t *testing.T) {
+	var gotMethod, gotPath, gotQuery string
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+	})
+
+	root.SetArgs([]string{
+		"marketplace", "plugin", "version", "list",
+		"--plugin-id", "p1", "--page", "2", "--page-size", "50",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/market/api/v1/plugins/versions" {
+		t.Errorf("request = %s %s, want GET /market/api/v1/plugins/versions", gotMethod, gotPath)
+	}
+	for _, want := range []string{"plugin_id=p1", "page=2", "page_size=50"} {
+		if !strings.Contains(gotQuery, want) {
+			t.Errorf("query = %q, want it to contain %q", gotQuery, want)
+		}
 	}
 }
 
@@ -211,7 +307,11 @@ func TestMarketplacePluginInstallRequest(t *testing.T) {
 // client-side so the retired `public` value and unknown types never leave.
 func TestMarketplacePluginUpsertRequest(t *testing.T) {
 	// Happy path: the full document is forwarded and the plugin sub-document
-	// survives verbatim.
+	// survives verbatim. The document is backend-realistic on purpose —
+	// manifest_json.plugin_name/plugin_type/labels agree with the outer fields,
+	// which the backend requires on every write. The CLI does not enforce that
+	// invariant (it has no cross-field validator), so this pins the wire shape a
+	// real call takes rather than a stub the server would reject with 400.
 	var gotMethod, gotPath string
 	var gotBody map[string]any
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +324,7 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 	})
 	root.SetArgs([]string{
 		"marketplace", "plugin", "upsert",
-		"--data", `{"plugin":{"plugin_name":"deep miner","plugin_type":"connector","visibility":"private","manifest_json":{},"plugin_json":{"connector":{"type":"stdio"},"mcpServers":{}}}}`,
+		"--data", `{"plugin":{"plugin_name":"deep miner","plugin_type":"connector","visibility":"private","tags":["cli","mcp"],"manifest_json":{"plugin_name":"deep miner","plugin_type":"connector","labels":["cli","mcp"]},"plugin_json":{"connector":{"type":"stdio"},"mcpServers":{}}}}`,
 	})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -235,6 +335,20 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 	plugin, ok := gotBody["plugin"].(map[string]any)
 	if !ok || plugin["plugin_name"] != "deep miner" || plugin["plugin_type"] != "connector" || plugin["visibility"] != "private" {
 		t.Errorf("body.plugin = %#v", gotBody["plugin"])
+	}
+	// The manifest must reach the backend unmodified: the CLI must not helpfully
+	// re-derive or reorder labels, because the comparison there is order-
+	// sensitive canonical JSON.
+	manifest, ok := plugin["manifest_json"].(map[string]any)
+	if !ok {
+		t.Fatalf("body.plugin.manifest_json = %#v, want an object", plugin["manifest_json"])
+	}
+	if manifest["plugin_name"] != "deep miner" || manifest["plugin_type"] != "connector" {
+		t.Errorf("manifest_json = %#v, want it forwarded verbatim", manifest)
+	}
+	labels, _ := manifest["labels"].([]any)
+	if len(labels) != 2 || labels[0] != "cli" || labels[1] != "mcp" {
+		t.Errorf("manifest_json.labels = %#v, want [cli mcp] in order", manifest["labels"])
 	}
 
 	// Each of these documents must be rejected locally before any request is
@@ -313,6 +427,30 @@ func TestMarketplaceDownloadRequest(t *testing.T) {
 	}
 	if gotSpace != "space-1" {
 		t.Errorf("X-Space-Id = %q, want space-1", gotSpace)
+	}
+}
+
+// TestMarketplaceDownloadWritesOutputFile pins that x-octo-binary-response on
+// plugin.download actually registers -o and streams the reconstructed zip to
+// disk. The skill install flow documented in skills.md depends on it, and the
+// path-only test above would still pass if -o silently stopped being wired.
+func TestMarketplaceDownloadWritesOutputFile(t *testing.T) {
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write([]byte("PK\x03\x04payload"))
+	})
+
+	out := filepath.Join(t.TempDir(), "skill.zip")
+	root.SetArgs([]string{"marketplace", "plugin", "download", "--plugin-id", "p1", "-o", out})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read %s: %v", out, err)
+	}
+	if string(got) != "PK\x03\x04payload" {
+		t.Errorf("downloaded bytes = %q, want the streamed zip payload", got)
 	}
 }
 

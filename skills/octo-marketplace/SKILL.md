@@ -51,19 +51,26 @@ a normal upsert/import leaves the plugin listable without a follow-up call. Do
 not attempt to manipulate placements through the CLI.
 
 If a gateway-timeout hits a write, the outcome is UNKNOWN (the CLI surfaces
-`RESULT_UNKNOWN` rather than retrying, because create/upsert/install/delete are
-non-idempotent). Before re-running, re-check `plugin list --scene-code default
---plugin-type <type> --mode mine --q "<name>"` to confirm the plugin does or does
-not exist — that prevents duplicates.
+`RESULT_UNKNOWN` rather than retrying, because create/upsert/install/delete and
+`skill-upload parse` are non-idempotent). Before re-running, re-check `plugin
+list --scene-code default --plugin-type <type> --mode mine --q "<name>"` to
+confirm the plugin does or does not exist — that prevents duplicates. That check
+is only conclusive if you walk every page: it returns 20 rows by default and
+`--q` matches `plugin_name` substrings only, so stop at page 1 and an owner with
+many matches gets a false "not found" and creates a duplicate.
 
 ## Pagination and filtering
 
-`plugin list` is offset-paged: walk `--page` (with `--page-size`) yourself until
-a short page. There is no `--page-all`. The server-side filters are only
-`--category-id`, `--q`, `--tag` (repeatable), `--mode mine`, and `--sort`
+`plugin list` is page-paginated (`--page` / `--page-size`, default 20, max 100;
+an out-of-range `--page-size` is a 400, not a clamp): walk `--page` yourself
+until a short page. There is no `--page-all` — the unified endpoint is
+offset-based and does not advertise the cursor extension the retired per-type
+list ops used. The server-side filters are only `--category-id`, `--q`, `--tag`
+(repeatable), `--mode mine`, and `--sort`
 (`newest`/`oldest`/`updated`/`name`/`placement`/`views`/`installs`/`downloads`/
-`comprehensive`). Narrow anything else (e.g. by connector transport or
-visibility) client-side over the returned rows.
+`comprehensive`). `--q` is a substring match against `plugin_name` only — not
+the display name, description, tags or publisher. Narrow anything else (e.g. by
+connector transport or visibility) client-side over the returned rows.
 
 `plugin-category list` accepts only `--scene-code` + `--plugin-type` (no mode,
 pagination, or keyword); owned/provenance-scoped category counts from the
