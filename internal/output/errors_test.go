@@ -272,6 +272,25 @@ func TestParseBackendError_DetailRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseBackendError_DocsSheetRepairDetailAndHint(t *testing.T) {
+	body := []byte(`{"error":"sheet_too_large","baseVersion":"sv-1","repairDataValidationKey":"default!c","hint":"delete the returned checkbox validation key with PATCH, then retry the write"}`)
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, body)
+
+	if ee.Type != "validation" || ee.Code != "sheet_too_large" {
+		t.Fatalf("error = %+v", ee)
+	}
+	if ee.Hint != "delete the returned checkbox validation key with PATCH, then retry the write" {
+		t.Fatalf("hint = %q", ee.Hint)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(ee.Detail, &detail); err != nil {
+		t.Fatalf("Detail not valid JSON: %v", err)
+	}
+	if detail["baseVersion"] != "sv-1" || detail["repairDataValidationKey"] != "default!c" {
+		t.Fatalf("repair fields missing from detail: %v", detail)
+	}
+}
+
 func TestExitError_ExitCodes(t *testing.T) {
 	cases := []struct {
 		typ  string

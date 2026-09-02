@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -200,6 +201,45 @@ func TestWriteError_ExitError(t *testing.T) {
 	}
 	if errObj["hint"] != "pass --title" {
 		t.Errorf("hint = %v", errObj["hint"])
+	}
+}
+
+func TestWriteError_DocsTooManyDataValidations(t *testing.T) {
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, []byte(`{"error":"too_many_data_validations"}`))
+	var buf bytes.Buffer
+	if err := WriteError(&buf, ee); err != nil {
+		t.Fatalf("WriteError: %v", err)
+	}
+
+	var got struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type    string          `json:"type"`
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Hint    string          `json:"hint"`
+			Detail  json.RawMessage `json:"detail"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.OK || got.Error.Type != "validation" || got.Error.Code != "too_many_data_validations" {
+		t.Fatalf("envelope = %s", buf.String())
+	}
+	if got.Error.Message != "too_many_data_validations" {
+		t.Fatalf("message = %q", got.Error.Message)
+	}
+	const wantHint = "split checkbox validation changes into smaller batches and retry"
+	if got.Error.Hint != wantHint {
+		t.Fatalf("hint = %q, want %q", got.Error.Hint, wantHint)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(got.Error.Detail, &detail); err != nil {
+		t.Fatalf("detail is not valid JSON: %v", err)
+	}
+	if detail["error"] != "too_many_data_validations" {
+		t.Fatalf("detail = %s", got.Error.Detail)
 	}
 }
 

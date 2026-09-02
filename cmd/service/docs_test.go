@@ -1016,13 +1016,13 @@ func TestDocsContentEdit_RequiresBaseVersion(t *testing.T) {
 // TestDocsSheetGet_WholeSheet checks docs.sheet.get hits
 // GET /v1/bot/docs/{docId}/sheet (reader), sends no body and no pagination
 // query when neither flag is set, and surfaces {sheetCells, sheetDims,
-// baseVersion} through the success envelope.
+// sheetDataValidations, baseVersion} through the success envelope.
 func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	var gotMethod, gotPath, gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{"default!0:0":{"v":"A1"}},"sheetDims":{"c0":120},"baseVersion":"BV_ABC=="}`))
+		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{"default!0:0":{"v":"A1"}},"sheetDims":{"c0":120},"sheetDataValidations":{"default!checkbox-a1":{"uid":"checkbox-a1","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":0,"startColumn":0,"endRow":0,"endColumn":0}]}},"baseVersion":"BV_ABC=="}`))
 	})
 	root.SetArgs([]string{"docs", "sheet", "get", "d1"})
 	if err := root.Execute(); err != nil {
@@ -1038,7 +1038,8 @@ func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	var env struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			BaseVersion string `json:"baseVersion"`
+			BaseVersion          string                    `json:"baseVersion"`
+			SheetDataValidations map[string]map[string]any `json:"sheetDataValidations"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
@@ -1046,6 +1047,9 @@ func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	}
 	if !env.OK || env.Data.BaseVersion != "BV_ABC==" {
 		t.Errorf("expected baseVersion BV_ABC== in envelope, got %+v", env)
+	}
+	if rule := env.Data.SheetDataValidations["default!checkbox-a1"]; rule["uid"] != "checkbox-a1" {
+		t.Errorf("sheetDataValidations checkbox rule = %v, want checkbox-a1", rule)
 	}
 }
 
@@ -1072,7 +1076,7 @@ func TestDocsSheetGet_Paginated(t *testing.T) {
 }
 
 // TestDocsSheetEdit_SendsCellsBatchAndIfMatch checks docs.sheet.edit hits
-// PATCH /v1/bot/docs/{docId}/sheet, carries the cells batch (via --data) as a
+// PATCH /v1/bot/docs/{docId}/sheet, carries cell and checkbox batches (via --data) as a
 // JSON object in the body, and sends the base-version token as the If-Match
 // header (the --base-version flag wired to If-Match, not a body/query field).
 func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
@@ -1085,7 +1089,7 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","bytes":64,"baseVersion":"BV_NEXT==","newDocVersionSeq":4}`))
 	})
-	cells := `{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}`
+	cells := `{"cells":{"default!0:0":{"v":0},"default!1:0":null,"default!2:0":{"v":"hi"}},"dataValidations":{"default!checkbox-a1":{"uid":"checkbox-a1","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":0,"startColumn":0,"endRow":0,"endColumn":0}]},"default!checkbox-old":null}}`
 	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--base-version", "BV_ABC==", "--data", cells})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -1097,15 +1101,41 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
 	}
 	cellsMap, ok := gotBody["cells"].(map[string]any)
-	if !ok || len(cellsMap) != 2 {
-		t.Fatalf("cells = %v, want a 2-entry object", gotBody["cells"])
+	if !ok || len(cellsMap) != 3 {
+		t.Fatalf("cells = %v, want a 3-entry object", gotBody["cells"])
 	}
 	set0, ok := cellsMap["default!0:0"].(map[string]any)
-	if !ok || set0["v"] != "hi" {
-		t.Errorf("cells[default!0:0] = %v, want {v:hi}", cellsMap["default!0:0"])
+	if !ok || set0["v"] != float64(0) {
+		t.Errorf("cells[default!0:0] = %v, want {v:0}", cellsMap["default!0:0"])
 	}
 	if v, present := cellsMap["default!1:0"]; !present || v != nil {
 		t.Errorf("cells[default!1:0] = %v, want an explicit null (delete)", cellsMap["default!1:0"])
+	}
+	set2, ok := cellsMap["default!2:0"].(map[string]any)
+	if !ok || set2["v"] != "hi" {
+		t.Errorf("cells[default!2:0] = %v, want {v:hi}", cellsMap["default!2:0"])
+	}
+	validations, ok := gotBody["dataValidations"].(map[string]any)
+	if !ok {
+		t.Fatalf("dataValidations = %v, want an object", gotBody["dataValidations"])
+	}
+	rule, ok := validations["default!checkbox-a1"].(map[string]any)
+	if !ok {
+		t.Fatalf("checkbox rule = %v, want an object", validations["default!checkbox-a1"])
+	}
+	if rule["type"] != "checkbox" || rule["uid"] != "checkbox-a1" || rule["formula1"] != "1" || rule["formula2"] != "0" {
+		t.Errorf("checkbox rule = %v, want checkbox-a1 with numeric-string formulas", rule)
+	}
+	ranges, ok := rule["ranges"].([]any)
+	if !ok || len(ranges) != 1 {
+		t.Fatalf("checkbox ranges = %v, want one range", rule["ranges"])
+	}
+	range0, ok := ranges[0].(map[string]any)
+	if !ok || range0["startRow"] != float64(0) || range0["startColumn"] != float64(0) || range0["endRow"] != float64(0) || range0["endColumn"] != float64(0) {
+		t.Errorf("checkbox range = %v, want A1 coordinates", ranges[0])
+	}
+	if deleted, present := validations["default!checkbox-old"]; !present || deleted != nil {
+		t.Errorf("dataValidations[default!checkbox-old] = %v, want explicit null deletion", deleted)
 	}
 	// The base version travels in the header, not the JSON body.
 	if _, present := gotBody["baseVersion"]; present {
