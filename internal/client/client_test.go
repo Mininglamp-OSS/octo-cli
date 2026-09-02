@@ -69,12 +69,12 @@ func TestDo_LoopSelectsPublicAPIContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	if gotAccept != publicAPIMediaType {
-		t.Fatalf("Accept = %q, want %q", gotAccept, publicAPIMediaType)
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
 	}
 }
 
-func TestDo_LoopPreservesExplicitAccept(t *testing.T) {
+func TestDo_LoopOverridesGenericJSONAccept(t *testing.T) {
 	t.Parallel()
 
 	var gotAccept string
@@ -89,13 +89,13 @@ func TestDo_LoopPreservesExplicitAccept(t *testing.T) {
 		Service: "loop",
 		Method:  http.MethodGet,
 		Path:    "/fleet/api/v1/workspaces",
-		Headers: map[string]string{"Accept": "application/json"},
+		Headers: map[string]string{"accept": "application/json"},
 	})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	if gotAccept != "application/json" {
-		t.Fatalf("Accept = %q, want application/json", gotAccept)
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
 	}
 }
 

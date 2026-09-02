@@ -129,11 +129,12 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 }
 
 func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
-	var gotPath, gotAuth, gotSpace string
+	var gotPath, gotAuth, gotSpace, gotAccept string
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotSpace = r.Header.Get("X-Space-Id")
+		gotAccept = r.Header.Get("Accept")
 		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
 	}))
 	defer gateway.Close()
@@ -164,6 +165,9 @@ func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
 	}
 	if gotSpace != "" {
 		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
 	}
 }
 
