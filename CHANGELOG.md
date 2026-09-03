@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **Loop workspace flag terminology** — generated `--workspace-id` help and the
+  bundled Loop skill now state that the value is a workspace UUID, not a slug
+  or generic selector. The architecture guide records the separate Web slug,
+  Public API UUID, and credential-bound task conventions.
 - **Generated service commands now reject incomplete JSON bodies locally** —
   request-schema `required` fields and nested `minItems` constraints are
   validated after merging `--data` with promoted body flags, before any HTTP

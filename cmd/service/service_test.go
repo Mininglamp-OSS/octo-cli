@@ -291,6 +291,21 @@ func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
 	}
 }
 
+func TestLoopWorkspaceIDFlagDocumentsUUID(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
+	taskList := findCmd(findCmd(findCmd(root, "loop"), "task"), "list")
+	if taskList == nil {
+		t.Fatal("loop task list command not registered")
+	}
+	flag := taskList.Flags().Lookup("workspace-id")
+	if flag == nil {
+		t.Fatal("loop task list --workspace-id flag not registered")
+	}
+	if flag.Usage != "Workspace UUID for workspace-scoped Loop requests." {
+		t.Errorf("--workspace-id usage = %q", flag.Usage)
+	}
+}
+
 func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
 	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
 		t.Fatal("hidden workspace create command must not send a request")
