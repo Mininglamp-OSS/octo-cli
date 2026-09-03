@@ -15,14 +15,14 @@ import (
 
 // newAPICmd implements the generic passthrough:
 //
-//	octo-cli api <METHOD> <PATH> [--params '{...}'] [--data '{...}']
+//	octo-cli api <METHOD> <PATH> [--params '{...}'] [--data '{...}'] [--workspace-id <id>]
 //
 // Auth, service URL routing, retry, envelope, and universal flags are reused
 // verbatim. No spec consultation, no flag auto-generation, no pagination
 // helper — this is the escape hatch when an endpoint isn't in the registry
 // yet or when a caller needs to exercise something bespoke.
 func newAPICmd(f *cmdutil.Factory) *cobra.Command {
-	var paramsSpec, dataSpec, service string
+	var paramsSpec, dataSpec, service, workspaceID string
 
 	cmd := &cobra.Command{
 		Use:   "api <METHOD> <PATH>",
@@ -33,6 +33,7 @@ Examples:
   octo-cli api GET /api/v1/matters --params '{"status":"open"}'
   octo-cli api POST /api/v1/matters --data '{"title":"test"}'
   octo-cli api GET /v1/bot/events --service dmworkim
+  octo-cli api GET /fleet/api/v1/custom --workspace-id 00000000-0000-0000-0000-000000000000
   octo-cli api POST /api/v1/matters --data @body.json
   octo-cli api POST /api/v1/matters --data @-       # read from stdin
 
@@ -74,12 +75,17 @@ flags are not auto-generated and --page-all is not available.`,
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 				return err
 			}
+			var headers map[string]string
+			if workspaceID != "" {
+				headers = map[string]string{"X-Workspace-ID": workspaceID}
+			}
 			respBody, err := cli.Do(cobraCmd.Context(), &client.Request{
 				Service: service,
 				Method:  method,
 				Path:    path,
 				Query:   q,
 				Body:    body,
+				Headers: headers,
 			})
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -92,6 +98,7 @@ flags are not auto-generated and --page-all is not available.`,
 	cmd.Flags().StringVar(&paramsSpec, "params", "", "query parameters as JSON object (e.g. '{\"status\":\"open\"}')")
 	cmd.Flags().StringVar(&dataSpec, "data", "", "request body: inline JSON, @filepath, or @- for stdin")
 	cmd.Flags().StringVar(&service, "service", "", "service key override (matters | dmworkim). Default: OCTO_API_BASE_URL")
+	cmd.Flags().StringVar(&workspaceID, "workspace-id", "", "workspace UUID sent as X-Workspace-ID")
 	return cmd
 }
 

@@ -446,8 +446,11 @@ Discovered from backend code, relevant to CLI alias design and Skill documentati
 Passthrough for API calls not in specs:
 ```bash
 octo-cli api GET /api/v1/matters --params '{"status":"open"}'
+octo-cli api GET /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
-Uses credential provider, outputs envelope, supports universal flags. No spec consultation, no flag auto-gen, no --page-all.
+Uses credential provider, outputs envelope, supports universal flags, and can
+explicitly send workspace context as `X-Workspace-ID` with `--workspace-id`.
+No spec consultation, no flag auto-gen, no --page-all.
 
 ---
 

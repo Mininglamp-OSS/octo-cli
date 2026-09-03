@@ -185,6 +185,7 @@ octo-cli config show                # resolved config (token masked)
 # Generic passthrough for ops that aren't auto-registered.
 octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
 octo-cli api POST /v1/messages --data @body.json
+octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
 
 ## Authentication

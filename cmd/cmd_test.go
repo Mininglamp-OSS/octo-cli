@@ -235,6 +235,57 @@ func TestCmd_API_POSTBody(t *testing.T) {
 	}
 }
 
+func TestCmd_API_WorkspaceIDHeader(t *testing.T) {
+	const workspaceID = "00000000-0000-0000-0000-000000000001"
+	var gotWorkspaceID string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotWorkspaceID = r.Header.Get("X-Workspace-ID")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	f := newTestFactoryWithReg()
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
+	cred := &credential.BotCredential{Token: "app_test"}
+	f.SetConfig(cfg)
+	f.SetCredential(cred)
+	f.SetClient(client.New(cfg, cred, client.Options{}))
+
+	_, _, err := execRoot(t, f, "api", "GET", "/fleet/api/v1/custom", "--workspace-id", workspaceID)
+	if err != nil {
+		t.Fatalf("api GET with workspace context: %v\n%s", err, f.ErrOut.String())
+	}
+	if gotWorkspaceID != workspaceID {
+		t.Errorf("X-Workspace-ID = %q, want %q", gotWorkspaceID, workspaceID)
+	}
+}
+
+func TestCmd_API_OmitsWorkspaceHeaderByDefault(t *testing.T) {
+	var gotWorkspaceHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, gotWorkspaceHeader = r.Header[http.CanonicalHeaderKey("X-Workspace-ID")]
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	f := newTestFactoryWithReg()
+	cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
+	cred := &credential.BotCredential{Token: "app_test"}
+	f.SetConfig(cfg)
+	f.SetCredential(cred)
+	f.SetClient(client.New(cfg, cred, client.Options{}))
+
+	_, _, err := execRoot(t, f, "api", "GET", "/test")
+	if err != nil {
+		t.Fatalf("api GET without workspace context: %v\n%s", err, f.ErrOut.String())
+	}
+	if gotWorkspaceHeader {
+		t.Error("X-Workspace-ID header is present by default")
+	}
+}
+
 func TestCmd_API_PathMustStartWithSlash(t *testing.T) {
 	f := newTestFactoryWithReg()
 	_, errOut, err := execRoot(t, f, "api", "GET", "no-slash")
