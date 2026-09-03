@@ -70,7 +70,7 @@ octo-cli html      list | get | publish | versions | rm     (octo-doc HTML docs;
 
 octo-cli auth      login | status | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
-octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
+octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...] [--workspace-id <uuid>]
 octo-cli config show
 octo-cli completion bash|zsh|fish|powershell
 octo-cli version

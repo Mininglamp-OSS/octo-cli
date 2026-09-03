@@ -208,7 +208,11 @@ When an operation isn't auto-registered yet or you need low-level control:
 ```bash
 octo-cli api GET  /api/v1/messages --params '{"chat_id":"chat-1"}'
 octo-cli api POST /api/v1/messages --data @body.json
+octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
+
+For a workspace-scoped passthrough endpoint, pass `--workspace-id` explicitly;
+the CLI sends it as `X-Workspace-ID` and does not infer a workspace.
 
 ## 8. Domain skills
 

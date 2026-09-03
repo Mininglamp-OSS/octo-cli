@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli api --workspace-id`** — generic passthrough requests can now send
+  explicit workspace context through the `X-Workspace-ID` header.
 - **`octo-cli docs search`** — permission-scoped full-text search across online
   documents, sheets, boards, and mounted HTML documents registered in docs-backend
   via `POST /v1/bot/docs/search`. Supports repeatable `--doc-type` filters, manual
