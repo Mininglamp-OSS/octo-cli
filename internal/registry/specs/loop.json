@@ -6523,7 +6523,7 @@
         "name": "X-Workspace-ID",
         "in": "header",
         "required": true,
-        "description": "Workspace selector for workspace-scoped Loop requests.",
+        "description": "Workspace UUID for workspace-scoped Loop requests.",
         "x-octo-flag": "workspace-id",
         "schema": {
           "type": "string",
