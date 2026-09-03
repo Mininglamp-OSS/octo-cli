@@ -150,7 +150,8 @@ var backendErrorMapping = map[string]struct {
 	"not_found":                 {"api_error", "verify the id/token and that the space is accessible"},
 	"conflict":                  {"validation", "drive state conflicts; re-read and retry"},
 	"invalid_argument":          {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
-	"too_many_data_validations": {"validation", "split checkbox validation changes into smaller batches and retry"},
+	"too_many_data_validations": {"validation", "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"},
+	"too_many_sheet_resources":  {"validation", "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"},
 	"internal":                  {"api_error", "internal server error; retry or report"},
 }
 
