@@ -46,14 +46,19 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	if !strings.Contains(content, "external-image ingest") {
 		t.Error("SKILL.md must route external-image ingest guidance to common.md")
 	}
+	for _, capability := range []string{"freeze panes", "shared filters", "sorting", "data validation/dropdowns"} {
+		if !strings.Contains(content, capability) {
+			t.Errorf("SKILL.md must advertise spreadsheet capability %q and route it to sheet.md", capability)
+		}
+	}
 
 	// The reference files are embedded (ride the */*.md glob) and each leads with
 	// its surface's read/edit commands.
 	refChecks := map[string][]string{
 		"octo-docs/doc.md":    {"docs content get", "docs content edit", `"attachId": "att_xxx"`, `"width": 300`},
-		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit"},
+		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit", `"freeze"`, `"filters"`, `"dataValidations"`, `"listMultiple"`, "`dims` may be the only non-empty surface", "octo-cli docs export <docId> --export-format xlsx", "`${logicalId}!r:c`", "first scrollable", "normalizes it to `-1` on readback", "absolute 0-based worksheet column", "`filterColumns:[]`", "font-color filter", `{"c0":null,"default:c0":200}`, "412 base_version_stale", "413 too_many_sheet_resources"},
 		"octo-docs/board.md":  {"docs scene get", "docs scene edit"},
-		"octo-docs/common.md": {"docs comments add", "docs versions restore", "docs members set", "docs attachments presign", "/attachments/ingest", `"attachId": "att_xxx"`, `"width": 300`},
+		"octo-docs/common.md": {"docs comments add", "docs versions restore", "docs members set", "docs attachments presign", "/attachments/ingest", `"attachId": "att_xxx"`, `"width": 300`, "every returned sheet map", "floating images, hyperlinks, merges, sheet tabs, freeze panes"},
 	}
 	for path, needles := range refChecks {
 		rb, err := FS.ReadFile(path)
@@ -66,6 +71,133 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 			if !strings.Contains(rc, n) {
 				t.Errorf("%s must document %q", path, n)
 			}
+		}
+		if path == "octo-docs/sheet.md" && strings.Contains(rc, "{v,f,s}") {
+			t.Error("octo-docs/sheet.md must not describe the cell shape as only {v,f,s}; p and t must be preserved")
+		}
+		if path == "octo-docs/sheet.md" && strings.Contains(rc, "There is no server-side sheet export endpoint") {
+			t.Error("octo-docs/sheet.md must not deny the built-in docs export xlsx endpoint")
+		}
+		if path == "octo-docs/sheet.md" && strings.Contains(rc, "clear the filter first") {
+			t.Error("octo-docs/sheet.md must not claim clearing a filter preserves the visible subset")
+		}
+		if path == "octo-docs/sheet.md" && strings.Contains(rc, "a fourth batch") {
+			t.Error("octo-docs/sheet.md must not use the obsolete four-surface count")
+		}
+	}
+}
+
+func TestOctoDocsSheetSortingContract(t *testing.T) {
+	rb, err := FS.ReadFile("octo-docs/sheet.md")
+	if err != nil {
+		t.Fatalf("read octo-docs/sheet.md: %v", err)
+	}
+	content := string(rb)
+	start := strings.Index(content, "Sorting is different:")
+	end := strings.Index(content, "### Single-select and multi-select dropdown lists")
+	if start < 0 || end <= start {
+		t.Fatalf("sorting section bounds missing: start=%d end=%d", start, end)
+	}
+	sorting := strings.Join(strings.Fields(content[start:end]), " ")
+	for _, want := range []string{
+		"raw coordinate rewrite",
+		"move the complete selected row block",
+		"complete `{v,f,s,p,t}` shape",
+		"destinations that become empty",
+		"stores `f` verbatim and does not re-anchor relative formula references",
+		"row `dims`",
+		"`sheetDataValidations` ranges",
+		"`sheetHyperLinks`",
+		"`sheetMerges`",
+		"drawings",
+		"cell comments",
+		"`sheetDims` is one workbook-level map",
+		"keys may be sheet-qualified",
+		"`${logicalId}:r<idx>` keys",
+		"bare `r<idx>` keys address the legacy default sheet",
+		"Reads return dimension keys exactly as stored",
+		"evaluate the current `sheetFilters` criteria",
+		"leaves hidden row coordinates unchanged",
+		`"default!1:2":null`,
+		`"f":"=LEN(B2)"`,
+		`"f":"=LEN(B3)"`,
+	} {
+		if !strings.Contains(sorting, want) {
+			t.Errorf("spreadsheet sorting section must document %q", want)
+		}
+	}
+	if strings.Contains(sorting, "clear the filter first") {
+		t.Error("sorting section must not claim clearing a filter preserves the visible subset")
+	}
+}
+
+func TestOctoDocsSheetDimsExportContract(t *testing.T) {
+	rb, err := FS.ReadFile("octo-docs/sheet.md")
+	if err != nil {
+		t.Fatalf("read octo-docs/sheet.md: %v", err)
+	}
+	content := string(rb)
+	start := strings.Index(content, "## Exporting a sheet to Excel (.xlsx)")
+	end := strings.Index(content, "## Commenting on a cell")
+	if start < 0 || end <= start {
+		t.Fatalf("export section bounds missing: start=%d end=%d", start, end)
+	}
+	exporting := strings.Join(strings.Fields(content[start:end]), " ")
+	for _, want := range []string{
+		"`sheetDims` is one workbook-level map",
+		"`${logicalId}:c<idx>` / `${logicalId}:r<idx>`",
+		"route each width or height to that worksheet",
+		"Bare `c<idx>` / `r<idx>` keys belong to the legacy default sheet",
+		"Reads return all keys exactly as stored",
+		"do not duplicate unqualified dimensions across every tab",
+	} {
+		if !strings.Contains(exporting, want) {
+			t.Errorf("spreadsheet export section must document %q", want)
+		}
+	}
+}
+
+func TestOctoDocsSheetDropdownContract(t *testing.T) {
+	rb, err := FS.ReadFile("octo-docs/sheet.md")
+	if err != nil {
+		t.Fatalf("read octo-docs/sheet.md: %v", err)
+	}
+	content := string(rb)
+	start := strings.Index(content, "### Single-select and multi-select dropdown lists")
+	end := strings.Index(content, "### Column widths, row heights, and images")
+	if start < 0 || end <= start {
+		t.Fatalf("dropdown section bounds missing: start=%d end=%d", start, end)
+	}
+	dropdowns := strings.Join(strings.Fields(content[start:end]), " ")
+	for _, want := range []string{
+		"one array per logical sheet for every validation family",
+		"may mix `list`, `listMultiple`, `checkbox`",
+		"internal Y.Map's flat `${logicalId}!${uid}` key shape",
+		`type:"list"`,
+		`type:"listMultiple"`,
+		"`formula1` to a JSON-serialized string array",
+		"`formula2` to the same-length comma-separated color list",
+		"`uid` is 1–128 characters",
+		"neither `!` nor control characters",
+		"at least one non-empty `ranges:[{startRow,startColumn,endRow,endColumn}]` entry",
+		"recommended client-rendering inputs, not additional server-required fields",
+		"multi-select cell value uses the same serialized JSON-array form",
+		"`dataValidations` is replace-style per logical sheet",
+		"read `sheetDataValidations`",
+		"include every existing rule you need to keep",
+		"deployed read surface cannot enumerate every validation family",
+	} {
+		if !strings.Contains(dropdowns, want) {
+			t.Errorf("spreadsheet dropdown section must document %q", want)
+		}
+	}
+	for _, superseded := range []string{
+		`sheetDataValidations: { "logicalId!uid":`,
+		"Only `type:\"checkbox\"` is accepted",
+		"only checkbox rules are supported",
+	} {
+		if strings.Contains(content, superseded) {
+			t.Errorf("spreadsheet skill retains superseded validation contract %q", superseded)
 		}
 	}
 }

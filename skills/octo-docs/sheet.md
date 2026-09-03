@@ -1,8 +1,9 @@
-# octo-docs — Spreadsheet cells, dims & images (`doc_type: sheet`)
+# octo-docs — Spreadsheet cells, layout & rules (`doc_type: sheet`)
 
 Read this when the target is a **spreadsheet** (`doc_type: sheet`) and you need to
 read or edit its cells, column widths / row heights, floating images, hyperlinks,
-merged ranges, sheet tabs, or export it.
+merged ranges, sheet tabs, freeze panes, shared filters, sorting, data
+validation/dropdowns, or export it.
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
 
@@ -13,18 +14,24 @@ octo-cli docs export <docId> --export-format xlsx -o spreadsheet.xlsx
 ```
 
 A spreadsheet stores a flat cell map on the Y.Doc, keyed `sheetId!row:col` (e.g.
-`default!0:0`), with values `{v,f,s}` — `v` a string/number/boolean/null, `f` an
-optional formula, `s` an opaque resolved style object. (Cells authored in the web
-may also carry Univer's `p` rich-text snapshot and `t` cell-type; both round-trip
-untouched.) Same read-token-then-guarded-write discipline as the body surface.
+`default!0:0`), with values `{v,f,s,p,t}` — `v` a string/number/boolean/null,
+`f` an optional formula, `s` an opaque resolved style object, `p` Univer's
+rich-text snapshot, and `t` the cell type. All five fields round-trip untouched.
+Same read-token-then-guarded-write discipline as the body surface.
 
 ```bash
-# Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + baseVersion
+# Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + freeze +
+# filters + validation/dropdown rules + baseVersion
 # (reader). Response:
-#   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px },
+#   { docId, sheetCells: { "sheetId!row:col": {v,f,s,p,t} },
+#     sheetDims: { "${logicalId}:c<idx>|${logicalId}:r<idx>|c<idx>|r<idx>": px },
 #     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} },
 #     sheetMerges: { "logicalId:sr:sc:er:ec": true },
-#     sheetList: { "logicalId": {name,order} }, baseVersion }
+#     sheetList: { "logicalId": {name,order} },
+#     sheetFreeze: { "logicalId": {startRow,startColumn,xSplit,ySplit} },
+#     sheetFilters: { "logicalId": {ref,filterColumns?:[{colId,filters}]} },
+#     sheetDataValidations: { "logicalId": [rules of every validation type] },
+#     baseVersion }
 octo-cli docs sheet get <docId>
 
 # Batch-edit cells (writer). --base-version is REQUIRED and is sent as the
@@ -32,20 +39,189 @@ octo-cli docs sheet get <docId>
 # A cell value of null DELETES that cell.
 octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+```
 
-# Set column widths / row heights via the optional `dims` batch, keyed
-# `c<idx>` (column) or `r<idx>` (row) -> pixels; a null value deletes a dim.
-# Provide cells, dims, or drawings (at least one non-empty). These are the same
-# `sheetDims` values `docs sheet get` returns.
+### Freeze panes
+
+Freeze rows and columns with one compact record per worksheet. Coordinates are
+0-based. `xSplit` is the number of frozen columns and `ySplit` the number of
+frozen rows. `startColumn` / `startRow` are the first scrollable column / row, so
+freezing the first N columns / rows normally uses N for both the start and split
+on that axis. Use `-1` as the `start*` value for an unfrozen axis. The server
+also accepts `0` on an unfrozen axis but normalizes it to `-1` on readback.
+
+```bash
+# Freeze the header row and first column. Read a fresh baseVersion first.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "freeze":{"default":{"startRow":1,"startColumn":1,"xSplit":1,"ySplit":1}}
+}'
+
+# Freeze only the header row (column axis remains unfrozen).
 octo-cli docs sheet edit <docId> --base-version "<token>" \
-  --data '{"dims":{"c0":200,"r3":40,"c5":null}}'
+  --data '{"freeze":{"default":{"startRow":1,"startColumn":-1,"xSplit":0,"ySplit":1}}}'
+
+# Freeze only the first column (row axis remains unfrozen).
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"freeze":{"default":{"startRow":-1,"startColumn":1,"xSplit":1,"ySplit":0}}}'
+
+# Remove all frozen panes from the default sheet.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"freeze":{"default":null}}'
+```
+
+### Shared filter and sorting
+
+A filter has a 0-based rectangular `ref`. Its first row is the header row and
+is intentionally kept visible; criteria apply to the data rows below it. The
+example below keeps rows whose column B raw value is `待处理`. This is a value
+filter, not a font-color filter—cell font color does not decide whether a row
+matches. `colId` is the absolute 0-based worksheet column, not an offset from
+`ref.startColumn`. Filter state is shared, so collaborators see the same hidden
+rows. If you send `filterColumns:[]`, the server keeps the filter range but omits
+`filterColumns` from readback.
+
+```bash
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "filters":{"default":{
+    "ref":{"startRow":0,"startColumn":0,"endRow":100,"endColumn":1},
+    "filterColumns":[{"colId":1,"filters":{"filters":["待处理"]}}]
+  }}
+}'
+
+# Remove the filter range and its criteria.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"filters":{"default":null}}'
+```
+
+Sorting is different: there is no durable `sort` rule. It is a raw coordinate
+rewrite, not a spreadsheet-native sort. Read the current cells, move the complete
+selected row block, and carry every cell's complete `{v,f,s,p,t}` shape to its
+destination in one guarded edit. Use `null` for destinations that become empty;
+omitting them leaves old cells in place. The server stores `f` verbatim and does
+not re-anchor relative formula references. Rewrite relative references for each
+destination, or do not sort that range through this API. Never sort only the key
+column; move every cell in each selected row so values, styles, rich text, and
+cell types stay together.
+
+The same raw-coordinate rule applies to any state keyed by or containing a
+coordinate: row `dims`, `sheetDataValidations` ranges, `sheetHyperLinks`,
+`sheetMerges`, drawings, and cell comments all stay at their old coordinates.
+Freeze panes and filter ranges/columns also remain fixed, which is normally the
+intended behavior. Remap affected row dims, validation ranges, hyperlink anchors,
+and merge keys in the same atomic edit; because `dataValidations` is replace-
+style, resend every rule you need to keep. `sheetDims` is one workbook-level map
+whose keys may be sheet-qualified. When sorting a non-default tab, remap that
+tab's `${logicalId}:r<idx>` keys; bare `r<idx>` keys address the legacy default
+sheet. Reads return dimension keys exactly as stored.
+Bare and prefixed keys for the default sheet are distinct stored entries. When
+migrating a legacy bare key, read `sheetDims` first and clear the bare twin in
+the same batch, for example `{"c0":null,"default:c0":200}`; otherwise both
+entries remain and downstream precedence is undefined.
+Drawings are not returned by `docs sheet get`, and cell comments are managed
+outside the sheet-edit surface, so do not sort an affected range unless you
+already have authoritative metadata and a safe way to preserve those anchors.
+
+Rows hidden by an active shared filter still appear in `docs sheet get`. A full
+rectangle rewrite therefore includes them. To sort only visible rows, evaluate
+the current `sheetFilters` criteria before editing and build a sparse permutation
+that leaves hidden row coordinates unchanged; clearing the filter does not
+preserve the visible subset.
+
+```bash
+# Example result of sorting two A:D data rows by column A ascending. The old
+# second row had an empty C cell, so its new destination is explicitly deleted.
+# Column D held row-relative formulas; each f is rewritten for its destination.
+# Every non-null value shown must come from the immediately preceding sheet get.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells":{
+    "default!1:0":{"v":"a"},"default!1:1":{"v":"row-a"},"default!1:2":null,"default!1:3":{"f":"=LEN(B2)"},
+    "default!2:0":{"v":"b"},"default!2:1":{"v":"row-b"},"default!2:2":{"v":"kept-with-row-b"},"default!2:3":{"f":"=LEN(B3)"}
+  }
+}'
+```
+
+### Single-select and multi-select dropdown lists
+
+Dropdown lists are stored as data-validation rules. The public REST contract is
+one array per logical sheet for every validation family; an array may mix
+`list`, `listMultiple`, `checkbox`, and any other rules returned by the server.
+Do not send the internal Y.Map's flat `${logicalId}!${uid}` key shape through
+`dataValidations`; checkbox is not the sole supported rule family.
+
+The server requires every rule to have a unique `uid` within the sheet and at
+least one non-empty `ranges:[{startRow,startColumn,endRow,endColumn}]` entry. A
+`uid` is 1–128 characters and must contain neither `!` nor control characters.
+For a working colored dropdown, use `type:"list"` for a single selection or
+`type:"listMultiple"` for multiple selections; set `formula1` to a
+JSON-serialized string array, `formula2` to the same-length comma-separated
+color list, `showDropDown:true`, and `renderMode:2`. Those dropdown fields are
+recommended client-rendering inputs, not additional server-required fields.
+Do not add an `operator` to either list type. A multi-select cell value uses the
+same serialized JSON-array form (for example `"[\"待处理\",\"已完成\"]"`),
+while a single-select cell stores the selected label directly.
+
+`dataValidations` is replace-style per logical sheet: the array you send
+replaces that sheet's entire rule set. Before adding or changing a dropdown,
+read `sheetDataValidations` with `docs sheet get`, merge the intended change,
+and resend every existing rule you need to keep. Do not make a replace-style
+write if the deployed read surface cannot enumerate every validation family on
+that sheet: a filtered read cannot preserve omitted rules.
+
+```bash
+# One atomic edit creates both dropdown types and sets initial values. This
+# array is complete only when the sheet has no other rules; otherwise start
+# from sheetDataValidations and include every existing rule you need to keep.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells":{
+    "default!1:0":{"v":"待处理"},
+    "default!1:1":{"v":"[\"待处理\",\"已完成\"]"}
+  },
+  "dataValidations":{"default":[
+    {
+      "uid":"bot-status-single","type":"list",
+      "formula1":"[\"待处理\",\"处理中\",\"已完成\"]",
+      "formula2":"#E4F4FE,#FEF0E6,#EFFBD0",
+      "showDropDown":true,"renderMode":2,
+      "ranges":[{"startRow":1,"startColumn":0,"endRow":100,"endColumn":0}]
+    },
+    {
+      "uid":"bot-status-multiple","type":"listMultiple",
+      "formula1":"[\"待处理\",\"处理中\",\"已完成\"]",
+      "formula2":"#E4F4FE,#FEF0E6,#EFFBD0",
+      "showDropDown":true,"renderMode":2,
+      "ranges":[{"startRow":1,"startColumn":1,"endRow":100,"endColumn":1}]
+    }
+  ]}
+}'
+
+# Replace all rules on the sheet with an empty set (null works too).
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"dataValidations":{"default":[]}}'
+```
+
+Each successful edit returns a new `baseVersion`; use that new value for the
+next edit. Reusing an older token correctly fails with `412 base_version_stale`.
+
+### Column widths, row heights, and images
+
+```bash
+# Set column widths / row heights via the optional `dims` batch. Use
+# `${logicalId}:c<idx>` / `${logicalId}:r<idx>` for a specific tab; bare
+# `c<idx>` / `r<idx>` addresses the legacy default sheet. The two forms are
+# separate stored keys, so clear a legacy bare twin while migrating. A null
+# deletes a dim.
+# `dims` may be the only non-empty surface in a guarded batch; across the whole
+# request, at least one sheet edit surface must be non-empty.
+# These are the same `sheetDims` values `docs sheet get` returns.
+octo-cli docs sheet edit <docId> --base-version "<token>" \
+  --data '{"dims":{"c0":null,"default:c0":200,"default:r3":40,"default:c5":null}}'
 
 # Insert / remove a FLOATING IMAGE via the optional `drawings` batch, keyed
 # `${sheetId}!${drawingId}`. The value is a serialized Univer ISheetImage with
 # the bytes inline as a base64 data URL in `source`; `drawingId` MUST equal the
 # key's id. A null value deletes that image. `transform` is the pixel box;
-# `sheetTransform` anchors it to a cell range (from/to). NOT returned by
-# `docs sheet get` (the read surface is cells+dims only).
+# `sheetTransform` anchors it to a cell range (from/to). Drawings are the one
+# worksheet resource not returned by `docs sheet get`.
 octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
   "drawings": { "default!img1": {
     "drawingId": "img1", "drawingType": 0, "imageSourceType": "BASE64",
@@ -80,10 +256,10 @@ octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
 
 ### Cell hyperlinks — the `hyperlinks` batch
 
-A cell hyperlink is its OWN edit surface (a fourth batch alongside cells/dims/
-drawings), NOT a cell field: a link lives in the `sheetHyperLinks` map and points
-back at a cell by `row`/`column`. Put the visible text in the cell's `v`
-separately. Each entry is keyed `${sheetId}!${linkId}` (linkId alnum/`-`/`_`) and
+A cell hyperlink is its OWN edit surface, not a cell field: a link lives in the
+`sheetHyperLinks` map and points back at a cell by `row`/`column`. Put the
+visible text in the cell's `v` separately. Each entry is keyed
+`${sheetId}!${linkId}` (linkId alnum/`-`/`_`) and
 is `{ id, row, column, payload, display? }` where `id` MUST equal the key's linkId,
 `payload` is the URL (only `http`/`https`/`mailto`, or an internal `#…` jump — other
 schemes are rejected), and `display` is an optional label. A null value deletes a
@@ -217,9 +393,11 @@ via `--number ... --pattern ...`. Common cases (all round-trip verified):
 A whole-sheet `docs sheet get` of a grid over the server's ~1MB read cap returns
 `413 sheet_too_large`. Pass `--limit <n>` to read it in pages instead: each
 response carries `hasMore` and an opaque `nextCursor`; feed that back via
-`--cursor` until `hasMore` is false. `sheetDims` comes back on the first page
-only. Each page is bounded by both `--limit` and the byte cap, so no page
-exceeds ~1MB regardless of `--limit`.
+`--cursor` until `hasMore` is false. Paging slices only the cells; `sheetDims`,
+`sheetHyperLinks`, `sheetMerges`, `sheetList`,
+`sheetFreeze`, `sheetFilters`, and `sheetDataValidations` all come back on the
+first page only. Each page is bounded by both `--limit` and the byte cap, so no
+page exceeds ~1MB regardless of `--limit`.
 
 ```bash
 cursor=""
@@ -238,25 +416,38 @@ sheet changed since your `docs sheet get`, an edit is rejected with
 sheet is written between pages your `--cursor` is rejected with
 `409 sheet_changed` (restart from the first page for a consistent snapshot).
 Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
-`413 too_many_cells` / `413 cell_too_large` (write size caps),
+`413 too_many_cells` / `413 too_many_sheet_resources` / `413 cell_too_large`
+(write size caps),
 `400 invalid_body` (missing base version or malformed shape),
 `400 invalid_limit` / `400 invalid_cursor` (bad pagination params), and
-`422 sheet_cell_invalid` (a cell/dim/drawing/hyperlink/merge/tab violates its
-contract or key shape).
+`422 sheet_cell_invalid` (a cell/dim/drawing/hyperlink/merge/tab/freeze/filter/
+data-validation violates its contract or key shape). The server removes an
+`operator` from otherwise-valid `list` / `listMultiple` rules; omit it so the
+request and readback are identical.
 
 ## Exporting a sheet to Excel (.xlsx)
 
-There is no server-side sheet export endpoint. A bot exports by **reading the
-sheet and serializing it locally**: `docs sheet get` returns everything needed —
-`sheetCells` (`{v,f,s}` per cell) and `sheetDims` (column widths / row heights) —
-so feed those into whatever spreadsheet library the bot's runtime has (e.g.
-`xlsx-js-style` in Node, `openpyxl` in Python): map `default!r:c` → row r / col c,
-write `v` (or `f` as a formula), apply `s` as the cell style, and set widths from
-`c<idx>` / heights from `r<idx>`. For a large grid, page the read with
-`--limit`/`--cursor` and stream rows into the workbook. Merged ranges come back in
-`sheetMerges` (`logicalId:sr:sc:er:ec`) and the tabs in `sheetList`, so an export can
-carry values + styles + dimensions + merges across every sheet; only floating images
-/ formulas stay write-only (not in the read surface).
+For a standard workbook export, use the server-backed command shown above:
+`octo-cli docs export <docId> --export-format xlsx -o spreadsheet.xlsx`.
+Only when custom reconstruction is required should a bot read the sheet and
+serialize it locally: `docs sheet get` returns the readable worksheet state —
+`sheetCells` (`{v,f,s,p,t}` per cell), `sheetDims` (column widths / row heights),
+and the other returned worksheet maps. Feed those into the spreadsheet library
+available in the bot's runtime (for example, `xlsx-js-style` in Node or
+`openpyxl` in Python): split each `${logicalId}!r:c` key into its worksheet ID
+and 0-based row / column, create or select that worksheet, write `v` (or `f` as
+a formula), apply `s` as the cell style, preserve `p` rich text and `t` cell type
+when the library supports them. `sheetDims` is one workbook-level map whose keys
+may be sheet-qualified: split `${logicalId}:c<idx>` / `${logicalId}:r<idx>` and
+route each width or height to that worksheet. Bare `c<idx>` / `r<idx>` keys
+belong to the legacy default sheet. Reads return all keys exactly as stored; do
+not duplicate unqualified dimensions across every tab. Translate `sheetFreeze`,
+`sheetFilters`, and `sheetDataValidations` into the library's freeze-pane,
+auto-filter, and data-validation APIs when supported. For a large grid, page the
+read with `--limit`/`--cursor` and stream rows into the workbook. Merged ranges
+come back in `sheetMerges` (`logicalId:sr:sc:er:ec`) and tabs in `sheetList`, so an
+export can carry each sheet's values, formulas, styles, merges, and worksheet resources;
+only drawings remain write-only.
 
 ## Commenting on a cell
 

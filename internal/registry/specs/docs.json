@@ -380,8 +380,8 @@
     "/v1/bot/docs/{docId}/sheet": {
       "get": {
         "operationId": "docs.sheet.get",
-        "summary": "Read a spreadsheet's live cells + dims + base version (needs reader)",
-        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s}), its column-width / row-height overrides (sheetDims), its cell hyperlinks (sheetHyperLinks), its merged cell ranges (sheetMerges), its sheet tabs / pages (sheetList, logicalId -> {name,order}), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read of a grid over the 1MB cap returns 413 sheet_too_large; pass --limit (and follow nextCursor via --cursor) to read it in pages instead. In paged mode each page is bounded by both --limit and the byte cap, sheetDims, sheetHyperLinks, sheetMerges and sheetList are returned on the first page only, and the response carries hasMore + nextCursor. A --cursor whose snapshot moved returns 409 sheet_changed (restart from the first page); a bad --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
+        "summary": "Read a spreadsheet's live cells, worksheet resources, and base version (needs reader)",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, and sheetDataValidations are returned on the first page only. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -424,11 +424,11 @@
                     },
                     "sheetCells": {
                       "type": "object",
-                      "description": "flat cell map keyed `sheetId!row:col`; each value is {v?,f?,s?}. A page slice in paged mode."
+                      "description": "flat cell map keyed `sheetId!row:col`; each value is {v?,f?,s?,p?,t?}. A page slice in paged mode."
                     },
                     "sheetDims": {
                       "type": "object",
-                      "description": "column-width / row-height overrides keyed c<idx>/r<idx>. Returned on the first page only in paged mode."
+                      "description": "column-width / row-height overrides in one workbook-level map. Keys `${logicalId}:c<idx>` / `${logicalId}:r<idx>` target a specific tab; bare `c<idx>` / `r<idx>` address the legacy default sheet. Reads return keys exactly as stored. Returned on the first page only in paged mode."
                     },
                     "sheetHyperLinks": {
                       "type": "object",
@@ -442,6 +442,18 @@
                       "type": "object",
                       "description": "sheet tabs / pages keyed by logicalId; each value is {name,order}. The first tab's logicalId is 'default'. Returned on the first page only in paged mode."
                     },
+                    "sheetFreeze": {
+                      "type": "object",
+                      "description": "freeze panes keyed by logicalId; each value is {startRow,startColumn,xSplit,ySplit}. An unfrozen axis reads back with startRow/startColumn -1 even when the write used 0. Returned on the first page only in paged mode."
+                    },
+                    "sheetFilters": {
+                      "type": "object",
+                      "description": "shared auto-filter state keyed by logicalId; each value is {ref,filterColumns?:[{\"colId\":<absolute 0-based column>,\"filters\":{\"filters\":[<raw values>]}}]}. ref.startRow is the header row and stays visible; criteria apply to rows below it. An empty filterColumns array is omitted on readback. Returned on the first page only in paged mode."
+                    },
+                    "sheetDataValidations": {
+                      "type": "object",
+                      "description": "data-validation arrays keyed by logicalId; each array can contain every returned validation family, including `list`, `listMultiple`, and `checkbox`. This public shape is not the internal flat `${logicalId}!${uid}` Y.Map. Dropdown formula1 is the serialized option list and formula2 is the comma-separated option-color list. Returned on the first page only in paged mode."
+                    },
                     "baseVersion": {
                       "type": "string",
                       "description": "opaque base64 base-version token; pass to `docs sheet edit --base-version`"
@@ -451,7 +463,7 @@
                       "description": "paged mode: more cells remain after this page"
                     },
                     "nextCursor": {
-                      "type": "string",
+                      "type": ["string", "null"],
                       "description": "paged mode: opaque cursor for the next page (null when hasMore is false); pass back via --cursor"
                     }
                   }
@@ -463,8 +475,8 @@
       },
       "patch": {
         "operationId": "docs.sheet.edit",
-        "summary": "Apply a batch sheet edit — cells / dims / drawings / hyperlinks / merges / sheet tabs (needs writer)",
-        "description": "Applies a batch of cell, dimension, and/or drawing set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell). The optional dims batch sets column widths / row heights: a JSON object `{ \"c<idx>\"|\"r<idx>\": <px> | null }` (e.g. `{\"c0\":200,\"r3\":40}`; a null value deletes that dim). The optional drawings batch inserts/removes floating images: a JSON object `{ \"sheetId!drawingId\": <ISheetImage> | null }` (image bytes ride inline as a base64 data URL in `source`; a math formula rides here too as a float-DOM drawing with `drawingType:8`, `componentKey:\"octo-math-formula\"`, and the LaTeX in `data.latex`). The optional hyperlinks batch sets cell links: a JSON object `{ \"sheetId!linkId\": {id,row,column,payload,display?} | null }` (payload is the URL — http/https/mailto or an internal #jump — and the link points at a cell by row/column; put the visible text in that cell's `v`). The optional merges batch merges cell ranges: a JSON object `{ \"logicalId:sr:sc:er:ec\": true | null }` (0-based startRow:startCol:endRow:endCol; e.g. `{\"default:0:0:1:2\":true}` merges the A1:C2 block; a null value un-merges that range). The optional sheets batch manages sheet TABS / pages: a JSON object `{ \"logicalId\": {\"name\":\"<tab name>\",\"order\":<n>} | null }` (set to create / rename / reorder a tab, or null to delete it; read the current tabs from `docs sheet get`'s sheetList — the first tab's logicalId is 'default'; to ADD a sheet, set a NEW logicalId here AND write that sheet's cells with keys `logicalId!row:col`). Provide `cells`, `dims`, `drawings`, `hyperlinks`, `merges`, or `sheets` via --data; at least one must be non-empty. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell/dim/drawing count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version / malformed shape / all batches empty → 400 invalid_body, a cell/dim/drawing/merge/tab violating its contract or key shape → 422 sheet_cell_invalid.",
+        "summary": "Apply a batch sheet edit — cells, layout, filters, validation, and dropdowns (needs writer)",
+        "description": "Applies one atomic spreadsheet batch under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as If-Match); stale writes return 412 base_version_stale. Existing surfaces are cells, dims, drawings, hyperlinks, merges, and sheets. P0 worksheet resources are: freeze `{logicalId:{startRow,startColumn,xSplit,ySplit}|null}`, filters `{logicalId:{ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[columns]}|null}`, and dataValidations `{logicalId:[rules]|null}`. The public dataValidations and sheetDataValidations shapes are per-sheet arrays for every validation family, including list, listMultiple, and checkbox; do not send the internal flat `${logicalId}!${uid}` Y.Map shape. The server requires each rule uid to be unique within the sheet, 1–128 characters, free of `!` and control characters, plus at least one non-empty ranges entry. For a working colored `list` or `listMultiple` dropdown, also send type, formula1 (JSON-serialized option labels), formula2 (the same number of comma-separated colors), showDropDown, and renderMode; omit operator. A listMultiple cell stores its selected labels as a JSON-array string, while a list cell stores the label directly. dataValidations is replace-style per logical sheet: read sheetDataValidations first and resend every rule to keep, but do not write if the deployed read surface omits any validation family on that sheet. null removes a freeze/filter/resource entry, and null or [] removes all validation rules for that sheet. An empty filterColumns array is omitted on readback. An unfrozen freeze axis accepts startRow/startColumn 0 but normalizes it to -1. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Bare and prefixed keys for the default sheet are separate entries; when migrating a legacy key, read sheetDims and clear the bare twin in the same batch, for example `{\"c0\":null,\"default:c0\":200}`. Rows hidden by an active shared filter still participate in a full rectangle rewrite. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. Any one surface may be the only non-empty batch member, but at least one surface must be non-empty. Only doc_type 'sheet' is accepted. Gates: cell/dim/drawing count over the max → 413 too_many_cells; worksheet-resource key count over the max → 413 too_many_sheet_resources; a single cell's payload too large → 413 cell_too_large; missing base version, malformed shape, or all batches empty → 400 invalid_body; a cell/dim/drawing/hyperlink/merge/tab/freeze/filter/data-validation violating its contract or key shape → 422 sheet_cell_invalid.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -495,11 +507,11 @@
                 "properties": {
                   "cells": {
                     "type": "object",
-                    "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?} to set the cell, or null to delete it. At least one of v/f/s must be present on a set. Pass via --data."
+                    "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?,\"p\":<rich-text object>?,\"t\":<number>?} to set the cell, or null to delete it. At least one of v/f/s/p/t must be present on a set. Pass via --data."
                   },
                   "dims": {
                     "type": "object",
-                    "description": "batch of column-width / row-height ops keyed `c<idx>` (column) or `r<idx>` (row), e.g. `{\"c0\":200,\"r3\":40}`. Each value is a positive pixel number to set, or null to delete that dim. Optional; provide cells, dims, or drawings (at least one non-empty). Pass via --data."
+                    "description": "batch of column-width / row-height ops in one workbook-level map. Use `${logicalId}:c<idx>` / `${logicalId}:r<idx>` to target a specific tab; bare `c<idx>` / `r<idx>` address the legacy default sheet. Bare and prefixed default-sheet keys are separate stored entries: read sheetDims first and clear the bare twin while migrating, for example `{\"c0\":null,\"default:c0\":200}`. Each value is a positive pixel number to set, or null to delete that dim. Optional. Pass via --data."
                   },
                   "drawings": {
                     "type": "object",
@@ -507,7 +519,7 @@
                   },
                   "hyperlinks": {
                     "type": "object",
-                    "description": "batch of cell-hyperlink ops keyed `${sheetId}!${linkId}` (e.g. `default!lnk1`). Each value is {id (== the key's linkId), row, column (0-based cell anchor), payload:\"<url>\" (http/https/mailto or an internal #jump), display?:\"<label>\"} to set, or null to delete. The link lives outside cell data and points at a cell by row/column; put the cell's visible text in that cell's `v`. Optional; provide cells, dims, drawings, or hyperlinks (at least one non-empty). Pass via --data."
+                    "description": "batch of cell-hyperlink ops keyed `${sheetId}!${linkId}` (e.g. `default!lnk1`). Each value is {id (== the key's linkId), row, column (0-based cell anchor), payload:\"<url>\" (http/https/mailto or an internal #jump), display?:\"<label>\"} to set, or null to delete. The link lives outside cell data and points at a cell by row/column; put the cell's visible text in that cell's `v`. Optional. Pass via --data."
                   },
                   "merges": {
                     "type": "object",
@@ -515,7 +527,19 @@
                   },
                   "sheets": {
                     "type": "object",
-                    "description": "batch of sheet-TAB (page) ops keyed by logicalId. Value {name,order} to create / rename / reorder a tab, or null to delete it. Read the current tabs from `docs sheet get`'s sheetList (logicalId -> {name,order}); the first tab's logicalId is 'default'. To ADD a sheet: set a NEW logicalId here AND write that sheet's cells with keys `${logicalId}!row:col`. Optional; provide any of cells / dims / drawings / hyperlinks / merges / sheets (at least one non-empty). Pass via --data."
+                    "description": "batch of sheet-TAB (page) ops keyed by logicalId. Value {name,order} to create / rename / reorder a tab, or null to delete it. Read the current tabs from `docs sheet get`'s sheetList (logicalId -> {name,order}); the first tab's logicalId is 'default'. To ADD a sheet: set a NEW logicalId here AND write that sheet's cells with keys `${logicalId}!row:col`. Optional. Pass via --data."
+                  },
+                  "freeze": {
+                    "type": "object",
+                    "description": "batch of freeze-pane configs keyed by logicalId. Value {startRow,startColumn,xSplit,ySplit}; startRow/startColumn are the first scrollable row/column and normally equal ySplit/xSplit when freezing the first N rows/columns. Use -1 for the start coordinate of an unfrozen axis; 0 is accepted there but normalizes to -1 on readback. null unfreezes that sheet. Optional. Pass via --data."
+                  },
+                  "filters": {
+                    "type": "object",
+                    "description": "batch of shared auto-filter snapshots keyed by logicalId. Value {ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[{\"colId\":<absolute 0-based column>,\"filters\":{\"filters\":[<raw values>]}}]}. ref.startRow is the header row and stays visible; criteria apply to rows below it. colId is not an offset from ref.startColumn. Sending filterColumns:[] keeps the range but omits filterColumns on readback. null removes the filter. Optional. Pass via --data."
+                  },
+                  "dataValidations": {
+                    "type": "object",
+                    "description": "replace-style data-validation arrays keyed by logicalId. This public REST shape covers every validation family, including list, listMultiple, and checkbox; do not use the internal flat `${logicalId}!${uid}` Y.Map shape. The server requires each rule to have a uid unique within that sheet (1–128 characters, no `!` or control characters) and at least one non-empty ranges:[{startRow,startColumn,endRow,endColumn}] entry. It replaces that sheet's entire rule set, so read sheetDataValidations first and resend every rule to keep; do not write if the deployed read surface omits any validation family. For a working colored dropdown, use type 'list' or 'listMultiple', formula1 as a JSON string array of labels, formula2 as the same number of comma-separated colors, showDropDown:true, renderMode:2, and no operator. These dropdown fields are recommended rendering inputs, not additional server-required fields. A listMultiple cell stores selected labels in v as a JSON-array string; a list cell stores the label directly. The server strips operator from otherwise-valid list rules. null or [] removes all rules for the sheet. Optional. Pass via --data."
                   }
                 }
               }
@@ -979,7 +1003,7 @@
       "get": {
         "operationId": "docs.versions.state",
         "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
-        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON ({kind:'document', doc, sheetCells, sheetDims, schemaVersion, docVersionSeq}); a board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
+        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON plus the spreadsheet maps exposed by this endpoint ({kind:'document', doc, sheetCells, sheetDims, sheetFreeze, sheetFilters, sheetDataValidations, schemaVersion, docVersionSeq}); every sheet map is an empty {} for a text document. A board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
         "x-octo-risk": "read",
         "parameters": [
           { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -997,6 +1021,9 @@
                     "doc": { "type": "object", "description": "document/sheet only: the snapshot body as ProseMirror document JSON" },
                     "sheetCells": { "type": "object", "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)" },
                     "sheetDims": { "type": "object", "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)" },
+                    "sheetFreeze": { "type": "object", "description": "document/sheet only: freeze panes keyed by logicalId (empty {} for a text document)" },
+                    "sheetFilters": { "type": "object", "description": "document/sheet only: shared filter range and criteria keyed by logicalId (empty {} for a text document)" },
+                    "sheetDataValidations": { "type": "object", "description": "document/sheet only: per-sheet arrays containing every data-validation family, including dropdowns and checkboxes (empty {} for a text document)" },
                     "scene": { "type": "object", "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})" },
                     "schemaVersion": { "type": "integer" },
                     "docVersionSeq": { "type": "integer" }

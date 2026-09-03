@@ -1,7 +1,7 @@
 ---
 name: octo-docs
 version: 0.2.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheet cells (dims + images), read and batch-edit whiteboard scenes, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheets including cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -21,7 +21,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
 | Your task | Read |
 |---|---|
-| Read/edit a **spreadsheet** (`doc_type: sheet`): cells, formulas, styles, column widths / row heights (dims), floating **images**, paged reads, xlsx export | **`sheet.md`** |
+| Read/edit a **spreadsheet** (`doc_type: sheet`): cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
 | Continue from a searchable **HTML document** (`doc_type: html`): resolve its document reference, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
@@ -99,8 +99,8 @@ Pagination depends on the endpoint's response contract:
 
 `docs attachments upload` (binary helper), invites, access-requests, and
 link-card are out of scope here. Body editing is limited to `doc_type: doc`
-incremental block ops (`doc.md`), `doc_type: sheet` cell/dims/drawings batches
-(`sheet.md`), and `doc_type: board` scene batches (`board.md`). `doc_type: html`
+incremental block ops (`doc.md`), the spreadsheet batches documented in
+`sheet.md`, and `doc_type: board` scene batches (`board.md`). `doc_type: html`
 belongs to the separate `html` domain, uses its returned document reference, and
 is published as
 immutable versions; it cannot be read or edited through these three body

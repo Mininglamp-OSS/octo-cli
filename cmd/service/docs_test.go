@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1110,6 +1111,161 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 	// The base version travels in the header, not the JSON body.
 	if _, present := gotBody["baseVersion"]; present {
 		t.Errorf("baseVersion must not be duplicated into the JSON body; got %v", gotBody["baseVersion"])
+	}
+}
+
+// TestDocsSheetEdit_SendsP0ResourcesAndIfMatch pins the generic --data transport:
+// freeze, filter and single/multi dropdown payloads reach one PATCH with the
+// optimistic-concurrency header. Schema key presence is tested by the registry
+// loader test; this request schema intentionally remains an open object.
+func TestDocsSheetEdit_SendsP0ResourcesAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":512,"baseVersion":"BV_NEXT==","newDocVersionSeq":5}`))
+	})
+	payload := `{
+		"freeze":{
+			"default":{"startRow":1,"startColumn":1,"xSplit":1,"ySplit":1},
+			"rowOnly":{"startRow":1,"startColumn":-1,"xSplit":0,"ySplit":1},
+			"columnOnly":{"startRow":-1,"startColumn":1,"xSplit":1,"ySplit":0}
+		},
+		"filters":{"default":{"ref":{"startRow":0,"startColumn":0,"endRow":20,"endColumn":1},"filterColumns":[{"colId":1,"filters":{"filters":["待处理"]}}]}},
+		"dataValidations":{"default":[
+			{"uid":"single","type":"list","formula1":"[\"待处理\",\"已完成\"]","formula2":"#E4F4FE,#EFFBD0","showDropDown":true,"renderMode":2,"ranges":[{"startRow":1,"startColumn":0,"endRow":20,"endColumn":0}]},
+			{"uid":"multiple","type":"listMultiple","formula1":"[\"待处理\",\"已完成\"]","formula2":"#E4F4FE,#EFFBD0","showDropDown":true,"renderMode":2,"ranges":[{"startRow":1,"startColumn":1,"endRow":20,"endColumn":1}]}
+		]}
+	}`
+	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--base-version", "BV_P0==", "--data", payload})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/v1/bot/docs/d1/sheet" {
+		t.Fatalf("got %s %s, want PATCH /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_P0==" {
+		t.Fatalf("If-Match = %q, want BV_P0==", gotIfMatch)
+	}
+	freeze, ok := gotBody["freeze"].(map[string]any)
+	if !ok {
+		t.Fatalf("freeze = %#v, want object", gotBody["freeze"])
+	}
+	wantFreeze := map[string]map[string]float64{
+		"default":    {"startRow": 1, "startColumn": 1, "xSplit": 1, "ySplit": 1},
+		"rowOnly":    {"startRow": 1, "startColumn": -1, "xSplit": 0, "ySplit": 1},
+		"columnOnly": {"startRow": -1, "startColumn": 1, "xSplit": 1, "ySplit": 0},
+	}
+	for logicalID, wantFields := range wantFreeze {
+		gotConfig, ok := freeze[logicalID].(map[string]any)
+		if !ok {
+			t.Errorf("freeze.%s = %#v, want object", logicalID, freeze[logicalID])
+			continue
+		}
+		for field, want := range wantFields {
+			if got := gotConfig[field]; got != want {
+				t.Errorf("freeze.%s.%s = %#v, want %v", logicalID, field, got, want)
+			}
+		}
+	}
+	filters, ok := gotBody["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters = %#v, want default filter", gotBody["filters"])
+	}
+	filterDefault, ok := filters["default"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default = %#v, want object", filters["default"])
+	}
+	filterRef, ok := filterDefault["ref"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.ref = %#v, want object", filterDefault["ref"])
+	}
+	for field, want := range map[string]float64{
+		"startRow": 0, "startColumn": 0, "endRow": 20, "endColumn": 1,
+	} {
+		if got := filterRef[field]; got != want {
+			t.Errorf("filters.default.ref.%s = %#v, want %v", field, got, want)
+		}
+	}
+	filterColumns, ok := filterDefault["filterColumns"].([]any)
+	if !ok || len(filterColumns) != 1 {
+		t.Fatalf("filters.default.filterColumns = %#v, want one-element array", filterDefault["filterColumns"])
+	}
+	filterColumn, ok := filterColumns[0].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.filterColumns[0] = %#v, want object", filterColumns[0])
+	}
+	if got := filterColumn["colId"]; got != float64(1) {
+		t.Errorf("filters.default.filterColumns[0].colId = %#v, want 1", got)
+	}
+	filterCriteria, ok := filterColumn["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.filterColumns[0].filters = %#v, want object", filterColumn["filters"])
+	}
+	if got, want := filterCriteria["filters"], []any{"待处理"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filters.default.filterColumns[0].filters.filters = %#v, want %#v", got, want)
+	}
+	validations, ok := gotBody["dataValidations"].(map[string]any)
+	if !ok {
+		t.Fatalf("dataValidations = %#v, want object", gotBody["dataValidations"])
+	}
+	rules, ok := validations["default"].([]any)
+	if !ok || len(rules) != 2 {
+		t.Fatalf("dataValidations.default = %#v, want two rules", validations["default"])
+	}
+	wantRules := []struct {
+		uid         string
+		typeName    string
+		startColumn float64
+	}{
+		{uid: "single", typeName: "list", startColumn: 0},
+		{uid: "multiple", typeName: "listMultiple", startColumn: 1},
+	}
+	for i, wantRule := range wantRules {
+		rule, ok := rules[i].(map[string]any)
+		if !ok {
+			t.Errorf("dataValidations.default[%d] = %#v, want object", i, rules[i])
+			continue
+		}
+		for field, want := range map[string]any{
+			"uid":          wantRule.uid,
+			"type":         wantRule.typeName,
+			"formula1":     `["待处理","已完成"]`,
+			"formula2":     "#E4F4FE,#EFFBD0",
+			"showDropDown": true,
+			"renderMode":   float64(2),
+		} {
+			if got := rule[field]; !reflect.DeepEqual(got, want) {
+				t.Errorf("dataValidations.default[%d].%s = %#v, want %#v", i, field, got, want)
+			}
+		}
+		ranges, ok := rule["ranges"].([]any)
+		if !ok || len(ranges) != 1 {
+			t.Errorf("dataValidations.default[%d].ranges = %#v, want one-element array", i, rule["ranges"])
+			continue
+		}
+		gotRange, ok := ranges[0].(map[string]any)
+		if !ok {
+			t.Errorf("dataValidations.default[%d].ranges[0] = %#v, want object", i, ranges[0])
+			continue
+		}
+		wantRange := map[string]any{
+			"startRow": float64(1), "startColumn": wantRule.startColumn,
+			"endRow": float64(20), "endColumn": wantRule.startColumn,
+		}
+		if !reflect.DeepEqual(gotRange, wantRange) {
+			t.Errorf("dataValidations.default[%d].ranges[0] = %#v, want %#v", i, gotRange, wantRange)
+		}
+	}
+	if _, present := gotBody["baseVersion"]; present {
+		t.Errorf("baseVersion must stay in If-Match, got body value %#v", gotBody["baseVersion"])
 	}
 }
 
