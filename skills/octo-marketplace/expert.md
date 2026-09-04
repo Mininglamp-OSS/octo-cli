@@ -1,7 +1,7 @@
 # octo-marketplace — Expert and Squad workflows
 
-Read `SKILL.md` first for authentication, payload normalization, versioning, the
-no-separate-publish rule, and the shared safety rule. This file covers the
+Read `SKILL.md` first for authentication, payload normalization, the
+save→publish/review lifecycle, and the shared safety rule. This file covers the
 **专家市场**: `expert` (专家, a single agent, `plugin_type=expert`) and `squad`
 (专家团, an expert team, `plugin_type=expert_team`). Both are plugins; only the
 type and package shape differ.
@@ -39,9 +39,11 @@ octo-cli marketplace plugin download --plugin-id <skill-plugin-id> -o <tmp>/skil
 
 ## Create / update
 
-Create or edit through the unified write path. Every save is a version snapshot
-and attaches/self-heals the default market placement, so a created expert or
-team is listable immediately — there is no separate publish step. Show the
+Create or edit an **unpublished** draft through the unified write path. Every
+save records a version snapshot but does not publish the expert or team. An
+already-published Space expert/team cannot be changed with upsert; submit its
+new manifest/package/relations through `plugin review-request create --data
+@submission.json` so approval atomically applies the frozen upgrade. Show the
 target and intended change, then continue only after explicit confirmation:
 
 ```bash
@@ -58,11 +60,11 @@ every write:
   consumer secrets.
 - **expert_team**: `plugin_json` is a single `AGENTS.md` rendering the
   collaboration/dispatch, leader, strategies, dependencies, and permissions.
-  Members and their skills are `relations` entries; valid `relation_type`
-  values are `expert_team_expert` (team → member expert), `expert_skill`
-  (expert → skill), and `expert_connector` (expert → connector). The team
-  leader is the member relation whose `data.is_leader` is true; every
-  relation requires `target_plugin_id` and `relation_type`.
+  A team's own `relations` array may contain only `expert_team_expert` entries
+  (team → member expert). The leader is the member relation whose
+  `data.is_leader` is true. `expert_skill` and `expert_connector` belong on each
+  member expert's own upsert/review document, never directly on the team source.
+  Every relation requires `target_plugin_id` and `relation_type`.
 
 Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin version list --plugin-id <id>` after a release.
 
@@ -84,11 +86,23 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 >     "visibility": "space",
 >     "tags": ["research", "analysis"],
 >     "manifest_json": {
->       "plugin_name": "deep-miner",        // == plugin.plugin_name
->       "plugin_type": "expert",            // == plugin.plugin_type
->       "labels": ["research", "analysis"]  // == plugin.tags, same order
+>       "$schema": "cowork-plugin-manifest-2.0.json",
+>       "plugin_name": "deep-miner",
+>       "plugin_type": "expert",
+>       "name": "deep-miner",
+>       "description": "Research and analysis expert",
+>       "labels": ["research", "analysis"],
+>       "examples": []
 >     },
->     "plugin_json": { "attachments": [] }
+>     "plugin_json": {
+>       "$schema": "cowork-plugin-package-2.0.json",
+>       "attachments": [{
+>         "path": "AGENTS.md",
+>         "content_type": "raw",
+>         "mime_type": "text/markdown",
+>         "raw_content": "# Deep Miner\n\nResearch the question and cite evidence."
+>       }]
+>     }
 >   },
 >   "relations": []
 > }
@@ -109,9 +123,11 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 > so the destruction is silent. Echo `relation_id` for rows you want to keep
 > verbatim.
 
-Bumping `plugin.version` (and adding a changelog via the import flow for
-skill-bearing experts) is how a new release is recorded; there is no separate
-publish command.
+After saving, publish with `plugin publish --plugin-id <id> --version <x.y.z>
+--changelog "…"`. A Space-visible expert/team enters review; follow the
+applicant or reviewer flow in `SKILL.md`. `plugin import` is skill-only and must
+never be used to release an expert or expert_team. To review changed declared
+content directly, use `plugin review-request create --data @submission.json`.
 
 ## Install into a Loop workspace
 

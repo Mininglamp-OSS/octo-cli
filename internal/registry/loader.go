@@ -56,16 +56,73 @@ func New() (*Registry, error) {
 	if err := checkDuplicateOperationIDs(r.specs); err != nil {
 		return nil, err
 	}
+	for service, doc := range r.specs {
+		if err := validateConditionalQueryMetadata(doc); err != nil {
+			return nil, fmt.Errorf("registry: service %s: %w", service, err)
+		}
+	}
 	return r, nil
 }
 
-// checkDuplicateOperationIDs rejects an operationId claimed by more than one
-// spec. The id namespace is global: GetOperation resolves an id by iterating
-// the service map, so a duplicate would make command routing depend on Go's
-// randomized map order — a different backend could win on every process start.
-// Mirrors the duplicate-service guard above: a collision between embedded
-// specs is a build-time bug, surfaced on first registry load. Hidden and
-// disabled operations are included because GetOperation still resolves them.
+// validateConditionalQueryMetadata makes the opt-in extension fail closed at
+// registry load rather than silently weakening a required-parameter guard.
+func validateConditionalQueryMetadata(doc map[string]any) error {
+	var validationErr error
+	walkOperations(doc, func(path, method string, op map[string]any) {
+		if validationErr == nil {
+			validationErr = validateOperationConditionalQueries(doc, path, method, op)
+		}
+	})
+	return validationErr
+}
+
+func validateOperationConditionalQueries(doc map[string]any, path, method string, op map[string]any) error {
+	params := operationParameters(doc, path, op)
+	queryTypes := make(map[string]string, len(params))
+	for i := range params {
+		if params[i].In == "query" {
+			queryTypes[params[i].Name] = params[i].Type
+		}
+	}
+	for _, raw := range rawOperationParameters(doc, path, op) {
+		pm, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		ext, declared := pm["x-octo-required-unless-query"]
+		if !declared {
+			continue
+		}
+		conditional, ok := ext.(map[string]any)
+		name, nameOK := conditional["name"].(string)
+		_, valueOK := conditional["value"].(string)
+		dependent, dependentOK := pm["name"].(string)
+		if !ok || !nameOK || strings.TrimSpace(name) == "" || !valueOK || !dependentOK || dependent == "" {
+			return fmt.Errorf("%s %s has malformed x-octo-required-unless-query", strings.ToUpper(method), path)
+		}
+		peerType, exists := queryTypes[name]
+		if !exists || peerType != "string" || name == dependent {
+			return fmt.Errorf("%s %s conditional query %q must name a distinct string query parameter", strings.ToUpper(method), path, name)
+		}
+	}
+	return nil
+}
+
+func rawOperationParameters(doc map[string]any, path string, op map[string]any) []any {
+	var result []any
+	if paths, ok := doc["paths"].(map[string]any); ok {
+		if item, ok := paths[path].(map[string]any); ok {
+			if params, ok := item["parameters"].([]any); ok {
+				result = append(result, params...)
+			}
+		}
+	}
+	if params, ok := op["parameters"].([]any); ok {
+		result = append(result, params...)
+	}
+	return result
+}
+
 func checkDuplicateOperationIDs(specs map[string]map[string]any) error {
 	owner := map[string]string{}
 	services := make([]string, 0, len(specs))
@@ -172,6 +229,13 @@ type OperationInfo struct {
 	Risk    string `json:"risk,omitempty"`
 }
 
+// ConditionalQueryRequirement describes x-octo-required-unless-query: the
+// parameter carrying it is required unless the named peer query equals Value.
+type ConditionalQueryRequirement struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 // ParamInfo describes a single parameter on a path or operation (one entry in
 // an OpenAPI `parameters` array). Covers path, query, and header parameters;
 // the `In` field records which. Type/Default/Enum come from the nested
@@ -192,6 +256,11 @@ type ParamInfo struct {
 	MinLength int    `json:"min_length,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
 	Pattern   string `json:"pattern,omitempty"`
+	// RequiredUnlessQuery makes an otherwise optional query parameter required
+	// unless another query parameter equals the declared value. It is populated
+	// by x-octo-required-unless-query for contracts such as Marketplace's
+	// plugin_type, which is optional only when mode=mine.
+	RequiredUnlessQuery *ConditionalQueryRequirement `json:"required_unless_query,omitempty"`
 	// Secret records the x-octo-secret extension. A secret parameter's value is
 	// masked in --verbose traces and --dry-run output (share/invite tokens,
 	// share passwords) so a credential-equivalent value never lands in a log.
@@ -229,10 +298,10 @@ type SchemaInfo struct {
 	Description          string                `json:"description,omitempty"`
 	WriteOnly            bool                  `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
-	// validator enforces Required, MinItems and Enum for every service. Loop
-	// Public API operations additionally enforce closed-object and minimum-
-	// property constraints, MinLength, MaxLength and MaxItems. Pattern
-	// remains descriptive and is left to the backend.
+	// validator enforces Required, MinItems and Enum for every service. Loop and
+	// explicitly strict services additionally enforce closed-object and minimum-
+	// property constraints, MinLength, MaxLength and MaxItems. Pattern stays
+	// descriptive because stateful backend exceptions cannot be represented here.
 	MinLength     int    `json:"min_length,omitempty"`
 	MaxLength     int    `json:"max_length,omitempty"`
 	MinItems      int    `json:"min_items,omitempty"`
@@ -282,10 +351,15 @@ type BodyVariant struct {
 // binary response).
 type OperationDetail struct {
 	OperationInfo
-	Parameters          []ParamInfo     `json:"parameters,omitempty"`
-	RequestBody         *SchemaInfo     `json:"request_body,omitempty"`
-	RequestBodyRequired bool            `json:"request_body_required,omitempty"`
-	ResponseSchema      *SchemaInfo     `json:"response_schema,omitempty"`
+	Parameters          []ParamInfo `json:"parameters,omitempty"`
+	RequestBody         *SchemaInfo `json:"request_body,omitempty"`
+	RequestBodyRequired bool        `json:"request_body_required,omitempty"`
+	ResponseSchema      *SchemaInfo `json:"response_schema,omitempty"`
+	// StrictRequestSchema opts a service into the extended JSON Schema request
+	// checks (closed objects, lengths, patterns and size constraints) that Loop's
+	// Public API always uses. It lets another strongly typed API request the same
+	// local guarantees without changing historical domains.
+	StrictRequestSchema bool            `json:"strict_request_schema,omitempty"`
 	Pagination          *PaginationInfo `json:"pagination,omitempty"`
 	// BaseURLEnv is retained in schema output for compatibility with existing
 	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
@@ -460,9 +534,10 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			Summary: stringOf(op["summary"]),
 			Risk:    stringOf(op["x-octo-risk"]),
 		},
-		BaseURLEnv:  stringOf(doc["x-octo-base-url"]),
-		Credential:  stringOf(doc["x-octo-credential"]),
-		SpaceHeader: boolOf(doc["x-octo-space-header"]),
+		BaseURLEnv:          stringOf(doc["x-octo-base-url"]),
+		Credential:          stringOf(doc["x-octo-credential"]),
+		SpaceHeader:         boolOf(doc["x-octo-space-header"]),
+		StrictRequestSchema: truthy(doc["x-octo-strict-request-schema"]),
 	}
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
 
@@ -562,6 +637,12 @@ func operationParameters(doc map[string]any, pathStr string, op map[string]any) 
 				Description: stringOf(pm["description"]),
 				FlagName:    stringOf(pm["x-octo-flag"]),
 				Secret:      truthy(pm["x-octo-secret"]),
+			}
+			if conditional, ok := pm["x-octo-required-unless-query"].(map[string]any); ok {
+				name, value := stringOf(conditional["name"]), stringOf(conditional["value"])
+				if name != "" {
+					parameter.RequiredUnlessQuery = &ConditionalQueryRequirement{Name: name, Value: value}
+				}
 			}
 			if schema, ok := pm["schema"].(map[string]any); ok {
 				parameter.Type = stringOf(schema["type"])

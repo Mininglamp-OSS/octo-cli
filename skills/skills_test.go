@@ -175,6 +175,8 @@ func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
 		"plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>",
 		"plugin delete --plugin-id <id>",
 		"plugin version list",          // version snapshots live behind version list
+		"plugin publish --plugin-id",   // saving a draft does not publish it
+		"plugin review-request create", // declared-content upgrade review
 		"AGENTS.md",                    // expert instruction / team collaboration doc
 		"expert_skill",                 // member skills are relations
 		"CLI `.data` + `._pagination`", // list flattening, not .data.data
@@ -258,6 +260,9 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 		"skill-upload parse <skill_upload_id>",
 		"skill-parse-task get <parse_task_id>",
 		"plugin import --parse-task-id",
+		"plugin publish --plugin-id <plugin-id>",
+		"--parse-task-id <parse-task-id>",
+		"plugin review-request create --data @review.json",
 		"never duplicated",
 	} {
 		if !strings.Contains(content, want) {
@@ -268,10 +273,9 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
 		t.Error("owned-name lookup must happen before upload initialization")
 	}
-	// The retired synchronous publish path and the unified plugin.publish op
-	// (removed from the backend in refactor "drop formal publish; every save is
-	// a version snapshot") must both be gone from the workflow docs.
-	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url", "plugin publish --plugin-id"} {
+	// Retired per-type commands and presigned-download wording must stay gone;
+	// publication now uses the unified plugin.publish operation above.
+	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url"} {
 		if strings.Contains(content, gone) {
 			t.Errorf("skills workflow must not reference the retired %q surface", gone)
 		}

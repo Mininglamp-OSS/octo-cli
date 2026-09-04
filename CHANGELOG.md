@@ -11,15 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`octo-cli marketplace plugin` family (unified plugin surface)** — one command
   family over the backend's unified `/plugins/*` API, replacing the retired
   per-type `skill` / `mcp` / `marketplace expert` / `marketplace squad` surfaces
-  (44 legacy ops → 17). Resource kind is selected with `--plugin-type`
+  (44 legacy ops → 25). Resource kind is selected with `--plugin-type`
   (`skill` / `connector` / `expert` / `expert_team`; the old `mcp` maps to
   `connector`, `squad` to `expert_team`): `plugin list` / `get` / `version list`
-  / `skillmd` / `download` / `upsert` / `delete` / `install` /
-  `import`, plus `plugin-category list` / `plugin-tag list`. The skill
+  / `skillmd` / `download` / `upsert` / `delete` / `install` / `import` /
+  `publish` / `delist`, plus the six-command `plugin review-request` workflow and
+  `plugin-category list` / `plugin-tag list`. The skill
   upload→parse→import pipeline (`skill-upload`, `skill-parse-task`) and icon
   presign helpers are retained. Client-side gates before any request is sent:
-  `plugin list` requires `--scene-code` and `--plugin-type`; `plugin upsert`
-  requires a full `plugin` document (`plugin_name` / `plugin_type` /
+  `plugin list` requires `--scene-code` and requires `--plugin-type` except for
+  the all-types `--mode mine` view; `plugin upsert` requires a full `plugin`
+  document (`plugin_name` / `plugin_type` /
   `visibility` / `manifest_json` / `plugin_json`) and gates `plugin_type`,
   `visibility` (`space` / `private`; the retired `public` is refused, matching
   `plugin import`), the `sort` vocabulary, and relations' `relation_type`
@@ -29,15 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `x-octo-retry: never` so ambiguous gateway failures surface as
   `RESULT_UNKNOWN` instead of auto-replaying a non-idempotent mutation.
   Value-level rules remain backend-enforced.
-- **The backend has no separate publish step.** After unification every
-  `plugin upsert` (and `plugin import`) IS a version snapshot — each save
-  appends an auto-increment `plugin_versions` row; `plugin.version` is the
-  human-readable `current_version` label, not a separate release action. The
-  op removed here is `skill.publish` (`POST /market/api/v1/bot/skills/publish`),
-  the only publish operation the previous spec carried; it is replaced by the
-  upload→parse→`plugin import` pipeline, which snapshots the version itself. A
-  fresh create attaches (and update self-heals) the default market placement so
-  a saved plugin is immediately listable.
+- **Marketplace publishing is an explicit, review-aware lifecycle.** `plugin
+  upsert` and skill `plugin import` save drafts and version snapshots. `plugin
+  publish` lists private content immediately, while Space-visible content opens
+  a review request and stays draft until a Space owner/admin approves it. The
+  `plugin review-request create|list|get|approve|reject|cancel` family exposes
+  frozen-submission review, and `plugin delist` takes published Space content
+  down without deleting it. Reads expose `listing_state`, `display_status`, and
+  `review_id` so callers can distinguish draft, pending, published, rejected,
+  and delisted states.
 - **`octo-cli marketplace plugin install`** — installs an `expert` / `expert_team`
   plugin into a Loop workspace (`--workspace-id`, `--runtime-id`) through the
   unified API. This exposes the install-to-Loop capability that the retired

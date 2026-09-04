@@ -23,17 +23,25 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		method string
 		path   string
 	}{
-		"plugin.list":          {http.MethodGet, "/market/api/v1/plugins"},
-		"plugin.get":           {http.MethodGet, "/market/api/v1/plugins/detail"},
-		"plugin.version.list":  {http.MethodGet, "/market/api/v1/plugins/versions"},
-		"plugin.skillmd":       {http.MethodGet, "/market/api/v1/plugins/skill_md"},
-		"plugin.download":      {http.MethodGet, "/market/api/v1/plugins/download"},
-		"plugin_category.list": {http.MethodGet, "/market/api/v1/plugin_categories"},
-		"plugin_tag.list":      {http.MethodGet, "/market/api/v1/plugin_tags"},
-		"plugin.upsert":        {http.MethodPost, "/market/api/v1/plugins/upsert"},
-		"plugin.delete":        {http.MethodPost, "/market/api/v1/plugins/delete"},
-		"plugin.install":       {http.MethodPost, "/market/api/v1/plugins/install"},
-		"plugin.import":        {http.MethodPost, "/market/api/v1/plugins/import"},
+		"plugin.list":                   {http.MethodGet, "/market/api/v1/plugins"},
+		"plugin.get":                    {http.MethodGet, "/market/api/v1/plugins/detail"},
+		"plugin.version.list":           {http.MethodGet, "/market/api/v1/plugins/versions"},
+		"plugin.skillmd":                {http.MethodGet, "/market/api/v1/plugins/skill_md"},
+		"plugin.download":               {http.MethodGet, "/market/api/v1/plugins/download"},
+		"plugin_category.list":          {http.MethodGet, "/market/api/v1/plugin_categories"},
+		"plugin_tag.list":               {http.MethodGet, "/market/api/v1/plugin_tags"},
+		"plugin.upsert":                 {http.MethodPost, "/market/api/v1/plugins/upsert"},
+		"plugin.delete":                 {http.MethodPost, "/market/api/v1/plugins/delete"},
+		"plugin.install":                {http.MethodPost, "/market/api/v1/plugins/install"},
+		"plugin.import":                 {http.MethodPost, "/market/api/v1/plugins/import"},
+		"plugin.publish":                {http.MethodPost, "/market/api/v1/plugins/publish"},
+		"plugin.delist":                 {http.MethodPost, "/market/api/v1/plugins/delist"},
+		"plugin.review_request.list":    {http.MethodGet, "/market/api/v1/plugins/review_requests"},
+		"plugin.review_request.create":  {http.MethodPost, "/market/api/v1/plugins/review_requests"},
+		"plugin.review_request.get":     {http.MethodGet, "/market/api/v1/plugins/review_requests/{review_id}"},
+		"plugin.review_request.approve": {http.MethodPost, "/market/api/v1/plugins/review_requests/{review_id}/approve"},
+		"plugin.review_request.reject":  {http.MethodPost, "/market/api/v1/plugins/review_requests/{review_id}/reject"},
+		"plugin.review_request.cancel":  {http.MethodPost, "/market/api/v1/plugins/review_requests/{review_id}/cancel"},
 
 		// Retained helper pipelines (unchanged endpoints).
 		"mcp.probe":                {http.MethodPost, "/market/api/v1/mcps/_probe"},
@@ -69,11 +77,17 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 	// because the backend requires a pending task and answers a re-POST with 409
 	// CONFLICT instead of the original parse-task ID.
 	neverRetry := map[string]bool{
-		"plugin.upsert":      true,
-		"plugin.delete":      true,
-		"plugin.install":     true,
-		"plugin.import":      true,
-		"skill_upload.parse": true,
+		"plugin.upsert":                 true,
+		"plugin.delete":                 true,
+		"plugin.install":                true,
+		"plugin.import":                 true,
+		"plugin.publish":                true,
+		"plugin.delist":                 true,
+		"plugin.review_request.create":  true,
+		"plugin.review_request.approve": true,
+		"plugin.review_request.reject":  true,
+		"plugin.review_request.cancel":  true,
+		"skill_upload.parse":            true,
 	}
 	for id := range wants {
 		op, ok := r.GetOperation(id)
@@ -94,7 +108,6 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 	for _, gone := range []string{
 		"skill.list", "skill.get", "skill.download", "skill.publish",
 		"mcp.list", "mcp.create", "marketplace.expert.list", "marketplace.squad.create",
-		"plugin.publish",
 	} {
 		if _, ok := r.GetOperation(gone); ok {
 			t.Errorf("legacy operation %q must be retired", gone)
@@ -146,19 +159,19 @@ func TestMarketplacePluginListRequest(t *testing.T) {
 	}
 }
 
-// TestMarketplacePluginListRequiresSceneAndType pins that the backend-required
-// scene_code and plugin_type are enforced locally before any request is sent.
-// Both branches are exercised: the enforcement is per-flag, so covering only
-// one would leave the other free to regress.
-func TestMarketplacePluginListRequiresSceneAndType(t *testing.T) {
+// TestMarketplacePluginListRequiresSceneAndConditionallyType pins the latest
+// backend contract: scene_code is always required, while plugin_type is required
+// for the catalog grid but optional for mode=mine's all-types owner view.
+func TestMarketplacePluginListRequiresSceneAndConditionallyType(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"missing scene-code", []string{"--plugin-type", "skill"}, "scene-code"},
-		{"missing plugin-type", []string{"--scene-code", "default"}, "plugin-type"},
-		{"missing both", nil, "required"},
+		{"catalog missing plugin-type", []string{"--scene-code", "default"}, "plugin-type"},
+		{"catalog empty plugin-type", []string{"--scene-code", "default", "--plugin-type", ""}, "plugin-type"},
+		{"missing both", nil, "scene-code"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +183,22 @@ func TestMarketplacePluginListRequiresSceneAndType(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("mine accepts all plugin types", func(t *testing.T) {
+		var gotQuery string
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "list", "--scene-code", "default", "--mode", "mine"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if !strings.Contains(gotQuery, "mode=mine") || strings.Contains(gotQuery, "plugin_type=") {
+			t.Fatalf("query = %q, want mode=mine without plugin_type", gotQuery)
+		}
+	})
 }
 
 // TestMarketplacePluginDeleteRequest pins the destructive op's path, body and
@@ -365,6 +394,9 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 		{"missing manifest_json", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","plugin_json":{}}}`},
 		{"missing plugin_json", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","manifest_json":{}}}`},
 		{"unknown relation_type", `{"plugin":{"plugin_name":"x","plugin_type":"expert","visibility":"private","manifest_json":{},"plugin_json":{}},"relations":[{"target_plugin_id":"p2","relation_type":"bogus"}]}`},
+		{"unknown outer field", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","manifest_json":{},"plugin_json":{}},"typo":true}`},
+		{"unknown plugin field", `{"plugin":{"plugin_name":"x","plugin_type":"connector","visibility":"private","manifest_json":{},"plugin_json":{},"publsher":"typo"}}`},
+		{"unknown relation field", `{"plugin":{"plugin_name":"x","plugin_type":"expert","visibility":"private","manifest_json":{},"plugin_json":{}},"relations":[{"target_plugin_id":"p2","relation_type":"expert_skill","typo":true}]}`},
 	} {
 		sent := false
 		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -379,10 +411,81 @@ func TestMarketplacePluginUpsertRequest(t *testing.T) {
 			t.Errorf("%s: no request should have left the client", tc.name)
 		}
 	}
+
+	// Existing plugins may carry a grandfathered pre-semver label. The backend
+	// permits an update that echoes that exact stored value, so the CLI must not
+	// reject it from schema metadata before the backend can compare against state.
+	var sentLegacyVersion bool
+	root, _, _ = rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		sentLegacyVersion = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
+	})
+	root.SetArgs([]string{"marketplace", "plugin", "upsert", "--data", `{"plugin":{"plugin_id":"p1","plugin_name":"x","plugin_type":"connector","visibility":"private","version":"legacy-v1","manifest_json":{},"plugin_json":{}}}`})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("grandfathered version must reach backend for stateful validation: %v", err)
+	}
+	if !sentLegacyVersion {
+		t.Fatal("grandfathered version request was not sent")
+	}
 }
 
 // TestMarketplaceSkillmdRequest pins the unified skill_md endpoint keyed by
 // plugin_id (experts/teams resolve the relation target first).
+func TestMarketplacePublicationLifecycleRequests(t *testing.T) {
+	t.Run("publish", func(t *testing.T) {
+		var gotPath string
+		var gotBody map[string]any
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"plugin_id":"p1","display_status":"pending_review","review_id":"r1"}}`))
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "publish", "--plugin-id", "p1", "--version", "1.2.0", "--changelog", "review me"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if gotPath != "/market/api/v1/plugins/publish" || gotBody["plugin_id"] != "p1" || gotBody["version"] != "1.2.0" {
+			t.Fatalf("publish request = %s %#v", gotPath, gotBody)
+		}
+	})
+
+	t.Run("review list", func(t *testing.T) {
+		var gotQuery string
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.RawQuery
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[],"pagination":{"total":0,"page":1,"page_size":20}}`))
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "review-request", "list", "--mode", "space", "--status", "pending"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if !strings.Contains(gotQuery, "mode=space") || !strings.Contains(gotQuery, "status=pending") {
+			t.Fatalf("review list query = %q", gotQuery)
+		}
+	})
+
+	t.Run("reject", func(t *testing.T) {
+		var gotPath string
+		var gotBody map[string]any
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{}}`))
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "review-request", "reject", "r1", "--reason", "missing docs"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if gotPath != "/market/api/v1/plugins/review_requests/r1/reject" || gotBody["reason"] != "missing docs" {
+			t.Fatalf("reject request = %s %#v", gotPath, gotBody)
+		}
+	})
+}
+
 func TestMarketplaceSkillmdRequest(t *testing.T) {
 	var gotMethod, gotPath, gotQuery string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -481,7 +584,7 @@ func TestMarketplaceCommandTree(t *testing.T) {
 		t.Fatal("missing marketplace command")
 	}
 	domains := map[string][]string{
-		"plugin":            {"list", "get", "skillmd", "download", "upsert", "delete", "install", "import"},
+		"plugin":            {"list", "get", "skillmd", "download", "upsert", "delete", "install", "import", "publish", "delist"},
 		"plugin-category":   {"list"},
 		"plugin-tag":        {"list"},
 		"mcp":               {"probe"},
@@ -502,9 +605,19 @@ func TestMarketplaceCommandTree(t *testing.T) {
 			}
 		}
 	}
-	// `plugin version list` is a nested subgroup, checked separately.
-	if pv := findCmd(findCmd(marketplace, "plugin"), "version"); pv == nil || findCmd(pv, "list") == nil {
+	// Nested plugin subgroups are checked separately.
+	plugin := findCmd(marketplace, "plugin")
+	if pv := findCmd(plugin, "version"); pv == nil || findCmd(pv, "list") == nil {
 		t.Error("missing marketplace plugin version list command")
+	}
+	if reviews := findCmd(plugin, "review-request"); reviews == nil {
+		t.Error("missing marketplace plugin review-request command group")
+	} else {
+		for _, name := range []string{"create", "list", "get", "approve", "reject", "cancel"} {
+			if findCmd(reviews, name) == nil {
+				t.Errorf("missing marketplace plugin review-request %s command", name)
+			}
+		}
 	}
 	if got := childNames(marketplace); len(got) != len(domains) {
 		t.Errorf("marketplace domains = %v, want %d groups", got, len(domains))

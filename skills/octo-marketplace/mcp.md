@@ -1,8 +1,10 @@
 # octo-marketplace — MCP connector workflows
 
-Read `SKILL.md` first for authentication, payload normalization, versioning, the
-no-separate-publish rule, and the shared safety rule. MCP listings are
-`plugin_type=connector`: no downloadable archive or release version. The
+Read `SKILL.md` first for authentication, payload normalization, the
+save→publish/review lifecycle, and the shared safety rule. MCP listings are
+`plugin_type=connector`: there is no downloadable archive. Connectors still
+carry a `current_version`; a missing initial label defaults to `1.0.0`, and
+Space publication/review uses a version label. The
 connection lives in the package's root `mcp.json` (standard
 `{"mcpServers":…}`); user-supplied secret values appear as `${VAR}`
 placeholders, never real secrets.
@@ -57,14 +59,20 @@ start the command locally, complete MCP `initialize` and `tools/list`, then stop
 
 ## Create / update
 
-Create or edit a connector plugin through the unified write path. Every save is
-a version snapshot and attaches/self-heals the default market placement, so a
-created connector is listable immediately — no follow-up publish step. Show the
-target and intended change, then continue only after confirmation:
+Create or edit an **unpublished** connector draft through the unified write
+path. Saving creates a version snapshot but does not publish the draft. An
+already-published Space connector cannot be changed with upsert; submit its new
+manifest/package through `plugin review-request create --data @review.json`
+instead so the live version remains unchanged until approval. Show the target
+and intended change, then continue only after confirmation:
 
 ```bash
 octo-cli marketplace plugin upsert --data @plugin.json
 ```
+
+This workflow covers an MCP connector (`connector.type="mcp"`). The backend also
+supports `openconnector`, `cli`, and `skill-only`, whose descriptors and required
+attachments differ; do not reuse the MCP package shape for those subtypes.
 
 The `--data` body is `{"plugin":{plugin_name, plugin_type:"connector",
 visibility, category_id, tags, icon, version?, manifest_json, plugin_json}}`.
@@ -91,13 +99,23 @@ fields with `mcp probe` first.
 >     "visibility": "space",
 >     "tags": ["vcs", "github"],
 >     "manifest_json": {
->       "plugin_name": "github-mcp",   // == plugin.plugin_name
->       "plugin_type": "connector",    // == plugin.plugin_type
->       "labels": ["vcs", "github"]    // == plugin.tags, same order
+>       "$schema": "cowork-plugin-manifest-2.0.json",
+>       "plugin_name": "github-mcp",
+>       "plugin_type": "connector",
+>       "name": "github-mcp",
+>       "description": "GitHub tools over MCP",
+>       "labels": ["vcs", "github"],
+>       "examples": []
 >     },
 >     "plugin_json": {
->       "connector": { "type": "stdio" },
->       "mcpServers": { "github": { "env": { "TOKEN": "${GITHUB_TOKEN}" } } }
+>       "$schema": "cowork-plugin-package-2.0.json",
+>       "connector": { "type": "mcp", "source": "connector.github-mcp" },
+>       "attachments": [{
+>         "path": "mcp.json",
+>         "content_type": "raw",
+>         "mime_type": "application/json",
+>         "raw_content": "{\"mcpServers\":{\"github\":{\"command\":\"github-mcp-server\",\"env\":{\"TOKEN\":\"${GITHUB_TOKEN}\"}}}}"
+>       }]
 >     }
 >   }
 > }
@@ -111,7 +129,10 @@ fields with `mcp probe` first.
 > Read-modify-write with `plugin get` and resubmit the complete document.
 
 Re-read with `plugin get --plugin-id <id>` and verify the `${VAR}` placeholders
-round-trip. Delete only after showing the owned record and confirming:
+round-trip. Then run `plugin publish --plugin-id <id> --version <x.y.z>`; a
+Space-visible connector enters review, while a private connector lists
+immediately. Follow the review commands in `SKILL.md`. Delete only after showing
+the owned record and confirming:
 
 ```bash
 octo-cli marketplace plugin delete --plugin-id <id>

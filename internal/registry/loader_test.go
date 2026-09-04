@@ -33,8 +33,8 @@ func TestGetSpecReturnsNilForUnknown(t *testing.T) {
 
 func TestAllDomainOperationCounts(t *testing.T) {
 	// Caller-facing operation counts per service. Operations marked
-	// x-octo-cli-hidden remain in the embedded backend spec but are excluded
-	// here; marketplace skill.create is one such Web-only operation.
+	// x-octo-cli-hidden remain in an embedded backend spec but are excluded
+	// here; Loop workspace mutations are examples.
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
@@ -47,7 +47,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"docs":        32,
 		"drive":       43,
 		"html":        21,
-		"marketplace": 17,
+		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
 		"loop":        126,
@@ -204,6 +204,58 @@ func TestLoopTaskUpdateIncludesReviewStatus(t *testing.T) {
 	if !reflect.DeepEqual(status.Enum, want) {
 		t.Fatalf("task.update status enum = %#v, want %#v", status.Enum, want)
 	}
+}
+
+func TestConditionalQueryMetadataRejectsMalformedContracts(t *testing.T) {
+	base := func(extension any, peerSchema map[string]any) map[string]any {
+		return map[string]any{
+			"paths": map[string]any{
+				"/items": map[string]any{
+					"get": map[string]any{
+						"operationId": "item.list",
+						"parameters": []any{
+							map[string]any{"name": "kind", "in": "query", "schema": map[string]any{"type": "string"}, "x-octo-required-unless-query": extension},
+							map[string]any{"name": "mode", "in": "query", "schema": peerSchema},
+						},
+					},
+				},
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		doc  map[string]any
+	}{
+		{"extension is not an object", base("mode=mine", map[string]any{"type": "string"})},
+		{"missing peer", base(map[string]any{"name": "other", "value": "mine"}, map[string]any{"type": "string"})},
+		{"non-string peer", base(map[string]any{"name": "mode", "value": "1"}, map[string]any{"type": "integer"})},
+		{"missing string value", base(map[string]any{"name": "mode"}, map[string]any{"type": "string"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateConditionalQueryMetadata(tc.doc); err == nil {
+				t.Fatal("malformed conditional query metadata was accepted")
+			}
+		})
+	}
+}
+
+func TestMarketplaceConditionalQueryMetadata(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok {
+		t.Fatal("plugin.list not found")
+	}
+	for _, p := range op.Parameters {
+		if p.Name != "plugin_type" || p.In != "query" {
+			continue
+		}
+		want := &ConditionalQueryRequirement{Name: "mode", Value: "mine"}
+		if !reflect.DeepEqual(p.RequiredUnlessQuery, want) {
+			t.Fatalf("plugin_type conditional requirement = %#v, want %#v", p.RequiredUnlessQuery, want)
+		}
+		return
+	}
+	t.Fatal("plugin.list plugin_type query not found")
 }
 
 func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {

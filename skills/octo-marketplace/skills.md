@@ -1,7 +1,7 @@
 # octo-marketplace — Skill workflows
 
-Read `SKILL.md` first for authentication, payload normalization, versioning, the
-no-separate-publish rule, and the shared safety rule. Skills are
+Read `SKILL.md` first for authentication, payload normalization, the
+save→publish/review lifecycle, and the shared safety rule. Skills are
 `plugin_type=skill`. A skill package is a **flat attachment tree**:
 `plugin_json.attachments` is the file list, one attachment per file (text inline
 as `raw`, binary as `storage`), always including a root `SKILL.md`.
@@ -19,8 +19,8 @@ octo-cli marketplace plugin get --plugin-id <plugin-id>
 `plugin list` is page-paginated (`{data:[...],pagination}` → CLI `.data` +
 `._pagination`). Add `--mode mine` to list only owned skills. Sort may be
 `newest`/`oldest`/`updated`/`name`/`placement`/`downloads`/`views`/
-`installs`/`comprehensive`. A skill has at most 10 tags, each at most 10
-characters.
+`installs`/`comprehensive`. A plugin has at most 100 tags; each tag is non-empty
+UTF-8 and at most 128 bytes.
 
 ## Read content without downloading
 
@@ -78,28 +78,58 @@ Do not search the machine or guess a path.
      --name "<name>" --visibility space --version 1.0.0
    ```
 
-   `plugin import` finalizes through the unified write path: it builds the
-   attachment tree server-side, snapshots a new version, and attaches the
-   default market placement so the skill is immediately listable. Omit
+   `plugin import` builds the attachment tree and saves a draft version. Omit
    `--plugin-id` to create; set it to update an existing owned skill. Optional
    `--category-id`, `--tags`, `--icon`, `--changelog`.
-6. Read the returned `plugin_id`, then `plugin get --plugin-id <id>` to verify.
+6. Read the returned `plugin_id`, then `plugin get --plugin-id <plugin-id>` to
+   verify the draft.
+7. Publish explicitly:
+
+   ```bash
+   octo-cli marketplace plugin publish --plugin-id <plugin-id> \
+     --version 1.0.0 --changelog "Initial release"
+   ```
+
+   A Space-visible skill returns `pending_review` plus a `review_id`; it becomes
+   catalog-visible only after a Space owner/admin approves that request.
 
 If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. Parse
 itself is not idempotent: re-triggering an already-parsed upload returns `409
 CONFLICT` rather than the original task, so poll `skill-parse-task get` instead
-of re-posting. If import returns a gateway timeout or RESULT_UNKNOWN, re-check
-`plugin list --scene-code default --plugin-type skill --mode mine --q <name>`,
-walking `--page` until a short page as in step 3, before retrying so a created
-skill is never duplicated.
+of re-posting. If a create import returns a gateway timeout or RESULT_UNKNOWN,
+re-check `plugin list --scene-code default --plugin-type skill --mode mine --q
+<name>`, walking every page before retrying so the skill is never duplicated. If
+an existing-id import is ambiguous, use `plugin get`, version history, hashes,
+and content comparison instead—the row existed before the request, so finding it
+does not prove the update committed.
 
 ## Release a new version
 
-Every save is a version snapshot. To ship new content, re-run the upload / parse
-pipeline for the new package and `plugin import --plugin-id <id>
---parse-task-id <id> --version <new-version> --changelog "…"` — that is what
-creates the new snapshot and bumps `current_version`. There is no separate
-"publish" step.
+First inspect `display_status` with `plugin get`:
+
+- For an unpublished draft, re-run upload/parse and update it with `plugin
+  import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, then run
+  `plugin publish` as in the initial flow.
+- For an already-published Space skill, **do not call import or upsert**: direct
+  edits are rejected so live content cannot bypass review. Upload and parse the
+  new archive, then submit that fresh parse task as the frozen upgrade:
+
+```bash
+cat >review.json <<'JSON'
+{
+  "plugin_id": "<plugin-id>",
+  "version": "<new-version>",
+  "changelog": "What changed",
+  "parse_task_id": "<parse-task-id>"
+}
+JSON
+octo-cli marketplace plugin review-request create --data @review.json
+```
+
+Keep `<plugin-id>` and `<parse-task-id>` distinct. The published version remains
+live until a Space owner/admin approves the request. Version labels must be
+forward-moving `MAJOR.MINOR.PATCH` values; if review is rejected, correct the
+content and submit another review request.
 
 ```bash
 octo-cli marketplace plugin version list --plugin-id <id>
@@ -107,8 +137,11 @@ octo-cli marketplace plugin version list --plugin-id <id>
 
 ## Update metadata / manage owned skills
 
-Metadata-only edits (name, category, tags, icon, visibility, version label) go
-through `plugin upsert` with the existing `plugin.plugin_id` in the document.
+Metadata edits on a draft, delisted plugin, or published-private plugin go
+through `plugin upsert` with the existing `plugin.plugin_id`. A published Space
+plugin rejects direct metadata edits. Because review snapshots content rather
+than arbitrary market metadata, a Space owner/admin must delist it first; then
+the owner may edit and publish it for review again.
 `plugin import` is **not** a metadata-only path: its `--parse-task-id` is
 required, so reusing it always means a fresh upload+parse cycle to ship new
 package content.

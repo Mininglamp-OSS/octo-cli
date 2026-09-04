@@ -14,7 +14,7 @@
   `/fleet/api`.
 - **Factory DI**: `internal/cmdutil.Factory` is the DI container; no package-level globals. Tests inject stubs through `ConfigFunc` / `CredentialFunc` / `ClientFunc` / `RegistryFunc`. `Factory.ErrorEmitted` tracks whether an error envelope was already written to stderr, preventing double-emit between RunE and the top-level main error handler.
 - **JSON envelope I/O**: `{ok, identity, data, _pagination, _rate_limit}` on stdout for success; `{ok:false, error:{type,code,message,hint,detail}}` on stderr for failure. Exit codes: auth=3, validation/config=2, rest=1.
-- **Pre-flight validation** (`cmd/service/run.go`, `cmd/service/enum.go`): the metadata-driven path checks the resolved request against the spec before any HTTP — required fields and `minItems` (`VALIDATION_ERROR`), spec `enum` vocabularies (`ENUM_NOT_ALLOWED`), `uint64` id range, and a refusal of empty or `.` / `..` path values (an empty value addresses the collection and a gateway that normalises dot segments retargets the request — and the engine emits `DELETE`). Loop Public API operations additionally enforce composition, closed-object and minimum-property constraints, Unicode string lengths, and maximum array sizes; those extended checks remain backend-enforced for legacy domains. Body checks walk the *merged* body, so `--data` is validated too, at every nesting depth and including `format: uint64` — `--data` is not a raw passthrough on this path, and it decodes with `UseNumber` so an id above 2^53 is never rounded before it is checked. A property present with an explicit `null` is checked, not skipped: it is refused wherever the schema constrains the value (an enum or a `uint64` format), because `null` matches no vocabulary member and decodes into a scalar field as the zero value — for a `parent_id` that is folder `0`, the documented root, i.e. a *valid* id addressing a place nobody named. A required field set to `null` is reported as missing instead, so both paths refuse it; a `null` on an unconstrained property is still forwarded, since a backend may accept it to clear the field. Enum and constant comparison is by canonical form, not `==`, because the same wire value arrives as `int`, `float64` or `json.Number` depending on how it was supplied; numbers compare by exact decimal text, so an integer vocabulary admits `1` but not `1.0` — the body keeps what the caller wrote, and a non-integer would fail at the backend on a value the local gate had called valid. Hand-written composites reuse the same walker via `service.ValidateRequestBody`, so a composite that replaces a generated leaf cannot enforce a weaker contract than the leaf did.
+- **Pre-flight validation** (`cmd/service/run.go`, `cmd/service/enum.go`): the metadata-driven path checks the resolved request against the spec before any HTTP — required fields and `minItems` (`VALIDATION_ERROR`), spec `enum` vocabularies (`ENUM_NOT_ALLOWED`), `uint64` id range, and a refusal of empty or `.` / `..` path values (an empty value addresses the collection and a gateway that normalises dot segments retargets the request — and the engine emits `DELETE`). Loop Public API operations and services that opt into `x-octo-strict-request-schema` (currently Marketplace) additionally enforce composition, closed-object and minimum-property constraints, Unicode string lengths and maximum array sizes; those extended checks remain backend-enforced for other legacy domains. Body checks walk the *merged* body, so `--data` is validated too, at every nesting depth and including `format: uint64` — `--data` is not a raw passthrough on this path, and it decodes with `UseNumber` so an id above 2^53 is never rounded before it is checked. A property present with an explicit `null` is checked, not skipped: it is refused wherever the schema constrains the value (an enum or a `uint64` format), because `null` matches no vocabulary member and decodes into a scalar field as the zero value — for a `parent_id` that is folder `0`, the documented root, i.e. a *valid* id addressing a place nobody named. A required field set to `null` is reported as missing instead, so both paths refuse it; a `null` on an unconstrained property is still forwarded, since a backend may accept it to clear the field. Enum and constant comparison is by canonical form, not `==`, because the same wire value arrives as `int`, `float64` or `json.Number` depending on how it was supplied; numbers compare by exact decimal text, so an integer vocabulary admits `1` but not `1.0` — the body keeps what the caller wrote, and a non-integer would fail at the backend on a value the local gate had called valid. Hand-written composites reuse the same walker via `service.ValidateRequestBody`, so a composite that replaces a generated leaf cannot enforce a weaker contract than the leaf did.
 
 ## Identity Model
 
@@ -41,7 +41,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 314 operations)
+## Command Structure (12 active domains, 322 operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -95,6 +95,17 @@ octo-cli html      list | get | publish | versions | rm     (octo-doc HTML docs;
                comment  list|add
                element  get|replace
                reply
+
+octo-cli marketplace plugin list|get|version list|skillmd|download|upsert|delete
+                         install|import|publish|delist
+                         review-request create|list|get|approve|reject|cancel
+               plugin-category list
+               plugin-tag list
+               mcp probe
+               skill-upload create|parse
+               skill-parse-task get
+               skill-icon-upload create
+               mcp-icon-upload create
 
 octo-cli mail      me
                auth login|status

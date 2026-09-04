@@ -12,6 +12,7 @@
   "x-octo-service": "marketplace",
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": true,
+  "x-octo-strict-request-schema": true,
   "paths": {
     "/market/api/v1/plugins": {
       "get": {
@@ -41,8 +42,11 @@
                 "expert_team"
               ]
             },
-            "description": "Plugin type. Note the type mapping from the old per-type surface: mcp -> connector, squad -> expert_team.",
-            "required": true
+            "description": "Plugin type. Required for the catalog grid; optional only with mode=mine, which lists all caller-owned types. Legacy mappings: mcp -> connector, squad -> expert_team.",
+            "x-octo-required-unless-query": {
+              "name": "mode",
+              "value": "mine"
+            }
           },
           {
             "name": "category_id",
@@ -396,11 +400,77 @@
         }
       }
     },
-    "/market/api/v1/plugins/upsert": {
+    "/market/api/v1/plugins/publish": {
       "post": {
-        "operationId": "plugin.upsert",
-        "summary": "Create or update a plugin (every save is a version snapshot)",
-        "description": "Create (plugin.plugin_id empty) or update a plugin. Every save appends an auto-increment plugin_versions snapshot and a default market placement is attached/self-healed so the plugin is visible in scene-scoped lists. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skills prefer the upload+import flow (which finalizes through upsert).",
+        "operationId": "plugin.publish",
+        "summary": "Publish a plugin",
+        "description": "Publish a caller-owned plugin. A private plugin's listing state becomes published immediately but remains owner-only. Publishing a space-visible plugin opens a Space review request and leaves the plugin as a draft until approval; the response carries review_id for that branch.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "plugin_id": { "type": "string", "minLength": 1, "description": "Nonblank plugin id" },
+                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Optional MAJOR.MINOR.PATCH label for the Space-review branch; defaults to the draft current version. Ignored when publishing a private plugin." },
+                  "changelog": { "type": "string", "description": "Optional review changelog, at most 1000 Unicode characters on the Space-review branch; ignored for private publish" }
+                },
+                "required": ["plugin_id"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Published immediately or submitted for review", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/delist": {
+      "post": {
+        "operationId": "plugin.delist",
+        "summary": "Delist a plugin",
+        "description": "Take a published Space-visible standalone plugin out of the marketplace. Requires the Space owner or admin role. Any pending review is canceled; the plugin remains editable and may be published again.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "plugin_id": { "type": "string", "minLength": 1, "description": "Nonblank plugin id" },
+                  "reason": { "type": "string", "maxLength": 1000 }
+                },
+                "required": ["plugin_id"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Delisted", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/review_requests": {
+      "get": {
+        "operationId": "plugin.review_request.list",
+        "summary": "List plugin review requests",
+        "description": "mode=mine lists the caller's submissions; mode=space lists the Space review queue and requires Space owner/admin authority.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "mode", "in": "query", "required": true, "schema": { "type": "string", "enum": ["mine", "space"] }, "description": "List the caller's submissions or the Space queue" },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "approved", "rejected", "canceled"] }, "description": "Filter by review status" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1 }, "description": "Page number, default 1" },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100 }, "description": "Page size, default 20, max 100" }
+        ],
+        "responses": { "200": { "description": "Review request page", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      },
+      "post": {
+        "operationId": "plugin.review_request.create",
+        "summary": "Submit a plugin for Space review",
+        "description": "Freeze a Space-visible plugin version for review. Supply parse_task_id for a skill zip, manifest_json plus plugin_json for declared documents, or neither only for the first listing of an unlisted Space-intent draft. parse_task_id is mutually exclusive with the document pair. An omitted relations key inherits the live graph; a present array replaces the reviewed graph.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "requestBody": {
@@ -410,8 +480,119 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "plugin_id": { "type": "string", "minLength": 1 },
+                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Required MAJOR.MINOR.PATCH label; must not move backward or duplicate a published version" },
+                  "changelog": { "type": "string", "maxLength": 1000 },
+                  "parse_task_id": { "type": "string", "description": "Completed skill parse task; skill plugins only" },
+                  "manifest_json": { "type": "object", "description": "Frozen type-specific manifest; provide together with plugin_json" },
+                  "plugin_json": { "type": "object", "description": "Frozen type-specific package; provide together with manifest_json" },
+                  "relations": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "description": "When present, replaces the graph in the frozen review snapshot; when omitted, inherits the live graph",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "relation_id": { "type": "string" },
+                        "source_plugin_id": { "type": "string" },
+                        "target_plugin_id": { "type": "string" },
+                        "relation_type": { "type": "string", "enum": ["expert_team_expert", "expert_skill", "expert_connector"] },
+                        "sort_order": { "type": "integer" },
+                        "data": { "type": "object" }
+                      },
+                      "required": ["target_plugin_id", "relation_type"]
+                    }
+                  }
+                },
+                "required": ["plugin_id", "version"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Review request created", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/review_requests/{review_id}": {
+      "get": {
+        "operationId": "plugin.review_request.get",
+        "summary": "Get a plugin review request",
+        "description": "Return one request with its frozen document preview and relation graph.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "review_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Review request id" }
+        ],
+        "responses": { "200": { "description": "Review request detail", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/review_requests/{review_id}/approve": {
+      "post": {
+        "operationId": "plugin.review_request.approve",
+        "summary": "Approve a plugin review request",
+        "description": "Apply the frozen submission and publish it. Requires Space owner/admin authority.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "review_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Review request id" }
+        ],
+        "responses": { "200": { "description": "Approved plugin detail", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/review_requests/{review_id}/reject": {
+      "post": {
+        "operationId": "plugin.review_request.reject",
+        "summary": "Reject a plugin review request",
+        "description": "Reject a pending request. Requires Space owner/admin authority and a nonblank reason.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "review_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Review request id" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "reason": { "type": "string", "minLength": 1, "maxLength": 1000, "description": "Nonblank rejection reason (after trimming)" } },
+                "required": ["reason"]
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Rejected", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/review_requests/{review_id}/cancel": {
+      "post": {
+        "operationId": "plugin.review_request.cancel",
+        "summary": "Cancel a plugin review request",
+        "description": "Withdraw the caller's own pending request.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "parameters": [
+          { "name": "review_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Review request id" }
+        ],
+        "responses": { "200": { "description": "Canceled", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/upsert": {
+      "post": {
+        "operationId": "plugin.upsert",
+        "summary": "Create or update a plugin (every save is a version snapshot)",
+        "description": "Create (plugin.plugin_id empty) or update an editable plugin. A create is a draft; an update preserves the current listing state. Published Space plugins reject direct edits and must submit a frozen review request instead. Every accepted save appends a plugin_versions snapshot. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skill drafts prefer upload+import.",
+        "x-octo-risk": "write",
+        "x-octo-retry": "never",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
                   "plugin": {
                     "type": "object",
+                    "additionalProperties": false,
                     "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin get -> edit the document -> plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save is a version snapshot (auto-increment label); plugin.version sets the current_version display label, defaults to 1.0.0, and is preserved when left blank on update.",
                     "properties": {
                       "plugin_id": {
@@ -461,7 +642,8 @@
                       },
                       "version": {
                         "type": "string",
-                        "description": "Current-version label; defaults to 1.0.0. Independent of the per-save auto-increment snapshot label."
+                        "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$",
+                        "description": "MAJOR.MINOR.PATCH current-version label. Omit to keep the existing label on update (or default to 1.0.0 on create); a new label cannot move backward."
                       },
                       "manifest_json": {
                         "type": "object",
@@ -484,6 +666,7 @@
                     "type": "array",
                     "items": {
                       "type": "object",
+                      "additionalProperties": false,
                       "properties": {
                         "relation_id": {
                           "type": "string",
@@ -556,6 +739,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "plugin_id": {
                     "type": "string",
@@ -595,6 +779,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "plugin_id": {
                     "type": "string"
@@ -642,6 +827,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "additionalProperties": false,
                 "properties": {
                   "parse_task_id": {
                     "type": "string"
@@ -681,7 +867,9 @@
                     "type": "string"
                   },
                   "version": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$",
+                    "description": "MAJOR.MINOR.PATCH version label; cannot move backward"
                   },
                   "changelog": {
                     "type": "string"
