@@ -733,7 +733,7 @@ func TestBodyPropertyFlagAlias(t *testing.T) {
 	}
 }
 
-func TestDocsSheetCheckboxSchemas(t *testing.T) {
+func TestDocsSheetSchemas(t *testing.T) {
 	r := MustNew()
 
 	edit, ok := r.GetOperation("docs.sheet.edit")
@@ -743,6 +743,9 @@ func TestDocsSheetCheckboxSchemas(t *testing.T) {
 	if validation, ok := edit.RequestBody.Properties["dataValidations"]; !ok || validation.Type != "object" {
 		t.Fatalf("docs.sheet.edit dataValidations = %+v, want object property", validation)
 	}
+	if sheets, ok := edit.RequestBody.Properties["sheets"]; !ok || sheets.Type != "object" || !strings.Contains(sheets.Description, "rowCount") {
+		t.Fatalf("docs.sheet.edit sheets = %+v, want rowCount-aware object property", sheets)
+	}
 
 	for _, operationID := range []string{"docs.sheet.get", "docs.versions.state"} {
 		op, ok := r.GetOperation(operationID)
@@ -751,6 +754,9 @@ func TestDocsSheetCheckboxSchemas(t *testing.T) {
 		}
 		if validation, ok := op.ResponseSchema.Properties["sheetDataValidations"]; !ok || validation.Type != "object" {
 			t.Errorf("%s sheetDataValidations = %+v, want object property", operationID, validation)
+		}
+		if sheets, ok := op.ResponseSchema.Properties["sheetList"]; !ok || sheets.Type != "object" || !strings.Contains(sheets.Description, "rowCount") {
+			t.Errorf("%s sheetList = %+v, want rowCount-aware object property", operationID, sheets)
 		}
 	}
 }

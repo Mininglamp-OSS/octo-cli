@@ -24,7 +24,7 @@ untouched.) Same read-token-then-guarded-write discipline as the body surface.
 #   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px },
 #     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} },
 #     sheetMerges: { "logicalId:sr:sc:er:ec": true },
-#     sheetList: { "logicalId": {name,order} },
+#     sheetList: { "logicalId": {name,order,rowCount?} },
 #     sheetDataValidations: { "logicalId!uid": {uid,type:"checkbox",ranges:[...]} }, baseVersion }
 octo-cli docs sheet get <docId>
 
@@ -187,12 +187,23 @@ octo-cli docs sheet edit <docId> --base-version "<token>" \
 ### Multiple sheet tabs — the `sheets` batch
 
 A workbook's tabs live in the `sheetList` map, keyed by `logicalId` with value
-`{name, order}` (order sorts the tabs left→right). The first/default tab has
+`{name, order, rowCount?}` (order sorts the tabs left→right). `rowCount` is the
+declared visible row count from 1 through 10000. New tabs default to 200 rows;
+an absent value means a legacy 1000-row tab. The first/default tab has
 logicalId `default`. This is its own edit surface (the `sheets` batch) and IS
 returned by `docs sheet get` (as `sheetList`), so **read the current tabs first** to
 learn their logicalIds before renaming, reordering, or adding one.
 
-- **Rename / reorder** an existing tab: set its logicalId to new `{name, order}`.
+- **Rename / reorder** an existing tab: set its logicalId to new `{name, order}`;
+  omitting `rowCount` preserves the current declared size.
+- **Resize** a tab explicitly: send `{name, order, rowCount}`. The usual growth
+  path needs no separate resize call: writing a non-null cell below the current
+  boundary automatically grows the same tab in that atomic edit. For example,
+  writing `default!299:0` grows a 200-row default tab to 300 rows.
+- **Read / export boundary**: shrinking does not delete stored cells below the new
+  bottom. Treat rows `>= rowCount` as hidden and exclude them from exports; this
+  preserves data for undo or later regrowth. For a legacy entry without
+  `rowCount`, use 1000 as the effective boundary.
 - **Add a NEW sheet**: pick a fresh logicalId, set it in `sheets` AND write that
   sheet's cells with keys `${logicalId}!row:col` in the SAME edit — a tab with no
   cells is an empty sheet, and cells whose logicalId has no tab are orphaned (the
