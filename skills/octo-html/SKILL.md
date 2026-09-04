@@ -24,7 +24,8 @@ All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the `{data}/{er
 ## Auth & space
 
 - Authenticate with a bot token via a stored profile (`--profile` / `--bot-id`)
-  or `OCTO_BOT_TOKEN`, sent as `Authorization: Bearer`. Confirm with
+  or `OCTO_TOKEN` (legacy alias `OCTO_BOT_TOKEN`), sent as
+  `Authorization: Bearer`. Confirm with
   `octo-cli config show`.
 - **Do not pass a space flag.** octo-doc resolves identity/space server-side
   (via the reverse-proxy trust headers on the fusion deploy); the CLI does not

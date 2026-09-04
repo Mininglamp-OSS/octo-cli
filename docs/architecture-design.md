@@ -249,7 +249,7 @@ before invoking.
 
 | Backend Code | HTTP | CLI Type | CLI Hint |
 |-------------|------|----------|----------|
-| `UNAUTHORIZED` | 401 | `auth_error` | "check OCTO_BOT_TOKEN; bot may be unpublished" |
+| `UNAUTHORIZED` | 401 | `auth_error` | "check OCTO_TOKEN / OCTO_BOT_TOKEN; bot may be unpublished" |
 | `AUTH_UNAVAILABLE` | 503 | `network` | "auth service unreachable; retry later" |
 | `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo-cli schema <op>`" |
 | `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo-cli matters list`" |
@@ -404,13 +404,13 @@ injected automatically when x-octo-space-header is set.
 type BotCredential struct {
     Token    string  // app_xxxx (App Bot token)
     SpaceID  string  // resolved from bot registration or --space flag
-    Source   string  // "env:OCTO_BOT_TOKEN" / "config:prod"
+    Source   string  // "env:OCTO_TOKEN" / "env:OCTO_BOT_TOKEN" / "config:prod"
 }
 ```
 
 ### 7.2 Provider Chain
 
-Phase 1: `Environment (OCTO_BOT_TOKEN) → Error`
+Phase 1: `Environment (OCTO_TOKEN → OCTO_BOT_TOKEN) → Error`
 Phase 4a: `Environment → Config File → Error`
 Future: `Environment → Config → Sidecar → Error`
 

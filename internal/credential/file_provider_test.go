@@ -116,14 +116,14 @@ func TestFileProvider_AmbiguousErrors(t *testing.T) {
 	}
 }
 
-func TestFileProvider_ZeroProfilesFallsThrough(t *testing.T) {
+func TestFileProvider_ZeroProfilesReturnsNoCredential(t *testing.T) {
 	s := fileTestStore(t, nil)
 	cred, err := NewFileProvider(s, "", "").Resolve()
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
 	if cred != nil {
-		t.Errorf("expected nil cred to fall through to env, got %+v", cred)
+		t.Errorf("expected nil credential, got %+v", cred)
 	}
 }
 

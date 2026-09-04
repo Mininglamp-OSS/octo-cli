@@ -29,8 +29,9 @@ Do not use it for chat unrelated to Loop, for pure local file work, or when
 
 ## Authentication
 
-Set `OCTO_BOT_TOKEN` to a credential Fleet accepts directly, such as an Octo
-Session credential, `bf_`, `uk_`, or `octo_loop_`. The CLI does not infer a
+Set `OCTO_TOKEN` (or its fully compatible legacy alias `OCTO_BOT_TOKEN`) to a
+credential Fleet accepts directly, such as an Octo Session credential, `bf_`,
+`uk_`, or `octo_loop_`. The CLI does not infer a
 human, device, or execution principal from a token prefix. Fleet verifies the
 credential and constructs the principal.
 

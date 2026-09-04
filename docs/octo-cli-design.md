@@ -16,6 +16,12 @@
 
 > The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with one exception: an `app_*` token running `message search` is rejected locally (`validation`) before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
 
+> **Token source.** Explicit `--bot-id` / `--profile` selectors win first.
+> Otherwise the environment aliases (`OCTO_TOKEN`, then `OCTO_BOT_TOKEN`)
+> override an `OCTO_BOT_ID`-selected or sole implicit profile. Both aliases
+> accept every supported credential kind; `identity.source` names the alias
+> that supplied the value.
+
 ---
 
 ## Domain 1: matter (matters service, 17 commands)

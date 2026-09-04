@@ -38,15 +38,19 @@ octo-cli --profile myname matter list              # or by the friendly profile 
 
 With exactly one stored profile, the selector is optional. With **two or more, you must pass `--bot-id` or `--profile`** — omitting it is a hard error (the CLI never guesses which identity to use).
 
-**Env token (fallback).** When no profile is stored, the raw token is read from `OCTO_BOT_TOKEN`:
+**Environment credential.** Outside an explicit `--bot-id` / `--profile`
+selection, an environment credential overrides stored profiles. `OCTO_TOKEN`
+is canonical; `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias:
 
 ```bash
-export OCTO_BOT_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
-export OCTO_BOT_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
-export OCTO_BOT_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
+export OCTO_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
+export OCTO_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
+export OCTO_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
 ```
 
-> `OCTO_BOT_ID` is a selector (a robot id), not a secret; `OCTO_BOT_TOKEN` is the secret. If `OCTO_BOT_ID` names no stored profile the command fails — it never falls back to silently using `OCTO_BOT_TOKEN` under that id.
+> `OCTO_BOT_ID` is not a secret. Without an environment credential it selects a
+> stored profile; an environment credential takes precedence over that implicit
+> selector.
 
 Token prefix determines capability — the CLI does NOT enforce this locally (the backend rejects unsupported operations with `FORBIDDEN`), with **one exception**: an `app_*` token running `message search` is rejected locally with a `validation` error before any request.
 
@@ -90,7 +94,7 @@ Every successful invocation prints a single JSON object to stdout:
 }
 ```
 
-`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is **always an object**: a stored profile fills in `profile` / `robot_id` / `source: "profile:<name>"`; a raw `OCTO_BOT_TOKEN` yields `{ "type": "bot", "bot_kind": ..., "source": "env:OCTO_BOT_TOKEN" }` (no `profile`/`robot_id`); a command that resolves no credential (e.g. `version`) yields the minimal `{ "type": "bot" }`.
+`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is **always an object**: a stored profile fills in `profile` / `robot_id` / `source: "profile:<name>"`; a raw environment credential reports the alias that supplied it (`source: "env:OCTO_TOKEN"` or `source: "env:OCTO_BOT_TOKEN"`) and has no verified `profile`/`robot_id`; a command that resolves no credential (e.g. `version`) yields the minimal `{ "type": "bot" }`.
 
 Every failure prints an error envelope to **stderr** and exits non-zero:
 

@@ -9,15 +9,15 @@ import (
 
 // FileProvider resolves a bot credential from the encrypted on-disk store,
 // selecting by --bot-id (robot id) and/or --profile (friendly name). It is the
-// primary source in the chain; the env provider remains the fallback for the
-// zero-profile case.
+// stored-profile source. The command factory decides whether an explicit
+// selector requires this provider or an environment credential wins first.
 //
 // Resolution outcomes (from authstore.ActiveProfile):
 //   - found     → the stored credential
 //   - missing   → a selector was given but matched nothing/was inconsistent →
 //     hard error (auth, exit 3); the chain stops rather than silently using env
 //   - ambiguous → ≥2 profiles and no selector → hard error (validation, exit 2)
-//   - none      → 0 profiles → (nil, nil) so the chain falls through to env
+//   - none      → 0 profiles → (nil, nil) so the caller may continue
 type FileProvider struct {
 	Store           *authstore.Store
 	ExplicitProfile string

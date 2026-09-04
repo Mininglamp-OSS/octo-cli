@@ -13,7 +13,10 @@ import (
 // Environment variable names. Centralised for testability and discoverability.
 const (
 	EnvAPIBaseURL = "OCTO_API_BASE_URL"
-	EnvBotToken   = "OCTO_BOT_TOKEN"
+	// EnvToken is the canonical token variable. It accepts every supported
+	// credential kind and takes precedence over the compatible EnvBotToken alias.
+	EnvToken    = "OCTO_TOKEN"
+	EnvBotToken = "OCTO_BOT_TOKEN"
 	// EnvCredentialMode selects the credential resolution policy. The empty
 	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
 	// used by octo-daemon task processes.
@@ -30,9 +33,9 @@ const (
 )
 
 // Config holds CLI configuration loaded from environment variables.
-// BotToken and SpaceID live here too (duplicated in credential.EnvProvider) so
-// callers wiring a client without a full provider chain still have access; the
-// credential provider remains the authoritative path for command execution.
+// BotToken and SpaceID live here so callers wiring a client without a full
+// provider chain still have access; the credential provider remains the
+// authoritative path for command execution.
 type Config struct {
 	// APIBaseURL is the unified base URL for all backend services.
 	// Set via OCTO_API_BASE_URL.
@@ -49,15 +52,38 @@ type Config struct {
 	Format string
 }
 
-// Load reads configuration from the environment.
+// ResolvedEnvToken is the canonical credential value resolved at the process
+// environment boundary. Callers use Token and Source without knowing which
+// compatibility alias supplied it.
+type ResolvedEnvToken struct {
+	Token  string
+	Source string
+}
+
+// Load reads configuration from the environment. Token aliases are normalized
+// by ResolveEnvToken so the auth gate and credential provider cannot drift.
 func Load() *Config {
+	token := ResolveEnvToken()
 	return &Config{
 		APIBaseURL:     envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
-		BotToken:       os.Getenv(EnvBotToken),
+		BotToken:       token.Token,
 		CredentialMode: strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode))),
 		SpaceID:        os.Getenv(EnvSpaceID),
 		Format:         envOrDefault(EnvFormat, "json"),
 	}
+}
+
+// ResolveEnvToken normalizes the supported environment aliases once. Both
+// normal and task credential policies consume this result without branching on
+// the alias that supplied it.
+func ResolveEnvToken() ResolvedEnvToken {
+	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
+		return ResolvedEnvToken{Token: v, Source: "env:" + EnvToken}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvBotToken)); v != "" {
+		return ResolvedEnvToken{Token: v, Source: "env:" + EnvBotToken}
+	}
+	return ResolvedEnvToken{}
 }
 
 // Validate checks required fields. Only the token is required at load time;
@@ -68,7 +94,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported %s %q", EnvCredentialMode, c.CredentialMode)
 	}
 	if c.BotToken == "" {
-		return fmt.Errorf("%s is required (Octo or Loop bearer credential)", EnvBotToken)
+		return fmt.Errorf("%s or %s is required (Octo or Loop bearer credential)", EnvToken, EnvBotToken)
 	}
 	if c.APIBaseURL != "" {
 		baseURL, err := NormalizeAPIBaseURL(c.APIBaseURL)
