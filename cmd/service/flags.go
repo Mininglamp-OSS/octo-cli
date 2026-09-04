@@ -215,7 +215,7 @@ var engineFlagNames = []string{
 // rootPersistentFlagNames are the global flags root registers as persistent
 // flags. Only long names are listed: `--jq`'s `-q` shorthand lives in pflag's
 // separate shorthand namespace, so a spec param legitimately named `q`
-// (matter.list, skill.list) does not shadow it and must stay registrable.
+// (matter.list, plugin.list) does not shadow it and must stay registrable.
 //
 // The list is spelled out here rather than read from the root command because
 // package cmd imports this package, not the other way round.

@@ -410,6 +410,9 @@ func marketplacePath(service, path string) string {
 // spec-declared enum is enforced before the request leaves — query and body
 // enums are checked at the same strictness so the two do not diverge.
 func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *output.ExitError) {
+	if err := validateConditionalQueryRequirements(cobraCmd, rt); err != nil {
+		return nil, err
+	}
 	q := url.Values{}
 	for flagName, qf := range rt.queryFlags {
 		if !cobraCmd.Flags().Changed(flagName) {
@@ -453,6 +456,41 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 		}
 	}
 	return q, nil
+}
+
+func validateConditionalQueryRequirements(cobraCmd *cobra.Command, rt *operationRuntime) *output.ExitError {
+	for i := range rt.detail.Parameters {
+		p := &rt.detail.Parameters[i]
+		if p.In != "query" || p.RequiredUnlessQuery == nil {
+			continue
+		}
+		flagName := paramFlagName(p)
+		peer := findParam(rt.detail, p.RequiredUnlessQuery.Name, "query")
+		// Registry construction validates this metadata. Keep the runtime check
+		// defensive for tests that inject OperationDetail directly.
+		if peer == nil || peer.Type != "string" {
+			return output.ErrValidation("operation has invalid conditional query metadata", "update the embedded API specification")
+		}
+		peerFlag := paramFlagName(peer)
+		peerValue, err := cobraCmd.Flags().GetString(peerFlag)
+		if err != nil {
+			return output.ErrValidation("operation has invalid conditional query metadata", "update the embedded API specification")
+		}
+		excepted := cobraCmd.Flags().Changed(peerFlag) && peerValue == p.RequiredUnlessQuery.Value
+		if excepted {
+			continue
+		}
+		if cobraCmd.Flags().Changed(flagName) {
+			value, valueErr := cobraCmd.Flags().GetString(flagName)
+			if valueErr == nil && value != "" {
+				continue
+			}
+		}
+		return output.ErrValidation(
+			fmt.Sprintf("--%s is required unless --%s is %q", flagName, peerFlag, p.RequiredUnlessQuery.Value),
+			fmt.Sprintf("pass a non-empty --%s, or set --%s to %s", flagName, peerFlag, p.RequiredUnlessQuery.Value))
+	}
+	return nil
 }
 
 // addSliceQueryValues emits every element of a repeated query flag, holding each to the
@@ -727,7 +765,7 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if rt.detail.Multipart {
 		return nil
 	}
-	enforcePublicAPIConstraints := rt.detail.Service == "loop"
+	enforcePublicAPIConstraints := rt.detail.Service == "loop" || rt.detail.StrictRequestSchema
 	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil
 	}
@@ -762,7 +800,7 @@ func topLevelBodyFlagNames(rt *operationRuntime) map[string]string {
 // flags AND --data — because --data is not a raw passthrough on this path.
 type bodySchemaValidator struct {
 	flagFor                     map[string]string // wire field name → promoted flag name (top level only)
-	enforcePublicAPIConstraints bool              // extended JSON Schema constraints (Loop Public API only)
+	enforcePublicAPIConstraints bool              // extended JSON Schema constraints (Loop or explicit service opt-in)
 }
 
 // validate reports the first violation found, or nil. Enum violations carry

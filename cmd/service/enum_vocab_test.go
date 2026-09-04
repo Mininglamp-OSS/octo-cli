@@ -176,53 +176,60 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"applied", "partial", "question"},
 		why:  "octo-docs-html reply status enum"},
 
-	// --- marketplace ---
-	{op: "marketplace.expert_category.list", in: "query", field: "kind",
-		want: []string{"agent", "squad"},
-		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
-			"ListCategories: `if c.Query(\"kind\") == \"squad\"` selects squads, any other value (including absent) " +
-			"means agent — two values cover every input the backend distinguishes"},
-	{op: "marketplace.expert_tag.list", in: "query", field: "kind",
-		want: []string{"agent", "squad"},
-		why:  "same kind branch in ListTags (handler.go:807) as expert_category.list"},
-	{op: "marketplace.expert_tag.list", in: "query", field: "mode",
-		want: []string{"all", "mine"},
-		why: "octo-marketplace origin/feat/expert-marketplace@448636d internal/api/handler/expert/handler.go " +
-			"ListTags: `c.Query(\"mode\") == \"mine\"` restricts to caller-owned rows, any other value means all — " +
-			"mirrors the pinned mcp_category.list mode pair"},
-	{op: "mcp_category.list", in: "query", field: "mode",
-		want: []string{"all", "mine"},
-		why:  "marketplace swagger binding tag; generated from the backend's own definition"},
-	{op: "mcp.create", in: "body", field: "visibility",
-		want: []string{"public", "private"},
-		why: "octo-marketplace internal/service/mcp.go validatePublicCreateVisibility accepts only \"\"|public|private. " +
-			"model.Visibility has four values, but internal/model/mcp.go says \"system never appears in a client write\" " +
-			"and VisibilitySpace is unused by the mcp service — so the two-value set is right for an mcp write even " +
-			"though skill's is three"},
-	{op: "mcp.update", in: "body", field: "visibility",
-		want: []string{"public", "private"},
-		why:  "same validatePublicCreateVisibility gate as mcp.create; a system row additionally refuses any visibility patch"},
-	{op: "mcp.create", in: "body", field: "transport",
-		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "octo-marketplace internal/model/mcp.go ValidTransport — exactly these three"},
-	{op: "mcp.update", in: "body", field: "transport",
-		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "same ValidTransport gate"},
+	// --- marketplace (unified plugin surface) ---
+	// Backend definitions pinned to Mininglamp-OSS/octo-marketplace
+	// upstream/main@50a1be3 (Space review/listing v2). Re-verify against
+	// upstream/main before widening or narrowing any set here.
 	{op: "mcp.probe", in: "body", field: "transport",
 		want: []string{"stdio", "streamable-http", "sse"},
-		why:  "same ValidTransport gate"},
-	{op: "skill.publish", in: "body", field: "visibility",
-		want: []string{"public", "private", "space"},
-		why: "octo-marketplace model.Visibility minus system (never a client write); the skill service does use " +
-			"VisibilitySpace (internal/service/skill/service.go), which is why skill's set is wider than mcp's"},
-	{op: "skill.update", in: "body", field: "visibility",
-		want: []string{"public", "private", "space"},
-		why:  "same set as skill.publish"},
-	{op: "skill.publish", in: "body", field: "publish_mode",
-		want: []string{"create"},
-		why: "backend-enforced single value: octo-marketplace internal/api/handler/upload/handler.go rejects anything " +
-			"else with \"only publish_mode=create is supported\". A one-value enum is the shape that made " +
-			"html.grant.add wrong, so this one was checked at source rather than assumed"},
+		why:  "octo-marketplace upstream/main@50a1be3 internal/model/mcp.go ValidTransport — the retained connectivity probe still takes these three"},
+	{op: "plugin.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/service/plugin/validation.go:71 validPluginType; " +
+			"internal/api/handler/plugin/handler.go reads plugin_type from query and lets buildListQuery reject others. " +
+			"Legacy per-type surface maps mcp->connector and squad->expert_team"},
+	{op: "plugin.list", in: "query", field: "mode",
+		want: []string{"mine"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/api/handler/plugin/handler.go:284-286 — the list handler accepts only \"\" or \"mine\" and 400s on anything else, so the sole explicit value is \"mine\" (omit for the full catalog). " +
+			"Deliberately NOT [all,mine]: the unified backend rejects mode=all, unlike the retired per-type surface"},
+	{op: "plugin.list", in: "query", field: "sort",
+		want: []string{"newest", "oldest", "updated", "name", "placement", "views", "installs", "downloads", "comprehensive"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/service/plugin/service.go:202-205 — sort switch default=ErrInvalidRequest; " +
+			"placement requires a non-empty scene_code (service.go:207-209). Default ordering in the handler is \"newest\" only when none supplied."},
+	{op: "plugin_category.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why:  "same plugin_type set as plugin.list (categories filtered by scene+type)"},
+	{op: "plugin_tag.list", in: "query", field: "plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why:  "same plugin_type set as plugin.list (optional filter here)"},
+	{op: "plugin_tag.list", in: "query", field: "mode",
+		want: []string{"mine"},
+		why:  "same mode gate as plugin.list (handler.go:541-544 mirrors handler.go:284-286); \"\" or \"mine\" only"},
+	{op: "plugin.upsert", in: "body", field: "plugin.plugin_type",
+		want: []string{"skill", "connector", "expert", "expert_team"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/service/plugin/validation.go:71 validPluginType, enforced on every write via buildWrite (service.go:562). " +
+			"Same set as the read filters; typed here so the write path gates plugin_type client-side too"},
+	{op: "plugin.upsert", in: "body", field: "plugin.visibility",
+		want: []string{"space", "private"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/service/plugin/validation.go:80-90 validVisibility; system is admin-only and " +
+			"public is retired on the write path, so a tenant caller on /plugins/upsert may set only space or private — same client set as plugin.import"},
+	{op: "plugin.upsert", in: "body", field: "relations[].relation_type",
+		want: []string{"expert_team_expert", "expert_skill", "expert_connector"},
+		why: "octo-marketplace upstream/main@50a1be3 octo-plugin-lib@v0.1.0 plugin/types.go:40-42 (RelationExpertTeamExpert/RelationExpertSkill/RelationExpertConnector); " +
+			"validation.go:125 validRelationType enforces source->target typing (expert_team->expert, expert->skill, expert->connector)."},
+	{op: "plugin.import", in: "body", field: "visibility",
+		want: []string{"space", "private"},
+		why: "octo-marketplace upstream/main@50a1be3 internal/service/plugin/import.go routes through buildWrite which calls validVisibility (system admin only, public rejected); " +
+			"skill imports default to space and accept only space/private from a tenant caller."},
+	{op: "plugin.review_request.list", in: "query", field: "mode",
+		want: []string{"mine", "space"},
+		why:  "octo-marketplace upstream/main@50a1be3 internal/api/handler/plugin/review.go ListReviews accepts only the applicant's mine view or the privileged Space queue"},
+	{op: "plugin.review_request.list", in: "query", field: "status",
+		want: []string{"pending", "approved", "rejected", "canceled"},
+		why:  "octo-marketplace upstream/main@50a1be3 model.ReviewStatus and ListReviews' explicit status switch"},
+	{op: "plugin.review_request.create", in: "body", field: "relations[].relation_type",
+		want: []string{"expert_team_expert", "expert_skill", "expert_connector"},
+		why:  "octo-marketplace upstream/main@50a1be3 reviewSubmitRequest reuses relationRequest and SubmitReview maps the same relation-type matrix as plugin.upsert"},
 
 	// --- message ---
 	{op: "message.search", in: "body", field: "sort",

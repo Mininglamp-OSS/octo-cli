@@ -8,16 +8,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`octo-cli marketplace expert` / `squad` families** — CRUD, `mine` lists,
-  taxonomy (`expert-category` / `expert-tag`), viewable `skillmd get`, presigned
-  `expert-skill-upload create` / `skill-download` for the Expert Marketplace
-  (专家/专家团). Required fields and member shape are validated client-side
-  before any request is sent: expert create requires
-  `name`/`summary`/`category`/`instruction`; squad create additionally requires
-  ≥ 1 `members[]` entry, each with `name`/`role`/`instruction` (errors name the
-  exact field, e.g. `members[0].instruction`). Value-level rules (non-empty
-  strings, size caps) remain backend-enforced. The install-to-Loop endpoints
-  (`POST /experts|squads/{id}/install`) are intentionally not exposed.
+- **`octo-cli marketplace plugin` family (unified plugin surface)** — one command
+  family over the backend's unified `/plugins/*` API, replacing the retired
+  per-type `skill` / `mcp` / `marketplace expert` / `marketplace squad` surfaces
+  (44 legacy ops → 25). Resource kind is selected with `--plugin-type`
+  (`skill` / `connector` / `expert` / `expert_team`; the old `mcp` maps to
+  `connector`, `squad` to `expert_team`): `plugin list` / `get` / `version list`
+  / `skillmd` / `download` / `upsert` / `delete` / `install` / `import` /
+  `publish` / `delist`, plus the six-command `plugin review-request` workflow and
+  `plugin-category list` / `plugin-tag list`. The skill
+  upload→parse→import pipeline (`skill-upload`, `skill-parse-task`) and icon
+  presign helpers are retained. Client-side gates before any request is sent:
+  `plugin list` requires `--scene-code` and requires `--plugin-type` except for
+  the all-types `--mode mine` view; `plugin upsert` requires a full `plugin`
+  document (`plugin_name` / `plugin_type` /
+  `visibility` / `manifest_json` / `plugin_json`) and gates `plugin_type`,
+  `visibility` (`space` / `private`; the retired `public` is refused, matching
+  `plugin import`), the `sort` vocabulary, and relations' `relation_type`
+  (`expert_team_expert` / `expert_skill` / `expert_connector`);
+  `mode` accepts only `mine`. Write ops (`upsert` / `delete` / `install` /
+  `import`, plus the non-idempotent `skill-upload parse`) set
+  `x-octo-retry: never` so ambiguous gateway failures surface as
+  `RESULT_UNKNOWN` instead of auto-replaying a non-idempotent mutation.
+  Value-level rules remain backend-enforced.
+- **Marketplace publishing is an explicit, review-aware lifecycle.** `plugin
+  upsert` and skill `plugin import` save drafts and version snapshots. `plugin
+  publish` lists private content immediately, while Space-visible content opens
+  a review request and stays draft until a Space owner/admin approves it. The
+  `plugin review-request create|list|get|approve|reject|cancel` family exposes
+  frozen-submission review, and `plugin delist` takes published Space content
+  down without deleting it. Reads expose `listing_state`, `display_status`, and
+  `review_id` so callers can distinguish draft, pending, published, rejected,
+  and delisted states.
+- **`octo-cli marketplace plugin install`** — installs an `expert` / `expert_team`
+  plugin into a Loop workspace (`--workspace-id`, `--runtime-id`) through the
+  unified API. This exposes the install-to-Loop capability that the retired
+  per-type surface deliberately withheld; it is gated backend-side and
+  provisions through octo-fleet.
 - **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,
   workspaces, runtimes, projects, skills, autopilots, attachments, comments,
@@ -132,6 +159,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   membership deletion is an exact Space-qualified mutation. Requiring the
   principal Space prevents an ambiguous uid from deleting the wrong row when
   the same uid has memberships in multiple Spaces.
+- **BREAKING (marketplace): `plugin list` loses `--page-all`.** The retired
+  `skill.list` / `skill.mine.list` operations declared `x-octo-pagination` and
+  could be exhausted in one invocation. The unified `/plugins` endpoint is
+  offset-paged (`--page` / `--page-size`, default 20, max 100, out-of-range
+  rejected with 400 rather than clamped) and does not advertise the cursor
+  extension, so `--page-all` is not registered. Callers that relied on it must
+  walk `--page` until a short page. This matters most for the owned-name
+  duplicate check: `--q` is a substring match against `plugin_name` only, so a
+  single unpaged probe can report a false "not found".
+- **BREAKING (marketplace): `plugin upsert` replaces the plugin row; it does not
+  patch it.** There is no metadata-only PATCH on the unified API. The backend
+  rebuilds the whole plugin from the submitted document, preserving only
+  `created_at`, the version history and the creator identity — an omitted
+  `category_id`, `publisher` or `icon` is accepted as empty and clears the
+  stored value, and an omitted `relations` key soft-deletes every live relation.
+  `plugin import` deliberately has the opposite semantics (omitted fields fall
+  back to the existing row). The spec field descriptions and the
+  `octo-marketplace` skill docs now state both, and prescribe read-modify-write
+  via `plugin get`. Additionally, `manifest_json` must agree with the outer
+  `plugin` fields (`plugin_name`, `plugin_type`, and `labels` == `tags` in the
+  same order); every disagreement returns one opaque
+  `400 VALIDATION_ERROR {"field":"body","reason":"invalid"}`.
 - **`octo-cli html` adopts canonical create and document references** — create
   omits `slug`; the CLI generates `idempotency_key` once per invocation and
   reuses it across transport retries (an explicit key remains supported). It returns `data.doc_id` plus
