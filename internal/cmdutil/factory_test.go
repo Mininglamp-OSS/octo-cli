@@ -3,6 +3,7 @@ package cmdutil
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,20 +14,43 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
-// TestMain isolates the credential store for the whole package: NewDefaultFactory
-// now resolves credentials through the on-disk store first, so env-based tests
-// must not see a developer's real ~/.octo-cli. An empty OCTO_CONFIG_DIR yields
-// zero profiles, so resolution falls through to OCTO_BOT_TOKEN as these tests
-// expect. Individual tests may still override OCTO_CONFIG_DIR via t.Setenv.
+// TestMain isolates the whole package from the developer's own OCTO_
+// environment. NewDefaultFactory lets an environment credential outrank an
+// implicit on-disk profile, so an ambient variable can outrank or redirect the
+// fixtures these tests pin with t.Setenv: OCTO_TOKEN outranks OCTO_BOT_TOKEN,
+// OCTO_BOT_ID selects a stored profile when no environment credential exists,
+// and OCTO_FORMAT reshapes the resolved config.
+//
+// The sweep is by prefix rather than by name on purpose. Naming variables is
+// what kept breaking: the clear list has been out of date three times
+// (OCTO_TOKEN, then OCTO_FORMAT, then OCTO_BOT_ID), each time because a new
+// variable was added without updating the tests. OCTO_MARKETPLACE_API_PREFIX
+// (cmd/service/run.go) is read straight from the environment with no config
+// constant behind it, so it is exactly the kind a by-name list misses.
+//
+// OCTO_CONFIG_DIR is re-set *after* the sweep: it must point at an empty temp
+// dir rather than be absent, or authstore falls back to the real user config dir
+// and a developer's stored profiles leak back in. An empty dir yields zero
+// profiles, keeping tests that do not set an environment credential isolated.
+// Individual tests may still override any of this with t.Setenv.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "octo-cmdutil-test")
 	if err != nil {
 		panic(err)
 	}
+	sweepOctoEnv()
 	os.Setenv("OCTO_CONFIG_DIR", dir)
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func sweepOctoEnv() {
+	for _, kv := range os.Environ() {
+		if name, _, found := strings.Cut(kv, "="); found && strings.HasPrefix(name, "OCTO_") {
+			os.Unsetenv(name)
+		}
+	}
 }
 
 func TestNewDefaultFactory_InitializesFields(t *testing.T) {
@@ -96,8 +120,72 @@ func TestFactory_CredentialFromEnv(t *testing.T) {
 	}
 }
 
+func TestFactory_EnvironmentCredentialOverridesImplicitProfiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		variable   string
+		token      string
+		profileNum int
+	}{
+		{name: "preferred alias over sole profile", variable: config.EnvToken, token: "app_preferred", profileNum: 1},
+		{name: "legacy alias over sole profile", variable: config.EnvBotToken, token: "app_legacy_env", profileNum: 1},
+		{name: "preferred alias bypasses profile ambiguity", variable: config.EnvToken, token: "app_preferred", profileNum: 2},
+		{name: "legacy alias bypasses profile ambiguity", variable: config.EnvBotToken, token: "app_legacy_env", profileNum: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(config.EnvToken, "")
+			t.Setenv(config.EnvBotToken, "")
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tt.profileNum; i++ {
+				name := fmt.Sprintf("profile-%d", i)
+				if err := store.SaveProfile(name, &authstore.ProfileMeta{RobotID: "bot-" + name}, "app_"+name); err != nil {
+					t.Fatalf("SaveProfile(%s): %v", name, err)
+				}
+			}
+			t.Setenv(tt.variable, tt.token)
+
+			cred, err := NewDefaultFactory().Credential()
+			if err != nil {
+				t.Fatalf("Credential: %v", err)
+			}
+			if cred.Token != tt.token || cred.Profile != "" || cred.Source != "env:"+tt.variable {
+				t.Fatalf("credential = %+v", cred)
+			}
+		})
+	}
+}
+
+func TestFactory_ExplicitProfileOverridesEnvironmentCredential(t *testing.T) {
+	t.Setenv(config.EnvToken, "app_environment")
+	t.Setenv(config.EnvBotToken, "app_legacy_environment")
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("selected", &authstore.ProfileMeta{RobotID: "bot-selected"}, "app_profile"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "selected"
+	cred, err := f.Credential()
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred.Token != "app_profile" || cred.Profile != "selected" || cred.Source != "profile:selected" {
+		t.Fatalf("credential = %+v", cred)
+	}
+}
+
 func TestFactory_TaskCredentialMode(t *testing.T) {
-	t.Run("uses only injected token without opening auth store", func(t *testing.T) {
+	t.Run("supports legacy alias without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"
 		if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
@@ -117,6 +205,20 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 		identity, ok := f.identityValue().(map[string]any)
 		if !ok || identity["type"] != "agent_task" || identity["credential_kind"] != "agent_task" {
 			t.Fatalf("identity = %#v", identity)
+		}
+	})
+
+	t.Run("prefers canonical alias", func(t *testing.T) {
+		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvToken, "octo_loop_preferred")
+		t.Setenv(config.EnvBotToken, "octo_loop_legacy")
+		f := NewDefaultFactory()
+		cred, err := f.Credential()
+		if err != nil {
+			t.Fatalf("Credential: %v", err)
+		}
+		if cred.Token != "octo_loop_preferred" || cred.Source != "env:"+config.EnvToken {
+			t.Fatalf("credential = %+v", cred)
 		}
 	})
 
@@ -142,6 +244,7 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 
 	t.Run("missing injected token fails closed", func(t *testing.T) {
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvToken, "")
 		t.Setenv(config.EnvBotToken, "")
 		f := NewDefaultFactory()
 		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {

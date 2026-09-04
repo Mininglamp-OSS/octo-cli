@@ -175,7 +175,7 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": 0,
-					"env_token_set": os.Getenv(config.EnvBotToken) != "",
+					"env_token_set": config.ResolveEnvToken().Token != "",
 					"hint":          "no stored profiles; run `octo-cli auth login`",
 				})
 			}

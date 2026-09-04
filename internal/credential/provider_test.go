@@ -4,11 +4,14 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 )
 
 // --- EnvProvider ---
 
 func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
+	t.Setenv(config.EnvToken, "")
 	t.Setenv("OCTO_BOT_TOKEN", "app_xxx")
 	t.Setenv("OCTO_SPACE_ID", "space-1")
 
@@ -31,6 +34,7 @@ func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
 }
 
 func TestEnvProvider_NoTokenReturnsNil(t *testing.T) {
+	t.Setenv(config.EnvToken, "")
 	t.Setenv("OCTO_BOT_TOKEN", "")
 
 	cred, err := NewEnvProvider().Resolve()
@@ -43,6 +47,7 @@ func TestEnvProvider_NoTokenReturnsNil(t *testing.T) {
 }
 
 func TestEnvProvider_TrimsWhitespace(t *testing.T) {
+	t.Setenv(config.EnvToken, "")
 	t.Setenv("OCTO_BOT_TOKEN", "  app_xxx  ")
 
 	cred, err := NewEnvProvider().Resolve()
@@ -56,12 +61,9 @@ func TestEnvProvider_TrimsWhitespace(t *testing.T) {
 
 func TestEnvProvider_Name(t *testing.T) {
 	p := NewEnvProvider()
-	if p.Name() != "env:OCTO_BOT_TOKEN" {
+	want := "env:" + config.EnvToken + "/" + config.EnvBotToken
+	if p.Name() != want {
 		t.Errorf("Name = %q", p.Name())
-	}
-	p2 := &EnvProvider{TokenVar: "CUSTOM"}
-	if p2.Name() != "env:CUSTOM" {
-		t.Errorf("Name = %q", p2.Name())
 	}
 }
 

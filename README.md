@@ -100,8 +100,8 @@ curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/instal
 ## Quick Start
 
 ```bash
-# Authenticate as a bot.
-export OCTO_BOT_TOKEN="bf_your_user_bot_token"
+# Authenticate as a bot (`OCTO_BOT_TOKEN` remains a compatible alias).
+export OCTO_TOKEN="bf_your_user_bot_token"
 # Optional for test or self-hosted deployments; production is the default.
 # export OCTO_API_BASE_URL="https://im-test.deepminer.com.cn"
 
@@ -190,8 +190,9 @@ octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 
 ## Authentication
 
-`octo-cli` is bot-only — there is no interactive user login. `OCTO_BOT_TOKEN`
-carries an **App Bot** (`app_*`), a **User Bot** (`bf_*`), or a **user API key**
+`octo-cli` is bot-only — there is no interactive user login. `OCTO_TOKEN`
+(or its compatible `OCTO_BOT_TOKEN` alias) carries an **App Bot** (`app_*`),
+a **User Bot** (`bf_*`), or a **user API key**
 (`uk_*`, a real-person identity used mainly for message search):
 
 | Prefix  | Type         | DM  | Group read | Group write | Thread | Voice | Search |
@@ -206,19 +207,51 @@ operations with `FORBIDDEN`. The one local exception: an `app_*` token running
 `uk_*` tokens are routed to `/v1/user/*`; a `bf_*` token can search as a real
 person with `--on-behalf-of <uid>` (OBO, requires an active grant).
 
+### Token variables
+
+Explicit CLI profile selectors win first. Otherwise, environment credentials
+override implicit stored profiles; the two environment names have identical
+semantics and differ only in priority:
+
+| Priority | Source | Notes |
+|---|---|---|
+| 1 | `--bot-id` / `--profile` | Explicit stored-profile selector; fails closed if it does not match |
+| 2 | `OCTO_TOKEN` | Canonical environment variable; accepts every supported credential kind |
+| 3 | `OCTO_BOT_TOKEN` | Fully compatible legacy alias |
+| 4 | stored profile | Selected by `OCTO_BOT_ID`, or selected implicitly when it is the only profile |
+
+`OCTO_TOKEN` lets you run a single command as a different identity without
+disturbing an existing setup:
+
+```bash
+OCTO_TOKEN="$BOT_TOKEN" octo-cli message sync
+```
+
+The success envelope's `identity.source` names the variable actually used
+(`env:OCTO_TOKEN` or `env:OCTO_BOT_TOKEN`), so a mix-up is visible.
+
 ### API Base URL
 
 All backend services are accessed through a single API base URL.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_BOT_TOKEN`    | Active Octo or Loop bearer credential. Required.         |
+| `OCTO_TOKEN`        | Canonical token variable (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); wins over `OCTO_BOT_TOKEN`. |
+| `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
 | `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
-| `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
+| `OCTO_BOT_ID`       | Select a stored profile by robot id when no environment credential is set. |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
+
+Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
+isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
+the restricted CLI policy but is not a security boundary against a process that
+can rewrite its own environment. In task mode, the daemon injects
+`OCTO_TOKEN`; `OCTO_BOT_TOKEN` remains accepted for compatibility. Both must
+contain a Loop task credential. `auth` and `config` diagnostics are intentionally
+unavailable.
 
 ## Output
 

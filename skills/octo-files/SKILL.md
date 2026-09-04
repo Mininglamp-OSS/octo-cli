@@ -73,7 +73,7 @@ octo-cli bot heartbeat
 
 ### `bot register` — special auth
 
-`register` is the **only** operation not behind the `authBot` middleware. The backend routes it by token prefix: `app_*` → `registerAppBot`, `bf_*` → `registerUserBot`. You still supply `OCTO_BOT_TOKEN`; the CLI treats the call like any other.
+`register` is the **only** operation not behind the `authBot` middleware. The backend routes it by token prefix: `app_*` → `registerAppBot`, `bf_*` → `registerUserBot`. You still supply the normal environment credential (`OCTO_TOKEN`, or legacy alias `OCTO_BOT_TOKEN`); the CLI treats the call like any other.
 
 Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-commands` to advertise slash-command metadata.
 

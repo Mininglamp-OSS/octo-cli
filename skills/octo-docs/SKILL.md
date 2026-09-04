@@ -44,7 +44,8 @@ addressed by `slug`, not `docId`: if a search hit does not include a slug, run
 ## Auth & space
 
 - Authenticate with a bot token via a stored profile (`--profile` / `--bot-id`)
-  or `OCTO_BOT_TOKEN`; both `app_*` and `bf_*` tokens work. Confirm with
+  or `OCTO_TOKEN` (legacy alias `OCTO_BOT_TOKEN`); both `app_*` and `bf_*`
+  tokens work. Confirm with
   `octo-cli config show`.
 - **Do not pass a space flag for docs.** The bot mount resolves the space
   server-side from the token and deliberately ignores any client-supplied space

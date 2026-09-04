@@ -138,7 +138,7 @@ func NewDefaultFactory() *Factory {
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
 // profile-based use and config show reports the active token. Only the "no
 // credential found" case is swallowed (so cfg.Validate reports the familiar
-// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// environment-token hint for the zero-config case); structured resolution errors
 // (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
 // surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
@@ -165,8 +165,9 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-// buildCredential resolves the credential through the file→env chain, applying
-// the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
+// buildCredential gives explicit CLI profile selectors first priority, then a
+// normalized environment credential, then an OCTO_BOT_ID-selected or sole
+// stored profile. Environment aliases are resolved only by EnvProvider.
 func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)))
 	if mode == config.CredentialModeTask {
@@ -176,33 +177,45 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 		return nil, fmt.Errorf("unsupported %s %q", config.EnvCredentialMode, mode)
 	}
 
+	hasExplicitSelector := f.Globals.Profile != "" || f.Globals.BotID != ""
+	if !hasExplicitSelector {
+		cred, err := credential.NewEnvProvider().Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if cred != nil {
+			return f.finalizeCredential(cred), nil
+		}
+	}
+
 	store, err := f.AuthStore()
 	if err != nil {
 		return nil, err
 	}
 	botID := f.Globals.BotID
 	if botID == "" {
-		botID = os.Getenv(config.EnvBotID)
+		botID = strings.TrimSpace(os.Getenv(config.EnvBotID))
 	}
-	chain := credential.NewChain(
-		credential.NewFileProvider(store, f.Globals.Profile, botID),
-		credential.NewEnvProvider(),
-	)
+	chain := credential.NewChain(credential.NewFileProvider(store, f.Globals.Profile, botID))
 	cred, err := chain.Resolve()
 	if err != nil {
 		return nil, err
 	}
+	return f.finalizeCredential(cred), nil
+}
+
+func (f *Factory) finalizeCredential(cred *credential.BotCredential) *credential.BotCredential {
 	if f.Globals.Space != "" {
 		cred.SpaceID = f.Globals.Space
 	}
-	return cred, nil
+	return cred
 }
 
 // buildTaskCredential is deliberately separate from the normal provider
 // chain. A daemon-launched task must use exactly the claim credential injected
-// through OCTO_BOT_TOKEN; local profiles and identity selectors must never
-// replace it. Fleet verifies that the opaque bearer is really an agent_task
-// credential and enforces its bindings/actions.
+// through OCTO_TOKEN (or its compatible OCTO_BOT_TOKEN alias); local profiles
+// and identity selectors must never replace it. Fleet verifies that the opaque
+// bearer is really an agent_task credential and enforces its bindings/actions.
 func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
@@ -211,13 +224,12 @@ func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
 	}
-
 	cred, err := credential.NewEnvProvider().Resolve()
 	if err != nil {
 		return nil, err
 	}
 	if cred == nil {
-		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvBotToken)
+		return nil, fmt.Errorf("%w: %s=task requires %s or %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
 	}
 	// Task credentials are server-bound; never forward a caller-selected Space
 	// context alongside them.

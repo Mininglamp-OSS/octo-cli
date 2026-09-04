@@ -370,8 +370,10 @@ func TestCmd_MissingTokenOnServiceCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected PersistentPreRunE to reject missing token")
 	}
-	if !strings.Contains(err.Error(), "OCTO_BOT_TOKEN") {
-		t.Errorf("error should reference OCTO_BOT_TOKEN, got: %v", err)
+	for _, name := range []string{config.EnvToken, config.EnvBotToken} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error should reference %s, got: %v", name, err)
+		}
 	}
 }
 
@@ -416,11 +418,14 @@ func TestParseParamsJSON_EmptyAndInvalid(t *testing.T) {
 }
 
 func TestDefaultTokenSource(t *testing.T) {
+	t.Setenv(config.EnvToken, "")
+	t.Setenv(config.EnvBotToken, "")
 	if got := defaultTokenSource(""); got != "" {
 		t.Errorf("empty token → %q, want \"\"", got)
 	}
-	if got := defaultTokenSource("app_x"); got == "" {
-		t.Error("non-empty token should have a source tag")
+	t.Setenv(config.EnvToken, "app_x")
+	if got := defaultTokenSource("app_x"); got != "env:"+config.EnvToken {
+		t.Errorf("source = %q, want env:%s", got, config.EnvToken)
 	}
 }
 

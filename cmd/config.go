@@ -100,12 +100,15 @@ func maskToken(tok string) any {
 }
 
 // defaultTokenSource is the source tag used when no resolved credential is
-// available — the env var that would supply the token.
+// available — ResolveEnvToken is the single source of alias precedence.
 func defaultTokenSource(tok string) string {
 	if tok == "" {
 		return ""
 	}
-	return "env:" + config.EnvBotToken
+	if resolved := config.ResolveEnvToken(); resolved.Token != "" {
+		return resolved.Source
+	}
+	return ""
 }
 
 func botKind(tok string) any {
