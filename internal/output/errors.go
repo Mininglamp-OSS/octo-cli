@@ -141,16 +141,17 @@ var backendErrorMapping = map[string]struct {
 	// invalid_argument/VALIDATION_ERROR are both validation (exit 2),
 	// not_found/NOT_FOUND both api_error, unauthorized/UNAUTHORIZED both
 	// auth_error (exit 3).
-	"unauthorized":      {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
-	"auth_unavailable":  {"network", "auth service unreachable; retry later"},
-	"permission_denied": {"permission", "caller lacks the required drive space role"},
-	"password_required": {"permission", "pass --password for this share"},
-	"wrong_password":    {"permission", "verify the share password"},
-	"share_expired":     {"permission", "request a new share"},
-	"not_found":         {"api_error", "verify the id/token and that the space is accessible"},
-	"conflict":          {"validation", "drive state conflicts; re-read and retry"},
-	"invalid_argument":  {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
-	"internal":          {"api_error", "internal server error; retry or report"},
+	"unauthorized":              {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
+	"auth_unavailable":          {"network", "auth service unreachable; retry later"},
+	"permission_denied":         {"permission", "caller lacks the required drive space role"},
+	"password_required":         {"permission", "pass --password for this share"},
+	"wrong_password":            {"permission", "verify the share password"},
+	"share_expired":             {"permission", "request a new share"},
+	"not_found":                 {"api_error", "verify the id/token and that the space is accessible"},
+	"conflict":                  {"validation", "drive state conflicts; re-read and retry"},
+	"invalid_argument":          {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
+	"too_many_data_validations": {"validation", "split checkbox validation changes into smaller batches and retry"},
+	"internal":                  {"api_error", "internal server error; retry or report"},
 }
 
 // ParseBackendError converts an HTTP response body (and status) to an *ExitError.
@@ -207,13 +208,18 @@ func parseBackendError(status int, body []byte, publicAPI bool) *ExitError {
 	var dvEnv struct {
 		Error   string `json:"error"`
 		Message string `json:"message"`
+		Hint    string `json:"hint"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &dvEnv) == nil && looksLikeErrorCode(dvEnv.Error) {
 		msg := dvEnv.Message
 		if msg == "" {
 			msg = dvEnv.Error
 		}
-		return newBackendError(dvEnv.Error, msg, typeFromStatus(status), hintFromStatus(status), body)
+		hint := dvEnv.Hint
+		if hint == "" {
+			hint = hintFromStatus(status)
+		}
+		return newBackendError(dvEnv.Error, msg, typeFromStatus(status), hint, body)
 	}
 
 	// Layer 3: dmworkim {"msg":"...","status":400}

@@ -681,6 +681,28 @@ func TestBodyPropertyFlagAlias(t *testing.T) {
 	}
 }
 
+func TestDocsSheetCheckboxSchemas(t *testing.T) {
+	r := MustNew()
+
+	edit, ok := r.GetOperation("docs.sheet.edit")
+	if !ok || edit.RequestBody == nil {
+		t.Fatal("docs.sheet.edit request body not found")
+	}
+	if validation, ok := edit.RequestBody.Properties["dataValidations"]; !ok || validation.Type != "object" {
+		t.Fatalf("docs.sheet.edit dataValidations = %+v, want object property", validation)
+	}
+
+	for _, operationID := range []string{"docs.sheet.get", "docs.versions.state"} {
+		op, ok := r.GetOperation(operationID)
+		if !ok || op.ResponseSchema == nil {
+			t.Fatalf("%s response schema not found", operationID)
+		}
+		if validation, ok := op.ResponseSchema.Properties["sheetDataValidations"]; !ok || validation.Type != "object" {
+			t.Errorf("%s sheetDataValidations = %+v, want object property", operationID, validation)
+		}
+	}
+}
+
 // TestBinaryBodyGatingDistinguishesInlineFromRedirect pins the -o footgun fix:
 // both docs.scene.export and file.download are x-octo-binary-response, but only
 // docs.scene.export delivers a body inline on a 2xx success, so only it should

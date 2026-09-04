@@ -2,7 +2,7 @@
 
 Read this when the target is a **spreadsheet** (`doc_type: sheet`) and you need to
 read or edit its cells, column widths / row heights, floating images, hyperlinks,
-merged ranges, sheet tabs, or export it.
+merged ranges, sheet tabs, checkbox rules, or export it.
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
 
@@ -19,12 +19,13 @@ may also carry Univer's `p` rich-text snapshot and `t` cell-type; both round-tri
 untouched.) Same read-token-then-guarded-write discipline as the body surface.
 
 ```bash
-# Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + baseVersion
+# Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + checkbox rules + baseVersion
 # (reader). Response:
 #   { docId, sheetCells: { "sheetId!row:col": {v,f,s} }, sheetDims: { "c<idx>|r<idx>": px },
 #     sheetHyperLinks: { "sheetId!linkId": {id,row,column,payload,display?} },
 #     sheetMerges: { "logicalId:sr:sc:er:ec": true },
-#     sheetList: { "logicalId": {name,order} }, baseVersion }
+#     sheetList: { "logicalId": {name,order} },
+#     sheetDataValidations: { "logicalId!uid": {uid,type:"checkbox",ranges:[...]} }, baseVersion }
 octo-cli docs sheet get <docId>
 
 # Batch-edit cells (writer). --base-version is REQUIRED and is sent as the
@@ -32,10 +33,12 @@ octo-cli docs sheet get <docId>
 # A cell value of null DELETES that cell.
 octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+```
 
+```bash
 # Set column widths / row heights via the optional `dims` batch, keyed
 # `c<idx>` (column) or `r<idx>` (row) -> pixels; a null value deletes a dim.
-# Provide cells, dims, or drawings (at least one non-empty). These are the same
+# Provide at least one non-empty supported batch. These are the same
 # `sheetDims` values `docs sheet get` returns.
 octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"dims":{"c0":200,"r3":40,"c5":null}}'
@@ -45,7 +48,7 @@ octo-cli docs sheet edit <docId> --base-version "<token>" \
 # the bytes inline as a base64 data URL in `source`; `drawingId` MUST equal the
 # key's id. A null value deletes that image. `transform` is the pixel box;
 # `sheetTransform` anchors it to a cell range (from/to). NOT returned by
-# `docs sheet get` (the read surface is cells+dims only).
+# `docs sheet get` (other sheet maps, including checkbox rules, are readable).
 octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
   "drawings": { "default!img1": {
     "drawingId": "img1", "drawingType": 0, "imageSourceType": "BASE64",
@@ -54,6 +57,64 @@ octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
     "sheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0}},
     "axisAlignSheetTransform": {"from":{"column":1,"row":1,"columnOffset":0,"rowOffset":0},"to":{"column":2,"row":3,"columnOffset":0,"rowOffset":0},"angle":0,"flipX":false,"flipY":false,"skewX":0,"skewY":0}
   } }
+}'
+```
+
+### Checkboxes — the `dataValidations` batch
+
+A checkbox is a cell value plus a checkbox validation rule. Rule keys are
+`${logicalId}!${uid}` and `uid` must equal the key suffix. Ranges use 0-based,
+inclusive coordinates. Only `type:"checkbox"` is accepted, and rules must target
+an existing sheet. `formula1` / `formula2` are optional, distinct strings. They
+default to `"1"` / `"0"`, whose cell values are numeric `1` (checked) and `0`
+(unchecked). A custom pair such as `"YES"` / `"NO"` instead uses those strings as
+the cell values. The server forces `allowBlank:true`, so an empty checkbox cell
+stays valid.
+
+The complete optional rule surface is `formula1`, `formula2`, `error`,
+`errorTitle`, `prompt`, `promptTitle`, `showDropDown`, `showErrorMessage`,
+`showInputMessage`, `operator`, `imeMode`, `errorStyle`, `renderMode`, and
+`bizInfo:{showTime?}`. The text fields are bounded strings; formulas are literal
+values and cannot start with `=`. Boolean fields must be booleans. `operator` is
+one of `between`, `equal`, `greaterThan`, `greaterThanOrEqual`, `lessThan`,
+`lessThanOrEqual`, `notBetween`, or `notEqual`; `imeMode` is 0..10 and
+`errorStyle` / `renderMode` are 0..2.
+
+Rules must not overlap the complete rule set after the edit. Updating an existing
+`uid` replaces the complete rule before overlap validation, so it may move away
+from its old range. Read the existing entry from `sheetDataValidations` and copy
+every optional field you intend to preserve; omitted fields are cleared. Set a
+rule to `null` to delete it. Deleting a sheet tab automatically deletes all
+checkbox rules owned by that tab.
+
+If a read or write returns `413 sheet_too_large` with `baseVersion` and
+`repairDataValidationKey` under the CLI error `detail`, the server could not
+finish its bounded checkbox-rule inspection. Delete only that returned key with
+the returned version, read again, and repeat if another repair key is returned:
+
+```bash
+octo-cli docs sheet edit <docId> --base-version "<error.detail.baseVersion>" \
+  --data '{"dataValidations":{"<error.detail.repairDataValidationKey>":null}}'
+```
+
+Do not mix cells or other changes into this repair PATCH. The backend only
+permits this path when it strictly shrinks the raw checkbox metadata.
+
+```bash
+# Create an unchecked checkbox in A2 atomically with its initial value.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells": { "default!1:0": { "v": 0 } },
+  "dataValidations": { "default!checkbox-a2": {
+    "uid": "checkbox-a2", "type": "checkbox",
+    "formula1": "1", "formula2": "0",
+    "ranges": [{"startRow":1,"startColumn":0,"endRow":1,"endColumn":0}]
+  } }
+}'
+
+# Remove the checkbox rule. Delete the cell too if its 0/1 value is unwanted.
+octo-cli docs sheet edit <docId> --base-version "<token>" --data '{
+  "cells": { "default!1:0": null },
+  "dataValidations": { "default!checkbox-a2": null }
 }'
 ```
 
@@ -238,11 +299,13 @@ sheet changed since your `docs sheet get`, an edit is rejected with
 sheet is written between pages your `--cursor` is rejected with
 `409 sheet_changed` (restart from the first page for a consistent snapshot).
 Other gates: `409 unsupported_doc_type` (target is a doc/board/whiteboard),
-`413 too_many_cells` / `413 cell_too_large` (write size caps),
+`413 too_many_cells` / `413 too_many_data_validations` / `413 cell_too_large`
+(write batch and size caps),
 `400 invalid_body` (missing base version or malformed shape),
 `400 invalid_limit` / `400 invalid_cursor` (bad pagination params), and
-`422 sheet_cell_invalid` (a cell/dim/drawing/hyperlink/merge/tab violates its
-contract or key shape).
+`422 sheet_cell_invalid` (a cell/dim/drawing/hyperlink/merge/tab/checkbox rule
+violates its contract or key shape). A write intersecting a protected range returns
+`403 protected_range`.
 
 ## Exporting a sheet to Excel (.xlsx)
 
@@ -254,9 +317,10 @@ so feed those into whatever spreadsheet library the bot's runtime has (e.g.
 write `v` (or `f` as a formula), apply `s` as the cell style, and set widths from
 `c<idx>` / heights from `r<idx>`. For a large grid, page the read with
 `--limit`/`--cursor` and stream rows into the workbook. Merged ranges come back in
-`sheetMerges` (`logicalId:sr:sc:er:ec`) and the tabs in `sheetList`, so an export can
-carry values + styles + dimensions + merges across every sheet; only floating images
-/ formulas stay write-only (not in the read surface).
+`sheetMerges` (`logicalId:sr:sc:er:ec`), tabs in `sheetList`, and checkbox rules in
+`sheetDataValidations`, so an export can carry values + styles + dimensions + merges
++ checkboxes across every sheet; only floating images / formulas stay write-only
+(not in the read surface).
 
 ## Commenting on a cell
 
