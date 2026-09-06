@@ -230,7 +230,7 @@ func TestWriteError_DocsTooManyDataValidations(t *testing.T) {
 	if got.Error.Message != "too_many_data_validations" {
 		t.Fatalf("message = %q", got.Error.Message)
 	}
-	const wantHint = "split checkbox validation changes into smaller batches and retry"
+	const wantHint = "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"
 	if got.Error.Hint != wantHint {
 		t.Fatalf("hint = %q, want %q", got.Error.Hint, wantHint)
 	}
@@ -240,6 +240,33 @@ func TestWriteError_DocsTooManyDataValidations(t *testing.T) {
 	}
 	if detail["error"] != "too_many_data_validations" {
 		t.Fatalf("detail = %s", got.Error.Detail)
+	}
+}
+
+func TestWriteError_DocsTooManySheetResources(t *testing.T) {
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, []byte(`{"error":"too_many_sheet_resources"}`))
+	var buf bytes.Buffer
+	if err := WriteError(&buf, ee); err != nil {
+		t.Fatalf("WriteError: %v", err)
+	}
+
+	var got struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.OK || got.Error.Type != "validation" || got.Error.Code != "too_many_sheet_resources" {
+		t.Fatalf("envelope = %s", buf.String())
+	}
+	const wantHint = "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"
+	if got.Error.Hint != wantHint {
+		t.Fatalf("hint = %q, want %q", got.Error.Hint, wantHint)
 	}
 }
 

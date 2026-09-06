@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -675,6 +676,240 @@ func TestHeaderParamWithFlagAlias(t *testing.T) {
 	}
 	if !found.Required {
 		t.Error("If-Match header must be required (mandatory base-version guard)")
+	}
+}
+
+// TestDocsSheetP0ResourceSchemas pins the Bot-visible contract for the P0
+// worksheet resources. The request schema teaches these keys while the generic
+// --data transport remains intentionally open; response schemas pin readback.
+func TestDocsSheetP0ResourceSchemas(t *testing.T) {
+	r := MustNew()
+	edit, ok := r.GetOperation("docs.sheet.edit")
+	if !ok || edit.RequestBody == nil {
+		t.Fatal("docs.sheet.edit request schema missing")
+	}
+	for _, field := range []string{"freeze", "filters", "dataValidations"} {
+		property, present := edit.RequestBody.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.sheet.edit request property %q = %#v, want object", field, property)
+		}
+	}
+	cells, present := edit.RequestBody.Properties["cells"]
+	if !present {
+		t.Fatal("docs.sheet.edit request schema missing cells")
+	}
+	for _, want := range []string{`"p":<rich-text object>?`, `"t":<number>?`, "v/f/s/p/t"} {
+		if !strings.Contains(cells.Description, want) {
+			t.Errorf("docs.sheet.edit cells description must document %q; got %q", want, cells.Description)
+		}
+	}
+	for _, field := range []string{"dims", "hyperlinks", "sheets"} {
+		property, present := edit.RequestBody.Properties[field]
+		if !present {
+			t.Errorf("docs.sheet.edit request schema missing %s", field)
+		}
+		if strings.Contains(property.Description, "only non-empty surface") || strings.Contains(property.Description, "combine with any other non-empty") {
+			t.Errorf("docs.sheet.edit %s description must leave the common non-empty rule at operation level: %q", field, property.Description)
+		}
+	}
+	dims := edit.RequestBody.Properties["dims"]
+	for _, want := range []string{
+		"`${logicalId}:c<idx>` / `${logicalId}:r<idx>`",
+		"bare `c<idx>` / `r<idx>` address the legacy default sheet",
+		"Bare and prefixed default-sheet keys are separate stored entries",
+		`{"c0":null,"default:c0":200}`,
+	} {
+		if !strings.Contains(dims.Description, want) {
+			t.Errorf("docs.sheet.edit dims description must document %q; got %q", want, dims.Description)
+		}
+	}
+	filters, present := edit.RequestBody.Properties["filters"]
+	if !present ||
+		!strings.Contains(filters.Description, `filterColumns?:[`) ||
+		!strings.Contains(filters.Description, `"filters":{"filters":[<raw values>]}`) ||
+		!strings.Contains(filters.Description, "ref.startRow is the header row and stays visible") ||
+		!strings.Contains(filters.Description, "filterColumns:[] keeps the range but omits filterColumns on readback") {
+		t.Errorf("docs.sheet.edit filters description must expose a buildable value-filter shape; got %#v", filters)
+	}
+	freeze := edit.RequestBody.Properties["freeze"]
+	if !strings.Contains(freeze.Description, "0 is accepted there but normalizes to -1 on readback") {
+		t.Errorf("docs.sheet.edit freeze description must document zero normalization; got %#v", freeze)
+	}
+	validations, present := edit.RequestBody.Properties["dataValidations"]
+	if !present {
+		t.Fatal("docs.sheet.edit request schema missing dataValidations")
+	}
+	for _, want := range []string{
+		"every validation family, including list, listMultiple, and checkbox",
+		"internal flat `${logicalId}!${uid}` Y.Map shape",
+		"uid unique within that sheet (1–128 characters, no `!` or control characters)",
+		"at least one non-empty ranges:[{startRow,startColumn,endRow,endColumn}] entry",
+		"formula2 as the same number of comma-separated colors",
+		"recommended rendering inputs, not additional server-required fields",
+		"listMultiple cell stores selected labels in v as a JSON-array string",
+		"list cell stores the label directly",
+		"Checkbox ranges must not overlap another checkbox rule",
+		"list and listMultiple overlaps are accepted by the backend",
+		"replaces that sheet's entire rule set",
+		"read sheetDataValidations first",
+		"resend every rule to keep",
+		"do not write if the deployed read surface omits any validation family",
+	} {
+		if !strings.Contains(validations.Description, want) {
+			t.Errorf("docs.sheet.edit dataValidations description must document %q; got %q", want, validations.Description)
+		}
+	}
+
+	get, ok := r.GetOperation("docs.sheet.get")
+	if !ok || get.ResponseSchema == nil {
+		t.Fatal("docs.sheet.get response schema missing")
+	}
+	for _, field := range []string{"sheetFreeze", "sheetFilters", "sheetDataValidations"} {
+		property, present := get.ResponseSchema.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.sheet.get response property %q = %#v, want object", field, property)
+		}
+	}
+	readFilters := get.ResponseSchema.Properties["sheetFilters"]
+	if !strings.Contains(readFilters.Description, `filterColumns?:[`) ||
+		!strings.Contains(readFilters.Description, `"filters":{"filters":[<raw values>]}`) ||
+		!strings.Contains(readFilters.Description, "ref.startRow is the header row and stays visible") ||
+		!strings.Contains(readFilters.Description, "empty filterColumns array is omitted on readback") {
+		t.Errorf("docs.sheet.get sheetFilters description must expose a buildable value-filter shape; got %#v", readFilters)
+	}
+	readValidations := get.ResponseSchema.Properties["sheetDataValidations"]
+	for _, want := range []string{
+		"every returned validation family",
+		"including `list`, `listMultiple`, and `checkbox`",
+		"not the internal flat `${logicalId}!${uid}` Y.Map",
+	} {
+		if !strings.Contains(readValidations.Description, want) {
+			t.Errorf("docs.sheet.get sheetDataValidations description must document %q; got %#v", want, readValidations)
+		}
+	}
+	readCells, present := get.ResponseSchema.Properties["sheetCells"]
+	if !present || !strings.Contains(readCells.Description, "{v?,f?,s?,p?,t?}") {
+		t.Errorf("docs.sheet.get sheetCells description must document the full cell shape; got %#v", readCells)
+	}
+	readDims, present := get.ResponseSchema.Properties["sheetDims"]
+	if !present {
+		t.Fatal("docs.sheet.get response schema missing sheetDims")
+	}
+	for _, want := range []string{
+		"`${logicalId}:c<idx>` / `${logicalId}:r<idx>` target a specific tab",
+		"bare `c<idx>` / `r<idx>` address the legacy default sheet",
+		"Reads return keys exactly as stored",
+	} {
+		if !strings.Contains(readDims.Description, want) {
+			t.Errorf("docs.sheet.get sheetDims description must document %q; got %q", want, readDims.Description)
+		}
+	}
+
+	state, ok := r.GetOperation("docs.versions.state")
+	if !ok || state.ResponseSchema == nil {
+		t.Fatal("docs.versions.state response schema missing")
+	}
+	for _, field := range []string{"sheetFreeze", "sheetFilters", "sheetDataValidations"} {
+		property, present := state.ResponseSchema.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.versions.state response property %q = %#v, want object", field, property)
+		}
+		if !strings.Contains(property.Description, "empty {} for a text document") {
+			t.Errorf("docs.versions.state response property %q must document text-doc emptiness; got %#v", field, property)
+		}
+	}
+	// The version-state handler does not decode sheetHyperLinks, sheetMerges, or
+	// sheetList. Remove this guard when that backend response starts returning
+	// those fields and the schema is updated in the same change.
+	for _, field := range []string{"sheetHyperLinks", "sheetMerges", "sheetList"} {
+		if _, present := state.ResponseSchema.Properties[field]; present {
+			t.Errorf("docs.versions.state must not promise backend-absent field %q", field)
+		}
+	}
+
+	rawDocs, err := specsFS.ReadFile("specs/docs.json")
+	if err != nil {
+		t.Fatalf("read embedded docs spec: %v", err)
+	}
+	var rawSpec struct {
+		Paths map[string]struct {
+			Get struct {
+				Description string `json:"description"`
+				Responses   map[string]struct {
+					Content map[string]struct {
+						Schema struct {
+							Properties map[string]struct {
+								Type any `json:"type"`
+							} `json:"properties"`
+						} `json:"schema"`
+					} `json:"content"`
+				} `json:"responses"`
+			} `json:"get"`
+			Patch struct {
+				Description string `json:"description"`
+			} `json:"patch"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(rawDocs, &rawSpec); err != nil {
+		t.Fatalf("decode embedded docs spec: %v", err)
+	}
+	sheetPath, present := rawSpec.Paths["/v1/bot/docs/{docId}/sheet"]
+	if !present {
+		t.Fatal("sheet path missing from embedded docs spec")
+	}
+	nextCursorType := sheetPath.Get.Responses["200"].Content["application/json"].Schema.Properties["nextCursor"].Type
+	if !reflect.DeepEqual(nextCursorType, []any{"string", "null"}) {
+		t.Errorf("docs.sheet.get nextCursor type = %#v, want nullable string union", nextCursorType)
+	}
+	contractText := strings.Join([]string{
+		sheetPath.Get.Description,
+		sheetPath.Patch.Description,
+		validations.Description,
+		readValidations.Description,
+	}, "\n")
+	for _, superseded := range []string{
+		`sheetDataValidations: { "logicalId!uid":`,
+		`Only type:"checkbox" is accepted`,
+		"only checkbox rules are supported",
+	} {
+		if strings.Contains(contractText, superseded) {
+			t.Errorf("embedded docs spec retains superseded validation contract %q", superseded)
+		}
+	}
+	for _, operation := range []struct {
+		name        string
+		description string
+	}{
+		{name: "docs.sheet.get", description: sheetPath.Get.Description},
+		{name: "docs.sheet.edit", description: sheetPath.Patch.Description},
+	} {
+		for _, want := range []string{
+			"raw coordinate rewrite",
+			"reorder the complete selected row block",
+			"use null for destinations that become empty",
+			"does not re-anchor relative formula references",
+			"Any state keyed by or containing coordinates stays at its old coordinates",
+			"row dims",
+			"data-validation ranges",
+			"cell-comment anchors",
+			"freeze panes and filter ranges/columns also remain fixed",
+			"`sheetDims` is one workbook-level map whose keys may be sheet-qualified",
+			"`${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab",
+			"bare `c<idx>` / `r<idx>` addresses the legacy default sheet",
+			"reads return keys exactly as stored",
+			"evaluate `sheetFilters` criteria",
+			"leaves hidden row coordinates unchanged",
+		} {
+			if !strings.Contains(operation.description, want) {
+				t.Errorf("%s description must document %q; got %q", operation.name, want, operation.description)
+			}
+		}
+		if strings.Contains(operation.description, "clear the filter first") {
+			t.Errorf("%s description must not claim clearing a filter preserves the visible subset", operation.name)
+		}
+	}
+	if !strings.Contains(sheetPath.Patch.Description, "Any one surface may be the only non-empty batch member") {
+		t.Errorf("docs.sheet.edit description must allow any standalone non-empty surface; got %q", sheetPath.Patch.Description)
 	}
 }
 

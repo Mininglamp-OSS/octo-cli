@@ -99,10 +99,13 @@ kind — a document/sheet as `{kind:"document", doc, sheetCells, sheetDims, ...}
 board as `{kind:"board", scene, ...}`. It is a preview, not the live document, and
 is not writable. To read the **live** content, use `docs content get` (`doc.md`),
 `docs sheet get` (`sheet.md`), or `docs scene get` (`board.md`).
+For a text document, every returned sheet map (`sheetCells`, `sheetDims`,
+`sheetFreeze`, `sheetFilters`, and `sheetDataValidations`) is an empty `{}`.
 
 `restore` is non-destructive and records a safety snapshot first, so it is itself
 undoable. For a sheet, restore rolls back the full grid — cells, column-width /
-row-height dims, AND floating images — to the target version.
+row-height dims, floating images, hyperlinks, merges, sheet tabs, freeze panes,
+shared filters, and data-validation rules — to the target version.
 Schema: `octo-cli schema docs.versions.restore`.
 
 ---

@@ -186,9 +186,11 @@ octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follo
 octo-cli docs sheet edit sheet-9 --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
 
-# Create a checkbox in A2; the default checkbox values are numeric 1 (checked) and 0 (unchecked).
+# Create a checkbox in A2 on a sheet that has no other validation rules.
+# dataValidations.default replaces that sheet's complete rule set: otherwise first
+# read sheetDataValidations and include every existing rule you need to keep.
 octo-cli docs sheet edit sheet-9 --base-version "<token>" \
-  --data '{"cells":{"default!1:0":{"v":0}},"dataValidations":{"default!checkbox-a2":{"uid":"checkbox-a2","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":1,"startColumn":0,"endRow":1,"endColumn":0}]}}}'
+  --data '{"cells":{"default!1:0":{"v":0}},"dataValidations":{"default":[{"uid":"checkbox-a2","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":1,"startColumn":0,"endRow":1,"endColumn":0}]}]}}'
 
 # Whiteboards — read the live scene + base version, then upsert/delete elements under If-Match.
 octo-cli docs scene get board-7                       # elements (z-order) + files + base version token
