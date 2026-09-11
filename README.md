@@ -37,8 +37,8 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 33  | Documents, spreadsheets & whiteboards — lifecycle, full-text search, body content, sheet cells (paged read and atomic replace), board scenes, members, comments, versions, attachments |
-| `html`    | 20  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
+| `docs`    | 38  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, sheet cells (paged read and atomic replace), board scenes, members, comments, versions, attachments |
+| `html`    | 21  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `drive`   | 43  | Network drive — spaces & members, folder/file tree, full-text search, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 46 leaves total |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
@@ -158,6 +158,13 @@ octo-cli docs get doc-123
 octo-cli docs content get doc-123          # returns the body + base version token
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
+# PPT: use the dedicated live revision API; preserve all fields when editing.
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId report --idempotency-key <unique-key>
+octo-cli docs ppt get ppt-7
+octo-cli docs ppt edit ppt-7 --data @edit.json   # {"baseRevision":7,"deck":{...}}
+octo-cli docs ppt get ppt-7                    # read back to verify the change
+octo-cli docs ppt export ppt-7 --file-format html --output slides.html
+# Anchors, comment replies, versions and restore: skills/octo-docs/ppt.md.
 # Boards: portable export and point/element comments.
 octo-cli docs scene export board-7 --image-format excalidraw -o ./board.excalidraw
 octo-cli docs comments add board-7 --body "Review this" --point 120,240
@@ -385,7 +392,7 @@ Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
 - [`octo-docs`](./skills/octo-docs/SKILL.md) — documents: lifecycle plus
   progressive-disclosure references. `SKILL.md` is a slim router; task detail
   lives in sibling files loaded on demand: `sheet.md` (spreadsheets), `doc.md`
-  (rich-text body), `board.md` (whiteboard), and `common.md` (comments,
+  (rich-text body), `board.md` (whiteboard), `ppt.md` (slides), and `common.md` (comments,
   versions, members/sharing, attachments).
 - [`octo-marketplace`](./skills/octo-marketplace/SKILL.md) — search, install,
   publish, and update Marketplace Skills and MCP server listings, plus Experts

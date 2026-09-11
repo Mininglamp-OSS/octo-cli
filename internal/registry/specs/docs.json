@@ -9,11 +9,179 @@
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
+    "/v1/bot/docs/{docId}/ppt/export": {
+      "get": {
+        "operationId": "docs.ppt.export",
+        "summary": "Save the live PPT as a self-contained HTML presentation (reader or higher)",
+        "description": "Pass --output slides.html to save the actual file bytes. Without --output, only response metadata is printed. HTML is an offline player, not editable PPTX or PDF. No external assets or collaboration credentials are included.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "x-octo-flag": "file-format",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "html"
+              ],
+              "default": "html"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offline presentation file",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/ppt": {
+      "get": {
+        "operationId": "docs.ppt.get",
+        "summary": "Read the current PPT deck and its base revision",
+        "description": "Reader or higher. Returns authoritative Bento JSON and baseRevision. Use docs.ppt.edit, not the document/sheet/scene or draft endpoints, to edit an html_ppt document. The HTTP response uses a data envelope; the CLI unwraps it once. Shared Docs lifecycle endpoints return flat JSON.",
+        "x-octo-risk": "read",
+        "x-octo-response-unwrap": "data",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live deck",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "deck": {
+                      "type": "object"
+                    },
+                    "baseRevision": {
+                      "type": "integer"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "description": "Advisory content digest; may be absent or empty. Use revision fields for concurrency control."
+                    }
+                  },
+                  "required": [
+                    "docId",
+                    "deck",
+                    "baseRevision"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.ppt.edit",
+        "x-octo-strict-request-schema": true,
+        "summary": "Apply a PPT edit under a mandatory base revision",
+        "description": "Writer or higher; changing title requires admin. Send only {baseRevision,deck} from a fresh get. Preserve deck.docId, unknown fields inside deck, and stable slide/element IDs; do not copy the response's top-level docId or contentHash into the request. The backend compiles the JSON difference to normal collaboration operations. A 409 CONFLICT means reread and reapply the intended change, never blindly resubmit the stale deck. Members and permissions cannot be supplied in deck JSON. The HTTP response uses a data envelope; the CLI unwraps it once. Shared Docs lifecycle endpoints return flat JSON.",
+        "x-octo-risk": "write",
+        "x-octo-response-unwrap": "data",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "baseRevision",
+                  "deck"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "The baseRevision returned by the immediately preceding PPT get"
+                  },
+                  "deck": {
+                    "type": "object",
+                    "description": "The edited bento/slides JSON; preserve document identity and stable slide/element IDs. Text elements use html; code elements use content (never code), grammarName (js/ts/py), fontSize, align, valign and lineHeight. Read back the actual rendered fields."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durably committed edit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "description": "Advisory content digest; may be absent or empty. Use revision fields for concurrency control."
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "changed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs": {
       "post": {
         "operationId": "docs.create",
         "summary": "Create an (empty) document; the caller becomes owner/admin",
-        "description": "Create takes no body content — a new doc starts empty and its body is edited over the Yjs websocket, not REST.",
+        "description": "Create a document in the verified caller Space. Use docType=html_ppt, title, optional templateId (blank by default), and Idempotency-Key for PPT. Content initialization, metadata and member grants commit atomically.",
         "x-octo-risk": "write",
         "requestBody": {
           "required": false,
@@ -22,9 +190,27 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "title": { "type": "string", "description": "initial title (optional; defaults to empty)" },
-                  "folderId": { "type": "string", "description": "target folder id (optional; defaults to the space default folder)" },
-                  "docType": { "type": "string", "description": "document type (optional; defaults to 'doc')" }
+                  "title": {
+                    "type": "string",
+                    "description": "initial title (optional; defaults to empty)"
+                  },
+                  "folderId": {
+                    "type": "string",
+                    "description": "target folder id (optional; defaults to the space default folder)"
+                  },
+                  "docType": {
+                    "type": "string",
+                    "description": "document type (optional; defaults to 'doc')"
+                  },
+                  "templateId": {
+                    "type": "string",
+                    "enum": [
+                      "blank",
+                      "pitch",
+                      "report",
+                      "lesson"
+                    ]
+                  }
                 }
               }
             }
@@ -38,20 +224,58 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "documentName": { "type": "string" },
-                    "title": { "type": "string" },
-                    "spaceId": { "type": "string" },
-                    "folderId": { "type": "string" },
-                    "ownerId": { "type": "string" },
-                    "role": { "type": "string" },
-                    "createdAt": { "type": "string" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "documentName": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "spaceId": {
+                      "type": "string"
+                    },
+                    "folderId": {
+                      "type": "string"
+                    },
+                    "ownerId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "editorUrl": {
+                      "type": "string",
+                      "description": "Editor URL; returned for html_ppt only."
+                    },
+                    "shareUrl": {
+                      "type": "string",
+                      "description": "Presentation URL subject to document access rules; returned for html_ppt only."
+                    }
                   }
                 }
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
+        ]
       },
       "get": {
         "operationId": "docs.list",
@@ -59,10 +283,46 @@
         "description": "Page-based listing scoped to the bot's server-resolved space. Response is {total, items}; there is no cursor, so --page-all does not apply — walk pages with --page/--pageSize.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "folderId", "in": "query", "schema": { "type": "string" }, "description": "filter to a single folder" },
-          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number" },
-          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 }, "description": "items per page (1-100, default 20)" },
-          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["updatedAt:desc", "updatedAt:asc"], "default": "updatedAt:desc" }, "description": "sort order by last update" }
+          {
+            "name": "folderId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "filter to a single folder"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "1-based page number"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            },
+            "description": "items per page (1-100, default 20)"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "updatedAt:desc",
+                "updatedAt:asc"
+              ],
+              "default": "updatedAt:desc"
+            },
+            "description": "sort order by last update"
+          }
         ],
         "responses": {
           "200": {
@@ -72,18 +332,32 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "total": { "type": "integer" },
+                    "total": {
+                      "type": "integer"
+                    },
                     "items": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "docId": { "type": "string" },
-                          "title": { "type": "string" },
-                          "ownerId": { "type": "string" },
-                          "docType": { "type": "string" },
-                          "role": { "type": "string" },
-                          "updatedAt": { "type": "string" }
+                          "docId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "ownerId": {
+                            "type": "string"
+                          },
+                          "docType": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -209,7 +483,14 @@
         "summary": "Fetch one document's metadata (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -219,17 +500,40 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "documentName": { "type": "string" },
-                    "title": { "type": "string" },
-                    "ownerId": { "type": "string" },
-                    "spaceId": { "type": "string" },
-                    "folderId": { "type": "string" },
-                    "docType": { "type": "string" },
-                    "octoDocSlug": { "type": "string", "description": "HTML document reference for octo-cli html commands: canonical doc_id for a newly created canonical document, or the retained legacy slug for an old document." },
-                    "role": { "type": "string" },
-                    "createdAt": { "type": "string" },
-                    "updatedAt": { "type": "string" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "documentName": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "ownerId": {
+                      "type": "string"
+                    },
+                    "spaceId": {
+                      "type": "string"
+                    },
+                    "folderId": {
+                      "type": "string"
+                    },
+                    "docType": {
+                      "type": "string"
+                    },
+                    "octoDocSlug": {
+                      "type": "string",
+                      "description": "HTML document reference for octo-cli html commands: canonical doc_id for a newly created canonical document, or the retained legacy slug for an old document."
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -242,7 +546,14 @@
         "summary": "Rename a document (needs admin)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -250,24 +561,44 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["title"],
+                "required": [
+                  "title"
+                ],
                 "properties": {
-                  "title": { "type": "string", "description": "new non-empty title" }
+                  "title": {
+                    "type": "string",
+                    "description": "new non-empty title"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Renamed" } }
+        "responses": {
+          "200": {
+            "description": "Renamed"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.delete",
         "summary": "Soft-delete a document (needs admin)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/export": {
@@ -279,19 +610,54 @@
         "x-octo-risk-note": "read reflects the server-side effect: this is a GET that renders and returns the live scene as an image without mutating any doc state. The optional --output/-o writes to a local, user-chosen path (client side, analogous to curl -o) and does not change the API risk class.",
         "x-octo-binary-response": true,
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "format", "in": "query", "x-octo-flag": "image-format", "schema": { "type": "string", "enum": ["png", "svg", "excalidraw"], "default": "png" }, "description": "image format (one of: png, svg, excalidraw); default png. Exposed as --image-format so it does not shadow the global --format output flag." }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "x-octo-flag": "image-format",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "png",
+                "svg",
+                "excalidraw"
+              ],
+              "default": "png"
+            },
+            "description": "image format (one of: png, svg, excalidraw); default png. Exposed as --image-format so it does not shadow the global --format output flag."
+          }
         ],
         "responses": {
           "200": {
             "description": "The rendered board image",
             "content": {
-              "image/png": { "schema": { "type": "string", "format": "binary" } },
-              "image/svg+xml": { "schema": { "type": "string", "format": "binary" } }
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
             }
           },
-          "400": { "description": "invalid_format" },
-          "409": { "description": "unsupported_doc_type / board_snapshot_invalid" }
+          "400": {
+            "description": "invalid_format"
+          },
+          "409": {
+            "description": "unsupported_doc_type / board_snapshot_invalid"
+          }
         }
       }
     },
@@ -302,7 +668,14 @@
         "description": "Reads the LIVE ProseMirror body of a doc_type 'doc' plus the base-version token that pins the read. Pass that token to `docs content edit` as --base-version so the optimistic-concurrency guard can prove the body did not change between read and write. board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -312,10 +685,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "doc": { "type": "object", "description": "the live body as ProseMirror document JSON" },
-                    "schemaVersion": { "type": "integer", "description": "ProseMirror schema version the body was decoded with" },
-                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs content edit --base-version`" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "doc": {
+                      "type": "object",
+                      "description": "the live body as ProseMirror document JSON"
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "description": "ProseMirror schema version the body was decoded with"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "opaque base64 base-version token; pass to `docs content edit --base-version`"
+                    }
                   }
                 }
               }
@@ -329,13 +713,22 @@
         "description": "Applies a batch of incremental block ops to a doc_type 'doc' body under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs content get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live body moved since that read. The ops batch is a structured array, so pass it as JSON through --data. Only doc_type 'doc' is accepted (board / whiteboard return 409 unsupported_doc_type). Gates: op count over the max → 413 too_many_ops, a single op's content too large → 413 op_content_too_large, block-path too deep → 400 path_too_deep, missing base version or malformed shape → 400 invalid_body, bad anchor / invalid ops → 422.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
             "x-octo-flag": "base-version",
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "base-version token from 'docs content get' (sent as the If-Match header for optimistic concurrency; required)"
           }
         ],
@@ -345,12 +738,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["ops"],
+                "required": [
+                  "ops"
+                ],
                 "properties": {
                   "ops": {
                     "type": "array",
                     "description": "ordered batch of incremental block edit ops. Each op is one of: insert {\"type\":\"insert\",\"at\":{\"path\":[i,...],\"position\":\"before|after|inside_start|inside_end\"},\"content\":[<ProseMirror block nodes>],\"expect\":{\"type\":\"<nodeType>\"}?}; replace {\"type\":\"replace\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"content\":[...],\"expect\":?}; delete {\"type\":\"delete\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"expect\":?}. `path` is child indices from the doc root; range endpoints must share a parent. Pass via --data.",
-                    "items": { "type": "object" }
+                    "items": {
+                      "type": "object"
+                    }
                   }
                 }
               }
@@ -365,10 +762,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "bytes": { "type": "integer", "description": "encoded size of the doc after the edit" },
-                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
-                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "encoded size of the doc after the edit"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "new base-version token for the next edit"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "sequence of the auto safety snapshot taken before the edit"
+                    }
                   }
                 }
               }
@@ -463,7 +871,10 @@
                       "description": "paged mode: more cells remain after this page"
                     },
                     "nextCursor": {
-                      "type": ["string", "null"],
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "description": "paged mode: opaque cursor for the next page (null when hasMore is false); pass back via --cursor"
                     }
                   }
@@ -588,14 +999,18 @@
             "name": "docId",
             "in": "path",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
             "x-octo-flag": "base-version",
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
           }
         ],
@@ -605,7 +1020,10 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["findString", "replaceString"],
+                "required": [
+                  "findString",
+                  "replaceString"
+                ],
                 "properties": {
                   "findString": {
                     "type": "string",
@@ -620,7 +1038,10 @@
                   "findBy": {
                     "type": "string",
                     "x-octo-flag": "find-by",
-                    "enum": ["value", "formula"],
+                    "enum": [
+                      "value",
+                      "formula"
+                    ],
                     "default": "value",
                     "description": "search displayed/raw values or formula source text"
                   },
@@ -644,12 +1065,29 @@
                   "range": {
                     "type": "object",
                     "description": "optional inclusive 0-based selection; requires logicalId",
-                    "required": ["startRow", "startColumn", "endRow", "endColumn"],
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
                     "properties": {
-                      "startRow": { "type": "integer", "minimum": 0 },
-                      "startColumn": { "type": "integer", "minimum": 0 },
-                      "endRow": { "type": "integer", "minimum": 0 },
-                      "endColumn": { "type": "integer", "minimum": 0 }
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   }
                 }
@@ -665,13 +1103,29 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "matchedCells": { "type": "integer" },
-                    "replacedCells": { "type": "integer" },
-                    "replacements": { "type": "integer" },
-                    "bytes": { "type": "integer", "description": "present when the sheet changed" },
-                    "baseVersion": { "type": "string" },
-                    "newDocVersionSeq": { "type": "integer", "description": "present when the sheet changed" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "matchedCells": {
+                      "type": "integer"
+                    },
+                    "replacedCells": {
+                      "type": "integer"
+                    },
+                    "replacements": {
+                      "type": "integer"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "present when the sheet changed"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "present when the sheet changed"
+                    }
                   }
                 }
               }
@@ -687,7 +1141,14 @@
         "description": "Reads the LIVE Excalidraw scene of a doc_type 'board' — its `elements` in fractional-index (z-order), the `files` map of image/file refs, and the base-version token that pins the read. Pass that token to `docs scene edit` as --base-version so the optimistic-concurrency guard can prove the scene did not change between read and write. doc / sheet bodies are a different Y.Doc shape and return 409 unsupported_doc_type here; a live scene that decodes to a wrong-kind / corrupt blob returns 409 board_snapshot_invalid.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -697,12 +1158,32 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "elements": { "type": "array", "items": { "type": "object" }, "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node" },
-                    "files": { "type": "object", "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene" },
-                    "appState": { "type": "object", "description": "live Excalidraw application state, including portable board appearance fields" },
-                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`" },
-                    "schemaVersion": { "type": "integer", "description": "whiteboard schema version the scene was decoded with" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "elements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      },
+                      "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node"
+                    },
+                    "files": {
+                      "type": "object",
+                      "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene"
+                    },
+                    "appState": {
+                      "type": "object",
+                      "description": "live Excalidraw application state, including portable board appearance fields"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`"
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "description": "whiteboard schema version the scene was decoded with"
+                    }
                   }
                 }
               }
@@ -717,13 +1198,22 @@
         "x-octo-risk": "write",
         "x-octo-validate-elements-index": true,
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
             "x-octo-flag": "base-version",
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "base-version token from 'docs scene get' (sent as the If-Match header for optimistic concurrency; required)"
           }
         ],
@@ -736,12 +1226,16 @@
                 "properties": {
                   "elements": {
                     "type": "array",
-                    "items": { "type": "object" },
+                    "items": {
+                      "type": "object"
+                    },
                     "description": "full Excalidraw elements to upsert; on a key collision the element with the higher `version` (then smaller `versionNonce`) wins the CAS. Each element MUST carry a valid fractional-index `index` (z-order key produced by the fractional-indexing / Excalidraw rules, e.g. `a0`); an index-less or malformed-index element is rejected locally before sending. Pass via --data."
                   },
                   "deletedElementIds": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "element ids to soft-delete; each becomes a tombstone with a superseding version so it converges under CAS. Pass via --data."
                   },
                   "files": {
@@ -761,10 +1255,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "bytes": { "type": "integer", "description": "encoded size of the scene after the edit" },
-                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
-                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "encoded size of the scene after the edit"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "new base-version token for the next edit"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "sequence of the auto safety snapshot taken before the edit"
+                    }
                   }
                 }
               }
@@ -779,7 +1284,14 @@
         "summary": "List a document's members (needs admin)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -794,11 +1306,22 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "uid": { "type": "string" },
-                          "principalSpaceId": { "type": "string", "description": "principal Space id that qualifies this membership" },
-                          "role": { "type": "string" },
-                          "source": { "type": "string" },
-                          "grantedBy": { "type": "string" }
+                          "uid": {
+                            "type": "string"
+                          },
+                          "principalSpaceId": {
+                            "type": "string",
+                            "description": "principal Space id that qualifies this membership"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "grantedBy": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -815,7 +1338,14 @@
         "description": "Space-qualified PUT mutation for Bot callers. When principalSpaceId is omitted, the backend uses the authenticated Bot Space. That Space may also be supplied explicitly and supports add or role update. A foreign principalSpaceId performs no directory lookup and can only update an existing exact (docId, uid, principalSpaceId) membership; a missing exact row returns 404.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -823,17 +1353,40 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["uid", "role"],
+                "required": [
+                  "uid",
+                  "role"
+                ],
                 "properties": {
-                  "uid": { "type": "string", "description": "uid in the Space-qualified membership key" },
-                  "principalSpaceId": { "type": "string", "x-octo-flag": "principal-space-id", "description": "principal Space id; for Bot calls, omission defaults to the authenticated Bot Space, an explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup" },
-                  "role": { "type": "string", "enum": ["reader", "commenter", "writer", "admin"], "description": "role to grant. Matches octo-docs-backend isMemberRole (src/permission/role.ts); commenter is a stored role ranked between reader and writer, so omitting it made the local enum gate reject a call the backend accepts" }
+                  "uid": {
+                    "type": "string",
+                    "description": "uid in the Space-qualified membership key"
+                  },
+                  "principalSpaceId": {
+                    "type": "string",
+                    "x-octo-flag": "principal-space-id",
+                    "description": "principal Space id; for Bot calls, omission defaults to the authenticated Bot Space, an explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "description": "role to grant. Matches octo-docs-backend isMemberRole (src/permission/role.ts); commenter is a stored role ranked between reader and writer, so omitting it made the local enum gate reject a call the backend accepts"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Upserted" } }
+        "responses": {
+          "200": {
+            "description": "Upserted"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/members/{uid}": {
@@ -843,11 +1396,38 @@
         "description": "Bot exact-delete mutation for the membership identified by (docId, uid, principalSpaceId). principalSpaceId is required because one uid can have distinct memberships in multiple Spaces.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "principalSpaceId", "in": "query", "required": true, "x-octo-flag": "principal-space-id", "schema": { "type": "string" }, "description": "principal Space id of the membership to remove; required to disambiguate the same uid across Spaces" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principalSpaceId",
+            "in": "query",
+            "required": true,
+            "x-octo-flag": "principal-space-id",
+            "schema": {
+              "type": "string"
+            },
+            "description": "principal Space id of the membership to remove; required to disambiguate the same uid across Spaces"
+          }
         ],
-        "responses": { "200": { "description": "Removed" } }
+        "responses": {
+          "200": {
+            "description": "Removed"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/share": {
@@ -857,7 +1437,14 @@
         "description": "Returns the current share settings any viewer can see: {docId, shareScope, shareRole}. shareScope is 'restricted' (only owner/members) or 'anyone_in_space' (every member of the doc's space gets the share role). shareRole is meaningful only when shareScope is anyone_in_space; a restricted doc always reports shareRole 'read'.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -867,9 +1454,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
-                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "shareScope": {
+                      "type": "string",
+                      "enum": [
+                        "restricted",
+                        "anyone_in_space"
+                      ]
+                    },
+                    "shareRole": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "edit"
+                      ]
+                    }
                   }
                 }
               }
@@ -883,7 +1484,14 @@
         "description": "Change the share scope so either only owner/members can access (--scope restricted) or every member of the doc's space gets a share role (--scope anyone_in_space --role read|edit). Normalization matches the backend: with --scope anyone_in_space a valid --role is required (a missing/invalid role is 400 invalid_role); with --scope restricted the role is ignored and stored as read, so --role may be omitted. An unknown scope is 400 invalid_scope; a non-admin caller is 403; a missing/cross-space doc is 404; an archived doc is 409. Share only ever RAISES access (owner/members are never downgraded).",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -891,10 +1499,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["shareScope"],
+                "required": [
+                  "shareScope"
+                ],
                 "properties": {
-                  "shareScope": { "type": "string", "x-octo-flag": "scope", "enum": ["restricted", "anyone_in_space"], "description": "share scope to set" },
-                  "shareRole": { "type": "string", "x-octo-flag": "role", "enum": ["read", "edit"], "description": "share role for anyone_in_space (required when scope=anyone_in_space; ignored and stored as read when scope=restricted)" }
+                  "shareScope": {
+                    "type": "string",
+                    "x-octo-flag": "scope",
+                    "enum": [
+                      "restricted",
+                      "anyone_in_space"
+                    ],
+                    "description": "share scope to set"
+                  },
+                  "shareRole": {
+                    "type": "string",
+                    "x-octo-flag": "role",
+                    "enum": [
+                      "read",
+                      "edit"
+                    ],
+                    "description": "share role for anyone_in_space (required when scope=anyone_in_space; ignored and stored as read when scope=restricted)"
+                  }
                 }
               }
             }
@@ -908,18 +1534,40 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
-                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "shareScope": {
+                      "type": "string",
+                      "enum": [
+                        "restricted",
+                        "anyone_in_space"
+                      ]
+                    },
+                    "shareRole": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "edit"
+                      ]
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "description": "invalid_scope / invalid_role" },
-          "403": { "description": "forbidden (not admin/owner)" },
-          "404": { "description": "not_found (missing or cross-space doc)" },
-          "409": { "description": "conflict (archived doc)" }
+          "400": {
+            "description": "invalid_scope / invalid_role"
+          },
+          "403": {
+            "description": "forbidden (not admin/owner)"
+          },
+          "404": {
+            "description": "not_found (missing or cross-space doc)"
+          },
+          "409": {
+            "description": "conflict (archived doc)"
+          }
         }
       }
     },
@@ -930,7 +1578,14 @@
         "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader or writer is grantable here; admin is not forward-grantable.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -938,16 +1593,34 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["uid", "role"],
+                "required": [
+                  "uid",
+                  "role"
+                ],
                 "properties": {
-                  "uid": { "type": "string", "description": "target user uid" },
-                  "role": { "type": "string", "enum": ["reader", "commenter", "writer"], "description": "role to grant (grant-only, never downgrades). Matches octo-docs-backend isForwardGrantRole (src/permission/role.ts) = the member roles minus admin" }
+                  "uid": {
+                    "type": "string",
+                    "description": "target user uid"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer"
+                    ],
+                    "description": "role to grant (grant-only, never downgrades). Matches octo-docs-backend isForwardGrantRole (src/permission/role.ts) = the member roles minus admin"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Grant result (final role + changed flag)" } }
+        "responses": {
+          "200": {
+            "description": "Grant result (final role + changed flag)"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/comments": {
@@ -957,10 +1630,40 @@
         "description": "Returns {items, nextCursor}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "includeResolved", "in": "query", "schema": { "type": "string" }, "description": "set to 1 to include resolved threads" },
-          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 100 }, "description": "page size (1-100, default 50)" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeResolved",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "set to 1 to include resolved threads"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "id cursor from a previous page's nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            },
+            "description": "page size (1-100, default 50)"
+          }
         ],
         "responses": {
           "200": {
@@ -970,8 +1673,15 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "nextCursor": { "type": "integer" }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -981,11 +1691,31 @@
       },
       "post": {
         "operationId": "docs.comments.add",
-        "summary": "Add a root comment (anchored) or a reply (needs reader)",
-        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor. For boards, `docs comments add` accepts --body plus exactly one of --point X,Y or repeatable --element-id; these board anchor flags are mutually exclusive with --data and the reply/rich-document anchor flags, and element-anchor dry runs still read the live scene. Other callers, replies, and advanced scenarios use --data with opaque base64 anchorStart/anchorEnd from a live editor selection, or anchorText for rich documents; ambiguous text anchors fail with 422 ambiguous_anchor and can be narrowed with blockPath/occurrence. For sheets, pass the base64 cell key as both anchors.",
+        "summary": "Add an anchored root or reply (commenter or higher)",
+        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor. For boards, `docs comments add` accepts --body plus exactly one of --point X,Y or repeatable --element-id; these board anchor flags are mutually exclusive with --data and the reply/rich-document anchor flags, and element-anchor dry runs still read the live scene. Other callers, replies, and advanced scenarios use --data with opaque base64 anchorStart/anchorEnd from a live editor selection, or anchorText for rich documents; ambiguous text anchors fail with 422 ambiguous_anchor and can be narrowed with blockPath/occurrence. For sheets, pass the base64 cell key as both anchors. PPT roots use anchor {kind,versionSeq,baseRevision?,slideId?,elementId?,elementIds?,x?,y?}; replies use parentId only. PPT writes require Idempotency-Key.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[\\x21-\\x7e]+$"
+            },
+            "description": "Required for PPT comments: 1–128 printable ASCII characters without spaces. Preserve the identical key and body on an uncertain retry. The CLI rejects an explicitly blank key; length and character bounds are backend-enforced."
+          }
         ],
         "requestBody": {
           "required": true,
@@ -993,21 +1723,102 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["body"],
+                "required": [
+                  "body"
+                ],
                 "properties": {
-                  "body": { "type": "string", "description": "comment text" },
-                  "parentId": { "type": "integer", "description": "thread root id to reply to (omit for a root comment)" },
-                  "anchorStart": { "type": "string", "description": "root only: opaque base64 anchor start; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor" },
-                  "anchorEnd": { "type": "string", "description": "root only: opaque base64 anchor end; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor" },
-                  "anchorText": { "type": "string", "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)" },
-                  "blockPath": { "type": "string", "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)" },
-                  "occurrence": { "type": "integer", "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates" }
+                  "body": {
+                    "type": "string",
+                    "description": "comment text"
+                  },
+                  "parentId": {
+                    "type": "integer",
+                    "description": "thread root id to reply to (omit for a root comment)"
+                  },
+                  "anchorStart": {
+                    "type": "string",
+                    "description": "root only: opaque base64 anchor start; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor"
+                  },
+                  "anchorEnd": {
+                    "type": "string",
+                    "description": "root only: opaque base64 anchor end; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor"
+                  },
+                  "anchorText": {
+                    "type": "string",
+                    "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)"
+                  },
+                  "blockPath": {
+                    "type": "string",
+                    "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)"
+                  },
+                  "occurrence": {
+                    "type": "integer",
+                    "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates"
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "document",
+                          "slide",
+                          "element",
+                          "point"
+                        ]
+                      },
+                      "slideId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "versionSeq": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Explicit null for live; positive integer for fixed version"
+                      },
+                      "baseRevision": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elementId": {
+                        "type": "string"
+                      },
+                      "elementIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "description": "PPT anchor contract. The CLI checks required fields and enums; coordinate bounds, identifiers, version/revision values and unknown fields are validated by the backend."
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created (returns the new comment id)" } }
+        "responses": {
+          "201": {
+            "description": "Created (returns the new comment id)"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/comments/{id}": {
@@ -1017,8 +1828,22 @@
         "description": "Pass --body to edit your own comment's text, or --resolved to resolve/reopen a thread root. Provide exactly one.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1027,25 +1852,124 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "body": { "type": "string", "description": "new comment text (author only)" },
-                  "resolved": { "type": "boolean", "description": "resolve (true) or reopen (false) a thread root (writer only)" }
+                  "body": {
+                    "type": "string",
+                    "description": "new comment text (author only)"
+                  },
+                  "resolved": {
+                    "type": "boolean",
+                    "description": "resolve (true) or reopen (false) a thread root (writer only)"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Required for PPT comments. Use the revision returned by comments get; refresh after a conflict."
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Updated" } }
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.comments.delete",
         "summary": "Soft-delete your own comment, or hard-delete as admin",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "hard", "in": "query", "schema": { "type": "string" }, "description": "set to 1 for an admin hard delete (default is a soft delete by the author)" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hard",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "set to 1 for an admin hard delete (default is a soft delete by the author)"
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Required current row revision for PPT comments."
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
+      },
+      "get": {
+        "operationId": "docs.comments.get",
+        "summary": "Read a comment and its authoritative root anchor",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comment and root records; replies inherit root.anchor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "comment",
+                    "root"
+                  ],
+                  "properties": {
+                    "comment": {
+                      "type": "object"
+                    },
+                    "root": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-strict-response-schema": true,
+        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
       }
     },
     "/v1/bot/docs/{docId}/versions": {
@@ -1055,11 +1979,51 @@
         "description": "Returns {items, nextCursor, counts}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "page size" },
-          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["manual", "auto", "all"] }, "description": "filter by snapshot kind" },
-          { "name": "includeAuto", "in": "query", "schema": { "type": "string" }, "description": "back-compat alias honoured only when kind is absent; set to 1 to include auto snapshots" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "id cursor from a previous page's nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "page size"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "auto",
+                "all"
+              ]
+            },
+            "description": "filter by snapshot kind"
+          },
+          {
+            "name": "includeAuto",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "back-compat alias honoured only when kind is absent; set to 1 to include auto snapshots"
+          }
         ],
         "responses": {
           "200": {
@@ -1069,9 +2033,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "nextCursor": { "type": "integer" },
-                    "counts": { "type": "object" }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "integer"
+                    },
+                    "counts": {
+                      "type": "object"
+                    }
                   }
                 }
               }
@@ -1084,7 +2057,26 @@
         "summary": "Take a named snapshot of the live document (needs writer)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
         ],
         "requestBody": {
           "required": false,
@@ -1093,44 +2085,113 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "label": { "type": "string", "description": "human label for the snapshot (optional)" }
+                  "label": {
+                    "type": "string",
+                    "description": "human label for the snapshot (optional)"
+                  },
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "PPT only: required revision from the immediately preceding docs ppt get. Integer type, range and freshness are validated by the PPT backend, including when supplied through --data.",
+                    "maximum": 9007199254740991
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created (returns docVersionSeq)" } }
+        "responses": {
+          "201": {
+            "description": "Created (returns docVersionSeq)"
+          }
+        },
+        "description": " For PPT use baseRevision and Idempotency-Key. Retry uncertain writes with the same body/key; normal editing auto-saves and HTML export reads the live deck."
       }
     },
     "/v1/bot/docs/{docId}/versions/{versionId}/state": {
       "get": {
         "operationId": "docs.versions.state",
         "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
-        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON plus the spreadsheet maps exposed by this endpoint ({kind:'document', doc, sheetCells, sheetDims, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, schemaVersion, docVersionSeq}); every sheet map is an empty {} for a text document. A board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
+        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON plus the spreadsheet maps exposed by this endpoint ({kind:'document', doc, sheetCells, sheetDims, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, schemaVersion, docVersionSeq}); every sheet map is an empty {} for a text document. A board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). A PPT decodes to its immutable presentation deck ({kind:'ppt', deck, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
         "responses": {
           "200": {
-            "description": "Decoded snapshot content (document/sheet or board scene, selected by kind)",
+            "description": "Decoded snapshot content (document/sheet, board scene or PPT deck, selected by kind)",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "kind": { "type": "string", "enum": ["document", "board"], "description": "which content line was decoded: 'document' (doc/sheet -> doc + sheet maps) or 'board' (whiteboard -> scene)" },
-                    "doc": { "type": "object", "description": "document/sheet only: the snapshot body as ProseMirror document JSON" },
-                    "sheetCells": { "type": "object", "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)" },
-                    "sheetDims": { "type": "object", "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)" },
-                    "sheetList": { "type": "object", "description": "document/sheet only: sheet tabs keyed by logicalId with {name,order,rowCount?,columnCount?}; rowCount is 1..10000 and columnCount is 1..100, with missing counts meaning a legacy 1000-row by 100-column tab. It is empty {} for a text document or a legacy single-sheet document; an empty sheetList does not mean sheetDataValidations should be filtered out" },
-                    "sheetFreeze": { "type": "object", "description": "document/sheet only: freeze panes keyed by logicalId (empty {} for a text document)" },
-                    "sheetFilters": { "type": "object", "description": "document/sheet only: shared filter range and criteria keyed by logicalId (empty {} for a text document)" },
-                    "sheetDataValidations": { "type": "object", "description": "document/sheet only: per-sheet arrays containing every data-validation family, including dropdowns and checkboxes (empty {} for a text document)" },
-                    "scene": { "type": "object", "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})" },
-                    "schemaVersion": { "type": "integer" },
-                    "docVersionSeq": { "type": "integer" }
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "document",
+                        "board",
+                        "ppt"
+                      ],
+                      "description": "which content line was decoded: 'document' (doc/sheet -> doc + sheet maps), 'board' (whiteboard -> scene), or 'ppt' (html_ppt -> deck)"
+                    },
+                    "doc": {
+                      "type": "object",
+                      "description": "document/sheet only: the snapshot body as ProseMirror document JSON"
+                    },
+                    "sheetCells": {
+                      "type": "object",
+                      "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)"
+                    },
+                    "sheetDims": {
+                      "type": "object",
+                      "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)"
+                    },
+                    "sheetList": {
+                      "type": "object",
+                      "description": "document/sheet only: sheet tabs keyed by logicalId with {name,order,rowCount?,columnCount?}; rowCount is 1..10000 and columnCount is 1..100, with missing counts meaning a legacy 1000-row by 100-column tab. It is empty {} for a text document or a legacy single-sheet document; an empty sheetList does not mean sheetDataValidations should be filtered out"
+                    },
+                    "sheetFreeze": {
+                      "type": "object",
+                      "description": "document/sheet only: freeze panes keyed by logicalId (empty {} for a text document)"
+                    },
+                    "sheetFilters": {
+                      "type": "object",
+                      "description": "document/sheet only: shared filter range and criteria keyed by logicalId (empty {} for a text document)"
+                    },
+                    "sheetDataValidations": {
+                      "type": "object",
+                      "description": "document/sheet only: per-sheet arrays containing every data-validation family, including dropdowns and checkboxes (empty {} for a text document)"
+                    },
+                    "scene": {
+                      "type": "object",
+                      "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})"
+                    },
+                    "schemaVersion": {
+                      "type": "integer"
+                    },
+                    "docVersionSeq": {
+                      "type": "integer"
+                    },
+                    "deck": {
+                      "type": "object",
+                      "description": "PPT only: the immutable presentation deck, including stable slide and element IDs"
+                    }
                   }
                 }
               }
@@ -1145,8 +2206,23 @@
         "summary": "Rename a saved version (needs writer)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1154,38 +2230,115 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label"],
+                "required": [
+                  "label"
+                ],
                 "properties": {
-                  "label": { "type": "string", "description": "new non-empty label" }
+                  "label": {
+                    "type": "string",
+                    "description": "new non-empty label"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Renamed" } }
+        "responses": {
+          "200": {
+            "description": "Renamed"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.versions.delete",
         "summary": "Delete a saved version (needs admin)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/versions/{versionId}/restore": {
       "post": {
         "operationId": "docs.versions.restore",
         "summary": "Restore the document to a saved version (needs admin)",
-        "description": "Non-destructive forward reconcile of the target version into the live state. A safety snapshot of the pre-restore state is recorded first, so a restore is itself undoable.",
+        "description": "Non-destructive forward reconcile of the target version into the live state. A safety snapshot of the pre-restore state is recorded first, so a restore is itself undoable. For PPT use baseRevision and Idempotency-Key. Retry uncertain writes with the same body/key; normal editing auto-saves and HTML export reads the live deck.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
         ],
-        "responses": { "200": { "description": "Restored (returns restoredFrom + newDocVersionSeq)" } }
+        "responses": {
+          "200": {
+            "description": "Restored (returns restoredFrom + newDocVersionSeq)"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "PPT only: required revision from the immediately preceding docs ppt get. Integer type, range and freshness are validated by the PPT backend, including when supplied through --data.",
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/attachments/presign": {
@@ -1195,7 +2348,14 @@
         "description": "Metadata-only. Returns a presigned PUT URL + headers; the CLI does not upload the bytes. After presign, PUT the file directly to uploadUrl with the returned headers (see the octo-docs skill).",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1203,11 +2363,24 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["fileName", "mime", "sizeBytes"],
+                "required": [
+                  "fileName",
+                  "mime",
+                  "sizeBytes"
+                ],
                 "properties": {
-                  "fileName": { "type": "string", "description": "original file name" },
-                  "mime": { "type": "string", "description": "MIME type (must pass the backend allow/deny list)" },
-                  "sizeBytes": { "type": "integer", "description": "file size in bytes (must be within the tier cap)" }
+                  "fileName": {
+                    "type": "string",
+                    "description": "original file name"
+                  },
+                  "mime": {
+                    "type": "string",
+                    "description": "MIME type (must pass the backend allow/deny list)"
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "description": "file size in bytes (must be within the tier cap)"
+                  }
                 }
               }
             }
@@ -1221,14 +2394,30 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "attachId": { "type": "string" },
-                    "objectKey": { "type": "string" },
-                    "bucket": { "type": "string" },
-                    "mime": { "type": "string" },
-                    "sizeBytes": { "type": "integer" },
-                    "uploadUrl": { "type": "string" },
-                    "headers": { "type": "object" },
-                    "expiresInSec": { "type": "integer" }
+                    "attachId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "bucket": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    },
+                    "uploadUrl": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object"
+                    },
+                    "expiresInSec": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -1243,8 +2432,22 @@
         "summary": "Get a freshly signed, time-limited download URL for one attachment (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "attachId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attachId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -1254,13 +2457,27 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "attachId": { "type": "string" },
-                    "objectKey": { "type": "string" },
-                    "mime": { "type": "string" },
-                    "sizeBytes": { "type": "integer" },
-                    "fileName": { "type": "string" },
-                    "url": { "type": "string" },
-                    "expiresInSec": { "type": "integer" }
+                    "attachId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresInSec": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -1275,7 +2492,14 @@
         "summary": "Batch-resolve attachIds to freshly signed download URLs (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1283,11 +2507,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["attachIds"],
+                "required": [
+                  "attachIds"
+                ],
                 "properties": {
                   "attachIds": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "attachment ids to resolve (non-empty; capped by the backend batch limit)"
                   }
                 }
@@ -1303,14 +2531,95 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "notFound": { "type": "array", "items": { "type": "string" } }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "notFound": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
             }
           }
         }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments/{id}/replies": {
+      "get": {
+        "operationId": "docs.comments.replies",
+        "summary": "Read a root's reply page (reader or higher)",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "itemsField": "items",
+          "cursorField": "nextCursor",
+          "inferHasMore": true,
+          "rejectCursorRepeats": true
+        },
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to 25 replies and nextCursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Positive comment ID for the next page; null ends the list. Zero is not a terminal marker."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-strict-response-schema": true,
+        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
       }
     }
   }

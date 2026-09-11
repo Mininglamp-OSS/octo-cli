@@ -302,13 +302,15 @@ type SchemaInfo struct {
 	// explicitly strict services additionally enforce closed-object and minimum-
 	// property constraints, MinLength, MaxLength and MaxItems. Pattern stays
 	// descriptive because stateful backend exceptions cannot be represented here.
-	MinLength     int    `json:"min_length,omitempty"`
-	MaxLength     int    `json:"max_length,omitempty"`
-	MinItems      int    `json:"min_items,omitempty"`
-	MaxItems      int    `json:"max_items,omitempty"`
-	MinProperties int    `json:"min_properties,omitempty"`
-	Pattern       string `json:"pattern,omitempty"`
-	Ref           string `json:"$ref,omitempty"`
+	Minimum       *float64 `json:"minimum,omitempty"`
+	Maximum       *float64 `json:"maximum,omitempty"`
+	MinLength     int      `json:"min_length,omitempty"`
+	MaxLength     int      `json:"max_length,omitempty"`
+	MinItems      int      `json:"min_items,omitempty"`
+	MaxItems      int      `json:"max_items,omitempty"`
+	MinProperties int      `json:"min_properties,omitempty"`
+	Pattern       string   `json:"pattern,omitempty"`
+	Ref           string   `json:"$ref,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag extension
 	// on a request-body property, mirroring ParamInfo.FlagName for query/header
 	// params. It lets a promoted body field expose a clean flag name (e.g.
@@ -355,12 +357,13 @@ type OperationDetail struct {
 	RequestBody         *SchemaInfo `json:"request_body,omitempty"`
 	RequestBodyRequired bool        `json:"request_body_required,omitempty"`
 	ResponseSchema      *SchemaInfo `json:"response_schema,omitempty"`
-	// StrictRequestSchema opts a service into the extended JSON Schema request
+	// StrictRequestSchema opts a service or individual operation into the extended JSON Schema request
 	// checks (closed objects, lengths, patterns and size constraints) that Loop's
 	// Public API always uses. It lets another strongly typed API request the same
 	// local guarantees without changing historical domains.
-	StrictRequestSchema bool            `json:"strict_request_schema,omitempty"`
-	Pagination          *PaginationInfo `json:"pagination,omitempty"`
+	StrictResponseSchema bool            `json:"strict_response_schema,omitempty"`
+	StrictRequestSchema  bool            `json:"strict_request_schema,omitempty"`
+	Pagination           *PaginationInfo `json:"pagination,omitempty"`
 	// BaseURLEnv is retained in schema output for compatibility with existing
 	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
 	// intentionally does not select a different service URL from this metadata.
@@ -534,10 +537,11 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			Summary: stringOf(op["summary"]),
 			Risk:    stringOf(op["x-octo-risk"]),
 		},
-		BaseURLEnv:          stringOf(doc["x-octo-base-url"]),
-		Credential:          stringOf(doc["x-octo-credential"]),
-		SpaceHeader:         boolOf(doc["x-octo-space-header"]),
-		StrictRequestSchema: truthy(doc["x-octo-strict-request-schema"]),
+		BaseURLEnv:           stringOf(doc["x-octo-base-url"]),
+		Credential:           stringOf(doc["x-octo-credential"]),
+		SpaceHeader:          boolOf(doc["x-octo-space-header"]),
+		StrictResponseSchema: truthy(op["x-octo-strict-response-schema"]),
+		StrictRequestSchema:  truthy(doc["x-octo-strict-request-schema"]) || truthy(op["x-octo-strict-request-schema"]),
 	}
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
 
@@ -741,42 +745,28 @@ func unwrapRequiredFields(doc, op map[string]any, path string) []string {
 	if !ok {
 		return nil
 	}
-	for code, r := range resps {
-		if !strings.HasPrefix(code, "2") {
-			continue
-		}
-		rm, ok := r.(map[string]any)
-		if !ok {
-			continue
-		}
-		if ref := stringOf(rm["$ref"]); ref != "" {
-			resolved := followResponseRef(doc, ref)
-			if resolved == nil {
-				continue
-			}
-			rm = resolved
-		}
-		schema := extractJSONSchema(rm)
-		if schema == nil {
-			continue
-		}
-		info := resolveSchema(doc, schema)
-		// Descend only when the schema models the wrapper itself. Ambiguity is
-		// possible in principle — a payload schema with its own property named
-		// like the unwrap path would match here — but no spec has one, and an
-		// explicit x-octo-response-unwrap-required is the fix if one appears.
-		for _, part := range strings.Split(path, ".") {
-			next, ok := info.Properties[part]
-			if !ok {
-				break
-			}
-			info = next
-		}
-		if len(info.Required) > 0 {
-			return append([]string(nil), info.Required...)
-		}
+	schema := ResponsePayloadSchema(firstSuccessSchema(doc, resps), path)
+	if schema == nil {
+		return nil
 	}
-	return nil
+	return append([]string(nil), schema.Required...)
+}
+
+// ResponsePayloadSchema descends only when the schema models the envelope.
+// A payload property matching the unwrap path is ambiguous; such a spec must
+// declare x-octo-response-unwrap-required explicitly. Current specs do not collide.
+func ResponsePayloadSchema(schema *SchemaInfo, path string) *SchemaInfo {
+	if schema == nil || path == "" {
+		return schema
+	}
+	for _, part := range strings.Split(path, ".") {
+		next, ok := schema.Properties[part]
+		if !ok {
+			break
+		}
+		schema = &next
+	}
+	return schema
 }
 
 func hasSuccessBody(doc, resps map[string]any) bool {
@@ -914,6 +904,12 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		MaxItems:      intOf(schema["maxItems"]),
 		MinProperties: intOf(schema["minProperties"]),
 		Pattern:       stringOf(schema["pattern"]),
+	}
+	if bound, ok := schema["minimum"].(float64); ok {
+		info.Minimum = &bound
+	}
+	if bound, ok := schema["maximum"].(float64); ok {
+		info.Maximum = &bound
 	}
 	if allowed, ok := schema["additionalProperties"].(bool); ok {
 		info.AdditionalProperties = &allowed
@@ -1068,6 +1064,12 @@ func mergeAdditionalProperties(dst, src *SchemaInfo) {
 func mergeSchemaConstraints(dst, src *SchemaInfo) {
 	if dst.MinLength == 0 {
 		dst.MinLength = src.MinLength
+	}
+	if src.Minimum != nil && (dst.Minimum == nil || *src.Minimum > *dst.Minimum) {
+		dst.Minimum = src.Minimum
+	}
+	if src.Maximum != nil && (dst.Maximum == nil || *src.Maximum < *dst.Maximum) {
+		dst.Maximum = src.Maximum
 	}
 	if dst.MaxLength == 0 {
 		dst.MaxLength = src.MaxLength

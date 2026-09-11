@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,23 @@ func TestNewLoadsAllServices(t *testing.T) {
 	for i, s := range want {
 		if got[i] != s {
 			t.Errorf("ListServices[%d]: got %q, want %q", i, got[i], s)
+		}
+	}
+}
+
+// OpenAPI forbids equivalent templated paths even when the parameter names
+// differ: all HTTP methods must share one path item.
+func TestAllSpecsHaveUniquePathTemplates(t *testing.T) {
+	r := MustNew()
+	parameter := regexp.MustCompile(`\{[^{}]+\}`)
+	for _, service := range r.ListServices() {
+		seen := make(map[string]string)
+		for path := range r.GetSpec(service)["paths"].(map[string]any) {
+			template := parameter.ReplaceAllString(path, "{}")
+			if previous, exists := seen[template]; exists {
+				t.Errorf("%s: equivalent OpenAPI paths: %s and %s", service, previous, path)
+			}
+			seen[template] = path
 		}
 	}
 }
@@ -45,7 +63,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        33,
+		"docs":        38,
 		"drive":       43,
 		"html":        21,
 		"marketplace": 25,
@@ -512,41 +530,39 @@ func TestHTMLMutationResponsesDeclareJSONObjects(t *testing.T) {
 	}
 }
 
-// TestUnwrapRequiredFieldsAreDeclaredStrings guards an assumption made by the
-// unwrap guard in cmd/service: it refuses a required unwrapped value that is not
-// a string, because every such field today is a document reference. A spec that
-// declares a non-string required field under the unwrap path would be refused at
-// runtime on a valid response, so this fails here instead.
-func TestUnwrapRequiredFieldsAreDeclaredStrings(t *testing.T) {
+// Required unwrap fields must have a type supported by the runtime guard.
+func TestRequiredResponseFieldsHaveSupportedTypes(t *testing.T) {
 	r := MustNew()
 	checked := 0
 	for _, op := range r.ListAllOperations() {
 		d, ok := r.GetOperation(op.ID)
-		if !ok || len(d.UnwrapRequiredFields) == 0 {
+		if !ok || (len(d.UnwrapRequiredFields) == 0 && !d.StrictResponseSchema) {
 			continue
 		}
 		if d.ResponseSchema == nil {
 			t.Errorf("%s declares unwrap required fields but no success schema", op.ID)
 			continue
 		}
-		payload := *d.ResponseSchema
-		if next, ok := payload.Properties[d.ResponseUnwrap]; ok {
-			payload = next
+		payload := ResponsePayloadSchema(d.ResponseSchema, d.ResponseUnwrap)
+		required := d.UnwrapRequiredFields
+		if d.StrictResponseSchema {
+			payload = d.ResponseSchema
+			required = payload.Required
 		}
-		for _, name := range d.UnwrapRequiredFields {
+		for _, name := range required {
 			prop, ok := payload.Properties[name]
 			if !ok {
-				t.Errorf("%s: required unwrap field %q is not declared under %q", op.ID, name, d.ResponseUnwrap)
+				t.Errorf("%s: required response field %q is not declared under %q", op.ID, name, d.ResponseUnwrap)
 				continue
 			}
-			if prop.Type != "string" {
-				t.Errorf("%s: required unwrap field %q is type %q; the runtime guard refuses non-strings", op.ID, name, prop.Type)
+			if !contains([]string{"string", "integer", "number", "object", "array", "boolean"}, prop.Type) {
+				t.Errorf("%s: required response field %q is type %q; the runtime guard does not support this type", op.ID, name, prop.Type)
 			}
 			checked++
 		}
 	}
 	if checked == 0 {
-		t.Fatal("no required unwrap fields found; the guard this pins would be unreachable")
+		t.Fatal("no required response fields found; the guard this pins would be unreachable")
 	}
 }
 
@@ -1239,4 +1255,106 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestPptStrictSchemaOnlyAppliesToEditBody(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{"docs.ppt.get", "docs.ppt.edit", "docs.ppt.export", "docs.comments.get", "docs.comments.replies", "docs.content.edit", "docs.comments.add", "docs.comments.edit", "docs.versions.create", "docs.versions.restore"} {
+		op, ok := r.GetOperation(id)
+		if !ok || op.StrictRequestSchema != (id == "docs.ppt.edit") {
+			t.Errorf("%s strict body validation metadata is misleading", id)
+		}
+	}
+}
+
+// OpenAPI 3.1 uses JSON Schema unions; nullable:true is a 3.0 keyword and
+// does not let schema consumers accept the live anchor or terminal cursor.
+func TestPptNullableIntegersUseOpenAPI31Types(t *testing.T) {
+	r := MustNew()
+	spec := r.GetSpec("docs")
+	if version, _ := spec["openapi"].(string); !strings.HasPrefix(version, "3.1.") {
+		t.Fatalf("recheck null semantics for dialect %v", spec["openapi"])
+	}
+	for _, tc := range []struct {
+		operation string
+		path      []string
+	}{
+		{"docs.comments.add", []string{"paths", "/v1/bot/docs/{docId}/comments", "post", "requestBody", "content", "application/json", "schema", "properties", "anchor", "properties", "versionSeq"}},
+		{"docs.comments.replies", []string{"paths", "/v1/bot/docs/{docId}/comments/{id}/replies", "get", "responses", "200", "content", "application/json", "schema", "properties", "nextCursor"}},
+	} {
+		node := spec
+		for _, name := range tc.path {
+			var ok bool
+			node, ok = node[name].(map[string]any)
+			if !ok {
+				t.Fatalf("%s missing schema node %q", tc.operation, name)
+			}
+		}
+		if !reflect.DeepEqual(node["type"], []any{"integer", "null"}) {
+			t.Errorf("%s must admit integer and null using OpenAPI 3.1 type union, got %v", tc.operation, node["type"])
+		}
+		op, _ := r.GetOperation(tc.operation)
+		prop := op.ResponseSchema
+		if tc.operation == "docs.comments.add" {
+			anchor := op.RequestBody.Properties["anchor"]
+			value := anchor.Properties["versionSeq"]
+			prop = &value
+		} else {
+			value := prop.Properties["nextCursor"]
+			prop = &value
+		}
+		if prop.Type != "integer" {
+			t.Errorf("%s lost integer type in CLI metadata: %q", tc.operation, prop.Type)
+		}
+	}
+}
+
+func TestPptVersionRevisionBounds(t *testing.T) {
+	for _, id := range []string{"docs.versions.create", "docs.versions.restore"} {
+		op, _ := MustNew().GetOperation(id)
+		revision := op.RequestBody.Properties["baseRevision"]
+		if revision.Maximum == nil || *revision.Maximum != 9007199254740991 {
+			t.Errorf("%s does not document safe revision bound", id)
+		}
+	}
+}
+
+func TestVersionStateSchemaIncludesPptDeck(t *testing.T) {
+	op, ok := MustNew().GetOperation("docs.versions.state")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("version state schema missing")
+	}
+	kinds := op.ResponseSchema.Properties["kind"].Enum
+	if !reflect.DeepEqual(kinds, []any{"document", "board", "ppt"}) {
+		t.Fatalf("snapshot kinds = %#v", kinds)
+	}
+	for field, typ := range map[string]string{"deck": "object", "schemaVersion": "integer", "docVersionSeq": "integer"} {
+		if op.ResponseSchema.Properties[field].Type != typ {
+			t.Errorf("%s must have type %s", field, typ)
+		}
+	}
+}
+
+func TestPptCommentIdempotencyKeyMatchesBackend(t *testing.T) {
+	raw, err := specsFS.ReadFile("specs/docs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	params := spec["paths"].(map[string]any)["/v1/bot/docs/{docId}/comments"].(map[string]any)["post"].(map[string]any)["parameters"].([]any)
+	for _, value := range params {
+		param := value.(map[string]any)
+		if param["name"] != "Idempotency-Key" {
+			continue
+		}
+		schema := param["schema"].(map[string]any)
+		if schema["minLength"] != float64(1) || schema["maxLength"] != float64(128) || schema["pattern"] != `^[\x21-\x7e]+$` {
+			t.Fatalf("PPT comment key contract = %#v", schema)
+		}
+		return
+	}
+	t.Fatal("comment idempotency key schema missing")
 }

@@ -1756,9 +1756,17 @@ func TestHTMLMalformedSuccessReportsIdempotencyKey(t *testing.T) {
 	}
 }
 
-// TestUnwrapFailureKeepsSpecHintWithoutAutoKey pins the fallback: an operation
-// with required unwrap fields but no auto-generated key has no key to retry
-// with, so it must keep the shape-diagnosis hint rather than emit an empty one.
+func TestHTMLInvalidModeHintExplainsAutomaticKey(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) { t.Error("invalid mode reached HTTP") })
+	root.SetArgs([]string{"html", "publish", "--data", `{"html":"<p>x</p>","slug":"s","idempotency_key":"k"}`})
+	err := output.AsExitError(root.Execute())
+	const hint = "create without slug (the CLI generates a key when omitted), or republish an existing slug without idempotency_key"
+	if err == nil || err.Code != "VALIDATION_ERROR" || err.Hint != hint {
+		t.Fatalf("HTML recovery hint must preserve auto-key guidance: %#v", err)
+	}
+}
+
+// An operation without an auto-generated key keeps the shape-diagnosis hint.
 func TestUnwrapFailureKeepsSpecHintWithoutAutoKey(t *testing.T) {
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

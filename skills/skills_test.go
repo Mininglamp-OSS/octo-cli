@@ -32,7 +32,7 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	// Progressive disclosure: SKILL.md must route to each reference file so a
 	// reader loads only the one matching its task. It must also keep the up-front
 	// doc_type / whiteboard framing so the surface split is clear.
-	for _, ref := range []string{"sheet.md", "doc.md", "board.md", "common.md"} {
+	for _, ref := range []string{"sheet.md", "doc.md", "board.md", "ppt.md", "common.md"} {
 		if !strings.Contains(content, ref) {
 			t.Errorf("SKILL.md must route to reference file %q", ref)
 		}
@@ -55,6 +55,7 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	// The reference files are embedded (ride the */*.md glob) and each leads with
 	// its surface's read/edit commands.
 	refChecks := map[string][]string{
+		"octo-docs/ppt.md":    {"docs ppt get", "docs ppt edit", "docs comments add"},
 		"octo-docs/doc.md":    {"docs content get", "docs content edit", `"attachId": "att_xxx"`, `"width": 300`},
 		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit", "docs sheet replace", "find & replace", "mixed-version environment", "trims `findString`", "substring matching over formula source text", `"freeze"`, `"filters"`, `"dataValidations"`, `"listMultiple"`, "`dims` may be the only non-empty surface", "octo-cli docs export <docId> --export-format xlsx", "`${logicalId}!r:c`", "first scrollable", "normalizes it to `-1` on readback", "absolute 0-based worksheet column", "column G raw value", "`filterColumns:[]`", "`enabledColumns`", "G:M backing range", "enables only G and M", "replace-style per logical sheet", "read `sheetFilters` first", "`enabledColumns:[]` is rejected", "does not restrict reads or writes", "font-color filter", `{"c0":null,"default:c0":200}`, "`rowCount`", "`columnCount`", "20 columns (A-T)", "0..9999", "first page only", "outside the effective boundary for that tab", "422 sheet_cell_invalid", "412 base_version_stale", "413 too_many_sheet_resources"},
 		"octo-docs/board.md":  {"docs scene get", "docs scene edit"},

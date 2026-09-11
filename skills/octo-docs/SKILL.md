@@ -1,14 +1,14 @@
 ---
 name: octo-docs
 version: 0.2.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheets including find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheets including find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
-# octo-docs — bot access to Octo documents, spreadsheets & whiteboards
+# octo-docs — bot access to Octo documents, spreadsheets, whiteboards & presentations
 
 This skill is **progressive**: this file covers the shared essentials (auth,
 document lifecycle) and routes you to a focused reference file for each surface.
@@ -24,16 +24,18 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 | Read/edit a **spreadsheet** (`doc_type: sheet`): find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
+| Create/edit a **PPT** (`doc_type: html_ppt`): slides, comments, versions and HTML export | **`ppt.md`** |
 | Continue from a searchable **HTML document** (`doc_type: html`): resolve its document reference, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
-| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload and external-image ingest) | **`common.md`** |
+| **Members & sharing**, **attachments** (presign/upload and external-image ingest); document/sheet/board **comments** and **versions** | **`common.md`** |
 
 > The first four split by `doc_type` (what kind of document you're handling);
-> `common.md` holds the features that apply across kinds. Read a reference with
+> `common.md` covers shared document management; PPT comments, versions and media
+> usage are described in `ppt.md`. Read a reference with
 > your file tool (it sits beside this SKILL.md, e.g. `sheet.md`), or reprint the
 > whole skill set anytime with `octo-cli skills octo-docs`.
 
 Pick by `doc_type`: a **doc** body → `doc.md`; a **sheet** → `sheet.md`; a
-**board** → `board.md`; an **html** result → the separate `octo-html` skill.
+**board** → `board.md`; a **PPT** → `ppt.md`; an **html** result → the separate `octo-html` skill.
 Using the wrong surface returns `409 unsupported_doc_type`. For an HTML search
 result, run `docs get <docId>` and use its `octoDocSlug` value as the document reference
 with `html get <octoDocSlug>` (or another `html` command). Do not retry HTML through `docs content`,
@@ -59,6 +61,9 @@ slug for old documents; callers do not infer the distinction from mount state.
 # seed a `doc` with `docs content edit` (doc.md), a `sheet` with
 # `docs sheet edit` / `docs sheet replace` (sheet.md), a `board` with `docs scene edit` (board.md).
 octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet|board]
+
+# Create a presentation from a template (ppt.md).
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId report --idempotency-key <unique-key>
 
 # List docs you own or are a member of. Page-based (see the pagination note below).
 octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
@@ -100,10 +105,11 @@ Pagination depends on the endpoint's response contract:
 `docs attachments upload` (binary helper), invites, access-requests, and
 link-card are out of scope here. Body editing is limited to `doc_type: doc`
 incremental block ops (`doc.md`), the spreadsheet batches documented in
-`sheet.md`, and `doc_type: board` scene batches (`board.md`). `doc_type: html`
+`sheet.md`, `doc_type: board` scene batches (`board.md`), and revision-checked
+PPT edits (`ppt.md`). `doc_type: html`
 belongs to the separate `html` domain, uses its returned document reference, and
 is published as
-immutable versions; it cannot be read or edited through these three body
+immutable versions; it cannot be read or edited through these content
 surfaces. The document outline is not editable through the CLI.
 
 ## Schema lookup

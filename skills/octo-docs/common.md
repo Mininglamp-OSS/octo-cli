@@ -1,7 +1,8 @@
 # octo-docs — Common features (comments, versions, members, attachments)
 
-Read this for capabilities that apply across all doc kinds. Jump to the section
-you need:
+Read this for shared document management and document/sheet/board comments and
+versions. For PPT comments, versions, export and media usage, read `ppt.md`.
+Jump to the section you need:
 
 - [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
 - [Versions](#versions) — snapshot / preview / rename / delete / restore

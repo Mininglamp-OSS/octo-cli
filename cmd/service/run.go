@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/url"
 	"os"
 	"sort"
@@ -548,6 +549,11 @@ func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (map[string]str
 			paramRequired(rt.detail, hf.apiName, "header")); err != nil {
 			return nil, err
 		}
+		// An explicitly blank replay key cannot identify an uncertain write.
+		// Omitted optional headers remain absent for legacy shared operations.
+		if strings.EqualFold(hf.apiName, "Idempotency-Key") && strings.TrimSpace(*hf.strVal) == "" {
+			return nil, output.ErrValidation("--"+flagName+" must not be blank", "supply a stable key and preserve it with the same body on retry")
+		}
 		if headers == nil {
 			headers = map[string]string{}
 		}
@@ -837,6 +843,10 @@ func (v bodySchemaValidator) validateByType(
 		return v.validateObject(schema, value, path)
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
+	case "integer", "number":
+		if v.enforcePublicAPIConstraints {
+			return validateNumber(schema, value, path)
+		}
 	case "string":
 		if v.enforcePublicAPIConstraints {
 			return validateString(schema, value, path)
@@ -849,6 +859,40 @@ func (v bodySchemaValidator) validateByType(
 			if schema.MinLength > 0 || schema.MaxLength > 0 {
 				return validateString(schema, value, path)
 			}
+		}
+	}
+	return nil
+}
+
+// Compare exact JSON decimals, preserving integers above the float64 precision limit.
+func validateNumber(schema *registry.SchemaInfo, value any, path string) *output.ExitError {
+	switch value.(type) {
+	case json.Number, int, int64, uint64, float64:
+	default:
+		return schemaError(fmt.Sprintf("field %s must have type %s", bodyPath(path), schema.Type))
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return schemaError(fmt.Sprintf("field %s must be a finite number", bodyPath(path)))
+	}
+	n, ok := new(big.Rat).SetString(string(raw))
+	if !ok || (schema.Type == "integer" && !n.IsInt()) {
+		return schemaError(fmt.Sprintf("field %s must have type %s", bodyPath(path), schema.Type))
+	}
+	for _, bound := range []struct {
+		value   *float64
+		minimum bool
+	}{{schema.Minimum, true}, {schema.Maximum, false}} {
+		if bound.value == nil {
+			continue
+		}
+		b, ok := new(big.Rat).SetString(strconv.FormatFloat(*bound.value, 'g', -1, 64))
+		if !ok {
+			continue
+		}
+		comparison := n.Cmp(b)
+		if (bound.minimum && comparison < 0) || (!bound.minimum && comparison > 0) {
+			return schemaError(fmt.Sprintf("field %s is outside its allowed numeric range", bodyPath(path)))
 		}
 	}
 	return nil
@@ -1112,13 +1156,18 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	if f.Globals == nil || !f.Globals.DryRun {
+		if contractErr := validateReadResponse(body, rt); contractErr != nil {
+			return emitAndReturn(f, contractErr)
+		}
+	}
 	body, err = normalizeResponse(f, rt, body)
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
 	if req.ResponseUnwrap != "" && (f.Globals == nil || !f.Globals.DryRun) {
-		body, err = unwrapResponse(body, req.ResponseUnwrap, req.UnwrapRequiredFields)
+		body, err = unwrapResponse(body, req.ResponseUnwrap, req.UnwrapRequiredFields, rt.detail.ResponseSchema)
 		if err != nil {
 			// A malformed 2xx means the request reached the server carrying the
 			// key, so the create may be committed — the same ambiguity a 5xx
@@ -1155,16 +1204,8 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 // would be false, and clobbering a curated hint like "ask a Workspace owner to
 // add this Bot" replaces actionable guidance with a misleading retry.
 func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error) error {
-	if rt == nil || rt.detail == nil || rt.detail.AutoIdempotencyKey == "" {
-		return err
-	}
-	field := rt.detail.AutoIdempotencyKey
-	body, ok := req.Body.(map[string]any)
-	if !ok {
-		return err
-	}
-	key, ok := body[field].(string)
-	if !ok || key == "" {
+	field, key := requestIdempotencyKey(rt, req)
+	if key == "" {
 		return err
 	}
 	var exit *output.ExitError
@@ -1192,10 +1233,34 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 	}
 	exit.Detail = detail
 	if exit.Hint == "" && exit.OutcomeUnknown() {
-		exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s to resume the same creation rather than create a second document",
+		exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s with the same body to resume the same operation rather than duplicate it",
 			strings.ReplaceAll(field, "_", "-"), key)
 	}
 	return exit
+}
+
+func requestIdempotencyKey(rt *operationRuntime, req *client.Request) (field, key string) {
+	if rt == nil || rt.detail == nil || req == nil {
+		return "", ""
+	}
+	field = rt.detail.AutoIdempotencyKey
+	if field != "" {
+		if body, ok := req.Body.(map[string]any); ok {
+			key, _ = body[field].(string)
+		}
+	} else {
+		// Header replay keys are explicitly declared metadata, never inferred from
+		// arbitrary request fields. Preserve them for malformed 2xx responses too.
+		for i := range rt.detail.Parameters {
+			param := &rt.detail.Parameters[i]
+			if param.In == "header" && strings.EqualFold(param.Name, "Idempotency-Key") && param.FlagName == "idempotency-key" {
+				field = "idempotency_key"
+				key = req.Headers[param.Name]
+				break
+			}
+		}
+	}
+	return field, key
 }
 
 // unwrapResponse lifts the spec-declared field out of a successful response.
@@ -1209,8 +1274,8 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 // It still fails closed when the value cannot carry what the caller was told to
 // read from it: when the 2xx schema declares required properties, an absent
 // field, a null, a scalar, or an object missing those keys all yield an empty
-// reference. The check is on the properties that matter, not on JSON type.
-func unwrapResponse(body []byte, path string, required []string) ([]byte, error) {
+// reference. Required values must match their declared JSON types.
+func unwrapResponse(body []byte, path string, required []string, schema *registry.SchemaInfo) ([]byte, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
 		if len(required) > 0 {
 			return nil, fmt.Errorf("response is empty but %q must carry %s", path, strings.Join(required, ", "))
@@ -1229,12 +1294,13 @@ func unwrapResponse(body []byte, path string, required []string) ([]byte, error)
 		if jsonErr := json.Unmarshal(raw, &object); jsonErr != nil || object == nil {
 			return nil, fmt.Errorf("response field %q must be an object carrying %s", path, strings.Join(required, ", "))
 		}
+		schema = registry.ResponsePayloadSchema(schema, path)
 		for _, name := range required {
 			value, ok := object[name]
 			if !ok {
 				return nil, fmt.Errorf("response field %q is missing required %q", path, name)
 			}
-			if unusableUnwrapReference(value) {
+			if schema == nil || unusableUnwrapValue(value, schema.Properties[name].Type) {
 				return nil, fmt.Errorf("response field %q carries an unusable %q", path, name)
 			}
 		}
@@ -1242,21 +1308,43 @@ func unwrapResponse(body []byte, path string, required []string) ([]byte, error)
 	return raw, nil
 }
 
-// unusableUnwrapReference reports whether a required unwrapped value cannot be
-// handed back as a document reference. A present-but-empty key is the same
-// failure as a missing one: null, a non-string, and a blank string all read as
-// "no reference", and the misconfigured intermediary this guard exists for —
-// one that re-encodes the envelope through a struct without omitempty — emits
-// exactly those. Blankness is trimmed, matching missingVariantRequiredValue on
-// the request side. Every required unwrap field in every embedded spec is
-// declared type:string; TestUnwrapRequiredFieldsAreDeclaredStrings trips if a
-// future spec declares a non-string one, since this would refuse it.
-func unusableUnwrapReference(raw json.RawMessage) bool {
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
+// unusableUnwrapValue checks the declared top-level payload type. Empty arrays,
+// objects, false and zero are valid; required string references remain nonblank.
+// Advisory strings such as contentHash must not be marked required: an absent
+// digest must not hide a committed edit receipt. The registry tests cover both
+// unwrap and strict-response required-field types.
+func unusableUnwrapValue(raw json.RawMessage, kind string) bool {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return true
 	}
-	return strings.TrimSpace(text) == ""
+	switch kind {
+	case "string":
+		var value string
+		return json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == ""
+	case "integer":
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var value any
+		if decoder.Decode(&value) != nil {
+			return true
+		}
+		number, ok := value.(json.Number)
+		return !ok || strings.ContainsAny(string(number), ".eE")
+	case "number":
+		var value float64
+		return json.Unmarshal(raw, &value) != nil
+	case "boolean":
+		var value bool
+		return json.Unmarshal(raw, &value) != nil
+	case "object":
+		var value map[string]json.RawMessage
+		return json.Unmarshal(raw, &value) != nil || value == nil
+	case "array":
+		var value []json.RawMessage
+		return json.Unmarshal(raw, &value) != nil || value == nil
+	default:
+		return true
+	}
 }
 
 // normalizeResponse applies the operation's spec-declared output transforms
@@ -1335,6 +1423,9 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
 		}
+		if contractErr := validateReadResponse(body, rt); contractErr != nil {
+			return emitAndReturn(f, contractErr)
+		}
 		data, nextCursor, hasMore, perr := parsePage(body, pag)
 		if perr != nil {
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
@@ -1374,6 +1465,26 @@ func paginationControls(rt *operationRuntime, pag *registry.PaginationInfo) (cur
 	return cursorParam, limit
 }
 
+// Opt-in read contracts reject missing data instead of reporting an empty list.
+// Existing mutation responses retain their historical delivery semantics.
+func validateReadResponse(body []byte, rt *operationRuntime) *output.ExitError {
+	if rt == nil || rt.detail == nil || !rt.detail.StrictResponseSchema {
+		return nil
+	}
+	schema := rt.detail.ResponseSchema
+	var payload map[string]json.RawMessage
+	if schema == nil || json.Unmarshal(body, &payload) != nil || payload == nil {
+		return output.ErrWithHint("internal", "RESPONSE_SCHEMA", "backend response must be an object", "backend response did not match its operation spec")
+	}
+	for _, name := range schema.Required {
+		raw, ok := payload[name]
+		if !ok || unusableUnwrapValue(raw, schema.Properties[name].Type) {
+			return output.ErrWithHint("internal", "RESPONSE_SCHEMA", fmt.Sprintf("backend response is missing or has invalid %q", name), "no complete result was returned")
+		}
+	}
+	return nil
+}
+
 func paginationSeenCursors(req *client.Request, rt *operationRuntime, pag *registry.PaginationInfo, cursorParam string) map[string]struct{} {
 	if !pag.RejectCursorRepeats {
 		return nil
@@ -1393,14 +1504,9 @@ func validatePaginationRequest(req *client.Request) *output.ExitError {
 	)
 }
 
-// validatePaginationTransforms refuses an operation that declares
-// x-octo-pagination together with either output transform
-// (x-octo-response-fields, x-octo-lossless-id-fields). No embedded spec declares
-// both today — TestPagination_NoSpecPairsWithOutputTransforms holds that line at
-// development time — so this never fires in practice; it exists so the first spec
-// that wires the two together fails loudly instead of silently returning
-// post-alias, decimal-string ids on a single call and raw backend keys with raw
-// JSON-number ids under --page-all.
+// The page-all walker bypasses normalizeResponse and unwrapResponse; combining
+// either transform with pagination would produce different output contracts.
+// TestPagination_NoSpecPairsWithOutputTransforms guards the embedded specs.
 func validatePaginationTransforms(rt *operationRuntime) *output.ExitError {
 	if rt == nil || rt.detail == nil {
 		return nil
@@ -1412,9 +1518,8 @@ func validatePaginationTransforms(rt *operationRuntime) *output.ExitError {
 	return output.ErrWithHint(
 		"internal",
 		"PAGINATION_TRANSFORM_CONFLICT",
-		"operation is paginated and also declares a response output transform; these are mutually exclusive",
-		"operation-spec bug: an op with x-octo-pagination must not also declare "+
-			"x-octo-response-fields, x-octo-lossless-id-fields or x-octo-response-unwrap",
+		"response unwrap, field aliases and lossless ID transforms cannot be combined with pagination",
+		"operation-spec bug: remove response transforms from paginated operations",
 	)
 }
 
@@ -1575,7 +1680,14 @@ func parsePageCursor(body []byte, path string) (string, error) {
 	}
 	var cursor string
 	if err := json.Unmarshal(raw, &cursor); err != nil {
-		return "", fmt.Errorf("field %q must be a string or null: %w", path, err)
+		// Numeric cursors (including PPT comment IDs and version sequences)
+		// retain their decimal representation without float64 rounding.
+		// This parser is shared across all paginated operations.
+		value := string(raw)
+		if value != "" && strings.IndexFunc(value, func(r rune) bool { return r < '0' || r > '9' }) == -1 {
+			return value, nil
+		}
+		return "", fmt.Errorf("field %q must be a string, unsigned integer or null: %w", path, err)
 	}
 	return cursor, nil
 }
