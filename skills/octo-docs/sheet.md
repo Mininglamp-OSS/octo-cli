@@ -42,6 +42,59 @@ octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
 ```
 
+### Insert/delete rows and columns
+
+Use structural commands when rows or columns must be added or removed rather
+than merely overwritten. Coordinates are 0-based. Insert commands add space
+after an existing coordinate; delete commands remove a range beginning at the
+specified coordinate. Each operation updates `rowCount` or `columnCount` and
+atomically relocates cells, dimensions, hyperlinks, merges, drawings, filters,
+validations, live comment anchors, and protection ranges.
+
+```bash
+octo-cli docs sheet rows insert <docId> \
+  --base-version "<token>" \
+  --logical-id default \
+  --after-row 9 \
+  --count 5
+
+octo-cli docs sheet rows delete <docId> \
+  --base-version "<token>" \
+  --logical-id default \
+  --start-row 10 \
+  --count 5
+
+octo-cli docs sheet columns insert <docId> \
+  --base-version "<token>" \
+  --logical-id default \
+  --after-column 3 \
+  --count 2
+
+octo-cli docs sheet columns delete <docId> \
+  --base-version "<token>" \
+  --logical-id default \
+  --start-column 4 \
+  --count 2
+```
+
+Insertion anchors and deletion starts are absolute 0-based stored indexes, not
+ordinals among rows hidden or shown by a filter. They must stay within the
+current boundary, and deletions must leave at least one row/column. Worksheets
+are capped at 10,000 rows and 100 columns. A stale token returns `412
+base_version_stale`; read the sheet again and retry with the new token. The
+backend deliberately returns `409 sheet_formula_unsupported` when any workbook
+cell has an `f` formula because the server has no Univer formula engine and will
+not silently leave references pointing at the wrong coordinates. Use the
+spreadsheet UI for that workbook until formula re-anchoring is supported.
+
+When `sheetList` is empty for a legacy single-sheet document, use `default` as
+the logical id. A `404 sheet_not_found` error means the supplied logical id does
+not name a worksheet. A route-level 404 without that error code in a
+mixed-version environment means the structural route is not deployed yet.
+Release these commands only after `octo-docs-backend` MR !136 is merged and
+deployed; do not emulate structural edits with a whole-sheet rewrite because
+that cannot safely re-anchor every persisted resource.
+
 ### Find and replace
 
 Prefer the server-side replace command when the endpoint is available. It

@@ -63,7 +63,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        38,
+		"docs":        42,
 		"drive":       43,
 		"html":        21,
 		"marketplace": 25,
@@ -1019,6 +1019,42 @@ func TestDocsSheetSchemas(t *testing.T) {
 	if cells := edit.RequestBody.Properties["cells"]; !strings.Contains(cells.Description, "capped at 10000 rows and 100 columns") ||
 		!strings.Contains(cells.Description, "422 sheet_cell_invalid") {
 		t.Errorf("docs.sheet.edit cells must document growth limits and rejection; got %+v", cells)
+	}
+
+	structuralEdits := []struct {
+		operationID string
+		path        string
+		anchor      string
+		flag        string
+	}{
+		{"docs.sheet.rows.insert", "/v1/bot/docs/{docId}/sheet/rows/insert", "afterRow", "after-row"},
+		{"docs.sheet.rows.delete", "/v1/bot/docs/{docId}/sheet/rows/delete", "startRow", "start-row"},
+		{"docs.sheet.columns.insert", "/v1/bot/docs/{docId}/sheet/columns/insert", "afterColumn", "after-column"},
+		{"docs.sheet.columns.delete", "/v1/bot/docs/{docId}/sheet/columns/delete", "startColumn", "start-column"},
+	}
+	for _, tc := range structuralEdits {
+		op, ok := r.GetOperation(tc.operationID)
+		if !ok || op.RequestBody == nil {
+			t.Fatalf("%s request body not found", tc.operationID)
+		}
+		if op.Method != "POST" || op.Path != tc.path {
+			t.Fatalf("%s route = %s %s", tc.operationID, op.Method, op.Path)
+		}
+		for property, flag := range map[string]string{
+			"logicalId": "logical-id",
+			tc.anchor:   tc.flag,
+			"count":     "count",
+		} {
+			got, present := op.RequestBody.Properties[property]
+			if !present || got.FlagName != flag {
+				t.Errorf("%s %s = %+v, want --%s", tc.operationID, property, got, flag)
+			}
+		}
+		for _, required := range []string{"logicalId", tc.anchor, "count"} {
+			if !contains(op.RequestBody.Required, required) {
+				t.Errorf("%s missing required body field %s", tc.operationID, required)
+			}
+		}
 	}
 
 	for _, operationID := range []string{"docs.sheet.get", "docs.versions.state"} {

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
+  insert|delete`** — structurally adds or removes rows and columns using
+  zero-based coordinates while the backend atomically relocates affected
+  resources and updates `rowCount` / `columnCount`. **Minimum rollout dependency:** release only after
+  `octo-docs-backend` MR !136 is merged and deployed. A route-level 404 without
+  `sheet_not_found` in a mixed-version environment means the backend is not
+  ready; do not emulate the structural operation with a whole-sheet rewrite.
 - **`octo-cli docs sheet replace`** — performs one server-side, optimistic-
   concurrency-guarded find-and-replace over workbook values or formulas, with
   optional worksheet/range, case, and whole-cell controls. **Minimum rollout

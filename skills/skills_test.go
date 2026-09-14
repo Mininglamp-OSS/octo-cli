@@ -46,7 +46,7 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	if !strings.Contains(content, "external-image ingest") {
 		t.Error("SKILL.md must route external-image ingest guidance to common.md")
 	}
-	for _, capability := range []string{"find & replace", "freeze panes", "shared filters", "sorting", "data validation/dropdowns"} {
+	for _, capability := range []string{"structural row/column edits", "find & replace", "freeze panes", "shared filters", "sorting", "data validation/dropdowns"} {
 		if !strings.Contains(content, capability) {
 			t.Errorf("SKILL.md must advertise spreadsheet capability %q and route it to sheet.md", capability)
 		}
@@ -57,7 +57,7 @@ func TestOctoDocsSkillEmbedded(t *testing.T) {
 	refChecks := map[string][]string{
 		"octo-docs/ppt.md":    {"docs ppt get", "docs ppt edit", "docs comments add"},
 		"octo-docs/doc.md":    {"docs content get", "docs content edit", `"attachId": "att_xxx"`, `"width": 300`},
-		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit", "docs sheet replace", "find & replace", "mixed-version environment", "trims `findString`", "substring matching over formula source text", `"freeze"`, `"filters"`, `"dataValidations"`, `"listMultiple"`, "`dims` may be the only non-empty surface", "octo-cli docs export <docId> --export-format xlsx", "`${logicalId}!r:c`", "first scrollable", "normalizes it to `-1` on readback", "absolute 0-based worksheet column", "column G raw value", "`filterColumns:[]`", "`enabledColumns`", "G:M backing range", "enables only G and M", "replace-style per logical sheet", "read `sheetFilters` first", "`enabledColumns:[]` is rejected", "does not restrict reads or writes", "font-color filter", `{"c0":null,"default:c0":200}`, "`rowCount`", "`columnCount`", "20 columns (A-T)", "0..9999", "first page only", "outside the effective boundary for that tab", "422 sheet_cell_invalid", "412 base_version_stale", "413 too_many_sheet_resources"},
+		"octo-docs/sheet.md":  {"docs sheet get", "docs sheet edit", "docs sheet rows insert", "docs sheet rows delete", "docs sheet columns insert", "docs sheet columns delete", "sheet_formula_unsupported", "do not emulate structural edits with a whole-sheet rewrite", "docs sheet replace", "find & replace", "mixed-version environment", "trims `findString`", "substring matching over formula source text", `"freeze"`, `"filters"`, `"dataValidations"`, `"listMultiple"`, "`dims` may be the only non-empty surface", "octo-cli docs export <docId> --export-format xlsx", "`${logicalId}!r:c`", "first scrollable", "normalizes it to `-1` on readback", "absolute 0-based worksheet column", "column G raw value", "`filterColumns:[]`", "`enabledColumns`", "G:M backing range", "enables only G and M", "replace-style per logical sheet", "read `sheetFilters` first", "`enabledColumns:[]` is rejected", "does not restrict reads or writes", "font-color filter", `{"c0":null,"default:c0":200}`, "`rowCount`", "`columnCount`", "20 columns (A-T)", "0..9999", "first page only", "outside the effective boundary for that tab", "422 sheet_cell_invalid", "412 base_version_stale", "413 too_many_sheet_resources"},
 		"octo-docs/board.md":  {"docs scene get", "docs scene edit"},
 		"octo-docs/common.md": {"docs comments add", "docs versions restore", "docs members set", "docs attachments presign", "/attachments/ingest", `"attachId": "att_xxx"`, `"width": 300`, "every returned sheet map", "`sheetList`", "`rowCount` / `columnCount`", "floating images, hyperlinks, merges, sheet tabs, freeze panes"},
 	}

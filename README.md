@@ -192,6 +192,16 @@ octo-cli docs export sheet-9 --export-format xlsx -o ./report.xlsx
 octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follow --cursor <nextCursor>
 octo-cli docs sheet edit sheet-9 --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
+# Structurally add/remove rows or columns and shift affected resources atomically.
+# Coordinates are zero-based. The server refuses formula-bearing workbooks.
+octo-cli docs sheet rows insert sheet-9 --base-version "<token>" \
+  --logical-id default --after-row 9 --count 5
+octo-cli docs sheet rows delete sheet-9 --base-version "<token>" \
+  --logical-id default --start-row 10 --count 5
+octo-cli docs sheet columns insert sheet-9 --base-version "<token>" \
+  --logical-id default --after-column 3 --count 2
+octo-cli docs sheet columns delete sheet-9 --base-version "<token>" \
+  --logical-id default --start-column 4 --count 2
 
 # Create a checkbox in A2 on a sheet that has no other validation rules.
 # dataValidations.default replaces that sheet's complete rule set: otherwise first
