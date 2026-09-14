@@ -41,7 +41,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 328 embedded operations)
+## Command Structure (12 active domains, 332 embedded operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -81,6 +81,8 @@ octo-cli drive     browse
 octo-cli docs      create | list | search | get | rename | delete | forward-grant
                content  get|edit
                sheet    get|edit|replace
+                        rows insert|delete
+                        columns insert|delete
                ppt      get|edit|export
                scene    get|edit|export
                members  list|set|remove

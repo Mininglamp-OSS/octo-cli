@@ -1,7 +1,7 @@
 ---
 name: octo-docs
 version: 0.2.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheets including find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and edit spreadsheets including structural row/column edits, find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -21,7 +21,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
 | Your task | Read |
 |---|---|
-| Read/edit a **spreadsheet** (`doc_type: sheet`): find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
+| Read/edit a **spreadsheet** (`doc_type: sheet`): structural row/column edits, find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
 | Create/edit a **PPT** (`doc_type: html_ppt`): slides, comments, versions and HTML export | **`ppt.md`** |
@@ -59,7 +59,7 @@ slug for old documents; callers do not infer the distinction from mount state.
 ```bash
 # Create an empty doc (caller becomes owner/admin). A new doc has NO body —
 # seed a `doc` with `docs content edit` (doc.md), a `sheet` with
-# `docs sheet edit` / `docs sheet replace` (sheet.md), a `board` with `docs scene edit` (board.md).
+# `docs sheet edit` (sheet.md), and a `board` with `docs scene edit` (board.md).
 octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet|board]
 
 # Create a presentation from a template (ppt.md).
@@ -119,5 +119,5 @@ Any operation's parameters + response schema come from the embedded registry:
 ```bash
 octo-cli schema docs.create
 octo-cli schema docs.search
-octo-cli schema docs.content.edit     # + docs.sheet.edit / docs.sheet.replace / docs.scene.edit / docs.comments.add / …
+octo-cli schema docs.content.edit     # + docs.sheet.edit / docs.sheet.replace / docs.sheet.rows.insert / docs.sheet.columns.delete / …
 ```

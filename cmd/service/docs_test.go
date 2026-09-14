@@ -71,44 +71,48 @@ func TestDocs_RegistryShape(t *testing.T) {
 
 	type want struct{ method, path string }
 	cases := map[string]want{
-		"docs.create":              {"POST", "/v1/bot/docs"},
-		"docs.list":                {"GET", "/v1/bot/docs"},
-		"docs.search":              {"POST", "/v1/bot/docs/search"},
-		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
-		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
-		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
-		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
-		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
-		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
-		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
-		"docs.sheet.replace":       {"POST", "/v1/bot/docs/{docId}/sheet/replace"},
-		"docs.ppt.export":          {"GET", "/v1/bot/docs/{docId}/ppt/export"},
-		"docs.ppt.get":             {"GET", "/v1/bot/docs/{docId}/ppt"},
-		"docs.ppt.edit":            {"PATCH", "/v1/bot/docs/{docId}/ppt"},
-		"docs.scene.get":           {"GET", "/v1/bot/docs/{docId}/scene"},
-		"docs.scene.edit":          {"PATCH", "/v1/bot/docs/{docId}/scene"},
-		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
-		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
-		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
-		"docs.share.get":           {"GET", "/v1/bot/docs/{docId}/share"},
-		"docs.share.set":           {"PUT", "/v1/bot/docs/{docId}/share"},
-		"docs.forward-grant":       {"POST", "/v1/bot/docs/{docId}/forward-grant"},
-		"docs.comments.get":        {"GET", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.comments.replies":    {"GET", "/v1/bot/docs/{docId}/comments/{id}/replies"},
-		"docs.comments.list":       {"GET", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.add":        {"POST", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.edit":       {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.comments.delete":     {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.versions.list":       {"GET", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.create":     {"POST", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.state":      {"GET", "/v1/bot/docs/{docId}/versions/{versionId}/state"},
-		"docs.versions.rename":     {"PATCH", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.delete":     {"DELETE", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.restore":    {"POST", "/v1/bot/docs/{docId}/versions/{versionId}/restore"},
-		"docs.attachments.presign": {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
-		"docs.attachments.get":     {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
-		"docs.attachments.resolve": {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
-		"docs.scene.export":        {"GET", "/v1/bot/docs/{docId}/export"},
+		"docs.create":               {"POST", "/v1/bot/docs"},
+		"docs.list":                 {"GET", "/v1/bot/docs"},
+		"docs.search":               {"POST", "/v1/bot/docs/search"},
+		"docs.get":                  {"GET", "/v1/bot/docs/{docId}"},
+		"docs.rename":               {"PATCH", "/v1/bot/docs/{docId}"},
+		"docs.delete":               {"DELETE", "/v1/bot/docs/{docId}"},
+		"docs.content.get":          {"GET", "/v1/bot/docs/{docId}/content"},
+		"docs.content.edit":         {"PATCH", "/v1/bot/docs/{docId}/content"},
+		"docs.sheet.get":            {"GET", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.edit":           {"PATCH", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.replace":        {"POST", "/v1/bot/docs/{docId}/sheet/replace"},
+		"docs.sheet.rows.insert":    {"POST", "/v1/bot/docs/{docId}/sheet/rows/insert"},
+		"docs.sheet.rows.delete":    {"POST", "/v1/bot/docs/{docId}/sheet/rows/delete"},
+		"docs.sheet.columns.insert": {"POST", "/v1/bot/docs/{docId}/sheet/columns/insert"},
+		"docs.sheet.columns.delete": {"POST", "/v1/bot/docs/{docId}/sheet/columns/delete"},
+		"docs.ppt.export":           {"GET", "/v1/bot/docs/{docId}/ppt/export"},
+		"docs.ppt.get":              {"GET", "/v1/bot/docs/{docId}/ppt"},
+		"docs.ppt.edit":             {"PATCH", "/v1/bot/docs/{docId}/ppt"},
+		"docs.scene.get":            {"GET", "/v1/bot/docs/{docId}/scene"},
+		"docs.scene.edit":           {"PATCH", "/v1/bot/docs/{docId}/scene"},
+		"docs.members.list":         {"GET", "/v1/bot/docs/{docId}/members"},
+		"docs.members.set":          {"PUT", "/v1/bot/docs/{docId}/members"},
+		"docs.members.remove":       {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
+		"docs.share.get":            {"GET", "/v1/bot/docs/{docId}/share"},
+		"docs.share.set":            {"PUT", "/v1/bot/docs/{docId}/share"},
+		"docs.forward-grant":        {"POST", "/v1/bot/docs/{docId}/forward-grant"},
+		"docs.comments.get":         {"GET", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.comments.replies":     {"GET", "/v1/bot/docs/{docId}/comments/{id}/replies"},
+		"docs.comments.list":        {"GET", "/v1/bot/docs/{docId}/comments"},
+		"docs.comments.add":         {"POST", "/v1/bot/docs/{docId}/comments"},
+		"docs.comments.edit":        {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.comments.delete":      {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.versions.list":        {"GET", "/v1/bot/docs/{docId}/versions"},
+		"docs.versions.create":      {"POST", "/v1/bot/docs/{docId}/versions"},
+		"docs.versions.state":       {"GET", "/v1/bot/docs/{docId}/versions/{versionId}/state"},
+		"docs.versions.rename":      {"PATCH", "/v1/bot/docs/{docId}/versions/{versionId}"},
+		"docs.versions.delete":      {"DELETE", "/v1/bot/docs/{docId}/versions/{versionId}"},
+		"docs.versions.restore":     {"POST", "/v1/bot/docs/{docId}/versions/{versionId}/restore"},
+		"docs.attachments.presign":  {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
+		"docs.attachments.get":      {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
+		"docs.attachments.resolve":  {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
+		"docs.scene.export":         {"GET", "/v1/bot/docs/{docId}/export"},
 	}
 
 	got := reg.ListOperations("docs")
@@ -1291,6 +1295,182 @@ func TestDocsSheetReplace_ValidatesRequiredBodyAndFindBy(t *testing.T) {
 			}
 			if called {
 				t.Fatal("invalid replacement request must not reach the server")
+			}
+		})
+	}
+}
+
+func TestDocsSheetRowsInsert_SendsFlagsAsGuardedStructuralRequest(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","logicalId":"default","afterRow":9,"insertedRows":5,"rowCount":205,"bytes":512,"baseVersion":"NEXT","newDocVersionSeq":8}`))
+	})
+	root.SetArgs([]string{
+		"docs", "sheet", "rows", "insert", "d1",
+		"--base-version", "BV_ABC==", "--logical-id", "default", "--after-row", "9", "--count", "5",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/docs/d1/sheet/rows/insert" {
+		t.Fatalf("got %s %s, want POST /v1/bot/docs/d1/sheet/rows/insert", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Fatalf("If-Match = %q, want BV_ABC==", gotIfMatch)
+	}
+	want := map[string]any{"logicalId": "default", "afterRow": float64(9), "count": float64(5)}
+	if !reflect.DeepEqual(gotBody, want) {
+		t.Fatalf("body = %#v, want %#v", gotBody, want)
+	}
+}
+
+func TestDocsSheetRowsInsert_PreservesZeroAnchor(t *testing.T) {
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"baseVersion":"NEXT"}`))
+	})
+	root.SetArgs([]string{
+		"docs", "sheet", "rows", "insert", "d1",
+		"--base-version", "BV", "--logical-id", "default", "--after-row", "0", "--count", "1",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	want := map[string]any{"logicalId": "default", "afterRow": float64(0), "count": float64(1)}
+	if !reflect.DeepEqual(gotBody, want) {
+		t.Fatalf("body = %#v, want %#v", gotBody, want)
+	}
+}
+
+func TestDocsSheetRowsInsert_ValidatesRequiredFlagsAndBoundsLocally(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing base version", args: []string{"--logical-id", "default", "--after-row", "9", "--count", "5"}, want: "required flag"},
+		{name: "missing logical id", args: []string{"--base-version", "BV", "--after-row", "9", "--count", "5"}, want: "logicalId"},
+		{name: "negative row", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "-1", "--count", "5"}, want: "afterRow is outside its allowed numeric range"},
+		{name: "zero count", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "9", "--count", "0"}, want: "count is outside its allowed numeric range"},
+		{name: "count over limit", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "9", "--count", "10000"}, want: "count is outside its allowed numeric range"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+			root.SetArgs(append([]string{"docs", "sheet", "rows", "insert", "d1"}, tc.args...))
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want text %q", err, tc.want)
+			}
+			if called {
+				t.Fatal("invalid row insertion must not reach the server")
+			}
+		})
+	}
+}
+
+func TestDocsSheetOtherStructuralEdits_SendGuardedRequests(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  []string
+		wantPath string
+		wantBody map[string]any
+	}{
+		{
+			name:     "delete rows",
+			command:  []string{"rows", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-row", "4", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/rows/delete",
+			wantBody: map[string]any{"logicalId": "default", "startRow": float64(4), "count": float64(2)},
+		},
+		{
+			name:     "insert columns",
+			command:  []string{"columns", "insert", "d1", "--base-version", "BV", "--logical-id", "default", "--after-column", "3", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/columns/insert",
+			wantBody: map[string]any{"logicalId": "default", "afterColumn": float64(3), "count": float64(2)},
+		},
+		{
+			name:     "delete columns",
+			command:  []string{"columns", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-column", "3", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/columns/delete",
+			wantBody: map[string]any{"logicalId": "default", "startColumn": float64(3), "count": float64(2)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotIfMatch string
+			var gotBody map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.Path
+				gotIfMatch = r.Header.Get("If-Match")
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"baseVersion":"NEXT"}`))
+			})
+			root.SetArgs(append([]string{"docs", "sheet"}, tc.command...))
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if gotMethod != http.MethodPost || gotPath != tc.wantPath {
+				t.Fatalf("got %s %s, want POST %s", gotMethod, gotPath, tc.wantPath)
+			}
+			if gotIfMatch != "BV" {
+				t.Fatalf("If-Match = %q, want BV", gotIfMatch)
+			}
+			if !reflect.DeepEqual(gotBody, tc.wantBody) {
+				t.Fatalf("body = %#v, want %#v", gotBody, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestDocsSheetOtherStructuralEdits_ValidateBoundsLocally(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "negative row delete start",
+			args: []string{"rows", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-row", "-1", "--count", "1"},
+			want: "startRow is outside its allowed numeric range",
+		},
+		{
+			name: "column insert over limit",
+			args: []string{"columns", "insert", "d1", "--base-version", "BV", "--logical-id", "default", "--after-column", "3", "--count", "100"},
+			want: "count is outside its allowed numeric range",
+		},
+		{
+			name: "column delete missing start",
+			args: []string{"columns", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--count", "1"},
+			want: "missing required field(s): startColumn",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+			root.SetArgs(append([]string{"docs", "sheet"}, tc.args...))
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want text %q", err, tc.want)
+			}
+			if called {
+				t.Fatal("invalid structural edit must not reach the server")
 			}
 		})
 	}

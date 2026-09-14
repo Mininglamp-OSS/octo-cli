@@ -988,6 +988,330 @@
         }
       }
     },
+    "/v1/bot/docs/{docId}/sheet/rows/insert": {
+      "post": {
+        "operationId": "docs.sheet.rows.insert",
+        "x-octo-strict-request-schema": true,
+        "summary": "Insert rows after an existing spreadsheet row (needs writer)",
+        "description": "Inserts count blank rows immediately after the zero-based afterRow in one logical worksheet. The server atomically shifts cells, row dimensions, hyperlinks, merged ranges, drawing anchors, freeze/filter ranges, data-validation ranges, live comment anchors, and protection ranges, then increments sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version; stale writes return 412 base_version_stale. afterRow is an absolute stored row index within the worksheet's current rowCount, not an ordinal among filter-visible rows. count must be 1..9999 and the resulting sheet cannot exceed 10000 rows. The operation refuses a workbook containing cell formulas with 409 sheet_formula_unsupported because the server cannot safely reproduce Univer formula-reference re-anchoring. Other failures include 403 protected_range, 404 sheet_not_found, 422 sheet_row_out_of_bounds or sheet_row_limit_exceeded, and the normal sheet/document size gates.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "afterRow",
+                  "count"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "afterRow": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999,
+                    "x-octo-flag": "after-row",
+                    "description": "zero-based existing row after which blank rows are inserted"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999,
+                    "x-octo-flag": "count",
+                    "description": "number of blank rows to insert; resulting rowCount must remain at most 10000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted row count, resulting rowCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "afterRow": { "type": "integer" },
+                    "insertedRows": { "type": "integer" },
+                    "rowCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/rows/delete": {
+      "post": {
+        "operationId": "docs.sheet.rows.delete",
+        "x-octo-strict-request-schema": true,
+        "summary": "Delete spreadsheet rows (needs writer)",
+        "description": "Deletes count rows beginning at zero-based startRow in one logical worksheet. startRow is an absolute stored row index, not an ordinal among filter-visible rows. The server atomically removes resources anchored wholly inside the deleted rows, shifts later resources upward, shrinks intersecting ranges, and decrements sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version. At least one row must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_row_out_of_bounds.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "startRow", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "startRow": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999,
+                    "x-octo-flag": "start-row",
+                    "description": "zero-based first row to delete"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999,
+                    "x-octo-flag": "count",
+                    "description": "number of contiguous rows to delete; at least one row must remain"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted row count, resulting rowCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "startRow": { "type": "integer" },
+                    "deletedRows": { "type": "integer" },
+                    "rowCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/columns/insert": {
+      "post": {
+        "operationId": "docs.sheet.columns.insert",
+        "x-octo-strict-request-schema": true,
+        "summary": "Insert columns after an existing spreadsheet column (needs writer)",
+        "description": "Inserts count blank columns immediately after zero-based afterColumn in one logical worksheet. The server atomically shifts column-bearing resources and increments sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. afterColumn is an absolute stored column index within the worksheet's current columnCount, not an ordinal among filter-visible columns. count must be 1..99 and the resulting sheet cannot exceed 100 columns. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds or sheet_column_limit_exceeded.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "afterColumn", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "afterColumn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99,
+                    "x-octo-flag": "after-column",
+                    "description": "zero-based existing column after which blank columns are inserted"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "x-octo-flag": "count",
+                    "description": "number of blank columns to insert; resulting columnCount must remain at most 100"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted column count, resulting columnCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "afterColumn": { "type": "integer" },
+                    "insertedColumns": { "type": "integer" },
+                    "columnCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/columns/delete": {
+      "post": {
+        "operationId": "docs.sheet.columns.delete",
+        "x-octo-strict-request-schema": true,
+        "summary": "Delete spreadsheet columns (needs writer)",
+        "description": "Deletes count columns beginning at zero-based startColumn in one logical worksheet. startColumn is an absolute stored column index, not an ordinal among filter-visible columns. The server atomically removes resources anchored wholly inside the deleted columns, shifts later resources left, shrinks intersecting ranges, and decrements sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. At least one column must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "startColumn", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "startColumn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99,
+                    "x-octo-flag": "start-column",
+                    "description": "zero-based first column to delete"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "x-octo-flag": "count",
+                    "description": "number of contiguous columns to delete; at least one column must remain"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted column count, resulting columnCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "startColumn": { "type": "integer" },
+                    "deletedColumns": { "type": "integer" },
+                    "columnCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/sheet/replace": {
       "post": {
         "operationId": "docs.sheet.replace",
