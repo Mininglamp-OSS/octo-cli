@@ -7,7 +7,7 @@ No command in these scripts runs `npm publish`, creates
 GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
 
 For the isolated **one-command CLI + daemon test installation**, start with
-[the daemon-owned runbook](https://codex.mlamp.cn/dmwork/octo-daemon-old/-/blob/test/docs/test-installation.md)
+[the daemon-owned runbook](https://codex.mlamp.cn/dmwork/octo-daemon-old/-/blob/test/docs/cos-publishing.md)
 and the self-contained npm section below. The native component installer described
 here is a separate maintenance tool: it does not isolate test state and is not the
 recommended unified test installation. The runbook link becomes available when the
@@ -272,7 +272,7 @@ metadata, a Node launcher, and one native binary with no external dependencies;
 npm install is tested. Do not regenerate uploaded files under an existing version.
 
 The daemon repository owns `scripts/release/install-loop.js`,
-`scripts/release/publish-installation.js`, and `docs/test-installation.md`, including
+`scripts/release/publish-installation.js`, and `docs/cos-publishing.md`, including
 the root installer, tested version-pair manifest, test prefix/state isolation, and
 the end-to-end release runbook. Promote the pair there after both component npm
 releases pass CDN verification. Main/production support is a subsequent rollout.
