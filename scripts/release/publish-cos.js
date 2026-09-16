@@ -151,5 +151,5 @@ async function main(argv = process.argv.slice(2)) {
   const plan = await publishRelease({dir, config, execute: !!args["--execute"], allowRollback: !!args["--allow-rollback"]});
   console.log(JSON.stringify(plan, null, 2));
 }
-module.exports = {publishRelease, putImmutable, createStore};
+module.exports = {publishRelease, putImmutable, createStore, assertConditionalCreation};
 if (require.main === module) main().catch(e => { console.error(e.message); process.exitCode = 1; });

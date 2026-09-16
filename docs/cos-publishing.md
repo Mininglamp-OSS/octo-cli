@@ -47,8 +47,7 @@ Node's `--env-file` loads the file when explicitly requested. The scripts never 
 an account CSV, discover credentials from other projects, or log signed SDK errors.
 
 The checked-in examples use `cdn.example.com` and placeholder credentials. Actual
-uploads reject example configuration. No real local config has been created as part
-of this implementation.
+uploads reject example configuration. Real local configuration must remain ignored and must never be committed.
 
 These paths are ignored: `scripts/release/*.local.*`, `.env*` (except `.env.example`),
 PEM/key files, `node_modules/`, and `/release-dist/`. Keep other generated/private
@@ -185,13 +184,15 @@ For the example prefixes:
 
 ```text
 static/octo-loop-test/
-  install.js                          # daemon installer
+  install.js                          # unified CLI + daemon installer (test only)
+  installation.json                   # tested version pair (test only)
+  daemon/install.js                   # component native installer
   daemon/latest.json
   daemon/releases/<version>/...       # daemon only
   cli/install.js
   cli/latest.json
   cli/releases/<version>/...          # CLI only
-static/octo-loop/                      # stable branch, same layout
+static/octo-loop/                      # native component layout only; unified production rollout deferred
 ```
 
 Each remote version directory contains the original native archives, checksums.txt,
@@ -242,3 +243,27 @@ This local builder resolves the named branch at invocation time; CI must additio
 verify that it equals the pipeline's expected commit before building, to avoid branch movement.
 Use per-component/per-environment concurrency groups in addition to the COS lock.
 Inject credentials into the publishing job only; never place them in artifacts.
+
+## Self-contained npm packages for unified test installation
+
+The existing npm registry release remains unchanged. COS can additionally publish
+six self-contained packages using the same CLI package name and native version:
+
+```sh
+node scripts/release/npm-artifacts.js --dist release-dist/X.Y.Z-next.N
+node scripts/release/publish-npm.js --dist release-dist/X.Y.Z-next.N/npm
+node --env-file=scripts/release/.env.local scripts/release/publish-npm.js --dist release-dist/X.Y.Z-next.N/npm --execute
+```
+
+The new publisher currently accepts test only and uploads immutable objects below
+`<test-prefix>/cli/npm/releases/<version>/`. It does not change the unified
+installation pointer or publish anything to npm. Each `.tgz` contains package
+metadata, a Node launcher, and one native binary with no external dependencies;
+`private: true` prevents accidental npm registry publication. An empty-cache offline
+npm install is tested. Do not regenerate uploaded files under an existing version.
+
+The daemon repository owns `scripts/release/install-loop.js`,
+`scripts/release/publish-installation.js`, and `docs/test-installation.md`, including
+the root installer, tested version-pair manifest, test prefix/state isolation, and
+the end-to-end release runbook. Promote the pair there after both component npm
+releases pass CDN verification. Main/production support is a subsequent rollout.
