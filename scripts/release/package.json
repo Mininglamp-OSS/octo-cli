@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "cos-nodejs-sdk-v5": "3.0.0",

@@ -275,3 +275,7 @@ the root installer, tested version-pair manifest, test prefix/state isolation, a
 the end-to-end release runbook. Promote the pair there after both component npm
 releases pass CDN verification. Both environments follow the same flow; the daemon installer owns the installation
 policy (isolated test commands/state versus production npm global packages).
+
+`scripts/release/tests/` contains automated tests for both release environments;
+it is not a separate test-environment workflow. Run them with
+`npm test --prefix scripts/release`.
