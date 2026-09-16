@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const {verifyNpm} = require("./build");
 const {readConfig, parseArgs, sha256, download, ROOT, sourceRef, run, project} = require("./lib");
 const {createStore, putImmutable, assertConditionalCreation} = require("./cos");
-async function publishNpm({dir, config, execute = false, store, fetcher = fetch, warn = console.warn}) {
+async function publishPackages({dir, config, execute = false, store, fetcher = fetch, warn = console.warn}) {
   const manifestBytes = fs.readFileSync(path.join(dir, "npm-release.json"));
   const m = verifyNpm(dir, manifestBytes);
   if (m.component !== project.component) throw new Error("Publish this component from its own repository");
@@ -52,11 +52,11 @@ async function main(argv = process.argv.slice(2)) {
   if (!args["--dist"]) throw new Error("--dist is required (directory containing npm-release.json)");
   const dir = path.resolve(args["--dist"]); const m = verifyNpm(dir);
   if (args["--execute"]) {
-    const source = sourceRef(ROOT, m.branch);
+    const source = sourceRef(ROOT, m.sourceBranch ?? m.branch);
     run("git", ["merge-base", "--is-ancestor", m.commit, source.commit], {cwd: ROOT});
-    if (m.sourceRef !== source.ref) throw new Error(`npm source ref does not match this repository's ${m.branch} branch`);
+    if (m.sourceRef !== source.ref) throw new Error(`npm source ref does not match this repository's ${source.branch} branch`);
   }
-  console.log(JSON.stringify(await publishNpm({dir, config: readConfig(args["--config"], !!args["--execute"]), execute: !!args["--execute"]}), null, 2));
+  console.log(JSON.stringify(await publishPackages({dir, config: readConfig(args["--config"], !!args["--execute"]), execute: !!args["--execute"]}), null, 2));
 }
-module.exports = {publishNpm};
+module.exports = {publishPackages};
 if (require.main === module) main().catch(e => {console.error(e.message); process.exitCode = 1;});

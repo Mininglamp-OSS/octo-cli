@@ -25,7 +25,7 @@ child.on("exit", (code, signal) => { stopForwarding(); if (signal) process.kill(
 function packNpm(dir, manifest, out) {
   if (fs.existsSync(out)) throw new Error("npm output already exists; reuse verified immutable artifacts or choose a new output");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "octo-npm-pack-"));
-  const result = {schemaVersion: 1, kind: "npm-release", component: manifest.component, name: packageName(manifest.component), branch: manifest.branch, version: manifest.version, commit: manifest.commit, sourceRef: manifest.sourceRef, targets: {}};
+  const result = {schemaVersion: 1, kind: "npm-release", component: manifest.component, name: packageName(manifest.component), branch: manifest.branch, version: manifest.version, commit: manifest.commit, sourceBranch: manifest.sourceBranch, sourceRef: manifest.sourceRef, targets: {}};
   try {
     const staged = path.join(temporary, "output"); fs.mkdirSync(staged);
     for (const target of TARGETS) {
@@ -94,10 +94,10 @@ function smokeDist(dir) {
 
 function build(argv = process.argv.slice(2)) {
   const args = parseArgs(argv, ["--ref", "--version", "--out"], ["--help"]);
-  if (args["--help"]) { console.log("node scripts/release/build.js --ref test|main --version X.Y.Z[-next.N] [--out directory]\nBuilds and verifies six self-contained COS packages in <out>/npm from the exact branch commit; never uploads."); return; }
+  if (args["--help"]) { console.log("node scripts/release/build.js --ref dev/vX.Y.Z|main --version X.Y.Z[-next.N] [--out directory]\nBuilds and verifies six self-contained COS packages in <out>/npm from the exact branch commit; never uploads."); return; }
   const YAML = require("yaml");
   const source = sourceRef(ROOT, args["--ref"]);
-  const version = checkVersion(source.branch, args["--version"]);
+  const version = checkVersion(source.channel, args["--version"]);
   const out = path.resolve(args["--out"] || path.join(ROOT, "release-dist", version));
   if (fs.existsSync(out)) throw new Error("Output directory already exists; choose a new empty location");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), `${project.binary}-release-`));
@@ -131,8 +131,8 @@ function build(argv = process.argv.slice(2)) {
       const bytes = fs.readFileSync(a.path);
       targets[key] = {file: a.name, size: bytes.length, sha256: sha256(bytes), format: a.name.endsWith(".zip") ? "zip" : "tar.gz"};
     }
-    const manifest = assertManifest({schemaVersion: 1, component: project.component, branch: source.branch, version,
-      commit: source.commit, sourceRef: source.ref, builtAt: new Date().toISOString(), tests: "go test ./...", targets});
+    const manifest = assertManifest({schemaVersion: 1, component: project.component, branch: source.channel, version,
+      commit: source.commit, sourceBranch: source.branch, sourceRef: source.ref, builtAt: new Date().toISOString(), tests: "go test ./...", targets});
     const stage = path.join(temporary, "release"); fs.mkdirSync(stage);
     for (const a of Object.values(targets)) fs.copyFileSync(path.join(output, a.file), path.join(stage, a.file));
     fs.writeFileSync(path.join(stage, "release.json"), JSON.stringify(manifest, null, 2) + "\n");

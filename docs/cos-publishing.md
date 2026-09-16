@@ -9,12 +9,15 @@ release workflows are unchanged; these tools never run `npm publish` or push tag
 
 | Source branch | Version | COS prefix (example) |
 | --- | --- | --- |
-| `test` | `X.Y.Z-next.N` | `static/octo-loop-test` |
+| `dev/vX.Y.Z` (for example `dev/v0.14.1`) | `X.Y.Z-next.N` | `static/octo-loop-test` |
 | `main` | `X.Y.Z` | `static/octo-loop` |
 
 Versions follow the CLI's existing `next.N` convention. The committed source
 branch selects the environment; it is not a separate upload switch. An optional
-leading `v` is normalized away. Build numbers have no leading zeroes.
+leading `v` is normalized away. Build numbers have no leading zeroes. `sourceBranch` and `sourceRef` record the
+actual Git branch/ref; manifest `branch` remains `test` or `main` for compatibility
+with the daemon installer. The package version is explicit and need not equal the
+version in the development branch name. Other source branches are rejected.
 
 Both environments use the same scripts:
 
@@ -67,8 +70,8 @@ configuration are not copied. Existing GoReleaser build/archive settings are
 reused without remote publishers or hooks.
 
 ```sh
-git fetch origin test
-node scripts/release/build.js --ref test --version X.Y.Z-next.N
+git fetch origin dev/v0.14.1
+node scripts/release/build.js --ref dev/v0.14.1 --version X.Y.Z-next.N
 node scripts/release/publish.js --dist release-dist/X.Y.Z-next.N/npm
 node --env-file=scripts/release/.env.local scripts/release/publish.js --dist release-dist/X.Y.Z-next.N/npm --execute
 ```
@@ -146,7 +149,7 @@ installer is no longer generated or supported; use the daemon-owned root entry.
 Already uploaded legacy objects are not deleted automatically.
 
 CI validates these tools without cloud credentials or publishing. A future
-manual `workflow_dispatch` can invoke the same commands, with test/main-only refs,
+manual `workflow_dispatch` can invoke the same commands, with `dev/vX.Y.Z`/`main` source refs,
 protected environment credentials and per-environment concurrency. It must
 verify that the builder's resolved source SHA equals the pipeline commit. Keep
 COS publication opt-in and separate from the existing npm release workflow.

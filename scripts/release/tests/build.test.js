@@ -10,7 +10,7 @@ const {TARGETS, targetName} = require("../lib");
 test("six self-contained packages install offline and preserve package identity", t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-npm-test-"));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
-  const m = {component: "cli", branch: "test", version: "1.2.3-next.1", commit: "a".repeat(40), targets: {}};
+  const m = {component: "cli", branch: "test", version: "1.2.3-next.1", commit: "a".repeat(40), sourceBranch: "dev/v0.14.1", sourceRef: "refs/remotes/origin/dev/v0.14.1", targets: {}};
   for (const target of TARGETS) {
     const binary = `octo-cli${target.startsWith("windows/") ? ".exe" : ""}`;
     const file = target.replace("/", "-") + ".tar.gz";
@@ -20,6 +20,9 @@ test("six self-contained packages install offline and preserve package identity"
   }
   const out = path.join(dir, "npm"); const packed = packNpm(dir, m, out);
   assert.equal(verifyNpm(out).name, "@mininglamp-oss/octo-cli");
+  assert.equal(packed.sourceBranch, m.sourceBranch);
+  assert.equal(packed.sourceRef, m.sourceRef);
+  assert.equal(packed.branch, "test");
   const prefix = path.join(dir, "prefix"); const a = packed.targets[targetName(process.platform, process.arch)];
   execFileSync("npm", ["install", "--global", "--prefix", prefix, "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", path.join(dir, "cache"), path.join(out, a.file)], {stdio: "pipe"});
   const root = path.join(prefix, process.platform === "win32" ? "node_modules" : "lib/node_modules", packed.name);

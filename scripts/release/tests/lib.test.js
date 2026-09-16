@@ -41,8 +41,8 @@ test("manifest accepts all platforms and rejects foreign components, invalid pat
 test("origin branch selection never silently uses feature branches", t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-ref-test-")); t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
   execFileSync("git", ["init", "-q", dir]);
-  assert.throws(() => sourceRef(dir, "test"), /not available/);
-  assert.throws(() => sourceRef(dir, "feature/test"), /main or test/);
+  assert.throws(() => sourceRef(dir, "dev/v0.14.1"), /not available/);
+  assert.throws(() => sourceRef(dir, "feature/test"), /main or dev\/v/);
 });
 test("redirects are rejected, never followed to another origin", async () => {
   await assert.rejects(download("https://cdn.example.com/a", 100, async (_url, options) => {
@@ -78,4 +78,23 @@ for (const explicit of [false, true]) test(`release children cannot inherit COS 
   if (explicit) assert.equal(result.probe, "retained");
   for (const key of keys) assert.equal(process.env[key], "unit-test-placeholder", "publisher credentials must remain in the parent");
   assert.equal(env.cos_secret_key, "unit-test-placeholder", "caller-supplied environment must not be mutated");
+});
+
+for (const branch of ["main", "dev/v0.14.1", "dev/v1.0.0"]) test(`source ${branch} selects its COS environment and prefers origin`, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-source-channel-"));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const git = (...args) => execFileSync("git", args, {cwd: dir, encoding: "utf8"}).trim();
+  git("init", "-q", "--initial-branch", branch);
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "initial");
+  const commit = git("rev-parse", "HEAD");
+  const channel = branch === "main" ? "main" : "test";
+  assert.deepEqual(sourceRef(dir, branch), {branch, channel, ref: `refs/heads/${branch}`, commit});
+  git("update-ref", `refs/remotes/origin/${branch}`, commit);
+  git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "local-only");
+  assert.deepEqual(sourceRef(dir, branch), {branch, channel, ref: `refs/remotes/origin/${branch}`, commit});
+});
+test("only main and versioned development sources are allowed", () => {
+  for (const branch of ["test", "feature/test", "dev/v", "dev/v01.2.3", "dev/v1.2.3/nested", "dev/v1.2.3-next.1"]) {
+    assert.throws(() => sourceRef(os.tmpdir(), branch), /main or dev\/v/);
+  }
 });

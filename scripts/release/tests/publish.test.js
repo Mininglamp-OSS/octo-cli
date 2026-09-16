@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {spawnSync, execFileSync} = require("node:child_process");
 const {TARGETS, sha256, readConfig} = require("../lib");
-const {publishNpm} = require("../publish");
+const {publishPackages} = require("../publish");
 const config = readConfig(path.join(__dirname, "../config.example.json"));
 function fixture(t, branch = "test", component = "cli") {
   const version = branch === "test" ? "1.2.3-next.1" : "1.2.3";
@@ -19,7 +19,8 @@ function fixture(t, branch = "test", component = "cli") {
     fs.writeFileSync(path.join(dir, file), bytes);
     targets[target] = {file, size: bytes.length, sha256: sha256(bytes), files: {"package.json": "b".repeat(64), "bin/run.js": "c".repeat(64), [`vendor/octo-${component}${target.startsWith("windows/") ? ".exe" : ""}`]: "d".repeat(64)}};
   }
-  const manifest = {schemaVersion: 1, kind: "npm-release", name: `@mininglamp-oss/octo-${component}`, component, branch, version, commit: "a".repeat(40), sourceRef: `refs/remotes/origin/${branch}`, targets};
+  const sourceBranch = branch === "test" ? "dev/v0.14.1" : "main";
+  const manifest = {schemaVersion: 1, kind: "npm-release", name: `@mininglamp-oss/octo-${component}`, component, branch, version, commit: "a".repeat(40), sourceBranch, sourceRef: `refs/remotes/origin/${sourceBranch}`, targets};
   const save = () => fs.writeFileSync(path.join(dir, "npm-release.json"), JSON.stringify(manifest));
   save();
   const objects = new Map(); const writes = [];
@@ -41,7 +42,7 @@ for (const branch of ["test", "main"]) {
   const root = config.prefixes[branch];
   test(`${branch} COS package preview has no cloud side effects`, async t => {
     const f = fixture(t, branch);
-    const plan = await publishNpm({...f, fetcher: () => { throw new Error("Preview must not fetch"); }});
+    const plan = await publishPackages({...f, fetcher: () => { throw new Error("Preview must not fetch"); }});
     assert.equal(plan.mode, "dry-run");
     assert.equal(plan.branch, branch);
     assert.equal(plan.upload.length, 7);
@@ -52,7 +53,7 @@ for (const branch of ["test", "main"]) {
     const f = fixture(t, branch);
     const other = `${config.prefixes[branch === "test" ? "main" : "test"]}/cli/npm/existing`;
     f.objects.set(other, Buffer.from("unchanged"));
-    const plan = await publishNpm({...f, execute: true});
+    const plan = await publishPackages({...f, execute: true});
     assert.equal(plan.branch, branch);
     assert.equal(f.writes.every(key => key.startsWith(`${root}/`)), true);
     assert.equal(f.writes.at(-1), `${root}/cli/npm/releases/${f.manifest.version}/npm-release.json`);
@@ -62,36 +63,36 @@ for (const branch of ["test", "main"]) {
   });
   test(`${branch} COS packages keep immutable retry behavior`, async t => {
     const f = fixture(t, branch);
-    await publishNpm({...f, execute: true});
+    await publishPackages({...f, execute: true});
     const count = f.writes.filter(key => key.includes("/releases/")).length;
-    await publishNpm({...f, execute: true});
+    await publishPackages({...f, execute: true});
     assert.equal(f.writes.filter(key => key.includes("/releases/")).length, count);
     const asset = Object.values(f.manifest.targets)[0];
     f.objects.set(`${root}/cli/npm/releases/${f.manifest.version}/${asset.file}`, Buffer.from("different"));
-    await assert.rejects(publishNpm({...f, execute: true}), /different contents/);
+    await assert.rejects(publishPackages({...f, execute: true}), /different contents/);
   });
   test(`${branch} COS package manifests reject the other environment's version format`, async t => {
     const f = fixture(t, branch);
     f.manifest.version = branch === "test" ? "1.2.3" : "1.2.3-next.1";
     f.save();
-    await assert.rejects(publishNpm(f), /test requires next.N; main requires a stable version/);
+    await assert.rejects(publishPackages(f), /test requires next.N; main requires a stable version/);
     assert.equal(f.writes.length, 0);
   });
 }
 test("COS package publication refuses foreign components", async t => {
   const f = fixture(t, "main", "daemon");
-  await assert.rejects(publishNpm(f), /own repository/);
+  await assert.rejects(publishPackages(f), /own repository/);
 });
 test("COS package CDN verification failure releases its own lock", async t => {
   const f = fixture(t, "main");
-  await assert.rejects(publishNpm({...f, execute: true, fetcher: async () => new Response("bad", {status: 200})}), /CDN npm artifact mismatch|allowed size/);
+  await assert.rejects(publishPackages({...f, execute: true, fetcher: async () => new Response("bad", {status: 200})}), /CDN npm artifact mismatch|allowed size/);
   assert.equal([...f.objects.keys()].some(key => key.endsWith(".publish-lock")), false);
 });
 test("COS package publication preserves a contending publisher's lock", async t => {
   const f = fixture(t, "main");
   const key = `${config.prefixes.main}/cli/npm/.publish-lock`;
   f.objects.set(key, Buffer.from("other"));
-  await assert.rejects(publishNpm({...f, execute: true}), /collision/);
+  await assert.rejects(publishPackages({...f, execute: true}), /collision/);
   assert.equal(f.objects.get(key).toString(), "other");
 });
 for (const branch of ["test", "main"]) {
@@ -100,17 +101,22 @@ for (const branch of ["test", "main"]) {
     const repo = path.join(f.dir, "repo");
     const tools = path.join(repo, "scripts", "release");
     fs.mkdirSync(tools, {recursive: true});
-    for (const file of ["publish.js", "build.js", "lib.js", "project.json", "cos.js"]) {
+    for (const file of ["publish.js", "build.js", "lib.js", "cos.js"]) {
       fs.copyFileSync(path.join(__dirname, "..", file), path.join(tools, file));
     }
-    execFileSync("git", ["init", "-q", "--initial-branch", branch, repo]);
+    execFileSync("git", ["init", "-q", "--initial-branch", f.manifest.sourceBranch, repo]);
     execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"], {cwd: repo});
     f.manifest.commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: repo, encoding: "utf8"}).trim();
     f.manifest.sourceRef = "refs/heads/other";
     f.save();
     const result = spawnSync(process.execPath, [path.join(tools, "publish.js"), "--dist", f.dir, "--execute"], {encoding: "utf8"});
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, new RegExp(`source ref does not match this repository's ${branch} branch`));
+    assert.match(result.stderr, new RegExp(`source ref does not match this repository's ${f.manifest.sourceBranch} branch`));
+    f.manifest.sourceRef = `refs/heads/${f.manifest.sourceBranch}`;
+    f.save();
+    const valid = spawnSync(process.execPath, [path.join(tools, "publish.js"), "--dist", f.dir, "--execute"], {encoding: "utf8"});
+    assert.notEqual(valid.status, 0);
+    assert.match(valid.stderr, /ENOENT.*config\.local\.json/, "valid source must reach local config validation without cloud access");
   });
 }
 
@@ -131,7 +137,7 @@ for (const method of ["get", "remove"]) {
         return originalPut(objectKey, ...rest);
       };
       const warnings = [];
-      const promise = publishNpm({...f, execute: true, warn: text => warnings.push(text)});
+      const promise = publishPackages({...f, execute: true, warn: text => warnings.push(text)});
       if (failUpload) await assert.rejects(promise, error => error === uploadError);
       else assert.equal((await promise).mode, "execute");
       assert.equal(warnings.length, 1);
@@ -150,7 +156,7 @@ test("lock cleanup preserves changed ownership and reports the object key", asyn
     f.objects.set(key, Buffer.from("different owner"));
     return f.fetcher(url);
   };
-  await publishNpm({...f, fetcher, execute: true, warn: text => warnings.push(text)});
+  await publishPackages({...f, fetcher, execute: true, warn: text => warnings.push(text)});
   assert.equal(f.objects.get(key).toString(), "different owner");
   assert.equal(warnings.length, 1);
   assert.ok(warnings[0].includes(key));
@@ -181,7 +187,7 @@ test("conditional-write probe rejects overwriting stores before release uploads"
   const f = fixture(t);
   const put = f.store.put;
   f.store.put = (key, bytes) => put(key, bytes);
-  await assert.rejects(publishNpm({...f, execute: true}), /does not enforce conditional creation/);
+  await assert.rejects(publishPackages({...f, execute: true}), /does not enforce conditional creation/);
   assert.equal(f.writes.every(key => key.includes(".publish-probe-")), true);
   assert.equal(f.objects.size, 0);
 });
@@ -192,7 +198,7 @@ test("conditional-write probe does not treat permission denial as conflict", asy
     if (f.objects.has(key)) throw Object.assign(new Error("denied"), {statusCode: 403});
     return put(key, bytes, options);
   };
-  await assert.rejects(publishNpm({...f, execute: true}), /denied/);
+  await assert.rejects(publishPackages({...f, execute: true}), /denied/);
   assert.equal(f.objects.size, 0);
 });
 test("conditional-write probe verifies original bytes survive the rejected overwrite", async t => {
@@ -205,13 +211,13 @@ test("conditional-write probe verifies original bytes survive the rejected overw
     }
     return put(key, bytes, options);
   };
-  await assert.rejects(publishNpm({...f, execute: true}), /Conditional creation changed/);
+  await assert.rejects(publishPackages({...f, execute: true}), /Conditional creation changed/);
   assert.equal(f.objects.size, 0);
 });
 test("conditional-write probe cleanup failure prevents release uploads", async t => {
   const f = fixture(t);
   f.store.remove = async () => { throw new Error("delete denied"); };
-  await assert.rejects(publishNpm({...f, execute: true}), /Could not clean up the COS publish probe/);
+  await assert.rejects(publishPackages({...f, execute: true}), /Could not clean up the COS publish probe/);
   assert.equal(f.writes.every(key => key.includes(".publish-probe-")), true);
 });
 
@@ -222,21 +228,21 @@ test("a failed artifact upload never writes the release manifest", async t => {
     if (key.endsWith(".tgz")) throw new Error("simulated upload failure");
     return put(key, ...rest);
   };
-  await assert.rejects(publishNpm({...f, execute: true}), /simulated upload failure/);
+  await assert.rejects(publishPackages({...f, execute: true}), /simulated upload failure/);
   assert.equal(f.writes.some(key => key.endsWith("npm-release.json")), false);
   assert.equal([...f.objects.keys()].some(key => key.endsWith(".publish-lock")), false);
 });
 test("tampered local package fails before any cloud requests", async t => {
   const f = fixture(t);
   fs.writeFileSync(path.join(f.dir, Object.values(f.manifest.targets)[0].file), "tampered");
-  await assert.rejects(publishNpm({...f, execute: true}), /mismatch/);
+  await assert.rejects(publishPackages({...f, execute: true}), /mismatch/);
   assert.equal(f.writes.length, 0);
 });
 test("immutable upload verifies COS read-back before CDN requests", async t => {
   const f = fixture(t);
   const get = f.store.get;
   f.store.get = async key => key.endsWith(".tgz") && f.objects.has(key) ? Buffer.from("tampered") : get(key);
-  await assert.rejects(publishNpm({...f, execute: true, fetcher: () => {throw new Error("must not fetch");}}), /COS read-back mismatch/);
+  await assert.rejects(publishPackages({...f, execute: true, fetcher: () => {throw new Error("must not fetch");}}), /COS read-back mismatch/);
   assert.equal(f.writes.some(key => key.endsWith("npm-release.json")), false);
 });
 test("probe cleanup failure cannot mask a conditional-creation failure", async t => {
@@ -245,7 +251,7 @@ test("probe cleanup failure cannot mask a conditional-creation failure", async t
   f.store.put = (key, bytes) => put(key, bytes);
   f.store.remove = async () => {throw new Error("signed-url secret");};
   const warnings = [];
-  await assert.rejects(publishNpm({...f, execute: true, warn: text => warnings.push(text)}), /does not enforce conditional creation/);
+  await assert.rejects(publishPackages({...f, execute: true, warn: text => warnings.push(text)}), /does not enforce conditional creation/);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /inspect .*\.publish-probe-/i);
   assert.doesNotMatch(warnings[0], /signed-url|secret/);
@@ -259,7 +265,7 @@ test("probe cleanup refuses to delete an externally replaced probe", async t => 
     if (key.includes(".publish-probe-") && ++reads === 2) f.objects.set(key, Buffer.from("foreign"));
     return get(key);
   };
-  await assert.rejects(publishNpm({...f, execute: true}), /Could not clean up the COS publish probe/);
+  await assert.rejects(publishPackages({...f, execute: true}), /Could not clean up the COS publish probe/);
   assert.deepEqual([...f.objects.values()].map(bytes => bytes.toString()), ["foreign"]);
   assert.equal(f.writes.every(key => key.includes(".publish-probe-")), true);
 });
@@ -278,7 +284,7 @@ for (const branch of ["test", "main"]) {
       await put(key, bytes, options);
       if (key.endsWith("/.publish-lock")) fs.writeFileSync(path.join(f.dir, asset.file), "changed after validation");
     };
-    await assert.rejects(publishNpm({...f, execute: true}), /npm artifact checksum mismatch/);
+    await assert.rejects(publishPackages({...f, execute: true}), /npm artifact checksum mismatch/);
     assert.equal(f.writes.some(key => key.includes("/releases/")), false);
     assert.equal([...f.objects.keys()].some(key => key.endsWith(".publish-lock")), false);
   });
@@ -288,7 +294,7 @@ for (const branch of ["test", "main"]) {
       await put(key, bytes, options);
       if (key.endsWith(".tgz")) fs.writeFileSync(path.join(f.dir, path.basename(key)), "changed after upload");
     };
-    assert.equal((await publishNpm({...f, execute: true})).mode, "execute");
+    assert.equal((await publishPackages({...f, execute: true})).mode, "execute");
     const root = `${config.prefixes[branch]}/cli/npm/releases/${f.manifest.version}/`;
     for (const asset of Object.values(f.manifest.targets)) assert.equal(sha256(f.objects.get(root + asset.file)), asset.sha256);
   });
@@ -298,7 +304,7 @@ for (const branch of ["test", "main"]) {
       await put(key, bytes, options);
       if (key.endsWith("/.publish-lock")) fs.writeFileSync(path.join(f.dir, "npm-release.json"), '{"tampered":true}');
     };
-    await publishNpm({...f, execute: true});
+    await publishPackages({...f, execute: true});
     const key = `${config.prefixes[branch]}/cli/npm/releases/${f.manifest.version}/npm-release.json`;
     assert.deepEqual(JSON.parse(f.objects.get(key)), f.manifest);
   });
@@ -317,7 +323,7 @@ for (const object of ["lock", "probe"]) for (const committed of [false, true]) {
       }
       await put(key, bytes, options);
     };
-    await assert.rejects(publishNpm({...f, execute: true}), error => error === failure);
+    await assert.rejects(publishPackages({...f, execute: true}), error => error === failure);
     assert.ok(attempted);
     assert.equal(f.objects.has(attempted), false);
     assert.equal(f.writes.some(key => key.includes("/releases/")), false);
@@ -329,6 +335,16 @@ test("publication preserves original manifest bytes when retrying an existing re
   const key = `${config.prefixes.test}/cli/npm/releases/${f.manifest.version}/npm-release.json`;
   const original = fs.readFileSync(path.join(f.dir, "npm-release.json"));
   f.objects.set(key, original);
-  assert.equal((await publishNpm({...f, execute: true})).mode, "execute");
+  assert.equal((await publishPackages({...f, execute: true})).mode, "execute");
   assert.deepEqual(f.objects.get(key), original);
+});
+
+for (const branch of ["test", "main"]) test(`${branch} rejects mismatched source environments before cloud access`, async t => {
+  const f = fixture(t, branch);
+  f.manifest.sourceBranch = branch === "test" ? "main" : "dev/v0.14.1";
+  f.save();
+  for (const execute of [false, true]) {
+    await assert.rejects(publishPackages({...f, execute}), /Source branch does not match the COS environment/);
+    assert.deepEqual(f.writes, []);
+  }
 });

@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const {spawnSync} = require("node:child_process");
-const project = require("./project.json");
+const project = {component: "cli", binary: "octo-cli", goreleaser: ".goreleaser.yaml"};
 const ROOT = path.resolve(__dirname, "../..");
 const VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-next\.(0|[1-9]\d*))?$/;
 const TARGETS = ["darwin/amd64", "darwin/arm64", "linux/amd64", "linux/arm64", "windows/amd64", "windows/arm64"];
@@ -98,11 +98,16 @@ function readConfig(file = path.join(__dirname, "config.local.json"), execute = 
   if (execute && /replace-me|example\.(com|org|net)/.test(JSON.stringify(c))) throw new Error("Replace example configuration before uploading");
   return c;
 }
+function releaseChannel(branch) {
+  if (branch === "main") return "main";
+  if (typeof branch === "string" && /^dev\/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(branch)) return "test";
+  throw new Error("--ref must be main or dev/vX.Y.Z");
+}
 function sourceRef(repo, branch) {
-  if (!["main", "test"].includes(branch)) throw new Error("--ref must be main or test");
+  const channel = releaseChannel(branch);
   for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
     const result = spawnSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {cwd: repo, encoding: "utf8", env: withoutCosCredentials()});
-    if (result.status === 0) return {branch, ref, commit: result.stdout.trim()};
+    if (result.status === 0) return {branch, channel, ref, commit: result.stdout.trim()};
   }
   throw new Error(`Branch ${branch} is not available; fetch/create the intended branch explicitly first`);
 }
@@ -125,6 +130,7 @@ function packageName(component) {
 function assertNpmManifest(m) {
   if (!m || m.schemaVersion !== 1 || m.kind !== "npm-release" || m.name !== packageName(m.component)) throw new Error("Invalid npm release identity");
   if (checkVersion(m.branch, m.version) !== m.version || !/^[a-f0-9]{40}$/.test(m.commit || "")) throw new Error("Invalid npm provenance");
+  if (m.sourceBranch !== undefined && releaseChannel(m.sourceBranch) !== m.branch) throw new Error("Source branch does not match the COS environment");
   if (Object.keys(m.targets || {}).sort().join() !== [...TARGETS].sort().join()) throw new Error("npm release requires six platforms");
   for (const [target, asset] of Object.entries(m.targets)) {
     fileName(asset.file);
