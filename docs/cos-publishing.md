@@ -1,12 +1,12 @@
 # Local releases and optional COS publishing
 
-This workflow releases **octo-cli only**. Daemon packages and the unified test
+This workflow releases **octo-cli only**. Daemon packages and the unified
 installer are published from the daemon repository. Existing npm/GitHub release workflows are
 unchanged. CI additionally validates the release tools without publishing to COS.
 No command in these scripts runs `npm publish`, creates
 GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
 
-For the isolated **one-command CLI + daemon test installation**, start with
+For **one-command CLI + daemon installation** (isolated test or npm-compatible production), start with
 [the daemon-owned runbook](https://codex.mlamp.cn/dmwork/octo-daemon-old/-/blob/test/docs/cos-publishing.md)
 and the self-contained npm section below. The native component installer described
 here is a separate maintenance tool: it does not isolate test state and is not the
@@ -192,13 +192,13 @@ For the example prefixes:
 
 ```text
 static/octo-loop-test/
-  install.js                          # unified CLI + daemon installer (test only)
-  installation.json                   # tested version pair (test only)
+  install.js                          # unified CLI + daemon installer
+  installation.json                   # tested version pair
   daemon/npm/releases/<version>/...   # independent daemon COS packages
   cli/install.js
   cli/latest.json
   cli/releases/<version>/...          # CLI only
-static/octo-loop/                      # native component layout only; unified production rollout deferred
+static/octo-loop/                      # same layout for main/stable releases
 ```
 
 Each remote version directory contains the original native archives, checksums.txt,
@@ -251,7 +251,7 @@ verify that it equals the pipeline's expected commit before building, to avoid b
 Use per-component/per-environment concurrency groups in addition to the COS lock.
 Inject credentials into the publishing job only; never place them in artifacts.
 
-## Self-contained npm packages for unified test installation
+## Self-contained npm packages for unified installation
 
 The existing npm registry release remains unchanged. COS can additionally publish
 six self-contained packages using the same CLI package name and native version:
@@ -262,8 +262,8 @@ node scripts/release/publish-npm.js --dist release-dist/X.Y.Z-next.N/npm
 node --env-file=scripts/release/.env.local scripts/release/publish-npm.js --dist release-dist/X.Y.Z-next.N/npm --execute
 ```
 
-The new publisher currently accepts test only and uploads immutable objects below
-`<test-prefix>/cli/npm/releases/<version>/`. It does not change the unified
+The publisher accepts `test` (`X.Y.Z-next.N`) and `main` (`X.Y.Z`), selecting
+`<environment-prefix>/cli/npm/releases/<version>/` from the verified source branch. It does not change the unified
 installation pointer or publish anything to npm. Each `.tgz` contains package
 metadata, a Node launcher, and one native binary with no external dependencies;
 `private: true` prevents accidental npm registry publication. An empty-cache offline
@@ -273,4 +273,5 @@ The daemon repository owns `scripts/release/install.js`,
 `scripts/release/publish.js`, and `docs/cos-publishing.md`, including
 the root installer, tested version-pair manifest, test prefix/state isolation, and
 the end-to-end release runbook. Promote the pair there after both component npm
-releases pass CDN verification. Main/production support is a subsequent rollout.
+releases pass CDN verification. Both environments follow the same flow; the daemon installer owns the installation
+policy (isolated test commands/state versus production npm global packages).
