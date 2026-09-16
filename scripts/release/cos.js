@@ -38,9 +38,9 @@ async function assertConditionalCreation(store, root, warn = console.warn) {
   const key = `${root}/.publish-probe-${crypto.randomUUID()}`;
   const original = Buffer.from(crypto.randomUUID());
   const replacement = Buffer.from(crypto.randomUUID());
-  await store.put(key, original, {immutable: true});
   let failure;
   try {
+    await store.put(key, original, {immutable: true});
     let rejected = false;
     try { await store.put(key, replacement, {immutable: true}); }
     catch (e) {

@@ -80,11 +80,15 @@ to the same publisher. The output directory must not already exist.
 Build runs source tests, the existing npm packaging tests, native host smoke and
 COS package verification before exposing its output. It does not install or
 change any existing CLI/daemon command. Both commands support `--help` without
-local configuration or credentials.
+local configuration or credentials. Build subprocesses receive an environment
+with `COS_*` variables removed; the publishing process retains its credentials.
 
 Without `--execute`, publication validates local files and prints object keys;
 it makes no cloud requests. With `--execute`, it also validates source provenance,
-uploads immutable objects and reads them back through the configured CDN.
+uploads immutable objects and reads them back through the configured CDN. Each
+package buffer is checked against the manifest immediately before upload, and
+the same buffer is used for COS/CDN verification. The original validated manifest
+bytes are uploaded last, preserving byte-for-byte retry compatibility.
 
 ```text
 <environment-prefix>/cli/npm/
@@ -125,8 +129,9 @@ rebuild an uploaded version. A partial upload is safe to retry, but does not
 activate anything.
 
 A per-component/environment lock prevents concurrent publishers. Cleanup checks
-ownership before deletion. A cleanup warning does not turn a verified upload into
-a failure or hide the original upload/CDN error. Inspect the indicated lock key;
+ownership before deletion, including after a lock/probe creation request times
+out with an uncertain server-side result. A cleanup warning does not turn a
+verified upload into a failure or hide the original upload/CDN error. Inspect the indicated lock key;
 remove it only after confirming no publisher is active. A failed preflight probe
 cleanup prevents publication. There is no automatic stale-lock timeout.
 

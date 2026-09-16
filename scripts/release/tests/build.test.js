@@ -77,7 +77,7 @@ for (const [signal, handled] of [["SIGTERM", true], ["SIGINT", true], ["SIGTERM"
   await assertSignalForwarded(t, path.join(dir, "package/bin/run.js"), signal, handled);
 });
 
-for (const format of ["table", "csv"]) test(`host version probe overrides OCTO_FORMAT=${format}`, {skip: process.platform === "win32"}, async t => {
+for (const format of ["table", "csv"]) test(`host version probe overrides OCTO_FORMAT=${format} without COS credentials`, {skip: process.platform === "win32"}, async t => {
   const {sha256} = require("../lib");
   const {smokeDist} = require("../build");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-cli-format-"));
@@ -86,7 +86,7 @@ for (const format of ["table", "csv"]) test(`host version probe overrides OCTO_F
   t.after(() => { if (before === undefined) delete process.env.OCTO_FORMAT; else process.env.OCTO_FORMAT = before; });
   process.env.OCTO_FORMAT = format;
   // Behave like the real CLI: the explicit flag overrides the environment.
-  const code = '#!/usr/bin/env node\nconst args=process.argv.slice(2); const format=args.includes("--format") ? args[args.indexOf("--format")+1] : process.env.OCTO_FORMAT; console.log(format === "json" ? JSON.stringify({data:{version:"1.2.3-next.1"}}) : "build_date,commit,version");\n';
+  const code = '#!/usr/bin/env node\nif(process.env.COS_SECRET_KEY)process.exit(91);const args=process.argv.slice(2); const format=args.includes("--format") ? args[args.indexOf("--format")+1] : process.env.OCTO_FORMAT; console.log(format === "json" ? JSON.stringify({data:{version:"1.2.3-next.1"}}) : "build_date,commit,version");\n';
   fs.writeFileSync(path.join(dir, "octo-cli"), code, {mode: 0o755});
   const file = "host.tar.gz";
   execFileSync("tar", ["-czf", path.join(dir, file), "-C", dir, "octo-cli"]);
@@ -99,6 +99,9 @@ for (const format of ["table", "csv"]) test(`host version probe overrides OCTO_F
   }
   fs.writeFileSync(path.join(dir, "release.json"), JSON.stringify({schemaVersion:1, component:"cli", branch:"test", version:"1.2.3-next.1", commit:"a".repeat(40), targets}));
   fs.writeFileSync(path.join(dir, "checksums.txt"), Object.values(targets).map(a => `${a.sha256}  ${a.file}\n`).join(""));
+  const beforeKey = process.env.COS_SECRET_KEY;
+  t.after(() => { if (beforeKey === undefined) delete process.env.COS_SECRET_KEY; else process.env.COS_SECRET_KEY = beforeKey; });
+  process.env.COS_SECRET_KEY = "unit-test-placeholder";
   await assert.doesNotReject(async () => smokeDist(dir));
 });
 

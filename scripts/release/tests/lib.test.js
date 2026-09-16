@@ -64,3 +64,18 @@ for (const file of ["build.js", "publish.js"]) test(`${file} help needs no confi
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--help|--ref|--dist/);
 });
+
+for (const explicit of [false, true]) test(`release children cannot inherit COS credentials (explicit env: ${explicit})`, t => {
+  const {run} = require("../lib");
+  const keys = ["COS_SECRET_ID", "COS_SECRET_KEY", "COS_SESSION_TOKEN"];
+  const previous = keys.map(key => process.env[key]);
+  t.after(() => keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; }));
+  for (const key of keys) process.env[key] = "unit-test-placeholder";
+  const env = {...process.env, BUILD_PROBE: "retained", cos_secret_key: "unit-test-placeholder"};
+  const options = explicit ? {env} : {};
+  const result = JSON.parse(run(process.execPath, ["-e", 'console.log(JSON.stringify({cosKeys:Object.keys(process.env).filter(k=>/^COS_/i.test(k)),probe:process.env.BUILD_PROBE}))'], options));
+  assert.deepEqual(result.cosKeys, []);
+  if (explicit) assert.equal(result.probe, "retained");
+  for (const key of keys) assert.equal(process.env[key], "unit-test-placeholder", "publisher credentials must remain in the parent");
+  assert.equal(env.cos_secret_key, "unit-test-placeholder", "caller-supplied environment must not be mutated");
+});

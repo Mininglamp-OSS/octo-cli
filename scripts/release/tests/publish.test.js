@@ -269,3 +269,66 @@ test("publisher help does not require configuration or cloud credentials", () =>
   assert.match(result.stdout, /--execute/);
   assert.match(result.stdout, /dry-run/);
 });
+
+for (const branch of ["test", "main"]) {
+  test(`${branch} rejects a package changed while acquiring the publish lock`, async t => {
+    const f = fixture(t, branch); const put = f.store.put;
+    const asset = Object.values(f.manifest.targets)[0];
+    f.store.put = async (key, bytes, options) => {
+      await put(key, bytes, options);
+      if (key.endsWith("/.publish-lock")) fs.writeFileSync(path.join(f.dir, asset.file), "changed after validation");
+    };
+    await assert.rejects(publishNpm({...f, execute: true}), /npm artifact checksum mismatch/);
+    assert.equal(f.writes.some(key => key.includes("/releases/")), false);
+    assert.equal([...f.objects.keys()].some(key => key.endsWith(".publish-lock")), false);
+  });
+  test(`${branch} CDN verification uses uploaded bytes if the local package later changes`, async t => {
+    const f = fixture(t, branch); const put = f.store.put;
+    f.store.put = async (key, bytes, options) => {
+      await put(key, bytes, options);
+      if (key.endsWith(".tgz")) fs.writeFileSync(path.join(f.dir, path.basename(key)), "changed after upload");
+    };
+    assert.equal((await publishNpm({...f, execute: true})).mode, "execute");
+    const root = `${config.prefixes[branch]}/cli/npm/releases/${f.manifest.version}/`;
+    for (const asset of Object.values(f.manifest.targets)) assert.equal(sha256(f.objects.get(root + asset.file)), asset.sha256);
+  });
+  test(`${branch} publication uses the validated manifest when the local manifest changes`, async t => {
+    const f = fixture(t, branch); const put = f.store.put;
+    f.store.put = async (key, bytes, options) => {
+      await put(key, bytes, options);
+      if (key.endsWith("/.publish-lock")) fs.writeFileSync(path.join(f.dir, "npm-release.json"), '{"tampered":true}');
+    };
+    await publishNpm({...f, execute: true});
+    const key = `${config.prefixes[branch]}/cli/npm/releases/${f.manifest.version}/npm-release.json`;
+    assert.deepEqual(JSON.parse(f.objects.get(key)), f.manifest);
+  });
+}
+for (const object of ["lock", "probe"]) for (const committed of [false, true]) {
+  test(`${object} acquisition timeout cleans up only its possibly committed object (${committed})`, async t => {
+    const f = fixture(t); const put = f.store.put;
+    const failure = new Error("simulated acquisition timeout");
+    let attempted;
+    f.store.put = async (key, bytes, options) => {
+      const matches = object === "lock" ? key.endsWith("/.publish-lock") : key.includes("/.publish-probe-");
+      if (matches && !attempted) {
+        attempted = key;
+        if (committed) await put(key, bytes, options);
+        throw failure;
+      }
+      await put(key, bytes, options);
+    };
+    await assert.rejects(publishNpm({...f, execute: true}), error => error === failure);
+    assert.ok(attempted);
+    assert.equal(f.objects.has(attempted), false);
+    assert.equal(f.writes.some(key => key.includes("/releases/")), false);
+  });
+}
+
+test("publication preserves original manifest bytes when retrying an existing release", async t => {
+  const f = fixture(t);
+  const key = `${config.prefixes.test}/cli/npm/releases/${f.manifest.version}/npm-release.json`;
+  const original = fs.readFileSync(path.join(f.dir, "npm-release.json"));
+  f.objects.set(key, original);
+  assert.equal((await publishNpm({...f, execute: true})).mode, "execute");
+  assert.deepEqual(f.objects.get(key), original);
+});

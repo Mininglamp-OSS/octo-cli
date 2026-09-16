@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const {execFileSync} = require("node:child_process");
-const {ROOT, project, TARGETS, run, sourceRef, checkVersion, parseArgs, sha256, assertManifest, targetName, assertNpmManifest, packageName, verifyDist} = require("./lib");
+const {ROOT, project, TARGETS, run, withoutCosCredentials, sourceRef, checkVersion, parseArgs, sha256, assertManifest, targetName, assertNpmManifest, packageName, verifyDist} = require("./lib");
 const LAUNCHER = `#!/usr/bin/env node
 "use strict";
 const path = require("node:path");
@@ -41,7 +41,7 @@ function packNpm(dir, manifest, out) {
       fs.writeFileSync(path.join(packageDir, "vendor", binary), extractBinary(path.join(dir, manifest.targets[target].file), binary), {mode: 0o755});
       const files = Object.fromEntries(["package.json", "bin/run.js", `vendor/${binary}`].map(f => [f, sha256(fs.readFileSync(path.join(packageDir, f)))]));
       const file = `octo-${manifest.component}-${manifest.version}-${goos}-${goarch}.tgz`;
-      execFileSync("tar", ["-czf", path.join(staged, file), "-C", path.dirname(packageDir), "package"], {env: {...process.env, COPYFILE_DISABLE: "1"}});
+      execFileSync("tar", ["-czf", path.join(staged, file), "-C", path.dirname(packageDir), "package"], {env: {...withoutCosCredentials(), COPYFILE_DISABLE: "1"}});
       const bytes = fs.readFileSync(path.join(staged, file));
       result.targets[target] = {file, size: bytes.length, sha256: sha256(bytes), files};
     }
@@ -54,8 +54,8 @@ function packNpm(dir, manifest, out) {
     return result;
   } finally { fs.rmSync(temporary, {recursive: true, force: true}); }
 }
-function verifyNpm(dir) {
-  const m = assertNpmManifest(JSON.parse(fs.readFileSync(path.join(dir, "npm-release.json"), "utf8")));
+function verifyNpm(dir, manifestBytes = fs.readFileSync(path.join(dir, "npm-release.json"))) {
+  const m = assertNpmManifest(JSON.parse(manifestBytes.toString()));
   for (const a of Object.values(m.targets)) {
     const file = path.join(dir, a.file);
     if (!fs.lstatSync(file).isFile()) throw new Error("npm artifact must be a regular file");
@@ -67,7 +67,7 @@ function verifyNpm(dir) {
 function extractBinary(archive, binary) {
   // Read only the exact regular root entry; never unpack arbitrary archive paths.
   if (!/^octo-(daemon|cli)(\.exe)?$/.test(binary)) throw new Error("Invalid archive binary name");
-  const options = {maxBuffer: 512 * 1024 * 1024, timeout: 30000};
+  const options = {maxBuffer: 512 * 1024 * 1024, timeout: 30000, env: withoutCosCredentials()};
   const entries = execFileSync("tar", ["-tf", archive], {...options, encoding: "utf8"}).trim().split(/\r?\n/);
   if (entries.filter(entry => entry === binary).length !== 1) throw new Error("Archive must contain exactly one root binary");
   const detail = execFileSync("tar", ["-tvf", archive, binary], {...options, encoding: "utf8"});
@@ -82,7 +82,7 @@ function smokeDist(dir) {
   try {
     const candidate = path.join(temporary, binary);
     fs.writeFileSync(candidate, extractBinary(path.join(dir, asset.file), binary), {mode: 0o755});
-    const output = execFileSync(candidate, ["version", "--format", "json"], {encoding: "utf8", timeout: 30000});
+    const output = execFileSync(candidate, ["version", "--format", "json"], {encoding: "utf8", timeout: 30000, env: withoutCosCredentials()});
     let result;
     try { result = JSON.parse(output); }
     catch { throw new Error("Host CLI version probe did not return valid JSON"); }

@@ -74,8 +74,11 @@ async function download(url, maxBytes = 1024 * 1024, fetcher = fetch) {
   }
   throw last;
 }
+function withoutCosCredentials(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !/^COS_/i.test(key)));
+}
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {encoding: "utf8", ...options});
+  const result = spawnSync(command, args, {encoding: "utf8", ...options, env: withoutCosCredentials(options.env)});
   if (result.error) throw new Error(`${command}: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`${command} failed (${result.status}): ${(result.stderr || "").slice(-2000)}`);
   return (result.stdout || "").trim();
@@ -98,7 +101,7 @@ function readConfig(file = path.join(__dirname, "config.local.json"), execute = 
 function sourceRef(repo, branch) {
   if (!["main", "test"].includes(branch)) throw new Error("--ref must be main or test");
   for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
-    const result = spawnSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {cwd: repo, encoding: "utf8"});
+    const result = spawnSync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {cwd: repo, encoding: "utf8", env: withoutCosCredentials()});
     if (result.status === 0) return {branch, ref, commit: result.stdout.trim()};
   }
   throw new Error(`Branch ${branch} is not available; fetch/create the intended branch explicitly first`);
@@ -132,4 +135,4 @@ function assertNpmManifest(m) {
   }
   return m;
 }
-module.exports = {TARGETS, normalizeVersion, checkVersion, targetName, sha256, fileName, assertManifest, parseArgs, download, project, ROOT, run, readConfig, sourceRef, verifyDist, assertNpmManifest, packageName};
+module.exports = {TARGETS, normalizeVersion, checkVersion, targetName, sha256, fileName, assertManifest, parseArgs, download, project, ROOT, run, withoutCosCredentials, readConfig, sourceRef, verifyDist, assertNpmManifest, packageName};
