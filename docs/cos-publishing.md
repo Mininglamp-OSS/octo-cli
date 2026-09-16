@@ -1,9 +1,17 @@
 # Local releases and optional COS publishing
 
 This workflow releases **octo-cli only**. The other component has its own repository,
-version, installer, and latest pointer. Existing CI triggers and npm/GitHub release
-workflows are unchanged. No command in these scripts runs `npm publish`, creates
+version, installer, and latest pointer. Existing npm/GitHub release workflows are
+unchanged. CI additionally validates the release tools without publishing to COS.
+No command in these scripts runs `npm publish`, creates
 GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
+
+For the isolated **one-command CLI + daemon test installation**, start with
+[the daemon-owned runbook](https://codex.mlamp.cn/dmwork/octo-daemon-old/-/blob/test/docs/test-installation.md)
+and the self-contained npm section below. The native component installer described
+here is a separate maintenance tool: it does not isolate test state and is not the
+recommended unified test installation. The runbook link becomes available when the
+daemon MR is merged into `test`.
 
 ## Files and dependencies
 
@@ -234,7 +242,8 @@ same version. Keep historical artifacts available in COS.
 
 ## Future CI integration
 
-No CI YAML changes are included now. Add a separate manual COS workflow/job later that
+CI runs the release-tool tests without cloud credentials or publishing steps.
+Add a separate manual COS workflow/job later that
 calls these same scripts after all required checks. CLI npm/GitHub releases stay independent.
 GitHub uses `workflow_dispatch`; GitLab must explicitly allow the chosen UI/API sources
 (`web` and the selected `api`/`trigger` path), not just web. Require test/main branch refs,
