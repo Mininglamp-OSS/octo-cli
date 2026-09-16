@@ -366,3 +366,9 @@ by editing a spec in `internal/registry/specs/`, not Go code.
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## Optional COS distribution
+
+Local release tooling and example-only configuration are documented in
+[Local releases and COS publishing](docs/cos-publishing.md). COS uploads are opt-in;
+existing release channels remain unchanged.

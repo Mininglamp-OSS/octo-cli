@@ -21,3 +21,12 @@ go.work.sum
 
 # Claude Code
 .omc/
+
+# Local release configuration, credentials and generated artifacts
+/scripts/release/node_modules/
+/scripts/release/*.local.*
+/scripts/release/.env*
+!/scripts/release/.env.example
+/scripts/release/*.pem
+/scripts/release/*.key
+/release-dist/

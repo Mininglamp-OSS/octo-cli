@@ -1,0 +1,5 @@
+{
+  "component": "cli",
+  "binary": "octo-cli",
+  "goreleaser": ".goreleaser.yaml"
+}

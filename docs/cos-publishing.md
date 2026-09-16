@@ -1,0 +1,221 @@
+# Local releases and optional COS publishing
+
+This workflow releases **octo-cli only**. The other component has its own repository,
+version, installer, and latest pointer. Existing CI triggers and npm/GitHub release
+workflows are unchanged. No command in these scripts runs `npm publish`, creates
+GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
+
+## Files and dependencies
+
+- `scripts/release/build.js`: test committed source and create six GoReleaser archives.
+- `scripts/release/verify.js`: validate archive hashes; optionally smoke-test the host installer.
+- `scripts/release/publish-cos.js`: preview by default; authenticated upload only with `--execute`.
+- `scripts/release/install.js`: source template for a standalone Node installer, bundled at publish time.
+- `runtime.js`, `lib.js`, `project.json`: release validation, repository identity and helpers.
+- `config.example.json`, `.env.example`: placeholders only. Never put real credentials in these files.
+- `package.json` / `package-lock.json`: private release-tool dependencies, separate from product/npm dependencies.
+
+Publisher requirements: Node 22+, npm, Git, the Go version required by `go.mod`,
+GoReleaser 2.16+ and `tar`. `npm ci` installs pinned `yaml` and Tencent's official
+`cos-nodejs-sdk-v5` plus their dependencies. Only the publishing machine/CI needs the SDK.
+The downloaded installer uses Node built-ins and system `tar` (Windows: `tar.exe`),
+with no npm registry dependency. Windows users need a tar implementation that reads
+both tar.gz and zip (the Windows bsdtar implementation does).
+
+## Configuration stays local
+
+Run from the repository root:
+
+```sh
+npm ci --prefix scripts/release
+cp scripts/release/config.example.json scripts/release/config.local.json
+cp scripts/release/.env.example scripts/release/.env.local
+```
+
+Edit **only** the local copies. `config.local.json` needs the actual bucket (including
+APPID suffix), region, HTTPS CDN origin and disjoint test/main object prefixes.
+The URL path must match the bucket's CDN origin mapping. Credentials are rejected
+as configuration keys; fill `COS_SECRET_ID`, `COS_SECRET_KEY`, and optionally the
+STS `COS_SESSION_TOKEN` in `.env.local` or inject them through your process environment.
+Node's `--env-file` loads the file when explicitly requested. The scripts never read
+an account CSV, discover credentials from other projects, or log signed SDK errors.
+
+The checked-in examples use `cdn.example.com` and placeholder credentials. Actual
+uploads reject example configuration. No real local config has been created as part
+of this implementation.
+
+These paths are ignored: `scripts/release/*.local.*`, `.env*` (except `.env.example`),
+PEM/key files, `node_modules/`, and `/release-dist/`. Keep other generated/private
+files in those locations. Check before staging; never force-add ignored files:
+
+```sh
+git check-ignore scripts/release/config.local.json scripts/release/.env.local release-dist/check
+# Both examples must remain visible to git:
+git check-ignore scripts/release/config.example.json scripts/release/.env.example
+# The second command should print nothing and return status 1.
+```
+
+## Branches and versions
+
+| Source branch | Version | Example prefix |
+|---|---|---|
+| `test` | `X.Y.Z-next.N` | `static/octo-loop-test` |
+| `main` | `X.Y.Z` | `static/octo-loop` |
+
+`--ref` accepts only `test` or `main`. It resolves `origin/<branch>` first, then a
+local branch with that exact name. Fetch first to update remote-tracking refs.
+If the branch is missing, the command fails; it does not create a branch or reinterpret
+`dev/*`, feature branches, or tags as test/main. The CLI repository may need its test
+branch established before test releases are possible.
+
+The build runs in a temporary detached checkout of the resolved **committed SHA**.
+Uncommitted work and local configuration are never copied, and the current worktree
+is not reset or switched. For code under development, commit/merge it to the intended
+source branch before expecting it in a release. The tooling can be invoked from a
+separate implementation worktree while building the selected source branch.
+
+Versions follow the CLI's `next.N` convention, without a leading v in directories,
+packages or manifests. Input may contain v. N must be unique/increasing for that base
+version; it is explicitly chosen, not silently allocated. Commit/build time remain
+separate metadata. Only these prerelease formats are supported (not arbitrary dev/rc).
+GoReleaser gets an explicit snapshot version so binary and archive versions agree.
+Snapshot mode disables remote publication; the script runs source tests before invoking it.
+
+## Build and validate (no cloud access)
+
+Examples below are version placeholders, not instructions to claim an already published
+version. Select the correct version for the component before running:
+
+```sh
+git fetch origin
+node scripts/release/build.js --ref test --version 1.2.0-next.1
+node scripts/release/verify.js --dist release-dist/1.2.0-next.1 --smoke
+node scripts/release/publish-cos.js --dist release-dist/1.2.0-next.1 --config scripts/release/config.example.json
+```
+
+For a stable release, use `--ref main --version X.Y.Z`. Both commands use the same
+rules. Existing output directories are refused; don't rebuild into an immutable
+release directory. Six archives, `checksums.txt`, and `release.json` are generated.
+GoReleaser archive names/formats are preserved: CLI uses tar.gz on all platforms;
+daemon uses zip on Windows and tar.gz otherwise. Go/platform names are normalized
+from Node's `win32`/`x64` to `windows`/`amd64` in the installer.
+
+`--smoke` installs only the current host's archive into a disposable prefix, runs its
+version command, and removes that prefix. It does not modify your normal installation.
+This validates real host execution, not all six operating-system/CPU combinations.
+Other platform smoke tests must be performed on matching hosts before claiming runtime support.
+
+`build.js` always runs `go test ./...`, plus the existing CLI npm packaging tests when
+present. It does not replace the project's full release quality gates (lint/race/required
+CI evidence). Future CI must retain those checks before a production upload.
+
+## Publish explicitly
+
+Preview (no SDK initialization, credential access or HTTP calls):
+
+```sh
+node scripts/release/publish-cos.js --dist release-dist/1.2.0-next.1
+```
+
+After reviewing the target and completing installation checks, upload:
+
+```sh
+node --env-file=scripts/release/.env.local scripts/release/publish-cos.js --dist release-dist/1.2.0-next.1 --execute
+```
+
+Environment derives from the manifest's verified source branch; there is no free-form
+`--env` or object-key option. At execution the source commit must still belong to the
+expected repository branch. All artifact hashes are checked before contacting COS.
+
+The publisher requires **an unversioned COS bucket**. It checks bucket versioning
+before creating objects because COS's `x-cos-forbid-overwrite` does not protect a
+version-enabled bucket. It fails closed for enabled/suspended versioning; it never
+changes bucket settings. Use a suitable distribution bucket if this prerequisite
+cannot be met. Required permissions are GetBucketVersioning, GetObject and PutObject
+for the release prefix, plus DeleteObject for the component's `.publish-lock` only.
+CDN configuration/refresh permissions are separate and not needed by the upload code.
+
+Sequence:
+
+1. Acquire `<environment-prefix>/cli/.publish-lock` with conditional creation.
+2. Refuse accidental backwards promotion unless `--allow-rollback` was explicitly supplied.
+3. Upload immutable version objects. Existing identical bytes are reused; different contents fail.
+4. Read back COS objects and download **every immutable object through HTTPS CDN** to verify hashes.
+5. Update the installer entry and verify the CDN serves its exact bytes.
+6. Recheck the existing pointer, write this component's latest.json **last**, and verify it through CDN.
+7. Remove only this invocation's own lock in normal success/failure cleanup.
+
+A crash or ambiguous network failure may leave the lock. Confirm there is no active
+publisher, then remove only that lock with an authorized operator. There is no automatic
+lock-stealing timeout. All publishers must follow the same lock convention; external
+console edits can bypass it and must not run concurrently.
+
+Installer and latest use `Cache-Control: no-store`; version objects use immutable long
+caching. Check CDN rules, including forced caching and cached 404s. The script does not
+modify/refresh CDN configuration. If it detects stale bytes, refresh the exact URL and
+retry. A failure **after** writing latest is reported as such; it is not presented as an
+unpublished release. Test CDN cache behavior before the first real deployment.
+
+## Layout and installation
+
+For the example prefixes:
+
+```text
+static/octo-loop-test/
+  install.js                          # daemon installer
+  daemon/latest.json
+  daemon/releases/<version>/...       # daemon only
+  cli/install.js
+  cli/latest.json
+  cli/releases/<version>/...          # CLI only
+static/octo-loop/                      # stable branch, same layout
+```
+
+Each remote version directory contains the original native archives, checksums.txt,
+release.json and the generated installer snapshot. On first explicit publication, the
+local release directory also saves install.js and installer.local.json (origin/channel/hash
+only, no credentials). Preserve both with the original archives: retries and rollbacks
+reuse that installer even after release-tool code changes. A changed origin or incomplete
+snapshot fails instead of replacing an immutable version. URLs below intentionally use a
+placeholder domain. Replace it with the configured CDN origin only in local commands:
+
+```sh
+# Download success must precede execution; the script also supports curl | node.
+curl -fsSL https://cdn.example.com/static/octo-loop-test/cli/install.js -o /tmp/octo-install.js && node /tmp/octo-install.js
+node /tmp/octo-install.js --version 1.2.0-next.1 --prefix /tmp/octo-install-check
+```
+
+Installer precedence: `--version`, then `OCTO_CLI_VERSION`, then the component's latest.json.
+It accepts only the version type for its own branch and refuses redirects, unexpected
+components/platforms, unsafe filenames, oversized downloads, and checksum mismatches.
+Native archives are read with tar; only the exact regular binary is streamed out,
+not arbitrary archive paths. Versions are checked by executing the candidate before activation: daemon uses `--version`, CLI uses `version` and its JSON result.
+
+Default prefix: `~/.local` on macOS/Linux; `%LOCALAPPDATA%/Octo` on Windows.
+Commands are installed under `bin/`; saved versions and installation receipts are under
+`lib/octo-cli/`. Add the bin directory to PATH. Shell startup files are not edited.
+The installer refuses overwriting unmanaged commands or symlinks. Existing global npm
+or Homebrew commands may take precedence on PATH; inspect command resolution and migrate
+explicitly. It does not uninstall those packages or alter npm registry configuration.
+Windows may refuse replacing a running executable: stop it, then retry. Restart any running
+daemon explicitly after installation and configure the separately installed CLI path.
+This adds no daemon self-update support; keep the existing GitHub updater disabled for
+COS-managed deployments until that path is deliberately adapted.
+
+Rollback of a device: run the same environment's installer with an older explicit
+version, then restart/verify the process where applicable. User credentials, profiles and
+workspaces are not touched. Rollback of new installations: republish the previously built
+release directory with `--execute --allow-rollback`. Do not rebuild old content under the
+same version. Keep historical artifacts available in COS.
+
+## Future CI integration
+
+No CI YAML changes are included now. Add a separate manual COS workflow/job later that
+calls these same scripts after all required checks. CLI npm/GitHub releases stay independent.
+GitHub uses `workflow_dispatch`; GitLab must explicitly allow the chosen UI/API sources
+(`web` and the selected `api`/`trigger` path), not just web. Require test/main branch refs,
+an explicit default-off publishing switch, protected credentials, and matching checkout SHA.
+This local builder resolves the named branch at invocation time; CI must additionally
+verify that it equals the pipeline's expected commit before building, to avoid branch movement.
+Use per-component/per-environment concurrency groups in addition to the COS lock.
+Inject credentials into the publishing job only; never place them in artifacts.
