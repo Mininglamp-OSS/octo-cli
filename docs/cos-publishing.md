@@ -1,7 +1,7 @@
 # Local releases and optional COS publishing
 
-This workflow releases **octo-cli only**. The other component has its own repository,
-version, installer, and latest pointer. Existing npm/GitHub release workflows are
+This workflow releases **octo-cli only**. Daemon packages and the unified test
+installer are published from the daemon repository. Existing npm/GitHub release workflows are
 unchanged. CI additionally validates the release tools without publishing to COS.
 No command in these scripts runs `npm publish`, creates
 GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
@@ -194,9 +194,7 @@ For the example prefixes:
 static/octo-loop-test/
   install.js                          # unified CLI + daemon installer (test only)
   installation.json                   # tested version pair (test only)
-  daemon/install.js                   # component native installer
-  daemon/latest.json
-  daemon/releases/<version>/...       # daemon only
+  daemon/npm/releases/<version>/...   # independent daemon COS packages
   cli/install.js
   cli/latest.json
   cli/releases/<version>/...          # CLI only
@@ -271,8 +269,8 @@ metadata, a Node launcher, and one native binary with no external dependencies;
 `private: true` prevents accidental npm registry publication. An empty-cache offline
 npm install is tested. Do not regenerate uploaded files under an existing version.
 
-The daemon repository owns `scripts/release/install-loop.js`,
-`scripts/release/publish-installation.js`, and `docs/cos-publishing.md`, including
+The daemon repository owns `scripts/release/install.js`,
+`scripts/release/publish.js`, and `docs/cos-publishing.md`, including
 the root installer, tested version-pair manifest, test prefix/state isolation, and
 the end-to-end release runbook. Promote the pair there after both component npm
 releases pass CDN verification. Main/production support is a subsequent rollout.
