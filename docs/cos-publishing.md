@@ -15,6 +15,12 @@ GitHub/GitLab Releases, pushes tags, or starts/restarts the daemon.
 - `config.example.json`, `.env.example`: placeholders only. Never put real credentials in these files.
 - `package.json` / `package-lock.json`: private release-tool dependencies, separate from product/npm dependencies.
 
+The installer's maintained source lives in this repository at
+`scripts/release/install.js`. Publication bundles it with `runtime.js` and the
+selected public distribution settings into `release-dist/<version>/install.js`.
+Keep the generated file and actual configuration ignored; do not add a second
+installer source at the repository root or maintain a separate publishing repository.
+
 Publisher requirements: Node 22+, npm, Git, the Go version required by `go.mod`,
 GoReleaser 2.16+ and `tar`. `npm ci` installs pinned `yaml` and Tencent's official
 `cos-nodejs-sdk-v5` plus their dependencies. Only the publishing machine/CI needs the SDK.
@@ -67,6 +73,13 @@ local branch with that exact name. Fetch first to update remote-tracking refs.
 If the branch is missing, the command fails; it does not create a branch or reinterpret
 `dev/*`, feature branches, or tags as test/main. The CLI repository may need its test
 branch established before test releases are possible.
+
+Git cannot have both `test` and `test/*` branches in the same ref namespace.
+If legacy branches occupy `test/*`, an initial local trial can use an isolated
+clone with a local `test` branch at the reviewed integration commit. Its manifest
+records `refs/heads/test` and the exact commit; this does not create a remote
+test branch. Resolve the remote naming conflict before connecting a CI workflow
+that requires `origin/test`.
 
 The build runs in a temporary detached checkout of the resolved **committed SHA**.
 Uncommitted work and local configuration are never copied, and the current worktree
@@ -127,13 +140,22 @@ Environment derives from the manifest's verified source branch; there is no free
 `--env` or object-key option. At execution the source commit must still belong to the
 expected repository branch. All artifact hashes are checked before contacting COS.
 
-The publisher requires **an unversioned COS bucket**. It checks bucket versioning
-before creating objects because COS's `x-cos-forbid-overwrite` does not protect a
-version-enabled bucket. It fails closed for enabled/suspended versioning; it never
-changes bucket settings. Use a suitable distribution bucket if this prerequisite
-cannot be met. Required permissions are GetBucketVersioning, GetObject and PutObject
-for the release prefix, plus DeleteObject for the component's `.publish-lock` only.
-CDN configuration/refresh permissions are separate and not needed by the upload code.
+The publisher verifies **conditional object creation** using a unique temporary
+`<environment-prefix>/cli/.publish-probe-<uuid>` object. It writes the probe,
+attempts a second write with different bytes and `x-cos-forbid-overwrite: true`,
+requires `409 FileAlreadyExists`, verifies the original bytes remain, and removes
+its probe before acquiring the release lock. Permission errors, unexpected
+conflicts, changed bytes, or cleanup failures stop publication. This requires no
+ListBuckets or GetBucketVersioning permission. A read-only bucket-status 403 does
+not imply that object uploads are denied.
+
+COS ignores forbid-overwrite for version-enabled/suspended buckets, so those
+buckets fail the behavioral check; the script never changes bucket settings.
+See [Tencent COS PUT Object](https://cloud.tencent.com/document/product/436/7749).
+Required permissions are GetObject and PutObject for the release prefix and
+installer entry, plus DeleteObject for `.publish-lock` and `.publish-probe-*`
+under the component directory. CDN configuration/refresh permissions are separate.
+Do not change bucket versioning while a publisher is running.
 
 Sequence:
 
@@ -145,8 +167,9 @@ Sequence:
 6. Recheck the existing pointer, write this component's latest.json **last**, and verify it through CDN.
 7. Remove only this invocation's own lock in normal success/failure cleanup.
 
-A crash or ambiguous network failure may leave the lock. Confirm there is no active
-publisher, then remove only that lock with an authorized operator. There is no automatic
+A crash or ambiguous network failure may leave a lock or temporary publish probe.
+Confirm there is no active publisher, then remove only the abandoned object with
+an authorized operator. There is no automatic
 lock-stealing timeout. All publishers must follow the same lock convention; external
 console edits can bypass it and must not run concurrently.
 

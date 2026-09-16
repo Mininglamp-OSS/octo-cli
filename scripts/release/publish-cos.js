@@ -16,14 +16,12 @@ function createStore(config, sdkConstructor) {
       if (!error) return resolve(data);
       // SDK errors may include signed request details. Never print the raw error.
       const safe = new Error(`COS ${method} failed (HTTP ${Number(error.statusCode) || "unknown"})`);
-      safe.statusCode = error.statusCode; reject(safe);
+      safe.statusCode = Number(error.statusCode);
+      if (error.code === "FileAlreadyExists") safe.code = error.code;
+      reject(safe);
     }));
   }
   return {
-    async assertUnversioned() {
-      const result = await call("getBucketVersioning", {});
-      if (result.VersioningConfiguration?.Status) throw new Error("This publisher requires an unversioned bucket for conditional create/locking; configure a dedicated unversioned distribution bucket");
-    },
     async get(key) {
       try { const r = await call("getObject", {Key: key}); return Buffer.isBuffer(r.Body) ? r.Body : Buffer.from(r.Body); }
       catch (e) { if (e.statusCode === 404) return null; throw e; }
@@ -31,11 +29,34 @@ function createStore(config, sdkConstructor) {
     async put(key, bytes, {immutable = false} = {}) {
       await call("putObject", {Key: key, Body: bytes, ContentLength: bytes.length,
         ContentType: key.endsWith(".json") ? "application/json" : key.endsWith(".js") ? "application/javascript" : "application/octet-stream",
-        CacheControl: immutable && !key.endsWith(".publish-lock") ? "public, max-age=31536000, immutable" : "no-store",
+        CacheControl: immutable && !key.includes("/.publish-") ? "public, max-age=31536000, immutable" : "no-store",
         Headers: immutable ? {"x-cos-forbid-overwrite": "true"} : {}});
     },
     async remove(key) { await call("deleteObject", {Key: key}); }
   };
+}
+async function assertConditionalCreation(store, root) {
+  // Exercise the actual object-level guarantee without bucket-list/admin access.
+  // Version-enabled buckets ignore forbid-overwrite and must fail this check.
+  const key = `${root}/.publish-probe-${crypto.randomUUID()}`;
+  const original = Buffer.from(crypto.randomUUID());
+  const replacement = Buffer.from(crypto.randomUUID());
+  await store.put(key, original, {immutable: true});
+  try {
+    let rejected = false;
+    try { await store.put(key, replacement, {immutable: true}); }
+    catch (e) {
+      if (e.statusCode !== 409 || e.code !== "FileAlreadyExists") throw e;
+      rejected = true;
+    }
+    if (!rejected) throw new Error("COS does not enforce conditional creation; publishing requires effective forbid-overwrite support");
+    const bytes = await store.get(key);
+    if (!bytes || !bytes.equals(original)) throw new Error("Conditional creation changed the existing probe contents");
+  } finally {
+    const bytes = await store.get(key);
+    if (bytes && (bytes.equals(original) || bytes.equals(replacement))) await store.remove(key);
+    else if (bytes) throw new Error(`Publish probe changed externally; inspect ${key}`);
+  }
 }
 async function putImmutable(store, key, bytes) {
   const existing = await store.get(key);
@@ -79,7 +100,7 @@ async function publishRelease({dir, config, execute = false, allowRollback = fal
     upload: files.map(([name]) => `${versionRoot}/${name}`), installer: scriptKey, promoteLast: `${root}/latest.json`};
   if (!execute) return plan;
   store ||= createStore(config);
-  await store.assertUnversioned();
+  await assertConditionalCreation(store, root);
   const lockKey = `${root}/.publish-lock`;
   const owner = Buffer.from(JSON.stringify({owner: crypto.randomUUID(), createdAt: new Date().toISOString(), version: manifest.version}));
   await store.put(lockKey, owner, {immutable: true});

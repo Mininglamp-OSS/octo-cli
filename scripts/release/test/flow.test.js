@@ -22,10 +22,9 @@ function fixture(t) {
   saveManifest(dir, manifest);
   const objects = new Map(); const writes = [];
   const store = {
-    async assertUnversioned() {},
     async get(key) { return objects.get(key) || null; },
     async put(key, bytes, {immutable = false} = {}) {
-      if (immutable && objects.has(key)) throw new Error("collision");
+      if (immutable && objects.has(key)) throw Object.assign(new Error("collision"), {statusCode: 409, code: "FileAlreadyExists"});
       writes.push(key); objects.set(key, Buffer.from(bytes));
     },
     async remove(key) { objects.delete(key); }
@@ -183,14 +182,50 @@ test("SDK transport uses authenticated HTTPS and sanitizes SDK errors", async t 
   const calls = [];
   class SDK {
     constructor(options) { assert.equal(options.Protocol, "https:"); }
-    getBucketVersioning(_params, callback) { callback(null, {VersioningConfiguration: {}}); }
     putObject(params, callback) { calls.push(params); callback(null, {}); }
     getObject(_params, callback) { callback({statusCode: 403, message: "unit-test-key signed-url"}); }
   }
   const store = require("../publish-cos").createStore(config, SDK);
-  await store.assertUnversioned();
   await store.put("some-key", Buffer.from("bytes"), {immutable: true});
   assert.equal(calls[0].Headers["x-cos-forbid-overwrite"], "true");
   assert.equal(calls[0].ContentLength, 5);
   await assert.rejects(store.get("some-key"), error => error.message.includes("403") && !error.message.includes("unit-test-key"));
+});
+
+test("conditional-write probe rejects overwriting stores before release uploads", async t => {
+  const f = fixture(t);
+  const put = f.store.put;
+  f.store.put = (key, bytes) => put(key, bytes);
+  await assert.rejects(publishRelease({...f, config, execute: true}), /does not enforce conditional creation/);
+  assert.equal(f.writes.every(key => key.includes(".publish-probe-")), true);
+  assert.equal(f.objects.size, 0);
+});
+test("conditional-write probe does not treat permission denial as conflict", async t => {
+  const f = fixture(t);
+  const put = f.store.put;
+  f.store.put = async (key, bytes, options) => {
+    if (f.objects.has(key)) throw Object.assign(new Error("denied"), {statusCode: 403});
+    return put(key, bytes, options);
+  };
+  await assert.rejects(publishRelease({...f, config, execute: true}), /denied/);
+  assert.equal(f.objects.size, 0);
+});
+test("conditional-write probe verifies original bytes survive the rejected overwrite", async t => {
+  const f = fixture(t);
+  const put = f.store.put;
+  f.store.put = async (key, bytes, options) => {
+    if (f.objects.has(key)) {
+      f.objects.set(key, Buffer.from(bytes));
+      throw Object.assign(new Error("collision"), {statusCode: 409, code: "FileAlreadyExists"});
+    }
+    return put(key, bytes, options);
+  };
+  await assert.rejects(publishRelease({...f, config, execute: true}), /Conditional creation changed/);
+  assert.equal(f.objects.size, 0);
+});
+test("conditional-write probe cleanup failure prevents release uploads", async t => {
+  const f = fixture(t);
+  f.store.remove = async () => { throw new Error("delete denied"); };
+  await assert.rejects(publishRelease({...f, config, execute: true}), /delete denied/);
+  assert.equal(f.writes.every(key => key.includes(".publish-probe-")), true);
 });
