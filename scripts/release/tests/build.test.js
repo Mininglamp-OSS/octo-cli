@@ -5,8 +5,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const {execFileSync} = require("node:child_process");
-const {packNpm, verifyNpm} = require("../npm-artifacts");
-const {TARGETS, targetName} = require("../runtime");
+const {packNpm, verifyNpm} = require("../build");
+const {TARGETS, targetName} = require("../lib");
 test("six self-contained packages install offline and preserve package identity", t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-npm-test-"));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
@@ -75,4 +75,39 @@ for (const [signal, handled] of [["SIGTERM", true], ["SIGINT", true], ["SIGTERM"
   const out = path.join(dir, "npm"), packed = packNpm(dir, m, out);
   execFileSync("tar", ["-xzf", path.join(out, packed.targets[targetName(process.platform, process.arch)].file), "-C", dir]);
   await assertSignalForwarded(t, path.join(dir, "package/bin/run.js"), signal, handled);
+});
+
+for (const format of ["table", "csv"]) test(`host version probe overrides OCTO_FORMAT=${format}`, {skip: process.platform === "win32"}, async t => {
+  const {sha256} = require("../lib");
+  const {smokeDist} = require("../build");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-cli-format-"));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const before = process.env.OCTO_FORMAT;
+  t.after(() => { if (before === undefined) delete process.env.OCTO_FORMAT; else process.env.OCTO_FORMAT = before; });
+  process.env.OCTO_FORMAT = format;
+  // Behave like the real CLI: the explicit flag overrides the environment.
+  const code = '#!/usr/bin/env node\nconst args=process.argv.slice(2); const format=args.includes("--format") ? args[args.indexOf("--format")+1] : process.env.OCTO_FORMAT; console.log(format === "json" ? JSON.stringify({data:{version:"1.2.3-next.1"}}) : "build_date,commit,version");\n';
+  fs.writeFileSync(path.join(dir, "octo-cli"), code, {mode: 0o755});
+  const file = "host.tar.gz";
+  execFileSync("tar", ["-czf", path.join(dir, file), "-C", dir, "octo-cli"]);
+  const bytes = fs.readFileSync(path.join(dir, file));
+  const targets = {};
+  for (const target of TARGETS) {
+    const name = target.replace("/", "-") + ".tar.gz";
+    fs.writeFileSync(path.join(dir, name), bytes);
+    targets[target] = {file:name, size:bytes.length, sha256:sha256(bytes), format:"tar.gz"};
+  }
+  fs.writeFileSync(path.join(dir, "release.json"), JSON.stringify({schemaVersion:1, component:"cli", branch:"test", version:"1.2.3-next.1", commit:"a".repeat(40), targets}));
+  fs.writeFileSync(path.join(dir, "checksums.txt"), Object.values(targets).map(a => `${a.sha256}  ${a.file}\n`).join(""));
+  await assert.doesNotReject(async () => smokeDist(dir));
+});
+
+test("archive symlinks are refused without extracting their target", {skip: process.platform === "win32"}, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-archive-link-"));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const stage = path.join(dir, "links"); fs.mkdirSync(stage);
+  fs.symlinkSync("/etc/passwd", path.join(stage, "octo-cli"));
+  const archive = path.join(dir, "link.tar.gz");
+  execFileSync("tar", ["-czf", archive, "-C", stage, "octo-cli"]);
+  assert.throws(() => require("../build").extractBinary(archive, "octo-cli"), /regular file/);
 });

@@ -186,7 +186,9 @@ jobs:
   release-tools-test:
     name: COS release tools (no publishing)
     needs: [changes]
-    if: needs.changes.outputs.code == 'true'
+    if: |
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+      needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
