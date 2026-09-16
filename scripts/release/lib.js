@@ -28,11 +28,15 @@ function fileName(value) {
   if (typeof value !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value) || value.includes("..")) throw new Error("Unsafe artifact filename");
   return value;
 }
+function hasExactKeys(value, keys) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+}
 function assertManifest(m, component = project.component) {
   if (!m || m.schemaVersion !== 1 || m.component !== component) throw new Error("Unexpected release schema/component");
   if (checkVersion(m.branch, m.version) !== m.version) throw new Error("Manifest version must not contain v prefix");
   if (!/^[a-f0-9]{40}$/.test(m.commit || "")) throw new Error("Missing full source commit");
-  if (!m.targets || Object.keys(m.targets).sort().join() !== [...TARGETS].sort().join()) throw new Error("Release must contain exactly six platforms");
+  if (!hasExactKeys(m.targets, TARGETS)) throw new Error("Release must contain exactly six platforms");
   const files = new Set();
   for (const asset of Object.values(m.targets)) {
     fileName(asset.file);
@@ -90,7 +94,7 @@ function readConfig(file = path.join(__dirname, "config.local.json"), execute = 
   const u = new URL(c.cdnOrigin);
   if (u.protocol !== "https:" || u.username || u.password || u.search || u.hash || u.pathname !== "/") throw new Error("cdnOrigin must be a plain HTTPS origin");
   c.cdnOrigin = u.origin;
-  if (!c.prefixes || Object.keys(c.prefixes).sort().join() !== "main,test") throw new Error("Configure exactly main/test prefixes");
+  if (!hasExactKeys(c.prefixes, ["main", "test"])) throw new Error("Configure exactly main/test prefixes");
   for (const prefix of Object.values(c.prefixes)) {
     if (typeof prefix !== "string" || !/^[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(prefix)) throw new Error("Invalid object prefix");
   }
@@ -131,13 +135,13 @@ function assertNpmManifest(m) {
   if (!m || m.schemaVersion !== 1 || m.kind !== "npm-release" || m.name !== packageName(m.component)) throw new Error("Invalid npm release identity");
   if (checkVersion(m.branch, m.version) !== m.version || !/^[a-f0-9]{40}$/.test(m.commit || "")) throw new Error("Invalid npm provenance");
   if (m.sourceBranch !== undefined && releaseChannel(m.sourceBranch) !== m.branch) throw new Error("Source branch does not match the COS environment");
-  if (Object.keys(m.targets || {}).sort().join() !== [...TARGETS].sort().join()) throw new Error("npm release requires six platforms");
+  if (!hasExactKeys(m.targets, TARGETS)) throw new Error("npm release requires six platforms");
   for (const [target, asset] of Object.entries(m.targets)) {
     fileName(asset.file);
     if (!asset.file.endsWith(".tgz") || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > 512 * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error("Invalid npm artifact");
     const binary = `octo-${m.component}${target.startsWith("windows/") ? ".exe" : ""}`;
-    const keys = ["package.json", "bin/run.js", `vendor/${binary}`].sort();
-    if (Object.keys(asset.files || {}).sort().join() !== keys.join() || Object.values(asset.files).some(h => !/^[a-f0-9]{64}$/.test(h))) throw new Error("Invalid npm file checksums");
+    const keys = ["package.json", "bin/run.js", `vendor/${binary}`];
+    if (!hasExactKeys(asset.files, keys) || Object.values(asset.files).some(h => !/^[a-f0-9]{64}$/.test(h))) throw new Error("Invalid npm file checksums");
   }
   return m;
 }

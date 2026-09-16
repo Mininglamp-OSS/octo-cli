@@ -6,7 +6,7 @@ const crypto = require("node:crypto");
 const {verifyNpm} = require("./build");
 const {readConfig, parseArgs, sha256, download, ROOT, sourceRef, run, project} = require("./lib");
 const {createStore, putImmutable, assertConditionalCreation} = require("./cos");
-async function publishPackages({dir, config, execute = false, store, fetcher = fetch, warn = console.warn}) {
+async function publishPackages({dir, config, execute = false, store, fetcher = fetch, warn = console.warn, repo = ROOT}) {
   const manifestBytes = fs.readFileSync(path.join(dir, "npm-release.json"));
   const m = verifyNpm(dir, manifestBytes);
   if (m.component !== project.component) throw new Error("Publish this component from its own repository");
@@ -15,6 +15,10 @@ async function publishPackages({dir, config, execute = false, store, fetcher = f
   const files = [...Object.values(m.targets).map(a => a.file), "npm-release.json"];
   const plan = {mode: execute ? "execute" : "dry-run", component: m.component, branch: m.branch, version: m.version, upload: files.map(f => `${versionRoot}/${f}`)};
   if (!execute) return plan;
+  // Check the provenance of the same manifest bytes that will be uploaded.
+  const source = sourceRef(repo, m.sourceBranch ?? m.branch);
+  run("git", ["merge-base", "--is-ancestor", m.commit, source.commit], {cwd: repo});
+  if (m.sourceRef !== source.ref) throw new Error(`npm source ref does not match this repository's ${source.branch} branch`);
   // Keep the validated metadata bytes, including formatting, for immutable retries.
   const assets = [...Object.values(m.targets), {file: "npm-release.json", size: manifestBytes.length, sha256: sha256(manifestBytes)}];
   store ||= createStore(config);
@@ -50,12 +54,7 @@ async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (!args["--dist"]) throw new Error("--dist is required (directory containing npm-release.json)");
-  const dir = path.resolve(args["--dist"]); const m = verifyNpm(dir);
-  if (args["--execute"]) {
-    const source = sourceRef(ROOT, m.sourceBranch ?? m.branch);
-    run("git", ["merge-base", "--is-ancestor", m.commit, source.commit], {cwd: ROOT});
-    if (m.sourceRef !== source.ref) throw new Error(`npm source ref does not match this repository's ${source.branch} branch`);
-  }
+  const dir = path.resolve(args["--dist"]);
   console.log(JSON.stringify(await publishPackages({dir, config: readConfig(args["--config"], !!args["--execute"]), execute: !!args["--execute"]}), null, 2));
 }
 module.exports = {publishPackages};

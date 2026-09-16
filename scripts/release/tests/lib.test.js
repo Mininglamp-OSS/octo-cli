@@ -98,3 +98,17 @@ test("only main and versioned development sources are allowed", () => {
     assert.throws(() => sourceRef(os.tmpdir(), branch), /main or dev\/v/);
   }
 });
+
+test("native manifest rejects a comma-joined platform key", () => {
+  const m = {schemaVersion: 1, component: "cli", branch: "test", version: "1.2.3-next.1", commit: "a".repeat(40),
+    targets: {[TARGETS.slice().sort().join()]: {file: "cli.tar.gz", format: "tar.gz", size: 1, sha256: "a".repeat(64)}}};
+  assert.throws(() => assertManifest(m), /exactly six platforms/);
+});
+test("configuration rejects comma-joined environment keys explicitly", t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-config-keys-"));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const file = path.join(dir, "config.json");
+  const config = readConfig(path.join(__dirname, "../config.example.json"));
+  fs.writeFileSync(file, JSON.stringify({...config, prefixes: {"main,test": "static/invalid"}}));
+  assert.throws(() => readConfig(file), /Configure exactly main\/test prefixes/);
+});

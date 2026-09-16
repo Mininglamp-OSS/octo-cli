@@ -20,7 +20,12 @@ function fixture(t, branch = "test", component = "cli") {
     targets[target] = {file, size: bytes.length, sha256: sha256(bytes), files: {"package.json": "b".repeat(64), "bin/run.js": "c".repeat(64), [`vendor/octo-${component}${target.startsWith("windows/") ? ".exe" : ""}`]: "d".repeat(64)}};
   }
   const sourceBranch = branch === "test" ? "dev/v0.14.1" : "main";
-  const manifest = {schemaVersion: 1, kind: "npm-release", name: `@mininglamp-oss/octo-${component}`, component, branch, version, commit: "a".repeat(40), sourceBranch, sourceRef: `refs/remotes/origin/${sourceBranch}`, targets};
+  const repo = path.join(dir, "source");
+  execFileSync("git", ["init", "-q", "--initial-branch", sourceBranch, repo]);
+  execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"], {cwd: repo});
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: repo, encoding: "utf8"}).trim();
+  execFileSync("git", ["update-ref", `refs/remotes/origin/${sourceBranch}`, commit], {cwd: repo});
+  const manifest = {schemaVersion: 1, kind: "npm-release", name: `@mininglamp-oss/octo-${component}`, component, branch, version, commit, sourceBranch, sourceRef: `refs/remotes/origin/${sourceBranch}`, targets};
   const save = () => fs.writeFileSync(path.join(dir, "npm-release.json"), JSON.stringify(manifest));
   save();
   const objects = new Map(); const writes = [];
@@ -36,7 +41,7 @@ function fixture(t, branch = "test", component = "cli") {
     const key = new URL(url).pathname.slice(1);
     return new Response(objects.get(key) || "missing", {status: objects.has(key) ? 200 : 404});
   };
-  return {dir, config, manifest, save, objects, writes, store, fetcher};
+  return {dir, repo, config, manifest, save, objects, writes, store, fetcher};
 }
 for (const branch of ["test", "main"]) {
   const root = config.prefixes[branch];
@@ -95,28 +100,40 @@ test("COS package publication preserves a contending publisher's lock", async t 
   await assert.rejects(publishPackages({...f, execute: true}), /collision/);
   assert.equal(f.objects.get(key).toString(), "other");
 });
-for (const branch of ["test", "main"]) {
-  test(`${branch} COS execute requires provenance matching the source branch`, t => {
+for (const branch of ["test", "main"]) for (const scenario of ["valid", "wrong ref", "manifest replaced"]) {
+  test(`${branch} CLI source validation: ${scenario}`, t => {
     const f = fixture(t, branch);
-    const repo = path.join(f.dir, "repo");
-    const tools = path.join(repo, "scripts", "release");
+    const tools = path.join(f.repo, "scripts", "release");
     fs.mkdirSync(tools, {recursive: true});
     for (const file of ["publish.js", "build.js", "lib.js", "cos.js"]) {
       fs.copyFileSync(path.join(__dirname, "..", file), path.join(tools, file));
     }
-    execFileSync("git", ["init", "-q", "--initial-branch", f.manifest.sourceBranch, repo]);
-    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"], {cwd: repo});
-    f.manifest.commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: repo, encoding: "utf8"}).trim();
-    f.manifest.sourceRef = "refs/heads/other";
-    f.save();
-    const result = spawnSync(process.execPath, [path.join(tools, "publish.js"), "--dist", f.dir, "--execute"], {encoding: "utf8"});
-    assert.notEqual(result.status, 0);
-    assert.match(result.stderr, new RegExp(`source ref does not match this repository's ${f.manifest.sourceBranch} branch`));
-    f.manifest.sourceRef = `refs/heads/${f.manifest.sourceBranch}`;
-    f.save();
-    const valid = spawnSync(process.execPath, [path.join(tools, "publish.js"), "--dist", f.dir, "--execute"], {encoding: "utf8"});
-    assert.notEqual(valid.status, 0);
-    assert.match(valid.stderr, /ENOENT.*config\.local\.json/, "valid source must reach local config validation without cloud access");
+    const configFile = path.join(f.dir, "config.json");
+    fs.writeFileSync(configFile, JSON.stringify({...config, bucket: "validation-1234567890", region: "ap-guangzhou", cdnOrigin: "https://cdn.validation.invalid"}));
+    if (scenario === "wrong ref") { f.manifest.sourceRef = "refs/heads/other"; f.save(); }
+    const otherBranch = branch === "test" ? "main" : "test";
+    const replacement = {...f.manifest, branch: otherBranch, version: otherBranch === "main" ? "1.2.3" : "1.2.3-next.1",
+      sourceBranch: otherBranch === "main" ? "main" : "dev/v0.14.1", sourceRef: "refs/heads/other"};
+    const preload = path.join(f.dir, "preload.cjs");
+    fs.writeFileSync(preload, `
+      const fs = require("node:fs");
+      require(${JSON.stringify(path.join(tools, "cos.js"))}).createStore = () => { throw Error("CLOUD_REACHED"); };
+      const read = fs.readFileSync;
+      fs.readFileSync = function(file, ...args) {
+        const bytes = read.call(this, file, ...args);
+        if (${JSON.stringify(scenario)} === "manifest replaced" && file === ${JSON.stringify(configFile)}) {
+          fs.writeFileSync(${JSON.stringify(path.join(f.dir, "npm-release.json"))}, ${JSON.stringify(JSON.stringify(replacement))});
+        }
+        return bytes;
+      };
+    `);
+    const result = spawnSync(process.execPath, ["--require", preload, path.join(tools, "publish.js"), "--dist", f.dir, "--config", configFile, "--execute"], {encoding: "utf8"});
+    assert.equal(result.status, 1);
+    if (scenario === "valid") assert.match(result.stderr, /CLOUD_REACHED/, "valid source reaches transport setup");
+    else {
+      assert.doesNotMatch(result.stderr, /CLOUD_REACHED/);
+      assert.match(result.stderr, /source ref does not match|not available/);
+    }
   });
 }
 
@@ -347,4 +364,49 @@ for (const branch of ["test", "main"]) test(`${branch} rejects mismatched source
     await assert.rejects(publishPackages({...f, execute}), /Source branch does not match the COS environment/);
     assert.deepEqual(f.writes, []);
   }
+});
+
+for (const [variable, debug] of [["NODE_DEBUG", "request"], ["NODE_DEBUG", "http"], ["NODE_DEBUG", "*"], ["NODE_DEBUG", "REQUEST,https"], ["NODE_DEBUG_NATIVE", "http"], ["NODE_DEBUG", ""]]) test(`COS transport ${debug ? "refuses" : "allows"} ${variable}=${debug} before loading SDK`, () => {
+  const code = `
+    const Module = require("node:module");
+    const original = Module._load;
+    Module._load = function(name, ...args) {
+      if (name === "cos-nodejs-sdk-v5") throw Error("SDK_LOAD_ATTEMPT");
+      return original.call(this, name, ...args);
+    };
+    try { require(${JSON.stringify(path.join(__dirname, "../cos"))}).createStore({}); }
+    catch (error) { console.error(error.message); process.exitCode = 1; }
+  `;
+  const env = {...process.env, NODE_DEBUG: "", NODE_DEBUG_NATIVE: "", [variable]: debug, COS_SECRET_ID: "unit-test-id", COS_SECRET_KEY: "unit-test-key", COS_SESSION_TOKEN: "unit-test-token"};
+  const result = spawnSync(process.execPath, ["-e", code], {env, encoding: "utf8"});
+  assert.equal(result.status, 1);
+  if (debug) {
+    assert.match(result.stderr, /Unset NODE_DEBUG/);
+    assert.doesNotMatch(result.stderr, /SDK_LOAD_ATTEMPT/);
+  } else assert.match(result.stderr, /SDK_LOAD_ATTEMPT/);
+  assert.doesNotMatch(result.stdout + result.stderr, /unit-test-id|unit-test-key|unit-test-token|q-sign-algorithm/);
+});
+
+for (const branch of ["test", "main"]) for (const field of ["commit", "sourceRef"]) test(`${branch} programmatic publication validates ${field} before cloud access`, async t => {
+  const f = fixture(t, branch);
+  if (field === "commit") {
+    execFileSync("git", ["checkout", "--orphan", "unrelated"], {cwd: f.repo, stdio: "pipe"});
+    execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "unrelated"], {cwd: f.repo});
+    f.manifest.commit = execFileSync("git", ["rev-parse", "HEAD"], {cwd: f.repo, encoding: "utf8"}).trim();
+  } else f.manifest.sourceRef = "refs/heads/unrelated";
+  f.save();
+  await assert.rejects(publishPackages({...f, execute: true}), /git failed|source ref does not match/);
+  assert.deepEqual(f.writes, []);
+});
+
+for (const kind of ["targets", "files"]) test(`npm manifest rejects comma-joined ${kind} keys before cloud access`, async t => {
+  const f = fixture(t);
+  if (kind === "targets") f.manifest.targets = {[TARGETS.slice().sort().join()]: f.manifest.targets["darwin/amd64"]};
+  else {
+    const asset = f.manifest.targets["darwin/amd64"];
+    asset.files = {[Object.keys(asset.files).sort().join()]: "a".repeat(64)};
+  }
+  f.save();
+  await assert.rejects(publishPackages({...f, execute: true}), /six platforms|file checksums/);
+  assert.deepEqual(f.writes, []);
 });

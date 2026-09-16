@@ -2,6 +2,8 @@
 const crypto = require("node:crypto");
 const {sha256} = require("./lib");
 function createStore(config, sdkConstructor) {
+  // Transport debug logs can include signed headers and STS tokens. Reject before SDK loading.
+  if (process.env.NODE_DEBUG || process.env.NODE_DEBUG_NATIVE) throw new Error("Unset NODE_DEBUG and NODE_DEBUG_NATIVE before COS publishing; transport debug logging can expose credentials");
   const SecretId = process.env.COS_SECRET_ID;
   const SecretKey = process.env.COS_SECRET_KEY;
   if (!SecretId || !SecretKey || [SecretId, SecretKey].includes("replace-me")) throw new Error("Set COS_SECRET_ID and COS_SECRET_KEY in the local environment");

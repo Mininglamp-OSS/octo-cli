@@ -50,6 +50,10 @@ Edit the local copies only. JSON contains the bucket, region, HTTPS CDN origin
 and disjoint test/main prefixes. Credentials belong in `.env.local`:
 `COS_SECRET_ID`, `COS_SECRET_KEY`, and optional `COS_SESSION_TOKEN`. Do not put
 credentials in JSON, shell arguments, examples, logs or build artifacts.
+Unset `NODE_DEBUG` and `NODE_DEBUG_NATIVE` in the publishing process. The transport
+refuses nonempty values before loading the COS SDK because debug logs can expose
+signed headers and session tokens; sanitizing returned SDK errors cannot protect
+that separate logging path.
 
 Local config, `.env` files, release dependencies and `release-dist/` are ignored;
 only placeholder examples are tracked. Confirm before committing:
@@ -87,8 +91,15 @@ local configuration or credentials. Build subprocesses receive an environment
 with `COS_*` variables removed; the publishing process retains its credentials.
 
 Without `--execute`, publication validates local files and prints object keys;
-it makes no cloud requests. With `--execute`, it also validates source provenance,
-uploads immutable objects and reads them back through the configured CDN. Each
+it makes no cloud requests. With `--execute`, the publisher checks the source ref
+and commit ancestry of the exact manifest bytes it will upload, including when
+called programmatically. The manifest is read once; replacement on disk cannot
+switch the validated release or its environment. These checks prevent accidental
+source mismatches; they do not cryptographically attest the build. Use a trusted
+build directory and publishing host.
+
+Platform and per-package file maps must have exactly the expected keys. The
+publisher uploads immutable objects and reads them back through the CDN. Each
 package buffer is checked against the manifest immediately before upload, and
 the same buffer is used for COS/CDN verification. The original validated manifest
 bytes are uploaded last, preserving byte-for-byte retry compatibility.
