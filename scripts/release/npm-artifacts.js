@@ -14,8 +14,14 @@ const pkg = require("../package.json");
 if (pkg.os[0] !== process.platform || pkg.cpu[0] !== process.arch) throw new Error("Package platform mismatch; reinstall for this platform");
 const binary = path.join(__dirname, "../vendor/", pkg.octoBinary);
 const child = spawn(binary, process.argv.slice(2), {stdio: "inherit", env: process.env});
-child.on("error", error => { console.error("Unable to start " + pkg.octoBinary + ": " + error.message); process.exitCode = 1; });
-child.on("exit", (code, signal) => { if (signal) process.kill(process.pid, signal); else process.exitCode = code ?? 1; });
+// Keep the wrapper alive until the native process has finished shutting down.
+const signalHandlers = new Map(["SIGINT", "SIGTERM"].map(signal => [signal, () => child.kill(signal)]));
+for (const [signal, handler] of signalHandlers) process.on(signal, handler);
+function stopForwarding() {
+  for (const [signal, handler] of signalHandlers) process.removeListener(signal, handler);
+}
+child.on("error", error => { stopForwarding(); console.error("Unable to start " + pkg.octoBinary + ": " + error.message); process.exitCode = 1; });
+child.on("exit", (code, signal) => { stopForwarding(); if (signal) process.kill(process.pid, signal); else process.exitCode = code ?? 1; });
 `;
 function packNpm(dir, manifest, out) {
   if (fs.existsSync(out)) throw new Error("npm output already exists; reuse verified immutable artifacts or choose a new output");

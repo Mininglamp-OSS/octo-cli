@@ -267,7 +267,10 @@ The publisher accepts `test` (`X.Y.Z-next.N`) and `main` (`X.Y.Z`), selecting
 installation pointer or publish anything to npm. Each `.tgz` contains package
 metadata, a Node launcher, and one native binary with no external dependencies;
 `private: true` prevents accidental npm registry publication. An empty-cache offline
-npm install is tested. Do not regenerate uploaded files under an existing version.
+npm install is tested. Package launchers forward SIGINT/SIGTERM on POSIX and wait
+for native shutdown. Launcher fixes require a new component version; updating the
+root installer does not change existing package contents. Do not regenerate uploaded
+files under an existing version.
 
 The daemon repository owns `scripts/release/install.js`,
 `scripts/release/publish.js`, and `docs/cos-publishing.md`, including
