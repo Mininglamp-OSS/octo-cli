@@ -36,6 +36,8 @@ test("manifest accepts all platforms and rejects foreign components, invalid pat
   assert.throws(() => assertManifest(unsafe), /Unsafe artifact filename/);
   const missing = make(); delete missing.targets[TARGETS[0]];
   assert.throws(() => assertManifest(missing), /Release must contain exactly six platforms/);
+  const extra = make(); extra.targets["linux/386"] = {...extra.targets["linux/amd64"], file: "linux-386.tar.gz"};
+  assert.throws(() => assertManifest(extra), /Release must contain exactly six platforms/);
 });
 
 test("origin branch selection never silently uses feature branches", t => {
@@ -111,4 +113,20 @@ test("configuration rejects comma-joined environment keys explicitly", t => {
   const config = readConfig(path.join(__dirname, "../config.example.json"));
   fs.writeFileSync(file, JSON.stringify({...config, prefixes: {"main,test": "static/invalid"}}));
   assert.throws(() => readConfig(file), /Configure exactly main\/test prefixes/);
+});
+
+for (const [name, prefixes, error] of [
+  ["extra environment", {main: "static/main", test: "static/test", extra: "static/extra"}, /Configure exactly main\/test prefixes/],
+  ["identical prefixes", {main: "static/shared", test: "static/shared"}, /must be disjoint/],
+  ["test inside main", {main: "static/octo", test: "static/octo/test"}, /must be disjoint/],
+  ["main inside test", {main: "static/octo/main", test: "static/octo"}, /must be disjoint/],
+  ["disjoint prefixes with a shared string prefix", {main: "static/octo", test: "static/octo-test"}, null]
+]) test(`configuration validates ${name}`, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "octo-prefix-test-"));
+  t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
+  const config = readConfig(path.join(__dirname, "../config.example.json"));
+  const file = path.join(dir, "config.json");
+  fs.writeFileSync(file, JSON.stringify({...config, prefixes}));
+  if (error) assert.throws(() => readConfig(file), error);
+  else assert.deepEqual(readConfig(file).prefixes, prefixes);
 });

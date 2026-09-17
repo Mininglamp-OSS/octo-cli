@@ -12,7 +12,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
-    branches: [main, dev/v0.14.1]
+    branches: [main, 'dev/v*']
     # paths-ignore is intentionally NOT set here — workflow-level path filtering
     # prevents GitHub from creating any check run, which deadlocks required-status
     # checks on docs-only PRs. Path-based skipping is handled by the `changes`

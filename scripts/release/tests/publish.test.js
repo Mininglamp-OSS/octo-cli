@@ -410,3 +410,14 @@ for (const kind of ["targets", "files"]) test(`npm manifest rejects comma-joined
   await assert.rejects(publishPackages({...f, execute: true}), /six platforms|file checksums/);
   assert.deepEqual(f.writes, []);
 });
+
+for (const kind of ["targets", "files"]) test(`npm manifest rejects extra ${kind} keys before cloud access`, async t => {
+  const f = fixture(t);
+  if (kind === "targets") f.manifest.targets["linux/386"] = {...f.manifest.targets["linux/amd64"]};
+  else f.manifest.targets["linux/amd64"].files["extra.txt"] = "a".repeat(64);
+  f.save();
+  for (const execute of [false, true]) {
+    await assert.rejects(publishPackages({...f, execute}), /six platforms|file checksums/);
+    assert.deepEqual(f.writes, []);
+  }
+});
