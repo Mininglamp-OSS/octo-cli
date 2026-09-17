@@ -124,6 +124,7 @@ var backendErrorMapping = map[string]struct {
 	"FORBIDDEN":                         {"permission", "bot lacks permission; check space membership"},
 	"BOT_WORKSPACE_MEMBERSHIP_REQUIRED": {"permission", "ask a Workspace owner or admin to add this Bot in Workspace Members"},
 	"SPACE_FORBIDDEN":                   {"permission", "bot not a member of this space"},
+	"bot_delete_forbidden":              {"permission", "bots cannot delete documents, even as owner/admin; do not retry or switch identities/routes; ask a human with document admin permission to delete it in Octo"},
 	"DUPLICATE_ASSIGNEE":                {"validation", "already assigned; check current assignees"},
 	"DUPLICATE":                         {"validation", "the resource already exists; inspect the current resource before retrying"},
 	"UNSUPPORTED_MEDIA_TYPE":            {"validation", "use the content type declared by `octo-cli schema <op>`"},

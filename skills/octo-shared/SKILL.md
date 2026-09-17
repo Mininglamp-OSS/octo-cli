@@ -13,6 +13,13 @@ metadata:
 
 > **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo-cli matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
 
+**Bots cannot delete documents, even documents they created or own/administer.**
+Do not invoke `docs delete`, `html rm`, or equivalent raw `api DELETE` calls to
+delete a document. Ask a human with document admin permission to delete it in
+Octo instead. Do not switch credentials/routes or clear the document's contents
+as a workaround. This rule concerns whole documents, not normal editing or
+otherwise-permitted comment, version, asset, or sheet row/column removal.
+
 ## 1. Authentication
 
 Bots authenticate with a bearer token. There is no interactive user login — but besides the two bot tokens (`app_*`, `bf_*`) there is a third kind, a **user API key** (`uk_*`), which carries a real person's identity and is used mainly for `message search`. Two ways to supply any of them:
@@ -111,6 +118,12 @@ Every failure prints an error envelope to **stderr** and exits non-zero:
 ```
 
 Parse `ok` first. On failure, branch on `error.type` (a small fixed taxonomy) or `error.code` (a string, may come straight from the backend).
+
+`error.code: bot_delete_forbidden` (`error.type: permission`, HTTP 403) is a
+terminal policy denial, not missing membership or a transient error. Do not
+retry, request a higher bot role, or change `uid`, owner, Space, credentials, or
+routes; ask a human document admin to perform the deletion. Do not claim success,
+even if the document was already deleted.
 
 Backends differ in their raw error shape. The CLI normalizes both:
 - **matters** (structured): `{error:{code, message, details}}` → passes through into `detail` unchanged.

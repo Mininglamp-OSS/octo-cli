@@ -1,7 +1,7 @@
 ---
 name: octo-html
 version: 0.2.0
-description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
+description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. Bots cannot delete documents. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -53,6 +53,18 @@ deployed before this CLI is released.
 
 ## 1. Create and publish
 
+**Bots cannot delete documents, even as author, owner, or admin.** Do not run
+`octo-cli html rm <doc-ref>` or use `docs delete` / raw `api DELETE` as an
+alternative. Ask a human with document admin permission to delete it in Octo.
+This includes cleanup of test documents and applies to canonical IDs and legacy
+slugs. Creating, publishing versions, editing, and permitted asset/comment
+operations are unchanged.
+
+`html rm` targets `/docs-html/v1/docs/{doc_id}`, a different service entry from
+the docs-backend `/v1/bot/docs/octo-doc/:octoDocSlug` deletion route. Do not infer
+that one route's deployment proves the other's enforcement, and do not probe
+the other route as a workaround.
+
 **Documents are declarative: no JavaScript.** The backend rejects any publish or
 draft whose HTML carries script, with `400` and the stable code
 `html_contains_javascript`. This is not advisory — there is no flag to opt out.
@@ -102,16 +114,15 @@ octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runboo
 # UNATTENDED CALLERS: supply your own stable --idempotency-key and persist it
 # before the call. A generated key lives only for that invocation, so if a
 # timeout or 5xx leaves the outcome unknown, a plain re-run creates a SECOND
-# document — and the first one's reference was never returned, so it can be
-# neither addressed nor deleted. With your own key the re-run resumes the same
+# document without returning the first one's reference. Bots must not delete
+# documents as cleanup. With your own key the re-run resumes the same
 # creation. A failed create also reports the key it used in the error envelope's
 # detail (and hint), so an ambiguous failure stays recoverable either way.
 
-# List, inspect, list versions, and soft-delete.
+# List, inspect, and list versions.
 octo-cli html list
 octo-cli html get <doc-ref>
 octo-cli html versions <doc-ref>
-octo-cli html rm <doc-ref>
 ```
 
 `html list` returns the backend's offset envelope as `data` plus `_pagination`
@@ -190,6 +201,10 @@ an element's tag or nearby heading unless necessary.
 
 ## Errors
 
+- `403 bot_delete_forbidden` — terminal bot-deletion policy denial, including
+  already-deleted retries on the docs-backend routes. Do not retry, change
+  roles/identity/Space, or switch endpoints; ask a human document admin to delete
+  it. This is not a successful deletion or a missing-membership problem.
 - `401 / 403` — missing or insufficient capability.
 - `404` — document reference (canonical doc_id or legacy slug), comment, or aid
   not found.

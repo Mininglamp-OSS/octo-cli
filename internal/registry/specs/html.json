@@ -336,8 +336,8 @@
       },
       "delete": {
         "operationId": "html.rm",
-        "summary": "Delete a document (author-only, soft delete)",
-        "description": "Soft-delete a document. Requires the write token / doc author credential.",
+        "summary": "Delete a document (forbidden for bots, including author/owner/admin)",
+        "description": "Bots must not invoke this operation, even for documents they authored, own, or administer. Ask a human with document admin permission to delete it in Octo; do not use docs.delete or raw API calls as a workaround. This command targets the HTML service, not the docs-backend bot deletion route, so enforcement must be verified for that service separately. If bot_delete_forbidden is returned, stop without retrying or changing identity/Space. Publishing and editing remain governed by their existing permissions.",
         "x-octo-risk": "write",
         "parameters": [
           {
