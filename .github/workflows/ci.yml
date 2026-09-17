@@ -12,7 +12,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
-    branches: [main]
+    branches: [main, 'dev/v*']
     # paths-ignore is intentionally NOT set here — workflow-level path filtering
     # prevents GitHub from creating any check run, which deadlocks required-status
     # checks on docs-only PRs. Path-based skipping is handled by the `changes`
@@ -182,3 +182,19 @@ jobs:
           node-version: "22"
       - name: npm test
         run: npm test
+
+  release-tools-test:
+    name: COS release tools (no publishing)
+    needs: [changes]
+    if: |
+      (github.event_name != 'pull_request' || !github.event.pull_request.draft) &&
+      needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - run: npm ci --prefix scripts/release --ignore-scripts --no-audit --no-fund
+      - run: npm test --prefix scripts/release
