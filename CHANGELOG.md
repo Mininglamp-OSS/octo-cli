@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Legacy Fleet Project commands** — removed `loop project`
+  `list/search/get/create/update/delete` and `resource list/create/update/delete`
+  from the command tree, completion, and schema discovery. Removed retired
+  `project_id` fields from quick-create and autopilot request/response schemas,
+  including the quick-create `--project-id` flag. Existing scripts must stop
+  using these retired operations and fields. Workspace scope (`--workspace-id`)
+  is unchanged; no octo-server Project API or command alias is introduced.
+
 ### Added
 - **`octo-cli api --workspace-id`** — generic passthrough requests can now send
   explicit workspace context through the `X-Workspace-ID` header.

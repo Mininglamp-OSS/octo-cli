@@ -48,7 +48,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"html":        20,
 		"marketplace": 25,
 		"summary":     4,
-		"loop":        126,
+		"loop":        116,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -155,7 +155,6 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 	for _, id := range []string{
 		"workspace.list",
 		"label.create",
-		"project.resource.create",
 		"comment.reaction.add",
 		"attachment.upload",
 		"loop.skill.list",
