@@ -1,7 +1,7 @@
 ---
 name: octo-loop
 version: 0.1.0
-description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, projects, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
+description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -20,7 +20,7 @@ Terminology (legacy → current): **agent → expert**, **squad → expert-team*
 ## When to use / not use
 
 Use this skill when the request targets a specific Loop workspace or task:
-reading or writing tasks, comments, projects, or metadata; working with experts
+reading or writing tasks, comments, or metadata; working with experts
 or expert-teams (dispatch, schedule, trigger a run); replying to a comment,
 creating or triaging a task, updating status, or reading progress.
 
@@ -45,6 +45,12 @@ paths include the Fleet module namespace, so requests resolve under
 `$OCTO_API_BASE_URL/fleet/api/v1/*`.
 
 ## Workspace UUID
+
+The retired Fleet `loop project` and `loop project resource` commands are no
+longer available. Their IDs are not octo-server Project/Workspace IDs. Do not
+pass the retired `project_id` field in quick-create or autopilot request bodies;
+use `--workspace-id` for workspace scope. This removal does not introduce a new
+Server Project command or change the Workspace ID supplied to daemon tasks.
 
 Workspace-scoped Loop commands require the `--workspace-id <workspace-uuid>`
 flag, sent as the `X-Workspace-ID` header. The value must be the UUID returned
@@ -94,7 +100,7 @@ octo-cli loop task children-by-parent <task-id> --workspace-id <workspace-uuid>
 
 Comment history is paginated with `--page` / `--page-size`.
 
-Explore other namespaces (`project`, `expert`, `expert-team`,
+Explore other namespaces (`expert`, `expert-team`,
 `expert-template`, `execution`, `runtime`, `skill`, `skill-file`, `autopilot`,
 `attachment`, `label`, top-level `comment`) with `--help` — their shapes vary.
 

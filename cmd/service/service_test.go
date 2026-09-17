@@ -96,7 +96,7 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	loop := findCmd(root, "loop")
 	for _, resource := range []string{
 		"attachment", "autopilot", "comment", "execution", "expert",
-		"expert-template", "expert-team", "label", "project", "runtime",
+		"expert-template", "expert-team", "label", "runtime",
 		"skill", "skill-file", "task", "workspace",
 	} {
 		if findCmd(loop, resource) == nil {
