@@ -26,11 +26,57 @@ returned by the relevant read commands, not a value inferred from CLI acceptance
 Choose a template and provide a title:
 
 ```bash
-octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId report --idempotency-key <unique-key>
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId signal --idempotency-key <unique-key>
 ```
 
-Templates: `blank`, `pitch`, `report`, `lesson`. Save the returned `docId` for
-subsequent commands; `editorUrl` opens the editor and `shareUrl` opens the shared
+For new presentations, choose from the blank + four gallery families in
+the editor's gallery picker. Match the requested style and preserve an explicit
+user choice; availability depends on the rollout below:
+
+| Template ID | Starting point |
+|---|---|
+| `blank` | Blank deck; server default when templateId is omitted |
+| `signal` | Editorial typography and coordinated page layouts |
+| `terra` | Premium product presentation |
+| `orbital` | Immersive technology presentation |
+| `picnic` | Pixel Picnic: playful learning presentation |
+
+The CLI no longer offers `pitch`, `report` and `lesson` for new creation, by the
+product decision tracked in [octo-cli #174](https://github.com/Mininglamp-OSS/octo-cli/issues/174).
+This is a CLI-level restriction, not a statement about the deployed server:
+older backends may still accept these IDs. Existing presentations remain readable
+and editable by docId; do not recreate or delete them to change their template ID.
+Do not use a raw API call or an older CLI to bypass this new-creation policy.
+
+**Minimum rollout dependency:** release this CLI only after the gallery backend
+in [octo-docs-backend !146](https://codex.mlamp.cn/dmwork/octo-docs-backend/-/merge_requests/146)
+and picker in [octo-docs-module !105](https://codex.mlamp.cn/dmwork/octo-web-enterprise/octo-docs-module/-/merge_requests/105)
+are merged and deployed to the intended environment, and all five choices are
+verified there. MR links and source refs are not proof of deployment. If the CLI
+ships against a backend with only the old catalogue, only `blank` works: the
+gallery IDs fail on the server and the old IDs fail in the CLI. After rollout,
+update Bot binaries and their installed skill copies together.
+
+The supported GitHub Release and npm publishing workflows enforce fresh Bot
+create/read probes for all five choices before publication. Missing release
+configuration or any failed probe blocks publishing; draft/dry runs are not
+deployment evidence. Operators must also confirm the frontend deployment. See
+[`docs/ppt-release-gate.md`](https://github.com/Mininglamp-OSS/octo-cli/blob/main/docs/ppt-release-gate.md)
+for protected-environment setup and retained acceptance-document cleanup.
+
+The four native gallery choices require a backend with that catalogue deployed.
+CLI acceptance or a dry run does not prove the server supports them. If the server
+rejects a template, report the deployment mismatch; do not silently substitute
+another style or repeat the request through a different API route. Use a different
+template only when the user agrees, with a new idempotency key for the changed body.
+
+Creation needs no local JSON file: the command asks the server to clone the chosen
+template into a new online presentation. It does not generate topic-specific content
+from the title. The agent must read that deck, compose the requested content and
+layout, then submit the edited JSON as described below. Do not deliver unchanged
+template placeholders as a finished presentation.
+
+Save the returned `docId` for subsequent commands; `editorUrl` opens the editor and `shareUrl` opens the shared
 presentation subject to its access rules. The Bot becomes the owner, and its
 human owner also receives admin access. Identity and Space come from the Bot's
 credential. Retry a timeout with the identical idempotency key and body to avoid
@@ -48,7 +94,10 @@ octo-cli docs ppt get <docId>
 
 `get` returns `.data.deck` and `.data.baseRevision`. `edit.json` must contain
 `{"baseRevision":7,"deck":{...the complete edited deck...}}`, with only those two
-top-level fields. Preserve `deck.docId`, unknown fields inside `deck`, and stable
+top-level fields. `--data @edit.json` reads that local request file; inline JSON
+with `--data '{...}'` is also supported. Merely writing a JSON file does not save
+anything to Octo: run the edit command and verify the server's readback. The edit
+sends the complete deck, not a list of element patches. Preserve `deck.docId`, unknown fields inside `deck`, and stable
 slide/element IDs, and the returned `format` / `version` fields. Do not copy the
 read response's top-level `docId` or `contentHash` into the edit request.
 `contentHash` is advisory and may be absent or empty; concurrency uses revisions. Other

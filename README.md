@@ -159,7 +159,9 @@ octo-cli docs content get doc-123          # returns the body + base version tok
 octo-cli docs import doc-123 --file ./notes.md      # replaces a doc from .md/.markdown/.docx
 octo-cli docs export doc-123 --export-format pdf -o ./notes.pdf
 # PPT: use the dedicated live revision API; preserve all fields when editing.
-octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId report --idempotency-key <unique-key>
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId signal --idempotency-key <unique-key>
+# Native gallery: signal, terra, orbital, picnic; requires the matching backend catalogue.
+# The server clones a template; the agent fills it through docs ppt get/edit (see skills/octo-docs/ppt.md).
 octo-cli docs ppt get ppt-7
 octo-cli docs ppt edit ppt-7 --data @edit.json   # {"baseRevision":7,"deck":{...}}
 octo-cli docs ppt get ppt-7                    # read back to verify the change
