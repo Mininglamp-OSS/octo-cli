@@ -123,6 +123,31 @@ func TestParseBackendErrorWorkspaceBotMembershipHint(t *testing.T) {
 	}
 }
 
+func TestParseBackendErrorBotDeleteForbidden(t *testing.T) {
+	for _, body := range []string{
+		`{"error":"bot_delete_forbidden"}`,
+		`{"error":{"code":"bot_delete_forbidden","message":"Bot deletion is forbidden","hint":"retry as admin"}}`,
+	} {
+		for _, parseError := range []func(int, []byte) *ExitError{ParseBackendError, ParsePublicAPIError} {
+			err := parseError(http.StatusForbidden, []byte(body))
+			if err.Code != "bot_delete_forbidden" || err.Type != "permission" || err.HTTPStatus != http.StatusForbidden {
+				t.Fatalf("error = %+v", err)
+			}
+			if err.ExitCode() != 1 || err.OutcomeUnknown() {
+				t.Fatalf("denial must be a definite failure: %+v", err)
+			}
+			for _, instruction := range []string{"even as owner/admin", "do not retry", "human"} {
+				if !strings.Contains(err.Hint, instruction) {
+					t.Errorf("hint %q must explain %q", err.Hint, instruction)
+				}
+			}
+			if string(err.Detail) != body {
+				t.Errorf("detail = %s, want %s", err.Detail, body)
+			}
+		}
+	}
+}
+
 func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 	body := []byte(`{"error":{"code":"SOMETHING_NEW","message":"nope"}}`)
 	ee := ParseBackendError(418, body)

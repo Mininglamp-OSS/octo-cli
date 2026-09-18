@@ -1,7 +1,7 @@
 ---
 name: octo-docs
 version: 0.2.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and edit spreadsheets including structural row/column edits, find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and edit spreadsheets including structural row/column edits, find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Bots cannot delete documents. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -56,6 +56,23 @@ slug for old documents; callers do not infer the distinction from mount state.
 
 ## Document lifecycle
 
+**Bots cannot delete documents, even as owner/admin or for cleanup of their own
+test documents.** Do not run `octo-cli docs delete <docId>`. Ask a human with
+document admin permission to delete the document in Octo.
+
+The docs-backend bot-deletion policy returns HTTP `403` / `bot_delete_forbidden`
+for both `DELETE /v1/bot/docs/:docId` and
+`DELETE /v1/bot/docs/octo-doc/:octoDocSlug`, including already-deleted retries.
+The CLI emits `error.type: permission` and keeps that error code. Stop on this
+denial: do not retry or treat it as successful cleanup. Identity comes from
+server-side authentication; changing `uid`, owner, Space, or the bot's role
+does not authorize deletion. Do not switch to `html rm`, a raw API call, another
+credential, or an older deployment to work around the policy.
+
+Bot creation and editing remain available under their existing permissions.
+Deleting a comment/version, sheet rows/columns, or individual scene elements is
+not whole-document deletion and retains its own permission checks.
+
 ```bash
 # Create an empty doc (caller becomes owner/admin). A new doc has NO body —
 # seed a `doc` with `docs content edit` (doc.md), a `sheet` with
@@ -84,7 +101,6 @@ octo-cli docs export <docId> --export-format pdf -o ./output.pdf
 # Other accepted matching pairs: md/.md, docx/.docx, xlsx/.xlsx, png/.png, svg/.svg
 
 octo-cli docs rename <docId> --title "New title"
-octo-cli docs delete <docId>                 # soft delete (admin)
 ```
 
 ## Pagination note

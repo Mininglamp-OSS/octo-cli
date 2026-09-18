@@ -582,7 +582,8 @@
       },
       "delete": {
         "operationId": "docs.delete",
-        "summary": "Soft-delete a document (needs admin)",
+        "summary": "Delete a document (forbidden for bots, including owner/admin)",
+        "description": "Bots must not invoke this operation, even for documents they created or own/administer. The docs-backend bot-deletion policy returns HTTP 403 bot_delete_forbidden, including already-deleted retries. Do not retry, change uid/owner/Space/credentials, or switch to HTML/raw API routes. Ask a human with document admin permission to delete it in Octo. Bot creation, editing, and separately permitted subresource operations are unchanged.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -595,8 +596,22 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Deleted"
+          "403": {
+            "description": "Bot document deletion is forbidden, including owner/admin and already-deleted retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["bot_delete_forbidden"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
           }
         }
       }
