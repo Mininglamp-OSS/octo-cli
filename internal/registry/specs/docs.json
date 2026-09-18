@@ -180,7 +180,7 @@
     "/v1/bot/docs": {
       "post": {
         "operationId": "docs.create",
-        "summary": "Create an (empty) document; the caller becomes owner/admin",
+        "summary": "Create a document, empty or initialized from a PPT template; the caller becomes owner/admin",
         "description": "Create a document in the verified caller Space. Use docType=html_ppt, title, optional templateId (blank by default), and Idempotency-Key for PPT. Content initialization, metadata and member grants commit atomically.",
         "x-octo-risk": "write",
         "requestBody": {
@@ -204,11 +204,14 @@
                   },
                   "templateId": {
                     "type": "string",
+                    "x-octo-enum-hint": "The CLI retires pitch/report/lesson for new creation by product policy; existing presentations remain readable/editable. Deploy the matching backend catalogue before using signal/terra/orbital/picnic; until then only blank is compatible. Run octo-cli skills octo-docs and read ppt.md for rollout prerequisites.",
+                    "description": "PPT template: blank (server default) or signal, terra, orbital, picnic. The four gallery choices require the matching backend catalogue to be deployed first. The CLI rejects pitch/report/lesson for new creation by product policy (octo-cli issue #174); this is not a claim that a deployed backend rejects them. Existing presentations can still be read and edited.",
                     "enum": [
                       "blank",
-                      "pitch",
-                      "report",
-                      "lesson"
+                      "signal",
+                      "terra",
+                      "orbital",
+                      "picnic"
                     ]
                   }
                 }
@@ -223,9 +226,27 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "Flat creation receipt, not wrapped in data. PPT-specific fields are optional on this shared endpoint. The example is a synthetic fixture of the backend PPT creation contract; see docs/ppt-release-gate.md for source provenance.",
                   "properties": {
                     "docId": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Server-generated document ID. New PPT IDs have the form d_ followed by 24 hexadecimal characters; existing document IDs remain opaque to callers."
+                    },
+                    "docType": {
+                      "type": "string",
+                      "description": "Document type; html_ppt for PPT creation."
+                    },
+                    "templateId": {
+                      "type": "string",
+                      "description": "PPT only: the selected template ID. Historical Idempotency-Key replay may return a retired ID; this response field is not constrained by the new-creation enum."
+                    },
+                    "draftRevision": {
+                      "type": "integer",
+                      "description": "PPT only: initial draft revision (0 on creation)."
+                    },
+                    "snapshotVersion": {
+                      "type": "integer",
+                      "description": "PPT only: initial snapshot version (0 on creation)."
                     },
                     "documentName": {
                       "type": "string"
@@ -256,6 +277,22 @@
                       "type": "string",
                       "description": "Presentation URL subject to document access rules; returned for html_ppt only."
                     }
+                  },
+                  "example": {
+                    "docId": "d_000000000000000000000001",
+                    "docType": "html_ppt",
+                    "templateId": "blank",
+                    "draftRevision": 0,
+                    "snapshotVersion": 0,
+                    "documentName": "octo:acceptance-space:f_default:ppt:d_000000000000000000000001",
+                    "title": "CLI contract probe",
+                    "spaceId": "acceptance-space",
+                    "folderId": "f_default",
+                    "ownerId": "release_probe_bot",
+                    "role": "admin",
+                    "createdAt": "2026-01-01T00:00:00.000Z",
+                    "editorUrl": "https://octo.example/d/d_000000000000000000000001",
+                    "shareUrl": "https://octo.example/d/d_000000000000000000000001"
                   }
                 }
               }
