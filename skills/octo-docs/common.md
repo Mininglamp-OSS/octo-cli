@@ -125,10 +125,11 @@ octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # requ
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 
 # Space-level share scope — read/set who in the space can reach the doc.
-octo-cli docs share get <docId>                                       # reader; {docId, shareScope, shareRole}
-octo-cli docs share set <docId> --scope restricted                    # admin; only owner/members can access
-octo-cli docs share set <docId> --scope anyone_in_space --role read   # admin; every space member gets read
-octo-cli docs share set <docId> --scope anyone_in_space --role edit   # admin; every space member gets edit
+octo-cli docs share get <docId>  # read the current settings and permissionEpoch first
+# Each alternative below needs a fresh epoch from that read, not a fixed/example value.
+octo-cli docs share set <docId> --scope restricted --permissionEpoch <epoch>
+octo-cli docs share set <docId> --scope anyone_in_space --role read --permissionEpoch <epoch>
+octo-cli docs share set <docId> --scope anyone_in_space --role edit --permissionEpoch <epoch>
 ```
 
 `docs members set` is a Space-qualified Bot mutation. Omit
@@ -152,6 +153,13 @@ Error codes: `400 invalid_scope` (unknown scope), `400 invalid_role`
 (anyone_in_space with a missing/invalid role), `403` (caller not admin/owner),
 `404` (missing or cross-space doc), `409` (archived doc). Schema:
 `octo-cli schema docs.share.set`.
+
+Every share update requires `--permissionEpoch` from a fresh `docs share get`.
+This is the permission version, not the document/PPT content revision. A missing
+or invalid epoch fails local validation. On `409 share_settings_conflict`,
+re-read the current sharing settings and re-evaluate the change before submitting;
+do not automatically overwrite a concurrent administrator's decision. The CLI
+does not fetch an epoch or retry a permission conflict on the caller's behalf.
 
 ---
 

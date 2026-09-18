@@ -299,6 +299,8 @@ Current v0.x outputs raw server JSON. Break immediately — only internal Agent 
 | `x-octo-positional` | Body fields → positional args | `["content"]` |
 | `x-octo-space-header` | Inject X-Space-Id | `true` (default for all service commands) |
 | `x-octo-status-values` | Valid status enum for domain | `["open","done","archived"]` |
+| `x-octo-strict-request-schema` | Opt a service or individual operation into extended request validation; used by Marketplace and selected PPT, sheet and sharing operations (Loop also enables strict validation) | `true` |
+| `x-octo-enum-hint` | Append schema-specific guidance to `ENUM_NOT_ALLOWED`; inherited through `allOf`, with the outer/first nonempty hint taking precedence | `"Deploy the matching backend catalogue first."` |
 
 **Response schemas required** — Agent needs field names for --jq and decision-making.
 

@@ -4,7 +4,7 @@
 #
 # Job graph:
 #
-#   publish ── build ── release-upload: gh release upload ── publish-npm: npm packages
+#   ppt-preflight ── publish ── build ── release-upload ── publish-npm
 #                         │                                     │
 #                         └──────────── cleanup-dist-artifact ◀──┘
 #
@@ -40,9 +40,18 @@ on:
 permissions: {}
 
 jobs:
+  ppt-preflight:
+    uses: ./.github/workflows/ppt-release-preflight.yml
+    with:
+      tag: ${{ inputs.tag }}
+      dry_run: ${{ inputs.draft }}
+    permissions:
+      contents: read
+
   # Org-gated Release creation: validates the CI-evidence run id and creates/
   # publishes the GitHub Release.
   publish:
+    needs: ppt-preflight
     uses: Mininglamp-OSS/.github/.github/workflows/reusable-release-publish.yml@v1
     with:
       tag: ${{ inputs.tag }}

@@ -80,7 +80,9 @@ not whole-document deletion and retains its own permission checks.
 octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet|board]
 
 # Create a presentation from a template (ppt.md).
-octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId report --idempotency-key <unique-key>
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId signal --idempotency-key <unique-key>
+# Native gallery choices: signal, terra, orbital, picnic (requires the matching backend).
+# Read ppt.md for style selection and the create -> read -> edit -> verify workflow.
 
 # List docs you own or are a member of. Page-based (see the pagination note below).
 octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
