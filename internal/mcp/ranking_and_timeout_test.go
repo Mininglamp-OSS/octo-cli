@@ -43,7 +43,7 @@ func TestNearestOperations_BoundsRankingInput(t *testing.T) {
 func TestUnknownOperationPayload_TruncatesEchoedID(t *testing.T) {
 	reg := registry.MustNew()
 	huge := strings.Repeat("x", 1<<20)
-	payload := unknownOperationPayload(reg, huge)
+	payload := unknownOperationPayload(reg, huge, "call search_ops to discover operation ids")
 	msg := payload["error"].(map[string]any)["message"].(string)
 	if len([]rune(msg)) > 260 {
 		t.Errorf("echoed operation_id must be truncated, message len=%d", len([]rune(msg)))

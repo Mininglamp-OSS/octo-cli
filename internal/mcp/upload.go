@@ -29,7 +29,12 @@ func uploadLocation(p string, pol execPolicy) (root, relative string, err error)
 	// System aliases in trusted ancestors (e.g. macOS /var) are canonicalized,
 	// but the configured root itself must be opened without following a link.
 	// Otherwise replacing the root with a link would redefine confinement.
-	parent, err := filepath.EvalSymlinks(filepath.Dir(configured))
+	parent := filepath.Dir(configured)
+	// Planning checks lexical containment without stat/readlink; real execution
+	// still resolves trusted ancestors and pins each opened path component.
+	if !pol.dryRun {
+		parent, err = filepath.EvalSymlinks(parent)
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("configured upload root is not accessible: %w", err)
 	}

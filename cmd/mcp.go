@@ -15,6 +15,7 @@ import (
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/mcp"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 // newMCPCmd wires `octo-cli mcp serve`: octo-cli as an MCP server exposing the
@@ -42,6 +43,7 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
 		forceChannelType string
 		forceOnBehalfOf  string
 		allowLocalUpload bool
+		facade           string
 	)
 	serve := &cobra.Command{
 		Use:   "serve",
@@ -51,9 +53,12 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
   octo-cli mcp serve                     # stdio (local / trusted-client transport)
   octo-cli mcp serve --http :8080        # HTTP: JSON-RPC over POST (production transport)
 
-Three meta-tools are exposed regardless of transport: search_ops, describe_op,
-call_op. The full operation set is discovered dynamically rather than expanded
-into hundreds of resident MCP tools, so a client's tools/list stays small.
+By default three meta-tools are exposed: search_ops, describe_op, call_op. The
+--facade flag selects the tool surface: "three" (default), "two" (the
+Skill-driven get_skill + execute facade), or "both" (all five, for controlled
+side-by-side comparison). Either way the full operation set is discovered
+dynamically rather than expanded into hundreds of resident MCP tools, so a
+client's tools/list stays small.
 
 The HTTP transport is JSON-RPC request/response over POST (one request, one
 response); it does not yet serve an SSE stream or a server-managed session.
@@ -93,6 +98,10 @@ envelope and performs no backend mutation for the server's lifetime.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{"skipValidation": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			fac, ok := mcp.ParseFacade(facade)
+			if !ok {
+				return output.ErrValidation(fmt.Sprintf("invalid --facade %q", facade), "choose one of: three, two, both")
+			}
 			// Validate the operator's --timeout once at startup so a malformed
 			// value fails loudly here rather than emitting a diagnostic into
 			// every call_op's stderr.
@@ -121,13 +130,13 @@ envelope and performs no backend mutation for the server's lifetime.`,
 			build := NewRootCmd
 
 			if httpAddr != "" {
-				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut)
+				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut, facade)
 			}
 			srv, err := mcp.NewServer(build)
 			if err != nil {
 				return err
 			}
-			srv.WithTrustedContext(tc).WithBaseGlobals(base).
+			srv.WithFacade(fac).WithTrustedContext(tc).WithBaseGlobals(base).
 				WithUploadPolicy(os.Getenv("OCTO_MCP_UPLOAD_ROOT"), allowLocalUpload)
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
@@ -137,6 +146,7 @@ envelope and performs no backend mutation for the server's lifetime.`,
 	serve.Flags().StringVar(&forceChannelType, "force-channel-type", "", "force this channel_type on session-bound message ops (stdio + HTTP)")
 	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "force this on_behalf_of identity (stdio + HTTP)")
 	serve.Flags().BoolVar(&allowLocalUpload, "allow-local-upload", false, "stdio only: allow unconfined multipart file_path uploads (trusted-local hosts); default-deny unless OCTO_MCP_UPLOAD_ROOT is set")
+	serve.Flags().StringVar(&facade, "facade", "three", "tool surface: three (default), two (get_skill + execute), or both")
 	return serve
 }
 
@@ -145,8 +155,9 @@ envelope and performs no backend mutation for the server's lifetime.`,
 // dropped mid-flight. Read/Idle timeouts bound a slow or idle client;
 // WriteTimeout is left unset because a legitimate --page-all response can be
 // long, and per-call bounding is the operator's --timeout instead.
-func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer) error { //nolint:gocritic // capture operator globals by value for connection isolation
-	h, err := mcp.NewHTTPHandler(build, tc, base)
+func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer, facade string) error { //nolint:gocritic // capture operator globals by value for connection isolation
+	fac, _ := mcp.ParseFacade(facade)
+	h, err := mcp.NewHTTPHandler(build, tc, base, fac)
 	if err != nil {
 		return err
 	}

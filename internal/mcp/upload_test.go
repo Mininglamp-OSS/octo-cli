@@ -155,93 +155,95 @@ func TestOpenUpload_RegularFileAndOptIn(t *testing.T) {
 }
 
 func TestUpload_PinnedHandleReachesMultipart(t *testing.T) {
-	for _, transport := range []string{"stdio", "http"} {
-		for _, swap := range []string{"none", "file", "directory", "root"} {
-			t.Run(transport+"/"+swap, func(t *testing.T) {
-				root, outside := uploadFixture(t)
-				received := make(chan string, 1)
-				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					mr, err := r.MultipartReader()
-					if err != nil {
-						http.Error(w, err.Error(), 400)
-						return
+	for _, tool := range []string{"call_op", "execute"} {
+		for _, transport := range []string{"stdio", "http"} {
+			for _, swap := range []string{"none", "file", "directory", "root"} {
+				t.Run(tool+"/"+transport+"/"+swap, func(t *testing.T) {
+					root, outside := uploadFixture(t)
+					received := make(chan string, 1)
+					backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						mr, err := r.MultipartReader()
+						if err != nil {
+							http.Error(w, err.Error(), 400)
+							return
+						}
+						part, err := mr.NextPart()
+						if err != nil {
+							http.Error(w, err.Error(), 400)
+							return
+						}
+						data, err := io.ReadAll(part)
+						if err != nil {
+							http.Error(w, err.Error(), 400)
+							return
+						}
+						received <- part.FileName() + ":" + string(data)
+						w.Header().Set("Content-Type", "application/json")
+						w.Write([]byte(`{"file_id":"1"}`))
+					}))
+					defer backend.Close()
+					t.Setenv("OCTO_API_BASE_URL", backend.URL)
+					var held *os.File
+					build := func(f *cmdutil.Factory) *cobra.Command {
+						held = f.MultipartFile
+						switch swap {
+						case "file":
+							swapUploadPath(t, filepath.Join(root, "sub", "f.txt"), filepath.Join(outside, "f.txt"))
+						case "directory":
+							swapUploadPath(t, filepath.Join(root, "sub"), outside)
+						case "root":
+							swapUploadPath(t, root, outside)
+						}
+						return testRoot(f)
 					}
-					part, err := mr.NextPart()
-					if err != nil {
-						http.Error(w, err.Error(), 400)
-						return
+					args := map[string]any{"operation_id": "file.upload", "arguments": map[string]any{"file_path": "sub/f.txt"}}
+					var raw []byte
+					if transport == "stdio" {
+						s := newTestServer(t).WithFacade(facadeBoth)
+						s.build = build
+						s.factoryFn = fakeBackendFactory(backend.URL, "bf_test")
+						s.WithUploadPolicy(root, false)
+						params, _ := json.Marshal(map[string]any{"name": tool, "arguments": args})
+						request, _ := json.Marshal(rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
+						var out bytes.Buffer
+						if err := s.ServeStdio(context.Background(), bytes.NewReader(append(request, '\n')), &out); err != nil {
+							t.Fatal(err)
+						}
+						raw = out.Bytes()
+					} else {
+						t.Setenv("OCTO_MCP_UPLOAD_ROOT", root)
+						h, err := NewHTTPHandler(build, TrustedContext{}, cmdutil.GlobalOptions{}, facadeBoth)
+						if err != nil {
+							t.Fatal(err)
+						}
+						params, _ := json.Marshal(map[string]any{"name": tool, "arguments": args})
+						request, _ := json.Marshal(rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
+						req := httptest.NewRequest("POST", "/", bytes.NewReader(request))
+						req.Header.Set("Authorization", "Bearer bf_test")
+						out := httptest.NewRecorder()
+						h.ServeHTTP(out, req)
+						raw = out.Body.Bytes()
 					}
-					data, err := io.ReadAll(part)
-					if err != nil {
-						http.Error(w, err.Error(), 400)
-						return
+					res := decodeSearchResponse(t, raw)
+					if res.IsError {
+						t.Fatalf("confined original must remain uploadable: %s", res.Content[0].Text)
 					}
-					received <- part.FileName() + ":" + string(data)
-					w.Header().Set("Content-Type", "application/json")
-					w.Write([]byte(`{"file_id":"1"}`))
-				}))
-				defer backend.Close()
-				t.Setenv("OCTO_API_BASE_URL", backend.URL)
-				var held *os.File
-				build := func(f *cmdutil.Factory) *cobra.Command {
-					held = f.MultipartFile
-					switch swap {
-					case "file":
-						swapUploadPath(t, filepath.Join(root, "sub", "f.txt"), filepath.Join(outside, "f.txt"))
-					case "directory":
-						swapUploadPath(t, filepath.Join(root, "sub"), outside)
-					case "root":
-						swapUploadPath(t, root, outside)
+					select {
+					case got := <-received:
+						if got != "f.txt:CONFINED-CONTENT" {
+							t.Fatalf("upload leaked/switched bytes: %q", got)
+						}
+					default:
+						t.Fatal("upload did not reach backend")
 					}
-					return testRoot(f)
-				}
-				args := map[string]any{"operation_id": "file.upload", "arguments": map[string]any{"file_path": "sub/f.txt"}}
-				var raw []byte
-				if transport == "stdio" {
-					s := newTestServer(t)
-					s.build = build
-					s.factoryFn = fakeBackendFactory(backend.URL, "bf_test")
-					s.WithUploadPolicy(root, false)
-					params, _ := json.Marshal(map[string]any{"name": "call_op", "arguments": args})
-					request, _ := json.Marshal(rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
-					var out bytes.Buffer
-					if err := s.ServeStdio(context.Background(), bytes.NewReader(append(request, '\n')), &out); err != nil {
-						t.Fatal(err)
+					if held == nil {
+						t.Fatal("no pinned descriptor passed to the engine")
 					}
-					raw = out.Bytes()
-				} else {
-					t.Setenv("OCTO_MCP_UPLOAD_ROOT", root)
-					h, err := NewHTTPHandler(build, TrustedContext{}, cmdutil.GlobalOptions{})
-					if err != nil {
-						t.Fatal(err)
+					if _, err := held.Stat(); err == nil {
+						t.Fatal("descriptor not released after execution")
 					}
-					params, _ := json.Marshal(map[string]any{"name": "call_op", "arguments": args})
-					request, _ := json.Marshal(rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
-					req := httptest.NewRequest("POST", "/", bytes.NewReader(request))
-					req.Header.Set("Authorization", "Bearer bf_test")
-					out := httptest.NewRecorder()
-					h.ServeHTTP(out, req)
-					raw = out.Body.Bytes()
-				}
-				res := decodeSearchResponse(t, raw)
-				if res.IsError {
-					t.Fatalf("confined original must remain uploadable: %s", res.Content[0].Text)
-				}
-				select {
-				case got := <-received:
-					if got != "f.txt:CONFINED-CONTENT" {
-						t.Fatalf("upload leaked/switched bytes: %q", got)
-					}
-				default:
-					t.Fatal("upload did not reach backend")
-				}
-				if held == nil {
-					t.Fatal("no pinned descriptor passed to the engine")
-				}
-				if _, err := held.Stat(); err == nil {
-					t.Fatal("descriptor not released after execution")
-				}
-			})
+				})
+			}
 		}
 	}
 }

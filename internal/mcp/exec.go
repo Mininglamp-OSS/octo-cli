@@ -26,11 +26,14 @@ type RootBuilder func(f *cmdutil.Factory) *cobra.Command
 // execPolicy carries the connection's capability posture into argument
 // translation: whether this is the HTTP transport (untrusted client) and, if
 // so, the operator-confined upload root that a multipart file_path must stay
-// within.
+// within. describeHint is the facade-aware recovery hint used when translation
+// fails, so a --facade two caller is pointed at get_skill, not describe_op.
 type execPolicy struct {
 	httpMode         bool
 	uploadRoot       string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled unless allowLocalUpload
-	allowLocalUpload bool   // operator --allow-local-upload: unconfined pass-through, stdio only
+	describeHint     string
+	dryRun           bool
+	allowLocalUpload bool // operator --allow-local-upload: unconfined pass-through, stdio only
 }
 
 // reservedFlagNames are the engine/root flag names a translated argument must
@@ -87,20 +90,33 @@ func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forc
 // writes into f's buffers and returns the JSON envelope plus whether the
 // operation succeeded. Pre-flight translation problems and cobra parse errors
 // are rendered as an error envelope so the caller always gets one.
-func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer) (envelope []byte, ok bool) {
+//
+// globalFlags are extra persistent/global flags (e.g. "--dry-run") spliced in
+// before the "--" positional separator. The three-tool call_op passes none, so
+// its argv is byte-for-byte what it was; the two-tool execute facade uses this
+// to honour dry-run without a second request-assembly path.
+func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) {
 	outBuf.Reset()
 	errBuf.Reset()
 
 	argv, terr := buildArgv(detail, arguments, pol)
 	if terr != nil {
-		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
+		hint := pol.describeHint
+		if hint == "" {
+			hint = "call describe_op to see the operation's declared arguments"
+		}
+		ee := output.ErrValidation(terr.Error(), hint)
+		return synthErrorEnvelope(ee), false, ee
 	}
-
+	if len(globalFlags) > 0 {
+		argv = spliceGlobalFlags(argv, globalFlags)
+	}
 	if detail.Multipart {
 		if value, ok := arguments["file_path"]; ok && value != nil && fmt.Sprint(value) != "" {
 			file, err := openUpload(fmt.Sprint(value), pol)
 			if err != nil {
-				return synthErrorEnvelope(output.ErrValidation(err.Error(), "check the configured upload root and file path")), false
+				ee := output.ErrValidation(err.Error(), "check the configured upload root and file path")
+				return synthErrorEnvelope(ee), false, ee
 			}
 			f.MultipartFile = file
 			defer func() {
@@ -126,7 +142,12 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	root.SilenceErrors = true
 
 	execErr := root.ExecuteContext(ctx)
-	return readEnvelope(outBuf, errBuf, execErr)
+	env, runOK := readEnvelope(outBuf, errBuf, execErr)
+	// execErr carries the *ExitError even when RunE also wrote the envelope to
+	// errBuf (emitOnce returns the same error it emitted), so machine-readable
+	// outcome classification (auth vs ambiguous vs plain failure) is available
+	// to the two-tool execute facade without re-parsing the rendered JSON.
+	return env, runOK, output.AsExitError(execErr)
 }
 
 // readEnvelope picks the envelope the run produced. A successful RunE writes a
@@ -461,11 +482,12 @@ func extractPathParams(path string) []string {
 	}
 }
 
-// disabledOpError reports a call to an operation on a withheld service.
-func disabledOpError(operationID string) error {
+// disabledOpError reports a call to an operation on a withheld service. The
+// discoveryTool is the facade's discovery entrypoint (search_ops or get_skill).
+func disabledOpError(operationID, discoveryTool string) error {
 	return output.ErrValidation(
 		fmt.Sprintf("operation %q belongs to a disabled service and is not callable", operationID),
-		"this service is withheld; it is not exposed by search_ops")
+		fmt.Sprintf("this service is withheld; it is not exposed by %s", discoveryTool))
 }
 
 // divergentOpError reports an operation whose generated schema does not match
@@ -483,4 +505,18 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func spliceGlobalFlags(argv, flags []string) []string {
+	sep := len(argv)
+	for i, a := range argv {
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	out := make([]string, 0, len(argv)+len(flags))
+	out = append(out, argv[:sep]...)
+	out = append(out, flags...)
+	return append(out, argv[sep:]...)
 }

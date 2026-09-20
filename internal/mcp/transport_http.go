@@ -38,6 +38,7 @@ type HTTPHandler struct {
 	mapping        *Mapping
 	build          RootBuilder
 	baseTrusted    TrustedContext
+	facade         facadeMode
 	baseGlobals    cmdutil.GlobalOptions
 	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
 	uploadRoot     string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
@@ -60,7 +61,11 @@ const (
 // OCTO_MCP_ALLOWED_ORIGINS (comma-separated); when unset, only loopback origins
 // are accepted and a request with no Origin header (typical non-browser MCP
 // client) is allowed. Multipart uploads are confined to OCTO_MCP_UPLOAD_ROOT.
-func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.GlobalOptions) (*HTTPHandler, error) { //nolint:gocritic // copy operator globals for immutable per-request snapshots
+func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.GlobalOptions, facades ...facadeMode) (*HTTPHandler, error) { //nolint:gocritic // copy operator globals for immutable per-request snapshots
+	facade := facadeThree
+	if len(facades) > 0 {
+		facade = facades[0]
+	}
 	reg, err := registry.New()
 	if err != nil {
 		return nil, err
@@ -74,6 +79,7 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.
 		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
 		uploadRoot:     os.Getenv("OCTO_MCP_UPLOAD_ROOT"),
 		requestTimeout: httpRequestTimeoutFromEnv(),
+		facade:         facade,
 	}, nil
 }
 
@@ -202,6 +208,7 @@ func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 		baseGlobals:     h.baseGlobals,
 		protocolVersion: defaultProtocolVersion,
 		clientResources: true, // HTTP clients can read the returned resource URIs
+		facade:          h.facade,
 	}
 }
 
