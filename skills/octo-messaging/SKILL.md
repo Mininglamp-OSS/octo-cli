@@ -1,6 +1,7 @@
 ---
 name: octo-messaging
 version: 0.4.1
+services: ["message", "group", "thread", "event"]
 description: Messaging domain — send/edit/sync messages, read receipts, message search (search/all/files/media/around/groups, in-channel or cross-channel), groups and threads (User Bot), and event polling. Covers App Bot DM-only constraints. Load after octo-shared.
 metadata:
   requires:

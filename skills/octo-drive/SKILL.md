@@ -1,6 +1,7 @@
 ---
 name: octo-drive
 version: 0.1.0
+services: ["drive"]
 description: Octo Drive — spaces, folders, file upload/download, online-document mounts, share links, invites, IM-attachment transfer. Works with a bot token or a user API key; the CLI routes by token kind. Load after octo-shared.
 metadata:
   requires:
