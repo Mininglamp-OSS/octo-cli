@@ -38,10 +38,17 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
 	}
 
+	// Capture the connection-forced values BEFORE build(): registering root's
+	// persistent flags (--space, --format, ...) via StringVar resets these
+	// fields to their empty defaults. Format and the trusted --space must both
+	// be re-applied afterward, or the stdio connection's space guard is silently
+	// dropped and X-Space-Id never reaches the backend.
+	forcedSpace := f.Globals.Space
+
 	root := build(f)
-	// Default to JSON output regardless of any OCTO_FORMAT in the environment.
-	// Set after build: registering the --format persistent flag reset Globals.
+	// Re-apply after build for the lifecycle reason above.
 	f.Globals.Format = output.FormatJSON
+	f.Globals.Space = forcedSpace
 	root.SetArgs(argv)
 	root.SetOut(outBuf)
 	root.SetErr(errBuf)

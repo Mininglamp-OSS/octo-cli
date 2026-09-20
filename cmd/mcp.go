@@ -16,7 +16,7 @@ import (
 
 // newMCPCmd wires `octo-cli mcp serve`: octo-cli as an MCP server exposing the
 // three meta-tools (search_ops / describe_op / call_op) over stdio (default) or
-// streamable HTTP. It is credential-free to start (delayed validation, design
+// HTTP (JSON-RPC over POST). It is credential-free to start (delayed validation, design
 // §9 item 6) — call_op resolves the credential lazily — so the annotation opts
 // the subtree out of the root auth gate while each call still authenticates.
 func newMCPCmd(f *cmdutil.Factory) *cobra.Command {
@@ -41,15 +41,21 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
 	)
 	serve := &cobra.Command{
 		Use:   "serve",
-		Short: "Serve the MCP protocol over stdio (default) or streamable HTTP",
+		Short: "Serve the MCP protocol over stdio (default) or HTTP (JSON-RPC over POST)",
 		Long: `Serve octo-cli as an MCP server.
 
   octo-cli mcp serve                     # stdio (local / trusted-client transport)
-  octo-cli mcp serve --http :8080        # streamable HTTP (production transport)
+  octo-cli mcp serve --http :8080        # HTTP: JSON-RPC over POST (production transport)
 
 Three meta-tools are exposed regardless of transport: search_ops, describe_op,
 call_op. The full operation set is discovered dynamically rather than expanded
 into hundreds of resident MCP tools, so a client's tools/list stays small.
+
+The HTTP transport is JSON-RPC request/response over POST (one request, one
+response); it does not yet serve an SSE stream or a server-managed session.
+Origin validation guards it against DNS-rebinding: set OCTO_MCP_ALLOWED_ORIGINS
+(comma-separated) to allow browser origins; unset, only loopback origins are
+accepted and non-browser clients (no Origin header) are allowed.
 
 Over-privilege防护: for stdio the forced space / channel / on-behalf-of values
 come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_* env); for
@@ -78,14 +84,14 @@ Authorization header, so one connection can never act in another's scope.`,
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
 	}
-	serve.Flags().StringVar(&httpAddr, "http", "", "serve streamable HTTP on this address (e.g. :8080); default transport is stdio")
+	serve.Flags().StringVar(&httpAddr, "http", "", "serve HTTP (JSON-RPC over POST) on this address (e.g. :8080); default transport is stdio")
 	serve.Flags().StringVar(&forceChannelID, "force-channel-id", "", "stdio: force this channel_id on session-bound message ops")
 	serve.Flags().StringVar(&forceChannelType, "force-channel-type", "", "stdio: force this channel_type on session-bound message ops")
 	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "stdio: force this on_behalf_of identity")
 	return serve
 }
 
-// serveHTTP runs the streamable-HTTP server until the context is cancelled or a
+// serveHTTP runs the HTTP (JSON-RPC over POST) server until the context is cancelled or a
 // termination signal arrives, then shuts down gracefully so no request is
 // dropped mid-flight.
 func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext) error {

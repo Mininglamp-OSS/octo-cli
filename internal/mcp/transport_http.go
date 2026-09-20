@@ -4,23 +4,31 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// HTTPHandler is the streamable-HTTP transport: the production form (design
-// §5.5). Each request carries its own bearer (Authorization) and its own
-// trusted headers, so the server injects a per-connection credential and
-// per-connection over-privilege防护 values — a client on connection A can never
-// act in connection B's space / channel / identity. reg and mapping are shared
-// read-only across requests; the mutable per-connection state lives on the
-// short-lived per-request Server.
+// maxHTTPBodyBytes caps a single request body (parity with the stdio message cap).
+const maxHTTPBodyBytes = 8 << 20
+
+// HTTPHandler is the HTTP transport: JSON-RPC request/response over POST. It is
+// NOT (yet) full MCP streamable HTTP — there is no SSE stream (GET) and no
+// server-managed session; each POST is one request and one response. It is the
+// intended production shape because each request carries its own bearer
+// (Authorization) and its own trusted headers, so the server injects a
+// per-connection credential and per-connection over-privilege防护 values — a
+// client on connection A can never act in connection B's space / channel /
+// identity. reg and mapping are shared read-only across requests; the mutable
+// per-connection state lives on the short-lived per-request Server.
 type HTTPHandler struct {
-	reg         *registry.Registry
-	mapping     *Mapping
-	build       RootBuilder
-	baseTrusted TrustedContext
+	reg            *registry.Registry
+	mapping        *Mapping
+	build          RootBuilder
+	baseTrusted    TrustedContext
+	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
 }
 
 // Trusted-context request headers. Space also flows onto the credential so
@@ -32,8 +40,11 @@ const (
 	headerOnBehalfOf  = "X-Octo-On-Behalf-Of"
 )
 
-// NewHTTPHandler builds the streamable-HTTP handler. baseTrusted supplies
-// defaults a request header may override.
+// NewHTTPHandler builds the HTTP handler. baseTrusted supplies defaults a
+// request header may override. Origin validation (anti DNS-rebinding, MCP
+// guidance) reads an exact-match allowlist from OCTO_MCP_ALLOWED_ORIGINS
+// (comma-separated); when unset, only loopback origins are accepted and a
+// request with no Origin header (typical non-browser MCP client) is allowed.
 func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext) (*HTTPHandler, error) {
 	reg, err := registry.New()
 	if err != nil {
@@ -43,18 +54,28 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext) (*HTTPHandler
 	if err != nil {
 		return nil, err
 	}
-	return &HTTPHandler{reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted}, nil
+	return &HTTPHandler{
+		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted,
+		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
+	}, nil
 }
 
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Origin validation first: reject a cross-origin browser request before any
+	// work, so a page on another origin cannot drive this server via the user's
+	// loopback binding (DNS-rebinding / CSRF class).
+	if origin := r.Header.Get("Origin"); origin != "" && !originAllowed(origin, h.allowedOrigins) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return
+	}
 	if r.Method != http.MethodPost {
-		// A GET here would be the SSE stream in a fuller implementation; this
-		// first version answers request/response over POST only.
+		// No SSE stream is served yet; this transport is POST request/response
+		// only. A GET would be the SSE channel in a fuller implementation.
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxHTTPBodyBytes))
 	if err != nil {
 		writeHTTPError(w, nil, codeParseError, "read body: "+err.Error())
 		return
@@ -74,6 +95,37 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// parseAllowedOrigins splits the comma-separated env allowlist, trimming blanks.
+func parseAllowedOrigins(raw string) []string {
+	var out []string
+	for _, o := range strings.Split(raw, ",") {
+		if o = strings.TrimSpace(o); o != "" {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// originAllowed reports whether an Origin header value is permitted: it matches
+// the exact-match allowlist, or (when the allowlist is empty) it is a loopback
+// origin. A malformed Origin is rejected.
+func originAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if origin == a {
+			return true
+		}
+	}
+	if len(allowed) > 0 {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // connectionServer builds the per-request Server with connection-scoped
@@ -99,7 +151,7 @@ func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 		trusted:         tc,
 		credentialToken: bearerToken(r),
 		protocolVersion: defaultProtocolVersion,
-		clientResources: true, // HTTP clients that speak streamable-HTTP can read resource URIs
+		clientResources: true, // HTTP clients can read the returned resource URIs
 	}
 }
 

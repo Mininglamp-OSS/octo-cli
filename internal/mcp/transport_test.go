@@ -64,8 +64,8 @@ func TestStdioTransport_ParseErrorDoesNotKillLoop(t *testing.T) {
 	}
 }
 
-// TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders is the streamable
-// HTTP smoke test plus a multi-tenant isolation proof: two POSTs with different
+// TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders is the HTTP
+// (JSON-RPC over POST) smoke test plus a multi-tenant isolation proof: two POSTs with different
 // bearers and different X-Space-Id headers each reach the backend with their
 // own credential and space.
 func TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders(t *testing.T) {
@@ -126,6 +126,71 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
+func TestOriginAllowed(t *testing.T) {
+	cases := []struct {
+		origin  string
+		allowed []string
+		want    bool
+	}{
+		{"http://localhost:3000", nil, true},
+		{"http://127.0.0.1", nil, true},
+		{"http://[::1]:9000", nil, true},
+		{"http://evil.example", nil, false},                                    // remote origin, no allowlist → rejected
+		{"https://app.example.com", []string{"https://app.example.com"}, true}, // exact allowlist match
+		{"https://evil.example", []string{"https://app.example.com"}, false},   // not in allowlist
+		{"::not a url", nil, false},                                            // malformed → rejected
+	}
+	for _, c := range cases {
+		if got := originAllowed(c.origin, c.allowed); got != c.want {
+			t.Errorf("originAllowed(%q, %v) = %v, want %v", c.origin, c.allowed, got, c.want)
+		}
+	}
+}
+
+func TestHTTPTransport_RejectsCrossOrigin(t *testing.T) {
+	h, err := NewHTTPHandler(testRoot, TrustedContext{})
+	if err != nil {
+		t.Fatalf("NewHTTPHandler: %v", err)
+	}
+	h.allowedOrigins = nil // default: loopback-only
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	// Cross-origin browser request is refused before any dispatch.
+	code, _ := postJSONWithOrigin(t, srv.URL, "http://evil.example", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	if code != http.StatusForbidden {
+		t.Errorf("cross-origin request = %d, want 403", code)
+	}
+	// A non-browser client (no Origin header) is allowed.
+	if code, _ := postJSON(t, srv.URL, "", "", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); code != http.StatusOK {
+		t.Errorf("no-Origin request = %d, want 200", code)
+	}
+	// A loopback Origin is allowed.
+	if code, _ := postJSONWithOrigin(t, srv.URL, "http://localhost:1234", `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`); code != http.StatusOK {
+		t.Errorf("loopback-origin request = %d, want 200", code)
+	}
+}
+
+func TestStdioTransport_OversizedMessageRejectedLoopSurvives(t *testing.T) {
+	s := newTestServer(t)
+	big := strings.Repeat("a", maxStdioMessageBytes+16)
+	in := strings.NewReader(big + "\n" + `{"jsonrpc":"2.0","id":7,"method":"ping"}` + "\n")
+	var out bytes.Buffer
+	if err := s.ServeStdio(context.Background(), in, &out); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
+	}
+	lines := nonEmptyLines(out.String())
+	if len(lines) != 2 {
+		t.Fatalf("want an oversized-error response and a ping response, got %d:\n%s", len(lines), out.String())
+	}
+	if !strings.Contains(lines[0], "exceeds 8 MiB") {
+		t.Errorf("first response should report the size limit, got %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"id":7`) {
+		t.Errorf("loop must continue after an oversized message, got %s", lines[1])
+	}
+}
+
 // envelopeOKFromRPC decodes a JSON-RPC response body, extracts the tool
 // result's text content, and reports whether that envelope's ok is true.
 func envelopeOKFromRPC(t *testing.T, body string) bool {
@@ -157,6 +222,21 @@ func postJSON(t *testing.T, url, bearer, space, body string) (int, string) {
 	if space != "" {
 		req.Header.Set(headerSpaceID, space)
 	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	out := new(bytes.Buffer)
+	_, _ = out.ReadFrom(resp.Body)
+	return resp.StatusCode, out.String()
+}
+
+func postJSONWithOrigin(t *testing.T, url, origin, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", origin)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)

@@ -237,7 +237,11 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		}
 	}
 
-	// Check 6: length caps; level values valid.
+	// Check 6: length caps and level validity. summary_short and advice must
+	// stay within their caps so a short summary cannot grow into a second copy
+	// of the Skill, and every declared level must be one of the three known
+	// values. (Only-raise-never-lower is not modeled here: the manifest holds
+	// the sole per-op level, so there is no separate baseline to lower from.)
 	for name, meta := range metas {
 		if len([]rune(meta.SummaryShort)) > maxSummaryShort {
 			problems = append(problems, fmt.Sprintf("skill %q summary_short exceeds %d chars", name, maxSummaryShort))
@@ -271,16 +275,6 @@ func (m *Mapping) SkillFor(op registry.OperationInfo) (*skillMeta, *opMeta, bool
 		return nil, nil, false
 	}
 	return meta, m.ops[op.ID], true
-}
-
-// LevelFor resolves the recommendation level for an operation: an explicit
-// manifest override wins; otherwise the service default (recommended). Override
-// may only raise strictness, never lower it — enforced at build (check 6).
-func (m *Mapping) LevelFor(op registry.OperationInfo) string {
-	if o := m.ops[op.ID]; o != nil && o.Level != "" {
-		return o.Level
-	}
-	return levelRecommended
 }
 
 // enabledSkillMetas returns every enabled skill's metadata, sorted by name.

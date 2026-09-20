@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -16,6 +18,27 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
+
+// TestMain isolates the package from the developer's own OCTO_ environment so
+// the real-makeFactory tests (which resolve credential + config from env)
+// behave deterministically. OCTO_CONFIG_DIR is repointed at an empty temp dir
+// after the sweep so authstore never falls back to real user profiles. Tests
+// that exercise a variable set it themselves with t.Setenv.
+func TestMain(m *testing.M) {
+	for _, kv := range os.Environ() {
+		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, "OCTO_") {
+			_ = os.Unsetenv(name)
+		}
+	}
+	dir, err := os.MkdirTemp("", "octo-mcp-test")
+	if err != nil {
+		panic(err)
+	}
+	_ = os.Setenv("OCTO_CONFIG_DIR", dir)
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 // testRoot mirrors cmd.NewRootCmd's service-tree wiring without importing
 // package cmd (which imports this package — that would be an import cycle). It

@@ -19,7 +19,7 @@ package mcp
 import "encoding/json"
 
 // JSON-RPC 2.0 wire types. MCP is JSON-RPC 2.0 over stdio (newline-delimited)
-// or streamable HTTP.
+// or HTTP (JSON-RPC over POST).
 
 const jsonrpcVersion = "2.0"
 

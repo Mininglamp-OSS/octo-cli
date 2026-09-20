@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,7 @@ type backend struct {
 	path   string
 	auth   string
 	space  string
+	query  url.Values
 	body   map[string]any
 	status int
 	reply  string
@@ -25,6 +27,7 @@ func (b *backend) server(t *testing.T) *httptest.Server {
 		b.path = r.URL.Path
 		b.auth = r.Header.Get("Authorization")
 		b.space = r.Header.Get("X-Space-Id")
+		b.query = r.URL.Query()
 		_ = json.NewDecoder(r.Body).Decode(&b.body)
 		w.Header().Set("Content-Type", "application/json")
 		status := b.status

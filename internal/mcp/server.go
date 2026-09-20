@@ -23,8 +23,8 @@ const (
 // Server handles MCP JSON-RPC requests for one connection. search_ops and
 // describe_op read the registry directly; call_op drives the generated cobra
 // tree via build. trusted carries the connection-scoped over-privilege防护
-// values; credentialToken, when set, pins call_op to that bearer (streamable
-// HTTP, one credential per connection) instead of the process env (stdio).
+// values; credentialToken, when set, pins call_op to that bearer (HTTP, one
+// credential per connection) instead of the process env (stdio).
 type Server struct {
 	reg     *registry.Registry
 	mapping *Mapping
