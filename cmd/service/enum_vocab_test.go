@@ -50,7 +50,7 @@ type vocabulary struct {
 // x-octo-disabled. matter and summary are withheld, so their enums cannot fire
 // and are deliberately absent.
 var requestSideVocabularies = []vocabulary{
-	{op: "docs.create", in: "body", field: "templateId", want: []string{"blank", "pitch", "report", "lesson"}, why: "PPT continuation of backend aa045b97c2def7e57389c9139970b5ed7f4f3f6f; src/ppt/templates.ts PPT_TEMPLATE_IDS"},
+	{op: "docs.create", in: "body", field: "templateId", want: []string{"blank", "signal", "terra", "orbital", "picnic"}, why: "Public creation policy: octo-cli #174 and docs/ppt-release-gate.md. Old pitch/report/lesson IDs remain only in existing decks and matching committed receipt replays, not new creation. Deployment provenance is retained in access-controlled release evidence."},
 	{op: "docs.comments.add", in: "body", field: "anchor.kind", want: []string{"document", "slide", "element", "point"}, why: "Same local PPT continuation; src/ppt/comments.ts anchor validation (new routes not yet submitted)"},
 	{op: "docs.ppt.export", in: "query", field: "format", want: []string{"html"}, why: "Same local PPT continuation; src/api/ppt/export.ts export format guard"},
 	// --- loop ---

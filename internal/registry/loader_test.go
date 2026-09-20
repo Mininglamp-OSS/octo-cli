@@ -1293,12 +1293,25 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-func TestPptStrictSchemaOnlyAppliesToEditBody(t *testing.T) {
+func TestDocsStrictSchemaAppliesOnlyToExplicitOperations(t *testing.T) {
 	r := MustNew()
-	for _, id := range []string{"docs.ppt.get", "docs.ppt.edit", "docs.ppt.export", "docs.comments.get", "docs.comments.replies", "docs.content.edit", "docs.comments.add", "docs.comments.edit", "docs.versions.create", "docs.versions.restore"} {
-		op, ok := r.GetOperation(id)
-		if !ok || op.StrictRequestSchema != (id == "docs.ppt.edit") {
-			t.Errorf("%s strict body validation metadata is misleading", id)
+	want := map[string]bool{
+		"docs.ppt.edit":             true,
+		"docs.share.set":            true,
+		"docs.sheet.rows.insert":    true,
+		"docs.sheet.rows.delete":    true,
+		"docs.sheet.columns.insert": true,
+		"docs.sheet.columns.delete": true,
+	}
+	for id := range want {
+		if _, ok := r.GetOperation(id); !ok {
+			t.Errorf("missing strict operation %s", id)
+		}
+	}
+	for _, info := range r.ListOperations("docs") {
+		op, ok := r.GetOperation(info.ID)
+		if !ok || op.StrictRequestSchema != want[info.ID] {
+			t.Errorf("%s strict body validation metadata is misleading", info.ID)
 		}
 	}
 }

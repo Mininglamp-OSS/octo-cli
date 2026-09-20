@@ -3,13 +3,16 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      # Root-level Markdown and docs are documentation-only. Markdown under
-      # skills/ is intentionally NOT ignored: skills are embedded in the CLI
-      # binary, so changing them must produce CI evidence for release gates.
-      - '*.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths:
+      # Keep documentation-only skips, but test README/CHANGELOG/release-gate contracts and
+      # embedded skills. Positive exceptions must follow the exclusions.
+      - '**'
+      - '!*.md'
+      - '!docs/**'
+      - '!.github/ISSUE_TEMPLATE/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'docs/ppt-release-gate.md'
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
     branches: [main]
@@ -36,13 +39,14 @@ jobs:
       pull-requests: read
     outputs:
       # code=true when at least one changed file is runtime code or an embedded
-      # Skill Markdown file. Push events always run once the workflow-level
+      # Skill Markdown file, or README/CHANGELOG/release-gate (inputs to executable guards).
+      # Push events always run once the workflow-level
       # path filter admits them.
       # predicate-quantifier:every + negation patterns (no bare '**'):
       # a file matches 'code' iff ALL negation patterns are satisfied
       # (file is not a doc/template). The separate embedded_skills filter
       # re-includes skills/**/*.md because those files ship in the binary.
-      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.embedded_skills == 'true' }}
+      code: ${{ github.event_name != 'pull_request' || steps.filter.outputs.code == 'true' || steps.filter.outputs.embedded_skills == 'true' || steps.filter.outputs.tested_docs == 'true' }}
     steps:
       # No checkout: on pull_request events dorny/paths-filter lists changed
       # files via the GitHub API (needs only pull-requests: read, granted
@@ -55,7 +59,8 @@ jobs:
           # negation patterns are satisfied (file is NOT a doc/template file).
           #
           # Validated by picomatch v4 unit test (same library used internally):
-          #   README.md:    !**/*.md=false → every=false → not match → code=false ✅
+          #   README.md:    excluded by code; re-included by tested_docs ✅
+          #   CONTRIBUTING.md: excluded, not re-included → docs-only skip ✅
           #   main file:    all negations=true → every=true → match → code=true ✅
           #   mixed PR:     code file matches → code=true (some over changed files) ✅
           #   dotfiles:     all negations=true → every=true → CI runs ✅
@@ -77,6 +82,8 @@ jobs:
               - '!.github/ISSUE_TEMPLATE/**'
             embedded_skills:
               - 'skills/**/*.md'
+            tested_docs:
+              - '{README.md,CHANGELOG.md,docs/ppt-release-gate.md}'
 
   build:
     name: build & test
@@ -182,3 +189,6 @@ jobs:
           node-version: "22"
       - name: npm test
         run: npm test
+      - name: Release preflight tests
+        working-directory: .
+        run: node --test scripts/ppt-release-preflight.test.mjs

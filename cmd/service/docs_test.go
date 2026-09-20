@@ -679,7 +679,7 @@ func TestDocsShareGet_ReadPath(t *testing.T) {
 }
 
 // TestDocsShareSet_RestrictedBody checks --scope restricted maps to a PUT on
-// /share with the byte-exact {shareScope} wire key and no shareRole (a
+// /share with exactly {shareScope, permissionEpoch} and no shareRole (a
 // restricted doc ignores the role; the backend normalizes it to read).
 func TestDocsShareSet_RestrictedBody(t *testing.T) {
 	var gotMethod, gotPath string
@@ -690,7 +690,7 @@ func TestDocsShareSet_RestrictedBody(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"restricted","shareRole":"read"}`))
 	})
-	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "restricted"})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "restricted", "--permissionEpoch", "3"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -715,7 +715,7 @@ func TestDocsShareSet_AnyoneEditBody(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"anyone_in_space","shareRole":"edit"}`))
 	})
-	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "anyone_in_space", "--role", "edit"})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "anyone_in_space", "--role", "edit", "--permissionEpoch", "3"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}

@@ -293,10 +293,12 @@ type SchemaInfo struct {
 	OneOf                []SchemaInfo          `json:"one_of,omitempty"`
 	AnyOf                []SchemaInfo          `json:"any_of,omitempty"`
 	Enum                 []any                 `json:"enum,omitempty"`
-	Const                any                   `json:"const,omitempty"`
-	Format               string                `json:"format,omitempty"`
-	Description          string                `json:"description,omitempty"`
-	WriteOnly            bool                  `json:"write_only,omitempty"`
+	// EnumHint is an opt-in x-octo-enum-hint for request-body enum errors.
+	EnumHint    string `json:"enum_hint,omitempty"`
+	Const       any    `json:"const,omitempty"`
+	Format      string `json:"format,omitempty"`
+	Description string `json:"description,omitempty"`
+	WriteOnly   bool   `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
 	// validator enforces Required, MinItems and Enum for every service. Loop and
 	// explicitly strict services additionally enforce closed-object and minimum-
@@ -895,6 +897,7 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		Type:          schemaType(schema["type"]),
 		Format:        stringOf(schema["format"]),
 		Description:   stringOf(schema["description"]),
+		EnumHint:      stringOf(schema["x-octo-enum-hint"]),
 		FlagName:      stringOf(schema["x-octo-flag"]),
 		Secret:        truthy(schema["x-octo-secret"]),
 		WriteOnly:     boolOf(schema["writeOnly"]),
@@ -1020,6 +1023,9 @@ func mergeSchemaIdentity(dst, src *SchemaInfo) {
 	}
 	if dst.Description == "" {
 		dst.Description = src.Description
+	}
+	if dst.EnumHint == "" {
+		dst.EnumHint = src.EnumHint
 	}
 	if dst.FlagName == "" {
 		dst.FlagName = src.FlagName

@@ -157,8 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `octo-html` skill and CLAUDE.md command-tree docs.
 - **`octo-cli docs share get|set`** — program the space-level share scope of a
   document. `docs share get <docId>` reads the current `{docId, shareScope,
-  shareRole}` (needs reader); `docs share set <docId> --scope
-  restricted|anyone_in_space [--role read|edit]` changes it (needs admin). The
+  shareRole, permissionEpoch}` (needs reader); `docs share set <docId> --scope
+  restricted|anyone_in_space --permissionEpoch <epoch> [--role read|edit]` changes it (needs admin). The
   scope enum is `restricted` / `anyone_in_space` and the role enum is `read` /
   `edit`; a valid `--role` is required with `--scope anyone_in_space` and is
   ignored (stored as `read`) with `--scope restricted`. This targets the
@@ -168,6 +168,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **BREAKING (docs): sharing updates require `permissionEpoch`.** Read the
+  current value with `docs share get`, then pass it unchanged to `docs share set`.
+  A stale epoch returns HTTP 409; re-read permissions and reconsider the intended
+  change instead of automatically retrying. Release only after the target backend
+  returns `permissionEpoch` from share reads and enforces it on writes.
+- **BREAKING (docs): PPT creation uses blank plus the new gallery templates.**
+  `docs create --templateId` accepts `blank`, `signal`, `terra`, `orbital` and
+  `picnic`. The CLI rejects the former `pitch`, `report` and `lesson` IDs with
+  `ENUM_NOT_ALLOWED` before HTTP, including inline JSON and JSON-file input.
+  This is the new-creation policy in [#174](https://github.com/Mininglamp-OSS/octo-cli/issues/174),
+  not a claim that already-deployed backends reject those IDs. Existing PPTs
+  remain readable/editable by docId; their data is not migrated or deleted.
+  **Minimum rollout dependency:** release only after
+  the backend player/data prerequisites, catalogue activation and frontend picker
+  in the [current rollout dependencies](docs/ppt-release-gate.md#current-rollout-dependencies)
+  are merged and deployed to the intended environment, with all five choices
+  verified. MR links and source refs are not deployed-state evidence. A backend with
+  only the old blank/pitch/report/lesson catalogue leaves only `blank` usable
+  if this CLI ships first: new gallery IDs fail server-side and old IDs fail
+  locally. Update Bot binaries and installed skill copies together after rollout.
+  Supported Release/npm workflows now require fresh five-template Bot create/read
+  probes plus a restricted sharing read/update/stale-epoch rejection/readback
+  check against a configured release target; missing configuration fails closed.
+  Draft/dry runs do not probe. See [PPT release gate](docs/ppt-release-gate.md) for
+  protected-environment setup, frontend confirmation and retained probe documents.
+  Enum errors include the deployment caveat for flags, inline JSON and files.
 - **`octo-cli docs members remove` now requires `--principal-space-id`** — Bot
   membership deletion is an exact Space-qualified mutation. Requiring the
   principal Space prevents an ambiguous uid from deleting the wrong row when

@@ -820,6 +820,9 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		}
 	}
 	if err := checkEnum(enumFieldLabel(path, flagName), value, schema.Enum); err != nil {
+		if schema.EnumHint != "" {
+			err.Hint += ". " + schema.EnumHint
+		}
 		return err
 	}
 	if err := checkUint64Field(schema, value, path, flagName); err != nil {
