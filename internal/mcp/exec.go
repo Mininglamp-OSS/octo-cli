@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,17 +26,37 @@ import (
 // into the next.
 type RootBuilder func(f *cmdutil.Factory) *cobra.Command
 
+// execPolicy carries the connection's capability posture into argument
+// translation: whether this is the HTTP transport (untrusted client) and, if
+// so, the operator-confined upload root that a multipart file_path must stay
+// within.
+type execPolicy struct {
+	httpMode   bool
+	uploadRoot string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled over HTTP
+}
+
+// reservedFlagNames are the engine/root flag names a translated argument must
+// never be able to synthesize (identity/scope/output controls + engine flags).
+// A model-supplied key that maps to one of these is refused before cobra sees
+// it, so call_op cannot smuggle --profile/--bot-id/--space/--format/--verbose
+// (or --data/--file/…) through an undeclared multipart or spec parameter.
+var reservedFlagNames = map[string]bool{
+	"format": true, "jq": true, "dry-run": true, "verbose": true,
+	"timeout": true, "no-retry": true, "space": true, "bot-id": true, "profile": true,
+	"data": true, "file": true, "page-all": true, "page-limit": true, "output": true, "o": true,
+}
+
 // executeOperation runs one operation through the generated cobra tree
 // in-process, reusing identity routing, request assembly, pre-flight
 // validation, transport, secret masking, and envelope emission unchanged. It
 // writes into f's buffers and returns the JSON envelope plus whether the
 // operation succeeded. Pre-flight translation problems and cobra parse errors
 // are rendered as an error envelope so the caller always gets one.
-func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, outBuf, errBuf *bytes.Buffer) (envelope []byte, ok bool) {
+func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer) (envelope []byte, ok bool) {
 	outBuf.Reset()
 	errBuf.Reset()
 
-	argv, terr := buildArgv(detail, arguments)
+	argv, terr := buildArgv(detail, arguments, pol)
 	if terr != nil {
 		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
 	}
@@ -99,7 +122,17 @@ func synthErrorEnvelope(err error) []byte {
 // flag); query and header parameters become their spec-derived flags; every
 // remaining declared/extra field is passed as the JSON --data body so run.go's
 // merged-body validator judges it at every depth (no second validator here).
-func buildArgv(d *registry.OperationDetail, args map[string]any) ([]string, error) {
+//
+// Two capability guards run here, before cobra parsing:
+//   - A synthesized flag name may never be a reserved engine/root flag (B3): a
+//     model cannot inject --profile/--bot-id/--space/--format/--verbose/etc.
+//   - For a multipart operation, only fields the schema declares (plus the file
+//     binding) are accepted; an undeclared key is rejected rather than turned
+//     into an arbitrary --key flag (B3).
+//   - A multipart file_path is confined per policy (B2): over HTTP it is denied
+//     unless an operator upload root is configured and the resolved path
+//     (symlinks included) stays within it.
+func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) {
 	pathNames := extractPathParams(d.Path)
 	pathSet := make(map[string]bool, len(pathNames))
 	for _, n := range pathNames {
@@ -115,6 +148,12 @@ func buildArgv(d *registry.OperationDetail, args map[string]any) ([]string, erro
 			queryByName[p.Name] = p
 		case "header":
 			headerByName[p.Name] = p
+		}
+	}
+	declaredBody := map[string]bool{}
+	if d.RequestBody != nil {
+		for name := range d.RequestBody.Properties {
+			declaredBody[name] = true
 		}
 	}
 
@@ -136,20 +175,38 @@ func buildArgv(d *registry.OperationDetail, args map[string]any) ([]string, erro
 		case pathSet[k]:
 			// consumed as a positional below
 		case queryByName[k] != nil:
-			vs, err := flagArgs(flagName(queryByName[k]), v)
+			fn := flagName(queryByName[k])
+			if reservedFlagNames[fn] {
+				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
+			}
+			vs, err := flagArgs(fn, v)
 			if err != nil {
 				return nil, err
 			}
 			flags = append(flags, vs...)
 		case headerByName[k] != nil:
-			vs, err := flagArgs(flagName(headerByName[k]), v)
+			fn := flagName(headerByName[k])
+			if reservedFlagNames[fn] {
+				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
+			}
+			vs, err := flagArgs(fn, v)
 			if err != nil {
 				return nil, err
 			}
 			flags = append(flags, vs...)
 		case d.Multipart:
-			// Multipart ops take no --data; a body field rides as a form-text flag.
-			vs, err := flagArgs(strings.ReplaceAll(k, "_", "-"), v)
+			// Multipart ops take no --data; a declared body field rides as a
+			// form-text flag. An UNDECLARED key is refused (B3), so it can never
+			// synthesize an arbitrary or reserved flag.
+			if !declaredBody[k] {
+				unexpected = append(unexpected, k)
+				continue
+			}
+			fn := strings.ReplaceAll(k, "_", "-")
+			if reservedFlagNames[fn] {
+				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
+			}
+			vs, err := flagArgs(fn, v)
 			if err != nil {
 				return nil, err
 			}
@@ -177,7 +234,11 @@ func buildArgv(d *registry.OperationDetail, args map[string]any) ([]string, erro
 		flags = append(flags, "--page-all")
 	}
 	if filePath != "" {
-		flags = append(flags, "--file="+filePath)
+		resolved, err := resolveUploadPath(filePath, pol)
+		if err != nil {
+			return nil, err
+		}
+		flags = append(flags, "--file="+resolved)
 	}
 
 	positionals := make([]string, 0, len(pathNames))
@@ -200,6 +261,44 @@ func buildArgv(d *registry.OperationDetail, args map[string]any) ([]string, erro
 		argv = append(argv, positionals...)
 	}
 	return argv, nil
+}
+
+// resolveUploadPath enforces the multipart file-path capability boundary (B2).
+// stdio is the trusted/local transport and passes the path through. Over HTTP a
+// model-supplied path is denied unless the operator configured a confined
+// upload root; when configured, the path (relative paths joined to the root) is
+// cleaned and its symlinks resolved, and the real target must stay within the
+// resolved root — blocking traversal, absolute escapes, and symlink escapes, so
+// host auth/config/environment files are never reachable through MCP.
+func resolveUploadPath(p string, pol execPolicy) (string, error) {
+	if !pol.httpMode {
+		return p, nil
+	}
+	if strings.TrimSpace(pol.uploadRoot) == "" {
+		return "", errors.New("local file_path upload is disabled for HTTP connections; set OCTO_MCP_UPLOAD_ROOT to a confined directory to enable it")
+	}
+	root, err := filepath.EvalSymlinks(pol.uploadRoot)
+	if err != nil {
+		return "", fmt.Errorf("configured upload root is not accessible: %w", err)
+	}
+	root, err = filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("configured upload root is invalid: %w", err)
+	}
+	candidate := p
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate = filepath.Clean(candidate)
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("file_path is not accessible: %w", err)
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", errors.New("file_path escapes the configured upload root")
+	}
+	return resolved, nil
 }
 
 // commandWords maps an operationId to its CLI command path words, matching the
@@ -294,6 +393,14 @@ func disabledOpError(operationID string) error {
 	return output.ErrValidation(
 		fmt.Sprintf("operation %q belongs to a disabled service and is not callable", operationID),
 		"this service is withheld; it is not exposed by search_ops")
+}
+
+// divergentOpError reports an operation whose generated schema does not match
+// its callable shape, pointing at the CLI form that does work.
+func divergentOpError(operationID, cli string) error {
+	return output.ErrValidation(
+		fmt.Sprintf("operation %q is not available over MCP: its generated schema does not describe the callable request shape", operationID),
+		fmt.Sprintf("use the CLI form instead: %s", cli))
 }
 
 func sortedKeys(m map[string]any) []string {

@@ -29,6 +29,7 @@ type HTTPHandler struct {
 	build          RootBuilder
 	baseTrusted    TrustedContext
 	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
+	uploadRoot     string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
 }
 
 // Trusted-context request headers. Space also flows onto the credential so
@@ -57,6 +58,7 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext) (*HTTPHandler
 	return &HTTPHandler{
 		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted,
 		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
+		uploadRoot:     os.Getenv("OCTO_MCP_UPLOAD_ROOT"),
 	}, nil
 }
 
@@ -130,19 +132,25 @@ func originAllowed(origin string, allowed []string) bool {
 
 // connectionServer builds the per-request Server with connection-scoped
 // credential and trusted context from the request headers.
+//
+// Precedence (B4): operator-configured (baseTrusted) values WIN. A request
+// X-Octo-* header may only fill a field the operator did NOT force. Header
+// trust is a gateway-mode convenience, not authentication — the bearer
+// credential and Origin validation are the guards; deploy behind a
+// loopback bind or a TLS-terminating reverse proxy that sets these headers.
 func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 	tc := h.baseTrusted
-	if v := r.Header.Get(headerSpaceID); v != "" {
-		tc.SpaceID = v
+	if tc.SpaceID == "" {
+		tc.SpaceID = r.Header.Get(headerSpaceID)
 	}
-	if v := r.Header.Get(headerChannelID); v != "" {
-		tc.ChannelID = v
+	if tc.ChannelID == "" {
+		tc.ChannelID = r.Header.Get(headerChannelID)
 	}
-	if v := r.Header.Get(headerChannelType); v != "" {
-		tc.ChannelType = v
+	if tc.ChannelType == "" {
+		tc.ChannelType = r.Header.Get(headerChannelType)
 	}
-	if v := r.Header.Get(headerOnBehalfOf); v != "" {
-		tc.OnBehalfOf = v
+	if tc.OnBehalfOf == "" {
+		tc.OnBehalfOf = r.Header.Get(headerOnBehalfOf)
 	}
 	return &Server{
 		reg:             h.reg,
@@ -150,16 +158,20 @@ func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 		build:           h.build,
 		trusted:         tc,
 		credentialToken: bearerToken(r),
+		httpMode:        true,
+		uploadRoot:      h.uploadRoot,
 		protocolVersion: defaultProtocolVersion,
 		clientResources: true, // HTTP clients can read the returned resource URIs
 	}
 }
 
+// bearerToken extracts the Authorization bearer token, parsing the scheme
+// case-insensitively per RFC 7235 ("Bearer" / "bearer" / "BEARER").
 func bearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
-	const p = "Bearer "
-	if strings.HasPrefix(auth, p) {
-		return strings.TrimSpace(auth[len(p):])
+	const scheme = "bearer "
+	if len(auth) >= len(scheme) && strings.EqualFold(auth[:len(scheme)], scheme) {
+		return strings.TrimSpace(auth[len(scheme):])
 	}
 	return ""
 }

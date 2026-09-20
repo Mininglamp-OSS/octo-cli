@@ -118,6 +118,9 @@ func (s *Server) searchOps(domain, query string) toolResult {
 	ops := make([]opSearchResult, 0, len(candidates))
 	truncated := false
 	for _, op := range candidates {
+		if _, div := divergentMCPOps[op.ID]; div {
+			continue // not advertised via MCP; generated schema is uncallable (B6)
+		}
 		if len(terms) > 0 && !matchOp(op, terms) {
 			continue
 		}
@@ -168,7 +171,10 @@ func (s *Server) moduleMap() map[string]any {
 	for _, svc := range s.reg.EnabledServices() {
 		ops := s.reg.ListOperations(svc)
 		samples := make([]string, 0, 3)
-		for i := 0; i < len(ops) && i < 3; i++ {
+		for i := 0; i < len(ops) && len(samples) < 3; i++ {
+			if _, div := divergentMCPOps[ops[i].ID]; div {
+				continue // don't sample an op that MCP does not advertise (B6)
+			}
 			samples = append(samples, ops[i].ID)
 		}
 		e := svcEntry{Service: svc, OperationCount: len(ops), SampleOps: samples}
@@ -271,6 +277,16 @@ func (s *Server) describeOp(operationID string) toolResult {
 	if !ok {
 		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
 	}
+	// Disabled services must not be describable (B6): GetOperation resolves them
+	// for introspection, but the MCP surface withholds them like search/call.
+	if s.reg.ServiceDisabled(detail.Service) {
+		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+	}
+	// A divergent op's generated schema does not describe its callable shape, so
+	// do not advertise it (B6); point at the CLI instead.
+	if cli, div := divergentMCPOps[operationID]; div {
+		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
+	}
 	// Marshal the OperationDetail (zero-drift parameter truth) and splice the
 	// skill block + server-managed markers into the same object.
 	raw, err := json.Marshal(detail)
@@ -303,6 +319,9 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if s.reg.ServiceDisabled(detail.Service) {
 		return rawToolResult(synthErrorEnvelope(disabledOpError(operationID)), true)
 	}
+	if cli, div := divergentMCPOps[operationID]; div {
+		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
+	}
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
@@ -314,8 +333,9 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if fn == nil {
 		fn = s.makeFactory
 	}
+	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot}
 	f, outBuf, errBuf := fn(s.trusted)
-	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, outBuf, errBuf)
+	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
 	return rawToolResult(env, !okRun)
 }
 

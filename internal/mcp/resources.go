@@ -80,8 +80,12 @@ type resourceContent struct {
 }
 
 // readResource returns one skill markdown file's contents. It refuses any URI
-// outside the octo://skills/ namespace and any disabled skill.
+// outside the octo://skills/ namespace and any disabled skill. A trailing
+// #fragment (a section_uri anchor from search/describe) is stripped before the
+// file lookup — MCP resources have no fragment semantics, so the whole file is
+// returned and the client locates the anchor itself (B6).
 func (s *Server) readResource(uri string) (map[string]any, error) {
+	uri, _, _ = strings.Cut(uri, "#")
 	if !strings.HasPrefix(uri, skillURIScheme) {
 		return nil, fmt.Errorf("unsupported resource uri %q", uri)
 	}
