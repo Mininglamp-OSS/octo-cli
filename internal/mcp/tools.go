@@ -106,7 +106,7 @@ func (s *Server) searchOps(domain, query string) toolResult {
 		if len(candidates) == 0 && s.reg.GetSpec(domain) == nil {
 			return jsonToolResult(map[string]any{
 				"operations": []any{},
-				"note":       fmt.Sprintf("unknown domain %q; call search_ops with no arguments for the module map", domain),
+				"note":       fmt.Sprintf("unknown domain %q; %s", domain, s.hintModuleMap()),
 			}, false)
 		}
 	} else {
@@ -240,7 +240,7 @@ func (s *Server) applyResourceHint(nav *skillNav) {
 	if s.clientResources {
 		return
 	}
-	nav.Hint = "client has no MCP resources support; run `octo-cli skills " + nav.Name + "` if a shell is available, or proceed with describe_op alone"
+	nav.Hint = s.resourceDegradeHint(nav.Name)
 }
 
 // matchReference picks the reference file whose registered topics best match
@@ -275,12 +275,12 @@ func matchReference(meta *skillMeta, op registry.OperationInfo) string {
 func (s *Server) describeOp(operationID string) toolResult {
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return jsonToolResult(unknownOperationPayload(s.reg, operationID, s.hintDiscover()), true)
 	}
 	// Disabled services must not be describable (B6): GetOperation resolves them
 	// for introspection, but the MCP surface withholds them like search/call.
 	if s.reg.ServiceDisabled(detail.Service) {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return jsonToolResult(unknownOperationPayload(s.reg, operationID, s.hintDiscover()), true)
 	}
 	// A divergent op's generated schema does not describe its callable shape, so
 	// do not advertise it (B6); point at the CLI instead.
@@ -314,10 +314,10 @@ func (s *Server) describeOp(operationID string) toolResult {
 func (s *Server) callOp(ctx context.Context, operationID string, arguments map[string]any) toolResult {
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return jsonToolResult(unknownOperationPayload(s.reg, operationID, s.hintDiscover()), true)
 	}
 	if s.reg.ServiceDisabled(detail.Service) {
-		return rawToolResult(synthErrorEnvelope(disabledOpError(operationID)), true)
+		return rawToolResult(synthErrorEnvelope(disabledOpError(operationID, s.discoveryToolName())), true)
 	}
 	if cli, div := divergentMCPOps[operationID]; div {
 		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
@@ -333,22 +333,24 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if fn == nil {
 		fn = s.makeFactory
 	}
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot}
+	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, describeHint: s.hintDescribe()}
 	f, outBuf, errBuf := fn(s.trusted)
-	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
+	env, okRun, _ := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
 	return rawToolResult(env, !okRun)
 }
 
 // unknownOperationPayload closes the failure loop (design §8-P1): it returns
-// near-miss candidate ids and points at search_ops, instead of a bare error.
-func unknownOperationPayload(reg *registry.Registry, operationID string) map[string]any {
+// near-miss candidate ids and points at the facade's discovery tool, instead of
+// a bare error. discoverHint is facade-aware: under --facade two it routes to
+// get_skill intent=search, not the disabled search_ops.
+func unknownOperationPayload(reg *registry.Registry, operationID, discoverHint string) map[string]any {
 	return map[string]any{
 		"ok": false,
 		"error": map[string]any{
 			"type":    "validation",
 			"code":    "UNKNOWN_OPERATION",
 			"message": fmt.Sprintf("unknown operation %q", operationID),
-			"hint":    "call search_ops to discover operation ids",
+			"hint":    discoverHint,
 		},
 		"candidates": nearestOperations(reg, operationID),
 	}

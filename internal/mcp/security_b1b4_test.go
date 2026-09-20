@@ -90,7 +90,7 @@ func TestHTTP_ValidBearerUsesConnectionCredential_RealMakeFactory(t *testing.T) 
 // --- B4: trusted-context precedence + case-insensitive Bearer ---
 
 func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"}, facadeThree)
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}

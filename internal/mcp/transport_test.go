@@ -72,7 +72,7 @@ func TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders(t *testing.T) {
 	be := &backend{}
 	backendSrv := be.server(t)
 
-	h, err := NewHTTPHandler(testRoot, TrustedContext{})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{}, facadeThree)
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestOriginAllowed(t *testing.T) {
 }
 
 func TestHTTPTransport_RejectsCrossOrigin(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{}, facadeThree)
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}

@@ -22,6 +22,32 @@ const (
 	serverVersion = "0.1.0-mcp"
 )
 
+// facadeMode selects which tool surface a connection exposes. The three-tool
+// facade (search_ops / describe_op / call_op) is the default and PR #177
+// behaviour; the two-tool facade (get_skill / execute) is opt-in; both exposes
+// the full set for controlled side-by-side comparison.
+type facadeMode string
+
+const (
+	facadeThree facadeMode = "three"
+	facadeTwo   facadeMode = "two"
+	facadeBoth  facadeMode = "both"
+)
+
+// ParseFacade validates a facade selector, defaulting empty to three-tool.
+func ParseFacade(s string) (facadeMode, bool) {
+	switch s {
+	case "", "three":
+		return facadeThree, true
+	case "two":
+		return facadeTwo, true
+	case "both":
+		return facadeBoth, true
+	default:
+		return facadeThree, false
+	}
+}
+
 // Server handles MCP JSON-RPC requests for one connection. search_ops and
 // describe_op read the registry directly; call_op drives the generated cobra
 // tree via build. trusted carries the connection-scoped over-privilege防护
@@ -39,6 +65,9 @@ type Server struct {
 
 	protocolVersion string
 	clientResources bool
+
+	// facade selects the exposed tool surface ("" == three-tool default).
+	facade facadeMode
 
 	// factoryFn builds the per-call factory; nil means makeFactory. Tests set it
 	// to point call_op at a fake backend.
@@ -71,6 +100,79 @@ func (s *Server) WithTrustedContext(tc TrustedContext) *Server { s.trusted = tc;
 
 // WithCredentialToken pins call_op to a specific bearer (HTTP per-connection).
 func (s *Server) WithCredentialToken(token string) *Server { s.credentialToken = token; return s }
+
+// WithFacade selects the exposed tool surface for this connection.
+func (s *Server) WithFacade(f facadeMode) *Server { s.facade = f; return s }
+
+// toolList returns the tools/list surface for the active facade.
+func (s *Server) toolList() []toolDef {
+	switch s.facade {
+	case facadeTwo:
+		return twoToolDefinitions()
+	case facadeBoth:
+		return append(toolDefinitions(), twoToolDefinitions()...)
+	default:
+		return toolDefinitions()
+	}
+}
+
+// toolEnabled reports whether a tool name is callable under the active facade,
+// so a tool from the other facade is a clean "unknown tool" rather than a
+// silent cross-facade call.
+func (s *Server) toolEnabled(name string) bool {
+	three := name == "search_ops" || name == "describe_op" || name == "call_op"
+	two := name == "get_skill" || name == "execute"
+	switch s.facade {
+	case facadeTwo:
+		return two
+	case facadeBoth:
+		return three || two
+	default:
+		return three
+	}
+}
+
+// Facade-aware recovery hints. Under --facade two the three meta-tools are NOT
+// exposed, so an error/degradation hint must never tell a caller to invoke the
+// disabled search_ops / describe_op; it routes to get_skill with the right
+// intent instead. Under three/both the wording is unchanged (no regression).
+func (s *Server) discoveryToolName() string {
+	if s.facade == facadeTwo {
+		return "get_skill"
+	}
+	return "search_ops"
+}
+
+func (s *Server) hintDiscover() string {
+	if s.facade == facadeTwo {
+		return "call get_skill with intent=search to discover operation ids"
+	}
+	return "call search_ops to discover operation ids"
+}
+
+func (s *Server) hintDescribe() string {
+	if s.facade == facadeTwo {
+		return "call get_skill with intent=describe to see the operation's declared arguments"
+	}
+	return "call describe_op to see the operation's declared arguments"
+}
+
+func (s *Server) hintModuleMap() string {
+	if s.facade == facadeTwo {
+		return "call get_skill with intent=search and no domain/query for the module map"
+	}
+	return "call search_ops with no arguments for the module map"
+}
+
+// resourceDegradeHint is the no-resources-support fallback, worded per facade so
+// a --facade two caller is pointed at get_skill describe, not describe_op.
+func (s *Server) resourceDegradeHint(skillName string) string {
+	proceed := "proceed with describe_op alone"
+	if s.facade == facadeTwo {
+		proceed = "proceed with get_skill intent=describe alone"
+	}
+	return "client has no MCP resources support; run `octo-cli skills " + skillName + "` if a shell is available, or " + proceed
+}
 
 // makeFactory builds a fresh factory with buffered IO for one call_op, applying
 // the connection credential and trusted space. A fresh factory per call keeps
@@ -124,7 +226,7 @@ func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, boo
 	case "ping":
 		return newResultResponse(req.ID, map[string]any{}), true
 	case "tools/list":
-		return newResultResponse(req.ID, map[string]any{"tools": toolDefinitions()}), true
+		return newResultResponse(req.ID, map[string]any{"tools": s.toolList()}), true
 	case "tools/call":
 		return s.handleToolCall(ctx, req), true
 	case "resources/list":
@@ -169,6 +271,9 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
+	}
+	if !s.toolEnabled(p.Name) {
+		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool: "+p.Name)
 	}
 	// An arguments value that is present but not a JSON object is an invalid
 	// shape: return -32602 rather than silently degrading to empty args (B6).
@@ -217,6 +322,47 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		return newResultResponse(req.ID, s.callOp(ctx, a.OperationID, args))
+	case "get_skill":
+		var a struct {
+			Intent      string `json:"intent"`
+			Domain      string `json:"domain"`
+			Query       string `json:"query"`
+			OperationID string `json:"operation_id"`
+			Depth       string `json:"depth"`
+		}
+		if err := unmarshalArgs(p.Arguments, &a); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid get_skill arguments: "+err.Error())
+		}
+		return newResultResponse(req.ID, s.getSkill(a.Intent, a.Domain, a.Query, a.OperationID, a.Depth))
+	case "execute":
+		var a struct {
+			OperationID       string          `json:"operation_id"`
+			Arguments         json.RawMessage `json:"arguments"`
+			DryRun            bool            `json:"dry_run"`
+			SchemaFingerprint string          `json:"schema_fingerprint"`
+		}
+		if err := unmarshalArgs(p.Arguments, &a); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid execute arguments: "+err.Error())
+		}
+		if a.OperationID == "" {
+			return newResultResponse(req.ID, jsonToolResult(map[string]any{
+				"status": "validation_error",
+				"error":  map[string]any{"type": "validation", "code": "VALIDATION_ERROR", "message": "missing required argument operation_id"},
+			}, true))
+		}
+		if len(a.Arguments) > 0 && !isJSONObject(a.Arguments) {
+			return newErrorResponse(req.ID, codeInvalidParams, "execute arguments must be a JSON object")
+		}
+		args, err := decodeArgs(a.Arguments)
+		if err != nil {
+			return newResultResponse(req.ID, jsonToolResult(map[string]any{
+				"status": "validation_error",
+				"error":  map[string]any{"type": "validation", "code": "INVALID_ARGUMENTS", "message": err.Error()},
+			}, true))
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return newResultResponse(req.ID, s.execute(ctx, a.OperationID, args, a.DryRun, a.SchemaFingerprint))
 	default:
 		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool: "+p.Name)
 	}

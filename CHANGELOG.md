@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli mcp serve --facade two|both` (two-tool Skill-driven facade)** — an
+  opt-in alternative tool surface over the same MCP engine, folding the three
+  meta-tools into two verbs. It is off by default (`--facade three`), so the
+  existing three-tool behaviour is unchanged; `--facade both` exposes all five
+  for controlled side-by-side comparison.
+  - `get_skill` — a discriminated discovery tool. `intent=search` is the
+    `search_ops` discovery backend (domain/keyword filter, or the service↔skill
+    module map with neither); `intent=describe` returns one operation's full
+    zero-drift schema plus its Skill reference, a schema fingerprint, a
+    per-operation `constraint_enforcement` projection, and progressive `depth`
+    (`summary` outline or `full` schema).
+  - `execute` — invokes one operation through the identical assembly / identity
+    / validation / transport / envelope / authz backend as `call_op`, wrapped in
+    a structured status (`ok` / `validation_error` / `ambiguous` /
+    `execution_error` / `schema_drift` / `result_unknown` / `auth_error`).
+    `dry_run=true` constructs and locally validates the request without sending
+    it (no server-side success implied); for multipart operations it validates
+    required path/query/header/body fields and the file binding without opening,
+    reading, or materializing the file, and never contacts the backend. An
+    optional `schema_fingerprint` from `describe` makes `execute` refuse with
+    `schema_drift` if the embedded schema changed since it was read. The
+    fingerprint is deterministic schema-drift detection only — it does not prove
+    `describe` was called this session; a stateful session challenge is deferred.
+    Machine-readable outcome semantics distinguish `result_unknown` (a mutating
+    request whose outcome is ambiguous after a transport/timeout/5xx — may have
+    applied, do not auto-retry) and `auth_error` (fix the credential) from a
+    plain `execution_error`. Error and degradation hints are facade-aware: under
+    `--facade two` they route to `get_skill`, never the disabled
+    `search_ops` / `describe_op`.
+  The facade reuses the existing registry/schema, Skill mapping/resources and
+  over-privilege防护 white-list unchanged; contract and side-by-side comparison
+  tests assert both facades drive the backend to the same wire.
+
 - **`octo-cli mcp serve` (MCP server, v2.3 initial)** — runs octo-cli as a Model
   Context Protocol server over stdio (default, local/trusted-client transport)
   or streamable HTTP (`--http <addr>`, production transport). It exposes three

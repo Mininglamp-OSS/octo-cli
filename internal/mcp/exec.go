@@ -29,10 +29,13 @@ type RootBuilder func(f *cmdutil.Factory) *cobra.Command
 // execPolicy carries the connection's capability posture into argument
 // translation: whether this is the HTTP transport (untrusted client) and, if
 // so, the operator-confined upload root that a multipart file_path must stay
-// within.
+// within. describeHint is the facade-aware recovery hint used when translation
+// fails, so a --facade two caller is pointed at get_skill, not describe_op.
 type execPolicy struct {
-	httpMode   bool
-	uploadRoot string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled over HTTP
+	httpMode     bool
+	uploadRoot   string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled over HTTP
+	describeHint string // facade-aware "how to see the schema" hint; "" => default describe_op wording
+	dryRun       bool   // metadata-only: validate shape/policy but never touch the filesystem
 }
 
 // reservedFlagNames are the engine/root flag names a translated argument must
@@ -44,6 +47,7 @@ var reservedFlagNames = map[string]bool{
 	"format": true, "jq": true, "dry-run": true, "verbose": true,
 	"timeout": true, "no-retry": true, "space": true, "bot-id": true, "profile": true,
 	"data": true, "file": true, "page-all": true, "page-limit": true, "output": true, "o": true,
+	"help": true, "h": true, // cobra's built-in help flags: an arg must never trigger --help/-h
 }
 
 // executeOperation runs one operation through the generated cobra tree
@@ -52,13 +56,26 @@ var reservedFlagNames = map[string]bool{
 // writes into f's buffers and returns the JSON envelope plus whether the
 // operation succeeded. Pre-flight translation problems and cobra parse errors
 // are rendered as an error envelope so the caller always gets one.
-func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer) (envelope []byte, ok bool) {
+//
+// globalFlags are extra persistent/global flags (e.g. "--dry-run") spliced in
+// before the "--" positional separator. The three-tool call_op passes none, so
+// its argv is byte-for-byte what it was; the two-tool execute facade uses this
+// to honour dry-run without a second request-assembly path.
+func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) {
 	outBuf.Reset()
 	errBuf.Reset()
 
 	argv, terr := buildArgv(detail, arguments, pol)
 	if terr != nil {
-		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
+		hint := pol.describeHint
+		if hint == "" {
+			hint = "call describe_op to see the operation's declared arguments"
+		}
+		ee := output.ErrValidation(terr.Error(), hint)
+		return synthErrorEnvelope(ee), false, ee
+	}
+	if len(globalFlags) > 0 {
+		argv = spliceGlobalFlags(argv, globalFlags)
 	}
 
 	// Capture the connection-forced values BEFORE build(): registering root's
@@ -79,7 +96,12 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	root.SilenceErrors = true
 
 	execErr := root.ExecuteContext(ctx)
-	return readEnvelope(outBuf, errBuf, execErr)
+	env, runOK := readEnvelope(outBuf, errBuf, execErr)
+	// execErr carries the *ExitError even when RunE also wrote the envelope to
+	// errBuf (emitOnce returns the same error it emitted), so machine-readable
+	// outcome classification (auth vs ambiguous vs plain failure) is available
+	// to the two-tool execute facade without re-parsing the rendered JSON.
+	return env, runOK, output.AsExitError(execErr)
 }
 
 // readEnvelope picks the envelope the run produced. A RunE that emitted an
@@ -277,6 +299,14 @@ func resolveUploadPath(p string, pol execPolicy) (string, error) {
 	if strings.TrimSpace(pol.uploadRoot) == "" {
 		return "", errors.New("local file_path upload is disabled for HTTP connections; set OCTO_MCP_UPLOAD_ROOT to a confined directory to enable it")
 	}
+	if pol.dryRun {
+		// Dry-run validation must never touch the filesystem (no open/stat/
+		// readlink). The pure policy gate above (an upload root must be
+		// configured) still applies; the symlink-resolved containment check runs
+		// only on real execution, so dry-run reports that as a residual limitation
+		// rather than opening the path.
+		return p, nil
+	}
 	root, err := filepath.EvalSymlinks(pol.uploadRoot)
 	if err != nil {
 		return "", fmt.Errorf("configured upload root is not accessible: %w", err)
@@ -299,6 +329,26 @@ func resolveUploadPath(p string, pol execPolicy) (string, error) {
 		return "", errors.New("file_path escapes the configured upload root")
 	}
 	return resolved, nil
+}
+
+// spliceGlobalFlags inserts persistent/global flags (e.g. "--dry-run") ahead of
+// the "--" positional separator. cobra treats everything after "--" as a bare
+// positional, so a flag appended at the tail would be mis-parsed as a path
+// value; inserting before the separator keeps it a flag. With no separator the
+// flags go at the end, which for a flags-only argv is the same position.
+func spliceGlobalFlags(argv, flags []string) []string {
+	sep := len(argv)
+	for i, a := range argv {
+		if a == "--" {
+			sep = i
+			break
+		}
+	}
+	out := make([]string, 0, len(argv)+len(flags))
+	out = append(out, argv[:sep]...)
+	out = append(out, flags...)
+	out = append(out, argv[sep:]...)
+	return out
 }
 
 // commandWords maps an operationId to its CLI command path words, matching the
@@ -388,11 +438,12 @@ func extractPathParams(path string) []string {
 	}
 }
 
-// disabledOpError reports a call to an operation on a withheld service.
-func disabledOpError(operationID string) error {
+// disabledOpError reports a call to an operation on a withheld service. The
+// discoveryTool is the facade's discovery entrypoint (search_ops or get_skill).
+func disabledOpError(operationID, discoveryTool string) error {
 	return output.ErrValidation(
 		fmt.Sprintf("operation %q belongs to a disabled service and is not callable", operationID),
-		"this service is withheld; it is not exposed by search_ops")
+		fmt.Sprintf("this service is withheld; it is not exposed by %s", discoveryTool))
 }
 
 // divergentOpError reports an operation whose generated schema does not match

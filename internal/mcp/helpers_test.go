@@ -66,13 +66,21 @@ func fakeBackendFactory(srvURL, token string) func(TrustedContext) (*cmdutil.Fac
 	return func(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer, *bytes.Buffer) {
 		cfg := &config.Config{APIBaseURL: srvURL, BotToken: token, Format: "json", SpaceID: tc.SpaceID}
 		cred := &credential.BotCredential{Token: token, SpaceID: tc.SpaceID, BotKind: credential.TokenKind(token), Source: "test"}
-		cli := client.New(cfg, cred, client.Options{ErrOut: io.Discard})
 		streams, _, outBuf, errBuf := cmdutil.NewTestIOStreams()
 		f := &cmdutil.Factory{IOStreams: streams, Globals: &cmdutil.GlobalOptions{}}
 		f.RegistryFunc = registry.MustNew
 		f.ConfigFunc = func() (*config.Config, error) { return cfg, nil }
 		f.CredentialFunc = func() (*credential.BotCredential, error) { return cred, nil }
-		f.ClientFunc = func() (*client.Client, error) { return cli, nil }
+		// Build the client lazily so it honours the --dry-run global the cobra tree
+		// sets during execution (the engine's dry-run short-circuits in client.Do);
+		// a pre-built client would ignore it and still hit the fake backend.
+		f.ClientFunc = func() (*client.Client, error) {
+			opts := client.Options{ErrOut: io.Discard}
+			if f.Globals != nil && f.Globals.DryRun {
+				opts.DryRun = true
+			}
+			return client.New(cfg, cred, opts), nil
+		}
 		return f, outBuf, errBuf
 	}
 }
