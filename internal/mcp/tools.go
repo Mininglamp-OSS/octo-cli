@@ -11,12 +11,12 @@ import (
 )
 
 // searchOpsPageLimit caps a keyword/domain result page so the per-op skill
-// navigation increment has a hard upper bound (design §3.4.1).
+// navigation increment has a hard upper bound.
 const searchOpsPageLimit = 20
 
 // tool metadata for tools/list. The three inputSchemas together are < 1 KB;
 // skill navigation lives in return values, never here, so tools/list stays
-// resident-cheap (design §3.1).
+// resident-cheap.
 func toolDefinitions() []toolDef {
 	return []toolDef{
 		{
@@ -119,7 +119,7 @@ func (s *Server) searchOps(domain, query string) toolResult {
 	truncated := false
 	for _, op := range candidates {
 		if _, div := divergentMCPOps[op.ID]; div {
-			continue // not advertised via MCP; generated schema is uncallable (B6)
+			continue // not advertised via MCP; generated schema is uncallable
 		}
 		if len(terms) > 0 && !matchOp(op, terms) {
 			continue
@@ -159,7 +159,7 @@ func matchOp(op registry.OperationInfo, terms []string) bool {
 
 // moduleMap returns a service<->skill map for search_ops() with no arguments: a
 // live map (never a static snapshot), disabled services excluded via
-// EnabledServices (design §3.4.3).
+// EnabledServices.
 func (s *Server) moduleMap() map[string]any {
 	type svcEntry struct {
 		Service        string    `json:"service"`
@@ -173,7 +173,7 @@ func (s *Server) moduleMap() map[string]any {
 		samples := make([]string, 0, 3)
 		for i := 0; i < len(ops) && len(samples) < 3; i++ {
 			if _, div := divergentMCPOps[ops[i].ID]; div {
-				continue // don't sample an op that MCP does not advertise (B6)
+				continue // don't sample an op that MCP does not advertise
 			}
 			samples = append(samples, ops[i].ID)
 		}
@@ -235,7 +235,7 @@ func (s *Server) navFor(op registry.OperationInfo, forDescribe bool) *skillNav {
 
 // applyResourceHint adds the degradation hint when the connected client did not
 // negotiate MCP resources support: the uri strings still return (plain
-// identifiers, no side effect) with a readable fallback (design §3.4.4/§3.7.3).
+// identifiers, no side effect) with a readable fallback.
 func (s *Server) applyResourceHint(nav *skillNav) {
 	if s.clientResources {
 		return
@@ -277,13 +277,13 @@ func (s *Server) describeOp(operationID string) toolResult {
 	if !ok {
 		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
 	}
-	// Disabled services must not be describable (B6): GetOperation resolves them
+	// Disabled services must not be describable: GetOperation resolves them
 	// for introspection, but the MCP surface withholds them like search/call.
 	if s.reg.ServiceDisabled(detail.Service) {
 		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
 	}
 	// A divergent op's generated schema does not describe its callable shape, so
-	// do not advertise it (B6); point at the CLI instead.
+	// do not advertise it; point at the CLI instead.
 	if cli, div := divergentMCPOps[operationID]; div {
 		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
 	}
@@ -305,7 +305,7 @@ func (s *Server) describeOp(operationID string) toolResult {
 		}
 		sort.Strings(names)
 		obj["server_managed_arguments"] = names
-		obj["server_managed_note"] = "these arguments are forced by the server connection (over-privilege防护); do not supply them"
+		obj["server_managed_note"] = "these arguments are forced by the server connection (over-privilege protection); do not supply them"
 	}
 	return jsonToolResult(obj, false)
 }
@@ -325,9 +325,10 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	// Over-privilege防护: force the connection's trusted values over whatever
-	// the model supplied, before assembly.
-	s.trusted.apply(operationID, arguments)
+	// Over-privilege protection: force the connection's trusted values over
+	// whatever the model supplied, before assembly. The returned set is the
+	// audit trail surfaced in the envelope below.
+	forced := s.trusted.apply(operationID, arguments)
 
 	fn := s.factoryFn
 	if fn == nil {
@@ -336,10 +337,42 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot}
 	f, outBuf, errBuf := fn(s.trusted)
 	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
+	env = spliceForcedArguments(env, forced)
 	return rawToolResult(env, !okRun)
 }
 
-// unknownOperationPayload closes the failure loop (design §8-P1): it returns
+// spliceForcedArguments records which arguments the connection forced on this
+// call by adding an underscore-prefixed `_forced_arguments` member to the
+// envelope (the same "_"-prefix convention the CLI uses for _pagination /
+// _rate_limit). It is a per-call audit trail — describe_op's
+// server_managed_arguments is static; this reflects what actually happened.
+// A non-object or unparseable envelope is returned unchanged.
+func spliceForcedArguments(env []byte, forced map[string]bool) []byte {
+	if len(forced) == 0 {
+		return env
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(env, &obj); err != nil {
+		return env
+	}
+	names := make([]string, 0, len(forced))
+	for k := range forced {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	raw, err := json.Marshal(names)
+	if err != nil {
+		return env
+	}
+	obj["_forced_arguments"] = raw
+	out, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		return env
+	}
+	return append(out, '\n')
+}
+
+// unknownOperationPayload closes the failure loop: it returns
 // near-miss candidate ids and points at search_ops, instead of a bare error.
 func unknownOperationPayload(reg *registry.Registry, operationID string) map[string]any {
 	return map[string]any{

@@ -9,7 +9,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// --- B2: multipart file_path capability boundary ---
+// --- multipart file_path capability boundary ---
 
 func TestResolveUploadPath_StdioPassthrough(t *testing.T) {
 	got, err := resolveUploadPath("/anything/goes.txt", execPolicy{httpMode: false})
@@ -77,7 +77,7 @@ func TestBuildArgv_MultipartFilePathDeniedOverHTTP(t *testing.T) {
 	}
 }
 
-// --- B3: multipart argument keys must not become arbitrary/root flags ---
+// --- multipart argument keys must not become arbitrary/root flags ---
 
 func multipartOp() *registry.OperationDetail {
 	return &registry.OperationDetail{

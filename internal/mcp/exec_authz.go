@@ -1,6 +1,8 @@
 package mcp
 
-// Trusted-context (over-privilege防护) injection, design §5.
+import "github.com/Mininglamp-OSS/octo-cli/internal/registry"
+
+// Trusted-context (over-privilege protection) injection.
 //
 // Some arguments decide *who / what scope* an operation acts on — space id,
 // the channel a message goes to, the on-behalf-of identity. Left to the model
@@ -12,12 +14,10 @@ package mcp
 //
 // The white-list is PER OPERATION, never a global parameter-name match. That is
 // deliberate: message.send.channel_id is forced, but drive's space_id (a drive
-// resource id, drive.json:83) and message.search's channel_id (optional
-// cross-channel scope, message.json:157) are absent from the table, so the
-// same-name trap the design calls out is structurally impossible here. This
-// centralized Go table is the first-version bridge; the target end-state is a
-// per-op `x-octo-authz-overridable` spec extension audited across all 342 ops
-// (design §9 item 2 / P2), which this table's shape mirrors.
+// resource id of the form personal:<octo-space>:<uid> / shared:<uuid>,
+// drive.json:83) and message.search's channel_id (optional cross-channel scope,
+// message.json:157) are NOT forced, so the same-name trap is structurally
+// impossible here.
 
 // TrustedContext holds the connection-scoped values a trusted source injects.
 // SpaceID additionally flows onto the credential so X-Space-Id is set the same
@@ -72,21 +72,32 @@ var overridableParams = map[string]map[string]overridableField{
 	"bot.space-members": {
 		"space_id": fieldSpaceID,
 	},
+	// group.create (body space_id) and group.list (query space_id) run under
+	// x-octo-space-header:false (group.json:10), so X-Space-Id is suppressed and
+	// the space_id argument is the ONLY space signal on the wire. Force it, like
+	// bot.space-members, so a connection-forced space actually confines them.
+	"group.create": {
+		"space_id": fieldSpaceID,
+	},
+	"group.list": {
+		"space_id": fieldSpaceID,
+	},
 }
 
 // authzExclusions records operations that DECLARE a session-bound field but are
 // deliberately NOT forced, with the rationale. The coverage guard
-// (TestAuthzCoverage) requires every enabled operation carrying a session-bound
-// field to be either in overridableParams or here, so a newly added equivalent
-// operation fails CI instead of silently bypassing over-privilege防护.
+// (TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified) requires every
+// enabled operation carrying a session-bound field to be either forced
+// (overridableParams), excluded here, or a documented drive resource-id space
+// (isDriveResourceSpaceID) — so a newly added equivalent operation fails CI
+// instead of silently bypassing over-privilege protection.
 //
-// The message.search family is the sole exclusion: its channel_id is an
-// OPTIONAL cross-channel scope ("omit to search across all reachable channels",
+// The message.search family is excluded because its channel_id is an OPTIONAL
+// cross-channel scope ("omit to search across all reachable channels",
 // message.json:157) and its on_behalf_of selects the real-person search subject
-// a bf_ token searches as (design §5.3; a bf_ token searches as the bot, or as
-// a real person when on_behalf_of is supplied). Forcing either would break
-// legitimate cross-channel / on-behalf-of search, so these stay
-// model/caller-controlled and the backend ACL is the guard.
+// a bf_ token searches as; forcing either would break legitimate cross-channel
+// / on-behalf-of search, so these stay model/caller-controlled and the backend
+// ACL is the guard.
 var authzExclusions = map[string]string{
 	"message.search":        "search scope: channel_id is optional cross-channel scope; on_behalf_of selects the search subject",
 	"message.search.all":    "search scope: optional cross-channel scope / search subject",
@@ -98,11 +109,33 @@ var authzExclusions = map[string]string{
 
 // sessionBoundFields are the argument names that decide who/what scope an
 // operation acts on; the coverage guard classifies every enabled op declaring
-// one of these.
+// one of these. space_id is included so the guard cannot be blind to a
+// cross-space argument (its omission was the fail-open the guard exists to
+// prevent); drive's same-named resource id is handled by isDriveResourceSpaceID.
 var sessionBoundFields = map[string]bool{
 	"channel_id":   true,
 	"channel_type": true,
 	"on_behalf_of": true,
+	"space_id":     true,
+}
+
+// isDriveResourceSpaceID is a documented, service-scoped exclusion: in the drive
+// namespace space_id is a resource identifier (personal:<octo-space>:<uid> or
+// shared:<uuid>, drive.json:83), NOT the Octo space context X-Space-Id carries.
+// Forcing the connection's Octo space onto it would break drive entirely (the
+// same-name trap). This is an EXCLUSION (never inject), so it is the safe
+// direction — the coverage guard treats a drive op whose only session-bound
+// field is space_id as classified.
+func isDriveResourceSpaceID(op registry.OperationInfo, fields []string) bool {
+	if op.Service != "drive" || len(fields) == 0 {
+		return false
+	}
+	for _, f := range fields {
+		if f != "space_id" {
+			return false
+		}
+	}
+	return true
 }
 
 // divergentMCPOps are operations whose generated OpenAPI schema does NOT
@@ -111,8 +144,8 @@ var sessionBoundFields = map[string]bool{
 // different argument shape (a positional body field / a whole share URL). Their
 // generated schema is therefore uncallable via call_op's schema-derived argv,
 // so this version withholds them from MCP discovery (search_ops), refuses to
-// describe them (describe_op), and refuses call_op with a pointer to the CLI
-// (B6). Keep in sync with the RemoveLeaf(share, …) calls in cmd/drive.go.
+// describe them (describe_op), and refuses call_op with a pointer to the CLI.
+// Keep in sync with the RemoveLeaf(share, ...) calls in cmd/drive.go.
 var divergentMCPOps = map[string]string{
 	"drive.share.blob-create": "octo-cli drive share blob-create",
 	"drive.share.access":      "octo-cli drive share access",
@@ -135,7 +168,7 @@ func (tc TrustedContext) value(f overridableField) string {
 
 // apply overrides the white-listed arguments of opID with the connection's
 // trusted values, in place. It returns the set of argument names it forced, so
-// the caller can report over-privilege防护 in effect. A value the trusted
+// the caller can surface which arguments were server-forced. A value the trusted
 // context does not carry is left to the model (the operation's own required
 // check still applies).
 func (tc TrustedContext) apply(opID string, args map[string]any) map[string]bool {

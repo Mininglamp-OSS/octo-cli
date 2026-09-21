@@ -3,7 +3,7 @@
 //
 // The server exposes three meta-tools — search_ops, describe_op, call_op —
 // rather than one MCP tool per operation, so a client's tools/list stays a few
-// hundred tokens instead of the ~6-15万 tokens a full 342-operation expansion
+// hundred tokens instead of the ~60k-150k tokens a full 342-operation expansion
 // would cost. search_ops and describe_op read the registry directly; call_op
 // drives the generated cobra command tree in-process so every request reuses
 // the CLI's identity routing, request assembly, validation, transport, secret
@@ -54,7 +54,7 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// Standard JSON-RPC error codes (JSON-RPC 2.0 §5.1).
+// Standard JSON-RPC error codes (JSON-RPC 2.0 spec).
 const (
 	codeParseError     = -32700
 	codeInvalidRequest = -32600

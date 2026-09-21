@@ -20,8 +20,7 @@ const maxStdioMessageBytes = 8 << 20
 //
 // stdio is the local-debug / trusted-or-sandboxed-client transport only: the
 // bearer token sits in the process env, reachable by a shell-capable host, so
-// the over-privilege防护 here rests on an external trust assumption (design
-// §5.5.1). HTTP is the production transport.
+// the over-privilege protection here rests on an external trust assumption. HTTP is the production transport.
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	r := bufio.NewReaderSize(in, 64*1024)
 	for {

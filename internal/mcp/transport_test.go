@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
 // TestStdioTransport_InitializeToolsListRoundTrip is the stdio smoke test: feed
@@ -72,7 +74,7 @@ func TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders(t *testing.T) {
 	be := &backend{}
 	backendSrv := be.server(t)
 
-	h, err := NewHTTPHandler(testRoot, TrustedContext{})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -148,7 +150,7 @@ func TestOriginAllowed(t *testing.T) {
 }
 
 func TestHTTPTransport_RejectsCrossOrigin(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}

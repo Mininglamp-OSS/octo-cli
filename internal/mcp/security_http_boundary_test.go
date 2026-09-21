@@ -4,9 +4,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 )
 
-// --- B1: HTTP must fail closed on credentials (production seam, factoryFn == nil) ---
+// --- HTTP must fail closed on credentials (production seam, factoryFn == nil) ---
 
 // httpModeServer builds a Server on the real makeFactory path (no factoryFn)
 // with httpMode set and the given connection bearer, mirroring what
@@ -87,10 +89,10 @@ func TestHTTP_ValidBearerUsesConnectionCredential_RealMakeFactory(t *testing.T) 
 	}
 }
 
-// --- B4: trusted-context precedence + case-insensitive Bearer ---
+// --- trusted-context precedence + case-insensitive Bearer ---
 
 func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -100,6 +102,9 @@ func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
 	req.Header.Set(headerChannelID, "hdr-chan") // this field is NOT operator-forced
 
 	srv := h.connectionServer(req)
+	if !srv.httpMode {
+		t.Error("connectionServer must set httpMode so call_op fails closed on the HTTP transport")
+	}
 	if srv.trusted.SpaceID != "op-space" {
 		t.Errorf("operator-forced SpaceID must win, got %q", srv.trusted.SpaceID)
 	}

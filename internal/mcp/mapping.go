@@ -13,7 +13,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/skills"
 )
 
-// Recommendation levels for Skill navigation (design §3.4.2). Three states,
+// Recommendation levels for Skill navigation. Three states,
 // not a boolean: read operations benefit from a Skill but a confident caller
 // may skip it; write operations with process semantics should load it first;
 // pure supplementary material never blocks a call.
@@ -24,7 +24,7 @@ const (
 )
 
 // Hard length caps so a short summary can never grow into a second copy of the
-// Skill (design §3.6(e) check 6).
+// Skill.
 const (
 	maxSummaryShort = 160
 	maxAdvice       = 200
@@ -122,15 +122,21 @@ func BuildMapping(reg *registry.Registry) (*Mapping, error) {
 		}
 	}
 
-	// Operation-level overrides.
+	// Operation-level overrides. A given operation may be overridden by at most
+	// one skill; a collision would make the winner depend on Go's map iteration
+	// order, so it is a fail-fast build error rather than a nondeterministic start.
+	overrideOwner := map[string]string{}
 	for name, ms := range mf.Skills {
 		for opID, op := range ms.Operations {
+			if prev, dup := overrideOwner[opID]; dup {
+				return nil, fmt.Errorf("mcp: operation %q has overrides in two skills (%q and %q)", opID, prev, name)
+			}
+			overrideOwner[opID] = name
 			level := op.Level
 			if level == "" {
 				level = levelRecommended
 			}
 			m.ops[opID] = &opMeta{Level: level, Advice: op.Advice, Section: op.Section}
-			_ = name
 		}
 	}
 
@@ -141,8 +147,11 @@ func BuildMapping(reg *registry.Registry) (*Mapping, error) {
 	return m, nil
 }
 
-// validate runs the six drift checks (design §3.6(e)). It collects every
-// problem rather than returning the first, so a maintainer sees the whole set.
+// validate runs the mapping drift checks, collecting every problem rather than
+// returning the first so a maintainer sees the whole set. Each check is
+// described by the invariant it enforces (registry existence, service coverage,
+// single-claim, reference/anchor existence, disabled-service sync, length/level
+// caps).
 func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[string]*skillMeta) []string {
 	var problems []string
 
@@ -159,9 +168,9 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		allServices[s] = true
 	}
 
-	// Check 1: every frontmatter/manifest service reference exists in the
-	// registry; every manifest operation exists in the enabled registry.
-	// Check 6 (part): only one enabled skill may claim a given service.
+	// Existence + single-claim: every frontmatter/manifest service reference
+	// exists in the registry; every manifest operation exists in the enabled
+	// registry; and only one enabled skill may claim a given service.
 	claimedBy := map[string]string{}
 	for name, meta := range metas {
 		for _, svc := range meta.Services {
@@ -189,7 +198,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		}
 	}
 
-	// Check 2: every enabled service is covered by >=1 enabled skill (shared is
+	// Service coverage: every enabled service is covered by >=1 enabled skill (shared is
 	// exempt — it is horizontal and declares no services).
 	for svc := range enabledServices {
 		if _, ok := m.serviceToSkill[svc]; !ok {
@@ -197,7 +206,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		}
 	}
 
-	// Check 4: manifest reference files must exist; section anchors must exist.
+	// Reference/anchor existence: manifest reference files must exist; section anchors must exist.
 	for name, ms := range mf.Skills {
 		for ref := range ms.References {
 			if _, err := skills.FS.ReadFile(name + "/" + ref); err != nil {
@@ -224,7 +233,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		}
 	}
 
-	// Check 5: disabled service <-> disabled skill sync; a disabled skill may
+	// Disabled-service sync: disabled service <-> disabled skill; a disabled skill may
 	// not be referenced by any enabled service mapping.
 	for _, svc := range reg.ListServices() {
 		if !reg.ServiceDisabled(svc) {
@@ -237,7 +246,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 		}
 	}
 
-	// Check 6: length caps and level validity. summary_short and advice must
+	// Length/level caps: length caps and level validity. summary_short and advice must
 	// stay within their caps so a short summary cannot grow into a second copy
 	// of the Skill, and every declared level must be one of the three known
 	// values. (Only-raise-never-lower is not modeled here: the manifest holds
@@ -264,7 +273,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 
 // SkillFor returns the merged Skill metadata for an operation and whether a
 // mapping exists. A missing mapping is not an error — the caller omits the
-// skill block and the operation stays callable (design §3.4.4).
+// skill block and the operation stays callable.
 func (m *Mapping) SkillFor(op registry.OperationInfo) (*skillMeta, *opMeta, bool) {
 	name, ok := m.serviceToSkill[op.Service]
 	if !ok {

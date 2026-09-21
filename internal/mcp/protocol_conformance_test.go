@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- B6: section/resource correctness and production-tree parity ---
+// --- section/resource correctness and production-tree parity ---
 
 func TestReadResource_SectionURIFragmentResolves(t *testing.T) {
 	s := newTestServer(t)

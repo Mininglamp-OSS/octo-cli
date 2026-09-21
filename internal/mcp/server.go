@@ -13,8 +13,9 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// defaultProtocolVersion is echoed when the client sends none. The server
-// otherwise mirrors the client's requested protocolVersion.
+// defaultProtocolVersion is the single MCP protocol version this server
+// implements and reports on initialize (it does not echo an arbitrary
+// client-supplied version).
 const defaultProtocolVersion = "2025-06-18"
 
 const (
@@ -24,18 +25,20 @@ const (
 
 // Server handles MCP JSON-RPC requests for one connection. search_ops and
 // describe_op read the registry directly; call_op drives the generated cobra
-// tree via build. trusted carries the connection-scoped over-privilege防护
-// values; credentialToken, when set, pins call_op to that bearer (HTTP, one
-// credential per connection) instead of the process env (stdio).
+// tree via build. trusted carries the connection-scoped over-privilege-
+// protection values; credentialToken, when set (HTTP), pins call_op to that
+// bearer instead of the process env (stdio). baseGlobals carries the operator's
+// parsed serve-time globals (credential selector + limits) into each call.
 type Server struct {
 	reg     *registry.Registry
 	mapping *Mapping
 	build   RootBuilder
 
 	trusted         TrustedContext
-	credentialToken string // "" → resolve from env (stdio) unless httpMode
-	httpMode        bool   // HTTP connection: never inherit the server env credential
-	uploadRoot      string // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path over HTTP
+	credentialToken string                // "" → resolve from env (stdio) unless httpMode
+	httpMode        bool                  // HTTP connection: never inherit the server env credential
+	uploadRoot      string                // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path over HTTP
+	baseGlobals     cmdutil.GlobalOptions // operator serve-time globals (BotID/Profile/Timeout/NoRetry)
 
 	protocolVersion string
 	clientResources bool
@@ -48,7 +51,7 @@ type Server struct {
 }
 
 // NewServer builds a connection server. It fails if the embedded skill
-// navigation mapping is invalid (fail-fast, design §3.6(b)).
+// navigation mapping is invalid (fail-fast).
 func NewServer(build RootBuilder) (*Server, error) {
 	reg, err := registry.New()
 	if err != nil {
@@ -69,22 +72,34 @@ func NewServer(build RootBuilder) (*Server, error) {
 // WithTrustedContext pins the connection's forced values.
 func (s *Server) WithTrustedContext(tc TrustedContext) *Server { s.trusted = tc; return s }
 
-// WithCredentialToken pins call_op to a specific bearer (HTTP per-connection).
-func (s *Server) WithCredentialToken(token string) *Server { s.credentialToken = token; return s }
+// WithBaseGlobals carries the operator's parsed serve-time globals (credential
+// selector + limits) into each call_op.
+func (s *Server) WithBaseGlobals(g cmdutil.GlobalOptions) *Server { s.baseGlobals = g; return s }
 
 // makeFactory builds a fresh factory with buffered IO for one call_op, applying
-// the connection credential and trusted space. A fresh factory per call keeps
-// credentials and cached clients isolated between connections.
+// the connection credential and the operator globals. A fresh factory per call
+// keeps credentials and cached clients isolated between connections. The
+// globals set here are re-applied after build() by executeOperation (build
+// resets the fresh root's persistent flags).
 //
-// HTTP connections fail closed (B1): the credential is pinned to the
-// connection's bearer, and a missing/malformed bearer yields a CredentialFunc
-// that returns an auth error — an HTTP call can NEVER inherit the server
-// process env / auth-store credential. Only stdio (the local/trusted transport)
-// resolves from the environment.
+// HTTP connections fail closed: the credential is pinned to the connection's
+// bearer, and a missing/malformed bearer yields a CredentialFunc that returns
+// an auth error — an HTTP call can NEVER inherit the server process env /
+// auth-store credential. Only stdio (the local/trusted transport) resolves from
+// the environment. reg is shared read-only with the connection so a call_op
+// does not re-parse ~600 KB of embedded specs.
 func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer, *bytes.Buffer) {
 	streams, _, outBuf, errBuf := cmdutil.NewTestIOStreams()
 	f := cmdutil.NewDefaultFactory()
 	f.IOStreams = streams
+	reg := s.reg
+	f.RegistryFunc = func() *registry.Registry { return reg }
+	// Operator-set routing/limit globals; re-applied post-build by executeOperation.
+	f.Globals.BotID = s.baseGlobals.BotID
+	f.Globals.Profile = s.baseGlobals.Profile
+	f.Globals.Timeout = s.baseGlobals.Timeout
+	f.Globals.NoRetry = s.baseGlobals.NoRetry
+	f.Globals.Space = tc.SpaceID
 	if s.httpMode {
 		tok := s.credentialToken
 		space := tc.SpaceID
@@ -101,16 +116,13 @@ func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer
 				Source:  "mcp:connection",
 			}, nil
 		}
-	} else if tc.SpaceID != "" {
-		// stdio: force the space onto the env-resolved credential via --space.
-		f.Globals.Space = tc.SpaceID
 	}
 	return f, outBuf, errBuf
 }
 
 // Dispatch handles one JSON-RPC message and returns the response plus whether
 // there is one. A JSON-RPC notification (no id) NEVER receives a response, for
-// any method (B6), so the id check comes first.
+// any method, so the id check comes first.
 func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, bool) {
 	if req.isNotification() {
 		return rpcResponse{}, false
@@ -146,9 +158,11 @@ func (s *Server) handleInitialize(params json.RawMessage) map[string]any {
 	if len(params) > 0 {
 		_ = json.Unmarshal(params, &p)
 	}
-	if p.ProtocolVersion != "" {
-		s.protocolVersion = p.ProtocolVersion
-	}
+	// Pin the negotiated version to what this server implements rather than
+	// echoing an arbitrary client string: the server supports exactly this
+	// protocol version, and an incompatible client fails loudly at the method
+	// layer instead of negotiating a version nobody implements.
+	s.protocolVersion = defaultProtocolVersion
 	s.clientResources = len(p.Capabilities.Resources) > 0
 	return map[string]any{
 		"protocolVersion": s.protocolVersion,
@@ -171,7 +185,7 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
 	}
 	// An arguments value that is present but not a JSON object is an invalid
-	// shape: return -32602 rather than silently degrading to empty args (B6).
+	// shape: return -32602 rather than silently degrading to empty args.
 	if len(p.Arguments) > 0 && !isJSONObject(p.Arguments) {
 		return newErrorResponse(req.ID, codeInvalidParams, "tool arguments must be a JSON object")
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -19,7 +20,7 @@ const maxHTTPBodyBytes = 8 << 20
 // server-managed session; each POST is one request and one response. It is the
 // intended production shape because each request carries its own bearer
 // (Authorization) and its own trusted headers, so the server injects a
-// per-connection credential and per-connection over-privilege防护 values — a
+// per-connection credential and per-connection over-privilege-protection values — a
 // client on connection A can never act in connection B's space / channel /
 // identity. reg and mapping are shared read-only across requests; the mutable
 // per-connection state lives on the short-lived per-request Server.
@@ -28,6 +29,7 @@ type HTTPHandler struct {
 	mapping        *Mapping
 	build          RootBuilder
 	baseTrusted    TrustedContext
+	baseGlobals    cmdutil.GlobalOptions
 	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
 	uploadRoot     string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
 }
@@ -41,12 +43,14 @@ const (
 	headerOnBehalfOf  = "X-Octo-On-Behalf-Of"
 )
 
-// NewHTTPHandler builds the HTTP handler. baseTrusted supplies defaults a
-// request header may override. Origin validation (anti DNS-rebinding, MCP
-// guidance) reads an exact-match allowlist from OCTO_MCP_ALLOWED_ORIGINS
-// (comma-separated); when unset, only loopback origins are accepted and a
-// request with no Origin header (typical non-browser MCP client) is allowed.
-func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext) (*HTTPHandler, error) {
+// NewHTTPHandler builds the HTTP handler. baseTrusted supplies operator-forced
+// values (which win over request headers); base carries the operator's
+// serve-time credential-selector / limit globals into each call. Origin
+// validation (anti DNS-rebinding) reads an exact-match allowlist from
+// OCTO_MCP_ALLOWED_ORIGINS (comma-separated); when unset, only loopback origins
+// are accepted and a request with no Origin header (typical non-browser MCP
+// client) is allowed. Multipart uploads are confined to OCTO_MCP_UPLOAD_ROOT.
+func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.GlobalOptions) (*HTTPHandler, error) {
 	reg, err := registry.New()
 	if err != nil {
 		return nil, err
@@ -56,7 +60,7 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext) (*HTTPHandler
 		return nil, err
 	}
 	return &HTTPHandler{
-		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted,
+		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted, baseGlobals: base,
 		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
 		uploadRoot:     os.Getenv("OCTO_MCP_UPLOAD_ROOT"),
 	}, nil
@@ -77,9 +81,15 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxHTTPBodyBytes))
+	// Read one byte past the cap so an over-limit body is rejected outright
+	// rather than silently truncated to a valid-JSON prefix.
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxHTTPBodyBytes+1))
 	if err != nil {
 		writeHTTPError(w, nil, codeParseError, "read body: "+err.Error())
+		return
+	}
+	if len(body) > maxHTTPBodyBytes {
+		http.Error(w, "request body exceeds 8 MiB limit", http.StatusRequestEntityTooLarge)
 		return
 	}
 	var req rpcRequest
@@ -133,7 +143,7 @@ func originAllowed(origin string, allowed []string) bool {
 // connectionServer builds the per-request Server with connection-scoped
 // credential and trusted context from the request headers.
 //
-// Precedence (B4): operator-configured (baseTrusted) values WIN. A request
+// Precedence: operator-configured (baseTrusted) values WIN. A request
 // X-Octo-* header may only fill a field the operator did NOT force. Header
 // trust is a gateway-mode convenience, not authentication — the bearer
 // credential and Origin validation are the guards; deploy behind a
@@ -160,6 +170,7 @@ func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 		credentialToken: bearerToken(r),
 		httpMode:        true,
 		uploadRoot:      h.uploadRoot,
+		baseGlobals:     h.baseGlobals,
 		protocolVersion: defaultProtocolVersion,
 		clientResources: true, // HTTP clients can read the returned resource URIs
 	}

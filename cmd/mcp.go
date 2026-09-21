@@ -2,6 +2,9 @@ package cmd
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -53,34 +56,64 @@ into hundreds of resident MCP tools, so a client's tools/list stays small.
 
 The HTTP transport is JSON-RPC request/response over POST (one request, one
 response); it does not yet serve an SSE stream or a server-managed session.
-Origin validation guards it against DNS-rebinding: set OCTO_MCP_ALLOWED_ORIGINS
-(comma-separated) to allow browser origins; unset, only loopback origins are
-accepted and non-browser clients (no Origin header) are allowed.
 
-Over-privilege防护: for stdio the forced space / channel / on-behalf-of values
-come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_* env); for
-HTTP they come per-connection from request headers (X-Space-Id,
-X-Octo-Channel-Id, X-Octo-Channel-Type, X-Octo-On-Behalf-Of) and the bearer
-Authorization header, so one connection can never act in another's scope.`,
+Deployment (HTTP):
+  - No TLS is provided. --http binds every interface unless you give a loopback
+    host (e.g. --http 127.0.0.1:8080). Terminate TLS at a reverse proxy and/or
+    bind loopback; the bearer is a long-lived bot token sent per request.
+  - Trusted-context headers (X-Space-Id, X-Octo-Channel-Id, X-Octo-Channel-Type,
+    X-Octo-On-Behalf-Of) are a gateway convenience, NOT authentication: operator
+    --force-* / --space values always win, and a header may only fill a field
+    the operator did not force. Only a proxy that sets and strips these headers
+    makes them trustworthy.
+  - OCTO_MCP_ALLOWED_ORIGINS (comma-separated) permits browser origins; unset,
+    only loopback origins are accepted (anti DNS-rebinding).
+  - OCTO_MCP_UPLOAD_ROOT confines multipart file_path uploads to one directory;
+    unset, local file_path upload over HTTP is refused.
+  - initialize / tools/list / search_ops / describe_op / resources/read need no
+    bearer, so any peer that can reach the port can enumerate the catalog.
+
+Over-privilege protection: for stdio the forced space / channel / on-behalf-of
+values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*
+env); for HTTP they come per-connection from the operator config with request
+headers filling only unforced fields, plus the bearer Authorization header, so
+one connection can never act in another's scope.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{"skipValidation": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Validate the operator's --timeout once at startup so a malformed
+			// value fails loudly here rather than emitting a diagnostic into
+			// every call_op's stderr.
+			if t := f.Globals.Timeout; t != "" {
+				if _, err := time.ParseDuration(t); err != nil {
+					return fmt.Errorf("invalid --timeout %q: %w", t, err)
+				}
+			}
 			tc := mcp.TrustedContext{
 				SpaceID:     firstNonEmpty(f.Globals.Space, os.Getenv("OCTO_SPACE_ID")),
 				ChannelID:   firstNonEmpty(forceChannelID, os.Getenv("OCTO_FORCE_CHANNEL_ID")),
 				ChannelType: firstNonEmpty(forceChannelType, os.Getenv("OCTO_FORCE_CHANNEL_TYPE")),
 				OnBehalfOf:  firstNonEmpty(forceOnBehalfOf, os.Getenv("OCTO_FORCE_ON_BEHALF_OF")),
 			}
+			// Carry the operator's credential-selector and limit globals into each
+			// call so --profile / --bot-id / --timeout / --no-retry are not
+			// silently dropped by the per-call factory.
+			base := cmdutil.GlobalOptions{
+				BotID:   f.Globals.BotID,
+				Profile: f.Globals.Profile,
+				Timeout: f.Globals.Timeout,
+				NoRetry: f.Globals.NoRetry,
+			}
 			build := func(ff *cmdutil.Factory) *cobra.Command { return NewRootCmd(ff) }
 
 			if httpAddr != "" {
-				return serveHTTP(cmd.Context(), httpAddr, build, tc)
+				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut)
 			}
 			srv, err := mcp.NewServer(build)
 			if err != nil {
 				return err
 			}
-			srv.WithTrustedContext(tc)
+			srv.WithTrustedContext(tc).WithBaseGlobals(base)
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
 	}
@@ -93,13 +126,24 @@ Authorization header, so one connection can never act in another's scope.`,
 
 // serveHTTP runs the HTTP (JSON-RPC over POST) server until the context is cancelled or a
 // termination signal arrives, then shuts down gracefully so no request is
-// dropped mid-flight.
-func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext) error {
-	h, err := mcp.NewHTTPHandler(build, tc)
+// dropped mid-flight. Read/Idle timeouts bound a slow or idle client;
+// WriteTimeout is left unset because a legitimate --page-all response can be
+// long, and per-call bounding is the operator's --timeout instead.
+func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer) error {
+	h, err := mcp.NewHTTPHandler(build, tc, base)
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	if !isLoopbackAddr(addr) {
+		fmt.Fprintf(warn, "warning: MCP HTTP server binding %q is not loopback and serves cleartext; terminate TLS at a proxy and/or bind 127.0.0.1\n", addr)
+	}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -118,6 +162,25 @@ func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.T
 		}
 		return err
 	}
+}
+
+// isLoopbackAddr reports whether a listen address binds only the loopback
+// interface. A bare ":port" or a non-loopback host is treated as public.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	if host == "" {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func firstNonEmpty(vals ...string) string {

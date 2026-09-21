@@ -44,6 +44,37 @@ var reservedFlagNames = map[string]bool{
 	"format": true, "jq": true, "dry-run": true, "verbose": true,
 	"timeout": true, "no-retry": true, "space": true, "bot-id": true, "profile": true,
 	"data": true, "file": true, "page-all": true, "page-limit": true, "output": true, "o": true,
+	// cobra auto-registers help on every command; a spec param named help/h would
+	// otherwise print usage instead of executing.
+	"help": true, "h": true,
+}
+
+// callGlobals is the operator GlobalOptions carried into a per-call factory. It
+// is applied AFTER build() (which resets the fresh root's persistent flags to
+// their defaults), so operator routing/limit intent is not silently dropped.
+//
+// The propagate/reset split is deliberate and asserted by
+// TestCallGlobals_EveryFieldClassified so a newly added GlobalOptions field
+// fails loudly instead of vanishing:
+//   - propagate (operator legitimately controls per call): BotID, Profile,
+//     Timeout, NoRetry — plus Space, which the trusted context supplies.
+//   - reset (must never be inherited into a per-call run): Format (pinned to
+//     json), DryRun, Verbose, JQ, PageAll, PageMax.
+func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forcedSpace string) {
+	// Propagate operator-set routing/limit knobs.
+	g.BotID = base.BotID
+	g.Profile = base.Profile
+	g.Timeout = base.Timeout
+	g.NoRetry = base.NoRetry
+	// Trusted space wins over anything build() or the base carried.
+	g.Space = forcedSpace
+	// Reset: never inherit these into a per-call execution.
+	g.Format = output.FormatJSON
+	g.DryRun = false
+	g.Verbose = false
+	g.JQ = ""
+	g.PageAll = false
+	g.PageMax = 0
 }
 
 // executeOperation runs one operation through the generated cobra tree
@@ -61,17 +92,15 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
 	}
 
-	// Capture the connection-forced values BEFORE build(): registering root's
-	// persistent flags (--space, --format, ...) via StringVar resets these
-	// fields to their empty defaults. Format and the trusted --space must both
-	// be re-applied afterward, or the stdio connection's space guard is silently
-	// dropped and X-Space-Id never reaches the backend.
-	forcedSpace := f.Globals.Space
+	// Snapshot the operator globals makeFactory set on f BEFORE build(): root's
+	// persistent-flag registration resets *f.Globals to empty defaults, so the
+	// operator's routing/limit intent (and the trusted space) must be re-applied
+	// afterward or it is silently dropped.
+	base := *f.Globals
+	forcedSpace := base.Space
 
 	root := build(f)
-	// Re-apply after build for the lifecycle reason above.
-	f.Globals.Format = output.FormatJSON
-	f.Globals.Space = forcedSpace
+	applyCallGlobals(f.Globals, base, forcedSpace)
 	root.SetArgs(argv)
 	root.SetOut(outBuf)
 	root.SetErr(errBuf)
@@ -82,22 +111,39 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	return readEnvelope(outBuf, errBuf, execErr)
 }
 
-// readEnvelope picks the envelope the run produced. A RunE that emitted an
-// error wrote it to errBuf; a success wrote to outBuf; a cobra parse / auth
-// gate failure returns via execErr with both buffers empty and is classified
-// through the same WrapCLIError funnel the CLI's main uses.
+// readEnvelope picks the envelope the run produced. A successful RunE writes a
+// full envelope to outBuf; an error RunE writes an error envelope to errBuf; a
+// cobra parse / auth gate failure returns via execErr with both buffers empty.
+//
+// outBuf is preferred whenever it parses as an envelope, so a benign diagnostic
+// on stderr (e.g. a client warning line) can never mask a real success — the
+// envelope contract stays intact even if something writes to errBuf alongside a
+// good result.
 func readEnvelope(outBuf, errBuf *bytes.Buffer, execErr error) ([]byte, bool) {
-	if errBuf.Len() > 0 {
-		return append([]byte(nil), errBuf.Bytes()...), false
-	}
-	if outBuf.Len() > 0 {
+	if outBuf.Len() > 0 && looksLikeEnvelope(outBuf.Bytes()) {
 		b := append([]byte(nil), outBuf.Bytes()...)
 		return b, envelopeOK(b)
+	}
+	if errBuf.Len() > 0 && looksLikeEnvelope(errBuf.Bytes()) {
+		return append([]byte(nil), errBuf.Bytes()...), false
+	}
+	if errBuf.Len() > 0 {
+		// Non-envelope stderr content with no usable envelope: wrap it.
+		return synthErrorEnvelope(output.ErrWithHint("internal", "UNEXPECTED_OUTPUT", strings.TrimSpace(errBuf.String()), "")), false
 	}
 	if execErr != nil {
 		return synthErrorEnvelope(cmdutil.WrapCLIError(execErr)), false
 	}
 	return synthErrorEnvelope(output.ErrWithHint("internal", "NO_OUTPUT", "operation produced no output", "")), false
+}
+
+// looksLikeEnvelope reports whether b decodes to a JSON object carrying an "ok"
+// field — the shared shape of both success and error envelopes.
+func looksLikeEnvelope(b []byte) bool {
+	var env struct {
+		OK *bool `json:"ok"`
+	}
+	return json.Unmarshal(b, &env) == nil && env.OK != nil
 }
 
 // envelopeOK reports whether an envelope's top-level "ok" is true.
@@ -124,14 +170,18 @@ func synthErrorEnvelope(err error) []byte {
 // merged-body validator judges it at every depth (no second validator here).
 //
 // Two capability guards run here, before cobra parsing:
-//   - A synthesized flag name may never be a reserved engine/root flag (B3): a
+//   - A synthesized flag name may never be a reserved engine/root flag: a
 //     model cannot inject --profile/--bot-id/--space/--format/--verbose/etc.
 //   - For a multipart operation, only fields the schema declares (plus the file
 //     binding) are accepted; an undeclared key is rejected rather than turned
-//     into an arbitrary --key flag (B3).
-//   - A multipart file_path is confined per policy (B2): over HTTP it is denied
+//     into an arbitrary --key flag.
+//   - A multipart file_path is confined per policy: over HTTP it is denied
 //     unless an operator upload root is configured and the resolved path
 //     (symlinks included) stays within it.
+//
+// A query/header argument whose value is JSON null is dropped (null means
+// "omitted", not "send an empty value"), so a null scope parameter cannot empty
+// a required filter on the wire.
 func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) {
 	pathNames := extractPathParams(d.Path)
 	pathSet := make(map[string]bool, len(pathNames))
@@ -150,10 +200,10 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			headerByName[p.Name] = p
 		}
 	}
-	declaredBody := map[string]bool{}
+	declaredBody := map[string]registry.SchemaInfo{}
 	if d.RequestBody != nil {
-		for name := range d.RequestBody.Properties {
-			declaredBody[name] = true
+		for name, prop := range d.RequestBody.Properties {
+			declaredBody[name] = prop
 		}
 	}
 
@@ -175,6 +225,9 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 		case pathSet[k]:
 			// consumed as a positional below
 		case queryByName[k] != nil:
+			if v == nil {
+				continue // null query arg => omitted, not an empty scope
+			}
 			fn := flagName(queryByName[k])
 			if reservedFlagNames[fn] {
 				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
@@ -185,6 +238,9 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			}
 			flags = append(flags, vs...)
 		case headerByName[k] != nil:
+			if v == nil {
+				continue // null header arg => omitted
+			}
 			fn := flagName(headerByName[k])
 			if reservedFlagNames[fn] {
 				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
@@ -196,9 +252,10 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			flags = append(flags, vs...)
 		case d.Multipart:
 			// Multipart ops take no --data; a declared body field rides as a
-			// form-text flag. An UNDECLARED key is refused (B3), so it can never
+			// form-text flag. An UNDECLARED key is refused, so it can never
 			// synthesize an arbitrary or reserved flag.
-			if !declaredBody[k] {
+			prop, ok := declaredBody[k]
+			if !ok {
 				unexpected = append(unexpected, k)
 				continue
 			}
@@ -206,13 +263,20 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			if reservedFlagNames[fn] {
 				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
 			}
-			vs, err := flagArgs(fn, v)
+			vs, err := flagArgs(fn, coerceToSchema(prop, v))
 			if err != nil {
 				return nil, err
 			}
 			flags = append(flags, vs...)
 		case d.RequestBody != nil:
-			body[k] = v
+			// Coerce to the declared property type so a forced/string value (e.g.
+			// a header-sourced channel_type "1") lands on the wire as the integer
+			// the schema declares, matching what a typed CLI flag would send.
+			if prop, ok := declaredBody[k]; ok {
+				body[k] = coerceToSchema(prop, v)
+			} else {
+				body[k] = v
+			}
 		default:
 			unexpected = append(unexpected, k)
 		}
@@ -263,7 +327,7 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 	return argv, nil
 }
 
-// resolveUploadPath enforces the multipart file-path capability boundary (B2).
+// resolveUploadPath enforces the multipart file-path capability boundary.
 // stdio is the trusted/local transport and passes the path through. Over HTTP a
 // model-supplied path is denied unless the operator configured a confined
 // upload root; when configured, the path (relative paths joined to the root) is
@@ -349,6 +413,33 @@ func flagArgs(name string, v any) ([]string, error) {
 		return nil, fmt.Errorf("argument --%s: %w", name, err)
 	}
 	return []string{"--" + name + "=" + s}, nil
+}
+
+// coerceToSchema converts a string value to the primitive JSON type the schema
+// declares (integer/number/boolean), so a trusted-context or header-sourced
+// value such as channel_type "1" reaches the wire as the integer 1 the backend
+// expects — matching what a typed CLI flag would send. Anything that does not
+// cleanly convert is left unchanged for the normal validator to judge.
+func coerceToSchema(prop registry.SchemaInfo, v any) any {
+	s, ok := v.(string)
+	if !ok {
+		return v
+	}
+	switch prop.Type {
+	case "integer":
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return json.Number(strconv.FormatInt(n, 10))
+		}
+	case "number":
+		if _, err := strconv.ParseFloat(s, 64); err == nil {
+			return json.Number(s)
+		}
+	case "boolean":
+		if b, err := strconv.ParseBool(s); err == nil {
+			return b
+		}
+	}
+	return v
 }
 
 // scalarString stringifies a JSON scalar for a flag / positional value.

@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`octo-cli mcp serve` (MCP server, v2.3 initial)** — runs octo-cli as a Model
   Context Protocol server over stdio (default, local/trusted-client transport)
-  or streamable HTTP (`--http <addr>`, production transport). It exposes three
+  or HTTP (`--http <addr>`): JSON-RPC request/response over POST — one request,
+  one response; no SSE stream or server-managed session yet. It exposes three
   meta-tools rather than one per operation, so a client's `tools/list` stays a
   few hundred tokens instead of expanding all embedded operations into resident
   schemas:
@@ -35,9 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caps are build/CI errors). Security-sensitive arguments (space, session-bound
   channel, on-behalf-of) can be forced per connection so a model-supplied value
   is overridden; the white-list is per operation, so a same-named field such as
-  drive's `space_id` is never affected. Existing CLI commands, authentication,
-  output, and exit codes are unchanged — the MCP server is a new front end over
-  the same engine.
+  drive's `space_id` is never affected. Over HTTP the credential is per
+  connection (the server env credential is never inherited), multipart
+  `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`, `Origin` is
+  validated (allowlist via `OCTO_MCP_ALLOWED_ORIGINS`, loopback-only by
+  default), and `--http` binds cleartext so TLS/loopback termination is the
+  operator's responsibility. Existing CLI commands, authentication, output, and
+  exit codes are unchanged — the MCP server is a new front end over the same
+  engine.
 
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using

@@ -77,7 +77,7 @@ func TestCallOp_SuccessReusesEngineTransport(t *testing.T) {
 	}
 }
 
-// TestCallOp_TrustedContextOverridesModelChannel is the over-privilege防护
+// TestCallOp_TrustedContextOverridesModelChannel is the over-privilege protection
 // end-to-end proof: the model writes a wrong channel_id, the connection forces
 // the trusted one, and the trusted value is what reaches the backend.
 func TestCallOp_TrustedContextOverridesModelChannel(t *testing.T) {
@@ -156,10 +156,9 @@ func TestCallOp_UnknownOperationSuggestsCandidates(t *testing.T) {
 	}
 }
 
-// TestCallOp_AutoIdempotencyKeyInjected proves the client-idempotency class
-// (design §5.3(d) sub-form two) is inherited: html.publish declares
-// x-octo-auto-idempotency-key, so run.go fills it when absent — call_op reuses
-// that path unchanged.
+// TestCallOp_AutoIdempotencyKeyInjected proves the client-idempotency class is
+// inherited: html.publish declares x-octo-auto-idempotency-key, so run.go fills
+// it when absent — call_op reuses that path unchanged.
 func TestCallOp_AutoIdempotencyKeyInjected(t *testing.T) {
 	be := &backend{reply: `{"data":{"doc_id":"d1","slug":"d1"}}`}
 	srv := be.server(t)

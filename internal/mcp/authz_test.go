@@ -26,7 +26,7 @@ func TestTrustedContext_OverridesWhitelistedArgs(t *testing.T) {
 }
 
 // TestTrustedContext_SameNameParamNotForcedOnOtherOps is the anti-footgun guard
-// (design §5.3): drive's space_id is a drive RESOURCE id, not an Octo space
+// : drive's space_id is a drive RESOURCE id, not an Octo space
 // context. Because the white-list is per-operation, a trusted SpaceID must NOT
 // rewrite drive's same-named argument.
 func TestTrustedContext_SameNameParamNotForcedOnOtherOps(t *testing.T) {
@@ -46,7 +46,7 @@ func TestTrustedContext_SameNameParamNotForcedOnOtherOps(t *testing.T) {
 		t.Errorf("message.search channel_id must not be forced, got %v", searchArgs["channel_id"])
 	}
 
-	// But bot.space-members' space_id IS a cross-space override口子 and must be forced.
+	// But bot.space-members' space_id IS a cross-space override channel and must be forced.
 	botArgs := map[string]any{"space_id": "other-space"}
 	tc.apply("bot.space-members", botArgs)
 	if botArgs["space_id"] != "octo-space-x" {

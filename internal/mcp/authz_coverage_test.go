@@ -7,7 +7,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// --- B5: per-operation authorization coverage guard ---
+// --- per-operation authorization coverage guard ---
 
 // sessionBoundFieldsOf returns the session-bound argument names an operation
 // declares (query/body), across params and request body.
@@ -41,7 +41,7 @@ func sessionBoundFieldsOf(reg *registry.Registry, op registry.OperationInfo) []s
 // guard: any enabled operation declaring channel_id / channel_type /
 // on_behalf_of must be either forced (overridableParams) or carry a documented
 // exclusion (authzExclusions). A newly added equivalent operation therefore
-// fails CI here instead of silently bypassing over-privilege防护.
+// fails CI here instead of silently bypassing over-privilege protection.
 func TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified(t *testing.T) {
 	reg := registry.MustNew()
 	for _, op := range reg.EnabledOperations() {
@@ -51,12 +51,37 @@ func TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified(t *testing.T) {
 		}
 		_, forced := overridableParams[op.ID]
 		_, excluded := authzExclusions[op.ID]
-		if !forced && !excluded {
-			t.Errorf("operation %q declares session-bound fields %v but is neither forced nor documented as excluded", op.ID, fields)
+		driveResource := isDriveResourceSpaceID(op, fields)
+		if !forced && !excluded && !driveResource {
+			t.Errorf("operation %q declares session-bound fields %v but is neither forced, documented-excluded, nor a drive resource space_id", op.ID, fields)
 		}
 		if forced && excluded {
 			t.Errorf("operation %q is both forced and excluded; pick one", op.ID)
 		}
+	}
+}
+
+// TestAuthzCoverage_SpaceIDIsClassified pins the specific space_id fixes: the
+// header-suppressed group ops are forced, and drive's same-named resource id is
+// the documented exclusion (never force-injected).
+func TestAuthzCoverage_SpaceIDIsClassified(t *testing.T) {
+	if !sessionBoundFields["space_id"] {
+		t.Fatal("space_id must be a session-bound field so the guard cannot be blind to it")
+	}
+	for _, opID := range []string{"group.create", "group.list", "bot.space-members"} {
+		if _, ok := overridableParams[opID]["space_id"]; !ok {
+			t.Errorf("%q must force space_id", opID)
+		}
+	}
+	reg := registry.MustNew()
+	// A drive op carrying space_id must be classified only via the documented
+	// drive-resource exclusion, never force-injected.
+	d, _ := reg.GetOperation("drive.folder.create")
+	if _, forced := overridableParams["drive.folder.create"]; forced {
+		t.Error("drive.folder.create space_id must NOT be force-injected (it is a drive resource id)")
+	}
+	if !isDriveResourceSpaceID(d.OperationInfo, sessionBoundFieldsOf(reg, d.OperationInfo)) {
+		t.Error("drive.folder.create should be classified as a drive resource space_id")
 	}
 }
 
@@ -80,12 +105,12 @@ func TestAuthzCoverage_ForcedOpsForceEveryDeclaredSessionField(t *testing.T) {
 }
 
 // TestAuthzCoverage_ResolvesReviewerNamedOps pins the three ops the reviewer
-// named (B5) as forced with their declared channel fields.
+// named as forced with their declared channel fields.
 func TestAuthzCoverage_ResolvesReviewerNamedOps(t *testing.T) {
 	for _, opID := range []string{"message.edit", "message.read-receipt", "bot.typing"} {
 		table, ok := overridableParams[opID]
 		if !ok {
-			t.Errorf("%q must be forced (B5)", opID)
+			t.Errorf("%q must be forced", opID)
 			continue
 		}
 		if _, ok := table["channel_id"]; !ok {

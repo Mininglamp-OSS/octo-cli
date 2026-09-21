@@ -10,7 +10,7 @@ import (
 )
 
 // MCP resources expose each enabled Skill's markdown for progressive, on-demand
-// reading (design §3.7). URIs are octo://skills/<name>/<file>.md, one namespace
+// reading. URIs are octo://skills/<name>/<file>.md, one namespace
 // shared with `octo-cli skills` and --install. Disabled skills are skipped.
 // resources/read returns whole files; clients locate #anchors themselves.
 
@@ -34,7 +34,7 @@ type resourceAnnotations struct {
 }
 
 // listResources enumerates every enabled skill's SKILL.md plus its reference
-// files, with the minimal per-item metadata (design §3.7.2).
+// files, with the minimal per-item metadata.
 func (s *Server) listResources() map[string]any {
 	var out []resourceEntry
 	for _, meta := range s.mapping.enabledSkillMetas() {
@@ -83,7 +83,7 @@ type resourceContent struct {
 // outside the octo://skills/ namespace and any disabled skill. A trailing
 // #fragment (a section_uri anchor from search/describe) is stripped before the
 // file lookup — MCP resources have no fragment semantics, so the whole file is
-// returned and the client locates the anchor itself (B6).
+// returned and the client locates the anchor itself.
 func (s *Server) readResource(uri string) (map[string]any, error) {
 	uri, _, _ = strings.Cut(uri, "#")
 	if !strings.HasPrefix(uri, skillURIScheme) {
