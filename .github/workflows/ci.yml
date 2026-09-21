@@ -189,6 +189,6 @@ jobs:
           node-version: "22"
       - name: npm test
         run: npm test
-      - name: Release preflight tests
+      - name: Release workflow and PPT contract tests
         working-directory: .
-        run: node --test scripts/ppt-release-preflight.test.mjs
+        run: node --test scripts/release-workflows.test.mjs

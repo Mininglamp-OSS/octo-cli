@@ -61,13 +61,14 @@ Sharing updates also require the target backend to return `permissionEpoch` from
 `docs share get` and enforce it on `docs share set`. Pass the epoch from the read;
 after HTTP 409, re-read and reconsider the change rather than automatically retrying.
 
-The supported GitHub Release and npm publishing workflows enforce fresh Bot
-create/read probes for all five choices and a sharing epoch read/update/conflict
-check on the fresh blank probe before publication. Missing release
-configuration or any failed probe blocks publishing; draft/dry runs are not
-deployment evidence. Operators must also confirm the frontend deployment. See
+GitHub Release and npm publishing do not require PPT-specific credentials or
+create test documents. Operators verify backend compatibility and the frontend
+when related deployments change, separately from CLI publishing. Publication
+deliberately restores the pre-#173 behavior without a main-only dispatch-ref check
+or PPT-specific environment approval; operators select the workflow ref and tag.
+The existing tag and CI-evidence checks remain. See
 [`docs/ppt-release-gate.md`](https://github.com/Mininglamp-OSS/octo-cli/blob/main/docs/ppt-release-gate.md)
-for protected-environment setup and retained acceptance-document cleanup.
+for deployment compatibility and wire contracts.
 
 The four native gallery choices require a backend with that catalogue deployed.
 CLI acceptance or a dry run does not prove the server supports them. If the server
