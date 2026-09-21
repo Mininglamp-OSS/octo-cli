@@ -1,6 +1,7 @@
 ---
 name: octo-docs
 version: 0.2.0
+services: ["docs"]
 description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and edit spreadsheets including structural row/column edits, find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Bots cannot delete documents. Load after octo-shared.
 metadata:
   requires:

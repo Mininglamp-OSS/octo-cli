@@ -8,6 +8,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli mcp serve --facade two|both` (two-tool Skill-driven facade)** — an
+  opt-in alternative tool surface over the same MCP engine, folding the three
+  meta-tools into two verbs. It is off by default (`--facade three`), so the
+  existing three-tool behaviour is unchanged; `--facade both` exposes all five
+  for controlled side-by-side comparison.
+  - `get_skill` — a discriminated discovery tool. `intent=search` is the
+    `search_ops` discovery backend (domain/keyword filter, or the service↔skill
+    module map with neither); `intent=describe` returns one operation's full
+    zero-drift schema plus its Skill reference, a schema fingerprint, a
+    per-operation `constraint_enforcement` projection, and progressive `depth`
+    (`summary` outline or `full` schema).
+  - `execute` — invokes one operation through the identical assembly / identity
+    / validation / transport / envelope / authz backend as `call_op`, wrapped in
+    a structured status (`ok` / `validation_error` / `ambiguous` /
+    `execution_error` / `schema_drift` / `result_unknown` / `auth_error`).
+    `dry_run=true` constructs and locally validates the request without sending
+    it (no server-side success implied); for multipart operations it validates
+    required path/query/header/body fields and the file binding without opening,
+    reading, or materializing the file, and never contacts the backend. An
+    optional `schema_fingerprint` from `describe` makes `execute` refuse with
+    `schema_drift` if the embedded schema changed since it was read. The
+    fingerprint is deterministic schema-drift detection only — it does not prove
+    `describe` was called this session; a stateful session challenge is deferred.
+    Machine-readable outcome semantics distinguish `result_unknown` (a mutating
+    request whose outcome is ambiguous after a transport/timeout/5xx — may have
+    applied, do not auto-retry) and `auth_error` (fix the credential) from a
+    plain `execution_error`. Error and degradation hints are facade-aware: under
+    `--facade two` they route to `get_skill`, never the disabled
+    `search_ops` / `describe_op`.
+  The facade reuses the existing registry/schema, Skill mapping/resources and
+  over-privilege防护 white-list unchanged; contract and side-by-side comparison
+  tests assert both facades drive the backend to the same wire.
+
+- **`octo-cli mcp serve` (MCP server, v2.3 initial)** — runs octo-cli as a Model
+  Context Protocol server over stdio (default, local/trusted-client transport)
+  or streamable HTTP (`--http <addr>`, production transport). It exposes three
+  meta-tools rather than one per operation, so a client's `tools/list` stays a
+  few hundred tokens instead of expanding all embedded operations into resident
+  schemas:
+  - `search_ops` — discover operations by domain/keyword, or a live
+    service↔skill module map with no arguments; each hit carries Skill
+    navigation metadata (which business Skill to load, a short summary, a
+    recommendation level, and the resource URI), never the Skill body.
+  - `describe_op` — the full, zero-drift parameter schema for one operation
+    (straight from the embedded spec) plus the operation's Skill reference and
+    a short pre-call advice; the Skill never carries a second copy of the
+    schema.
+  - `call_op` — invokes one operation by driving the existing command engine
+    in-process, so identity routing, request assembly, pre-flight validation,
+    transport, secret masking, and the JSON envelope are reused unchanged.
+  Skills are exposed for progressive on-demand reading through MCP resources
+  (`octo://skills/<name>/<file>.md`); clients that do not negotiate resources
+  degrade to a `skill_name` + readable hint and the three tools still work
+  standalone. The service→Skill map comes from each `SKILL.md`'s frontmatter
+  `services:` line plus a new embedded `skills/manifest.json`, merged and
+  validated fail-fast at start (unknown service/op, uncovered service, missing
+  reference file or heading anchor, disabled-service drift, and length/level
+  caps are build/CI errors). Security-sensitive arguments (space, session-bound
+  channel, on-behalf-of) can be forced per connection so a model-supplied value
+  is overridden; the white-list is per operation, so a same-named field such as
+  drive's `space_id` is never affected. Existing CLI commands, authentication,
+  output, and exit codes are unchanged — the MCP server is a new front end over
+  the same engine.
+
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using
   zero-based coordinates while the backend atomically relocates affected
