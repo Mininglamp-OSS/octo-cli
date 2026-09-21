@@ -188,11 +188,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only the old blank/pitch/report/lesson catalogue leaves only `blank` usable
   if this CLI ships first: new gallery IDs fail server-side and old IDs fail
   locally. Update Bot binaries and installed skill copies together after rollout.
-  Supported Release/npm workflows now require fresh five-template Bot create/read
-  probes plus a restricted sharing read/update/stale-epoch rejection/readback
-  check against a configured release target; missing configuration fails closed.
-  Draft/dry runs do not probe. See [PPT release gate](docs/ppt-release-gate.md) for
-  protected-environment setup, frontend confirmation and retained probe documents.
+  GitHub Release/npm publishing uses the existing CI and packaging checks; it
+  does not require PPT-specific credentials or create acceptance documents.
+  This deliberately restores the pre-#173 publishing behavior without a main-only
+  dispatch-ref check or PPT-specific environment approval; operators choose the
+  workflow ref and release tag. Tag and CI-evidence checks remain in place.
+  Live deployment acceptance is an operator-run check when related services
+  change, not a mandatory step on every CLI release. See
+  [PPT deployment compatibility](docs/ppt-release-gate.md).
   Enum errors include the deployment caveat for flags, inline JSON and files.
 - **`octo-cli docs members remove` now requires `--principal-space-id`** — Bot
   membership deletion is an exact Space-qualified mutation. Requiring the
