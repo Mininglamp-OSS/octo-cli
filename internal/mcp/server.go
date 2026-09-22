@@ -94,11 +94,12 @@ func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer
 	f.IOStreams = streams
 	reg := s.reg
 	f.RegistryFunc = func() *registry.Registry { return reg }
-	// Operator-set routing/limit globals; re-applied post-build by executeOperation.
+	// Operator-set routing/limit/safety globals; re-applied post-build by executeOperation.
 	f.Globals.BotID = s.baseGlobals.BotID
 	f.Globals.Profile = s.baseGlobals.Profile
 	f.Globals.Timeout = s.baseGlobals.Timeout
 	f.Globals.NoRetry = s.baseGlobals.NoRetry
+	f.Globals.DryRun = s.baseGlobals.DryRun
 	f.Globals.Space = tc.SpaceID
 	if s.httpMode {
 		tok := s.credentialToken

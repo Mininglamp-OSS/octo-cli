@@ -51,26 +51,32 @@ var reservedFlagNames = map[string]bool{
 
 // callGlobals is the operator GlobalOptions carried into a per-call factory. It
 // is applied AFTER build() (which resets the fresh root's persistent flags to
-// their defaults), so operator routing/limit intent is not silently dropped.
+// their defaults), so operator routing/limit/safety intent is not silently
+// dropped.
 //
 // The propagate/reset split is deliberate and asserted by
 // TestCallGlobals_EveryFieldClassified so a newly added GlobalOptions field
 // fails loudly instead of vanishing:
 //   - propagate (operator legitimately controls per call): BotID, Profile,
-//     Timeout, NoRetry — plus Space, which the trusted context supplies.
+//     Timeout, NoRetry, DryRun — plus Space, which the trusted context supplies.
+//     DryRun in particular is a safety switch, not an output knob: an operator
+//     who starts `mcp serve --dry-run` gets a rehearsal server where every call
+//     prints its request and performs no backend mutation, honoring the flag's
+//     documented "print request without executing" contract.
 //   - reset (must never be inherited into a per-call run): Format (pinned to
-//     json), DryRun, Verbose, JQ, PageAll, PageMax.
+//     json — the tool result must stay an envelope), Verbose, JQ, PageAll,
+//     PageMax (output/pagination knobs the model does not control).
 func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forcedSpace string) {
-	// Propagate operator-set routing/limit knobs.
+	// Propagate operator-set routing/limit/safety knobs.
 	g.BotID = base.BotID
 	g.Profile = base.Profile
 	g.Timeout = base.Timeout
 	g.NoRetry = base.NoRetry
+	g.DryRun = base.DryRun
 	// Trusted space wins over anything build() or the base carried.
 	g.Space = forcedSpace
 	// Reset: never inherit these into a per-call execution.
 	g.Format = output.FormatJSON
-	g.DryRun = false
 	g.Verbose = false
 	g.JQ = ""
 	g.PageAll = false

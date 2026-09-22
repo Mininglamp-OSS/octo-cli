@@ -19,8 +19,8 @@ import (
 // added without deciding whether it is propagated into a call_op or reset, so
 // the propagation class cannot silently regain a blind spot.
 func TestCallGlobals_EveryFieldClassified(t *testing.T) {
-	propagated := map[string]bool{"BotID": true, "Profile": true, "Timeout": true, "NoRetry": true, "Space": true}
-	reset := map[string]bool{"Format": true, "DryRun": true, "Verbose": true, "JQ": true, "PageAll": true, "PageMax": true}
+	propagated := map[string]bool{"BotID": true, "Profile": true, "Timeout": true, "NoRetry": true, "Space": true, "DryRun": true}
+	reset := map[string]bool{"Format": true, "Verbose": true, "JQ": true, "PageAll": true, "PageMax": true}
 	tp := reflect.TypeOf(cmdutil.GlobalOptions{})
 	for i := 0; i < tp.NumField(); i++ {
 		name := tp.Field(i).Name
@@ -35,17 +35,27 @@ func TestApplyCallGlobals_PropagatesAndResets(t *testing.T) {
 		Format: "table", JQ: ".x", DryRun: true, Verbose: true,
 		PageAll: true, PageMax: 99, Space: "old", BotID: "old", Profile: "old", Timeout: "old", NoRetry: false,
 	}
-	base := cmdutil.GlobalOptions{BotID: "b", Profile: "p", Timeout: "5s", NoRetry: true}
+	base := cmdutil.GlobalOptions{BotID: "b", Profile: "p", Timeout: "5s", NoRetry: true, DryRun: true}
 	applyCallGlobals(g, base, "forced-space")
 
 	if g.BotID != "b" || g.Profile != "p" || g.Timeout != "5s" || !g.NoRetry {
 		t.Errorf("operator routing/limit globals not propagated: %+v", g)
 	}
+	if !g.DryRun {
+		t.Errorf("operator --dry-run must propagate to the call, got %+v", g)
+	}
 	if g.Space != "forced-space" {
 		t.Errorf("trusted space must win, got %q", g.Space)
 	}
-	if g.Format != output.FormatJSON || g.DryRun || g.Verbose || g.JQ != "" || g.PageAll || g.PageMax != 0 {
+	if g.Format != output.FormatJSON || g.Verbose || g.JQ != "" || g.PageAll || g.PageMax != 0 {
 		t.Errorf("reset fields leaked into a call_op: %+v", g)
+	}
+
+	// With no operator --dry-run, a stale DryRun on the fresh factory must clear.
+	g2 := &cmdutil.GlobalOptions{DryRun: true}
+	applyCallGlobals(g2, cmdutil.GlobalOptions{}, "")
+	if g2.DryRun {
+		t.Errorf("DryRun must follow the operator flag, not a stale value; got true")
 	}
 }
 
@@ -107,6 +117,55 @@ func TestCallOp_ForcedArgumentsSurfacedInEnvelope(t *testing.T) {
 	}
 	if be.body["channel_id"] != "forced-chan" {
 		t.Errorf("forced value must reach the backend, got %v", be.body["channel_id"])
+	}
+}
+
+// TestCallOp_DryRunServer_NeverReachesBackend_RealMakeFactory proves the
+// operator's --dry-run reaches served calls: a dry server previews the request
+// (dry_run:true envelope) and never mutates the backend, while a non-dry server
+// on the same real factory path does reach it — both directions.
+func TestCallOp_DryRunServer_NeverReachesBackend_RealMakeFactory(t *testing.T) {
+	dryArgs := map[string]any{
+		"operation_id": "message.send",
+		"arguments":    map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}},
+	}
+
+	// Dry server: no backend hit, dry_run:true envelope.
+	beDry := &backend{}
+	srvDry := beDry.server(t)
+	t.Setenv("OCTO_API_BASE_URL", srvDry.URL)
+	t.Setenv("OCTO_TOKEN", "bf_test")
+	t.Setenv("OCTO_CONFIG_DIR", t.TempDir())
+
+	sDry := newTestServer(t) // real makeFactory (factoryFn nil)
+	sDry.baseGlobals = cmdutil.GlobalOptions{DryRun: true}
+
+	res := callTool(t, sDry, "call_op", dryArgs)
+	if res.IsError {
+		t.Fatalf("dry-run call should succeed with a preview envelope: %s", res.Content[0].Text)
+	}
+	env := toolText(t, res)
+	if env["ok"] != true {
+		t.Errorf("dry-run envelope should be ok:true, got %v", env)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data == nil || data["dry_run"] != true {
+		t.Errorf("dry-run envelope data must carry dry_run:true, got %v", env["data"])
+	}
+	if beDry.path != "" {
+		t.Fatalf("dry-run must not reach the backend, path=%q", beDry.path)
+	}
+
+	// Non-dry server on the same real path DOES reach the backend.
+	beLive := &backend{}
+	srvLive := beLive.server(t)
+	t.Setenv("OCTO_API_BASE_URL", srvLive.URL)
+	sLive := newTestServer(t)
+	if res := callTool(t, sLive, "call_op", dryArgs); res.IsError {
+		t.Fatalf("non-dry call should reach the backend: %s", res.Content[0].Text)
+	}
+	if beLive.path != "/v1/bot/sendMessage" {
+		t.Errorf("non-dry call must reach the backend, path=%q", beLive.path)
 	}
 }
 

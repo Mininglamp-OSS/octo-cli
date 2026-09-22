@@ -77,7 +77,11 @@ Over-privilege protection: for stdio the forced space / channel / on-behalf-of
 values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*
 env); for HTTP they come per-connection from the operator config with request
 headers filling only unforced fields, plus the bearer Authorization header, so
-one connection can never act in another's scope.`,
+one connection can never act in another's scope.
+
+--dry-run turns the whole server into a rehearsal: every call_op prints the
+request it would send (method, url, masked headers, body) as a "dry_run": true
+envelope and performs no backend mutation for the server's lifetime.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{"skipValidation": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -95,14 +99,16 @@ one connection can never act in another's scope.`,
 				ChannelType: firstNonEmpty(forceChannelType, os.Getenv("OCTO_FORCE_CHANNEL_TYPE")),
 				OnBehalfOf:  firstNonEmpty(forceOnBehalfOf, os.Getenv("OCTO_FORCE_ON_BEHALF_OF")),
 			}
-			// Carry the operator's credential-selector and limit globals into each
-			// call so --profile / --bot-id / --timeout / --no-retry are not
-			// silently dropped by the per-call factory.
+			// Carry the operator's credential-selector, limit, and dry-run globals
+			// into each call so --profile / --bot-id / --timeout / --no-retry /
+			// --dry-run are honored rather than silently dropped by the per-call
+			// factory. --dry-run makes every served call a rehearsal.
 			base := cmdutil.GlobalOptions{
 				BotID:   f.Globals.BotID,
 				Profile: f.Globals.Profile,
 				Timeout: f.Globals.Timeout,
 				NoRetry: f.Globals.NoRetry,
+				DryRun:  f.Globals.DryRun,
 			}
 			build := func(ff *cmdutil.Factory) *cobra.Command { return NewRootCmd(ff) }
 

@@ -36,7 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caps are build/CI errors). Security-sensitive arguments (space, session-bound
   channel, on-behalf-of) can be forced per connection so a model-supplied value
   is overridden; the white-list is per operation, so a same-named field such as
-  drive's `space_id` is never affected. Over HTTP the credential is per
+  drive's `space_id` is never affected. `--dry-run` turns the whole server into
+  a rehearsal: every `call_op` prints the request it would send as a
+  `"dry_run": true` envelope and performs no backend mutation for the server's
+  lifetime. Over HTTP the credential is per
   connection (the server env credential is never inherited), multipart
   `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`, `Origin` is
   validated (allowlist via `OCTO_MCP_ALLOWED_ORIGINS`, loopback-only by
