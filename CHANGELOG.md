@@ -8,6 +8,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`octo-cli mcp serve` (MCP server, v2.3 initial)** — runs octo-cli as a Model
+  Context Protocol server over stdio (default, local/trusted-client transport)
+  or HTTP (`--http <addr>`): JSON-RPC request/response over POST — one request,
+  one response; no SSE stream or server-managed session yet. It exposes three
+  meta-tools rather than one per operation, so a client's `tools/list` stays a
+  few hundred tokens instead of expanding all embedded operations into resident
+  schemas:
+  - `search_ops` — discover operations by domain/keyword, or a live
+    service↔skill module map with no arguments; each hit carries Skill
+    navigation metadata (which business Skill to load, a short summary, a
+    recommendation level, and the resource URI), never the Skill body.
+  - `describe_op` — the full, zero-drift parameter schema for one operation
+    (straight from the embedded spec) plus the operation's Skill reference and
+    a short pre-call advice; the Skill never carries a second copy of the
+    schema.
+  - `call_op` — invokes one operation by driving the existing command engine
+    in-process, so identity routing, request assembly, pre-flight validation,
+    transport, secret masking, and the JSON envelope are reused unchanged.
+  Skills are exposed for progressive on-demand reading through MCP resources
+  (`octo://skills/<name>/<file>.md`); clients that do not negotiate resources
+  degrade to a skill `name` + readable hint and the three tools still work
+  standalone. The service→Skill map comes from each `SKILL.md`'s frontmatter
+  `services:` line plus a new embedded `skills/manifest.json`, merged and
+  validated fail-fast at start (unknown service/op, uncovered service, missing
+  reference file or heading anchor, disabled-service drift, and length/level
+  caps are build/CI errors). Security-sensitive arguments (space, session-bound
+  channel, on-behalf-of) can be forced per connection so a model-supplied value
+  is overridden; the white-list is per operation, so a same-named field such as
+  drive's `space_id` is never affected. `--dry-run` turns the whole server into
+  a rehearsal: every `call_op` prints the request it would send as a
+  `"dry_run": true` envelope and performs no backend mutation for the server's
+  lifetime. Over HTTP the credential is per
+  connection (the server env credential is never inherited), multipart
+  `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`, `Origin` is
+  validated (allowlist via `OCTO_MCP_ALLOWED_ORIGINS`, loopback-only by
+  default), and `--http` binds cleartext so TLS/loopback termination is the
+  operator's responsibility. Existing CLI commands, authentication, output, and
+  exit codes are unchanged — the MCP server is a new front end over the same
+  engine.
+
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using
   zero-based coordinates while the backend atomically relocates affected
