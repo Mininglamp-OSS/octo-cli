@@ -38,8 +38,11 @@ func TestTrustedContext_SameNameParamNotForcedOnOtherOps(t *testing.T) {
 		t.Errorf("drive space_id must NOT be overridden by trusted Octo space, got %v", driveArgs["space_id"])
 	}
 
-	// message.search's channel_id is optional cross-channel scope and is also
-	// absent from the table, so it stays model-controlled.
+	// message.search's channel_id is optional cross-channel scope: with no
+	// configured channel value the empty-skip leaves it model-controlled (the
+	// documented default). When the operator DOES configure a channel, the
+	// search family is force-when-configured — pinned by
+	// TestAuthzCoverage_ConfiguredForceReachesEverySessionBoundOp.
 	searchArgs := map[string]any{"channel_id": "chan-explicit"}
 	tc.apply("message.search", searchArgs)
 	if searchArgs["channel_id"] != "chan-explicit" {

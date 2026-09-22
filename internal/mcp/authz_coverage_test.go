@@ -38,10 +38,12 @@ func sessionBoundFieldsOf(reg *registry.Registry, op registry.OperationInfo) []s
 }
 
 // TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified is the spec-driven
-// guard: any enabled operation declaring channel_id / channel_type /
-// on_behalf_of must be either forced (overridableParams) or carry a documented
-// exclusion (authzExclusions). A newly added equivalent operation therefore
-// fails CI here instead of silently bypassing over-privilege protection.
+// guard: every session-bound field (channel_id / channel_type / on_behalf_of /
+// space_id) an enabled operation declares must be force-when-configured
+// (present in that op's overridableParams table) — the only exception is drive's
+// same-named resource space_id (isDriveResourceSpaceID). A new equivalent
+// operation, or an op left out of the force table, therefore fails CI here
+// instead of silently bypassing over-privilege protection.
 func TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified(t *testing.T) {
 	reg := registry.MustNew()
 	for _, op := range reg.EnabledOperations() {
@@ -49,14 +51,55 @@ func TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified(t *testing.T) {
 		if len(fields) == 0 {
 			continue
 		}
-		_, forced := overridableParams[op.ID]
-		_, excluded := authzExclusions[op.ID]
-		driveResource := isDriveResourceSpaceID(op, fields)
-		if !forced && !excluded && !driveResource {
-			t.Errorf("operation %q declares session-bound fields %v but is neither forced, documented-excluded, nor a drive resource space_id", op.ID, fields)
+		table := overridableParams[op.ID]
+		for _, f := range fields {
+			if f == "space_id" && isDriveResourceSpaceID(op, fields) {
+				continue // documented never-force: drive resource id, not Octo space context
+			}
+			if _, forced := table[f]; !forced {
+				t.Errorf("operation %q declares session-bound field %q but does not force it "+
+					"(must be force-when-configured, or a documented drive resource space_id)", op.ID, f)
+			}
 		}
-		if forced && excluded {
-			t.Errorf("operation %q is both forced and excluded; pick one", op.ID)
+	}
+}
+
+// TestAuthzCoverage_ConfiguredForceReachesEverySessionBoundOp is the tightened
+// pin (A2): with a fully-configured trusted context, apply must overwrite every
+// session-bound field an enabled op declares with the operator value — so no
+// operation (the message.search* family included) can silently ignore a
+// configured --force-* value. Drive's resource space_id is the sole documented
+// exception and must stay model-controlled. Deleting the search-family force
+// entries turns this red.
+func TestAuthzCoverage_ConfiguredForceReachesEverySessionBoundOp(t *testing.T) {
+	reg := registry.MustNew()
+	tc := TrustedContext{SpaceID: "S-forced", ChannelID: "C-forced", ChannelType: "1", OnBehalfOf: "O-forced"}
+	forcedValue := map[string]string{
+		"space_id":     "S-forced",
+		"channel_id":   "C-forced",
+		"channel_type": "1",
+		"on_behalf_of": "O-forced",
+	}
+	for _, op := range reg.EnabledOperations() {
+		fields := sessionBoundFieldsOf(reg, op)
+		if len(fields) == 0 {
+			continue
+		}
+		args := map[string]any{}
+		for _, f := range fields {
+			args[f] = "model-" + f
+		}
+		tc.apply(op.ID, args)
+		for _, f := range fields {
+			if f == "space_id" && isDriveResourceSpaceID(op, fields) {
+				if args[f] != "model-space_id" {
+					t.Errorf("op %q: drive resource space_id must NOT be forced, got %v", op.ID, args[f])
+				}
+				continue
+			}
+			if args[f] != forcedValue[f] {
+				t.Errorf("op %q: configured --force value for %q must win, got %v (want %q)", op.ID, f, args[f], forcedValue[f])
+			}
 		}
 	}
 }

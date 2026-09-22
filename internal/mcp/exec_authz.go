@@ -15,9 +15,12 @@ import "github.com/Mininglamp-OSS/octo-cli/internal/registry"
 // The white-list is PER OPERATION, never a global parameter-name match. That is
 // deliberate: message.send.channel_id is forced, but drive's space_id (a drive
 // resource id of the form personal:<octo-space>:<uid> / shared:<uuid>,
-// drive.json:83) and message.search's channel_id (optional cross-channel scope,
-// message.json:157) are NOT forced, so the same-name trap is structurally
-// impossible here.
+// drive.json:83) is never forced, so the same-name trap is structurally
+// impossible here. Forcing is force-WHEN-CONFIGURED: apply only overwrites a
+// field the trusted context carries a non-empty value for, so the message.search*
+// family (channel_id optional cross-channel scope, on_behalf_of the search
+// subject) keeps its model-controlled default when the operator configures
+// nothing, and is confined the moment the operator sets a --force-* value.
 
 // TrustedContext holds the connection-scoped values a trusted source injects.
 // SpaceID additionally flows onto the credential so X-Space-Id is set the same
@@ -82,29 +85,41 @@ var overridableParams = map[string]map[string]overridableField{
 	"group.list": {
 		"space_id": fieldSpaceID,
 	},
-}
-
-// authzExclusions records operations that DECLARE a session-bound field but are
-// deliberately NOT forced, with the rationale. The coverage guard
-// (TestAuthzCoverage_EveryEnabledSessionBoundOpIsClassified) requires every
-// enabled operation carrying a session-bound field to be either forced
-// (overridableParams), excluded here, or a documented drive resource-id space
-// (isDriveResourceSpaceID) — so a newly added equivalent operation fails CI
-// instead of silently bypassing over-privilege protection.
-//
-// The message.search family is excluded because its channel_id is an OPTIONAL
-// cross-channel scope ("omit to search across all reachable channels",
-// message.json:157) and its on_behalf_of selects the real-person search subject
-// a bf_ token searches as; forcing either would break legitimate cross-channel
-// / on-behalf-of search, so these stay model/caller-controlled and the backend
-// ACL is the guard.
-var authzExclusions = map[string]string{
-	"message.search":        "search scope: channel_id is optional cross-channel scope; on_behalf_of selects the search subject",
-	"message.search.all":    "search scope: optional cross-channel scope / search subject",
-	"message.search.around": "search scope: optional cross-channel scope / search subject",
-	"message.search.files":  "search scope: optional cross-channel scope / search subject",
-	"message.search.media":  "search scope: optional cross-channel scope / search subject",
-	"message.search.groups": "search scope: on_behalf_of selects the search subject",
+	// The message.search* family is force-when-configured, NOT excluded: when the
+	// operator sets a --force-* value it must win (confine the search to that
+	// channel / on-behalf-of subject), and apply's empty-value skip preserves the
+	// legitimate default — an unconfigured operator leaves channel_id as optional
+	// cross-channel scope and on_behalf_of as the model-chosen search subject.
+	// (channel_id / channel_type / on_behalf_of are declared in the body;
+	// message.search.groups declares only on_behalf_of.)
+	"message.search": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+		"on_behalf_of": fieldOnBehalfOf,
+	},
+	"message.search.all": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+		"on_behalf_of": fieldOnBehalfOf,
+	},
+	"message.search.files": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+		"on_behalf_of": fieldOnBehalfOf,
+	},
+	"message.search.media": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+		"on_behalf_of": fieldOnBehalfOf,
+	},
+	"message.search.around": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+		"on_behalf_of": fieldOnBehalfOf,
+	},
+	"message.search.groups": {
+		"on_behalf_of": fieldOnBehalfOf,
+	},
 }
 
 // sessionBoundFields are the argument names that decide who/what scope an
