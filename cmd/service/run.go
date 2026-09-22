@@ -728,13 +728,16 @@ func missingVariantRequiredValue(value any) bool {
 }
 
 // applyBodyFlags merges body-flag values (--foo, --bar) into base, following the
-// promotable-primitive kinds registered on the operation. Only Changed flags are
-// applied so unset flags do not overwrite --data-supplied values with zero.
+// promotable-primitive kinds registered on the operation. Explicit flags override
+// --data; declared boolean defaults fill only absent body keys.
 // uint64 id flags are validated and written as json.Number so they marshal as a
 // bare JSON integer — the wire contract stays integer while the flag is text.
 func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[string]any) *output.ExitError {
 	for flagName, bf := range rt.bodyFlags {
 		if !cobraCmd.Flags().Changed(flagName) {
+			if _, supplied := base[bf.apiName]; !supplied && bf.boolDefault != nil {
+				base[bf.apiName] = *bf.boolDefault
+			}
 			continue
 		}
 		switch bf.kind {
@@ -828,7 +831,7 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 	if err := checkUint64Field(schema, value, path, flagName); err != nil {
 		return err
 	}
-	if value == nil {
+	if value == nil && (!v.enforcePublicAPIConstraints || schema.Type != "boolean") {
 		// Enum and uint64 constraints above reject null. Other optional fields
 		// preserve the historical clearing-value passthrough.
 		return nil
@@ -854,6 +857,10 @@ func (v bodySchemaValidator) validateByType(
 		if v.enforcePublicAPIConstraints {
 			return validateString(schema, value, path)
 		}
+	case "boolean":
+		if v.enforcePublicAPIConstraints {
+			return validateBoolean(value, path)
+		}
 	case "":
 		if v.enforcePublicAPIConstraints {
 			if len(schema.Required) > 0 || len(schema.Properties) > 0 {
@@ -863,6 +870,13 @@ func (v bodySchemaValidator) validateByType(
 				return validateString(schema, value, path)
 			}
 		}
+	}
+	return nil
+}
+
+func validateBoolean(value any, path string) *output.ExitError {
+	if _, valid := value.(bool); !valid {
+		return schemaError(fmt.Sprintf("field %s must have type boolean", bodyPath(path)))
 	}
 	return nil
 }
@@ -1155,6 +1169,7 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	}
 	body, err := cli.Do(ctx, req)
 	if err != nil {
+		err = annotateSheetCleaningError(rt, req, err)
 		err = annotateIdempotencyKey(rt, req, err)
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err

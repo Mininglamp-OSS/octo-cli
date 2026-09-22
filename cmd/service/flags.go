@@ -65,13 +65,14 @@ type pathFlag struct {
 }
 
 type bodyFlag struct {
-	apiName string // JSON body field name
-	kind    valueKind
-	secret  bool // x-octo-secret: mask the value in verbose / dry-run output
-	strVal  *string
-	intVal  *int
-	boolVal *bool
-	strSlc  *[]string
+	apiName     string // JSON body field name
+	kind        valueKind
+	secret      bool // x-octo-secret: mask the value in verbose / dry-run output
+	strVal      *string
+	intVal      *int
+	boolVal     *bool
+	boolDefault *bool
+	strSlc      *[]string
 }
 
 type valueKind int
@@ -365,7 +366,11 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 			cmd.Flags().IntVar(bf.intVal, flagName, 0, desc)
 		case kindBool:
 			bf.boolVal = new(bool)
-			cmd.Flags().BoolVar(bf.boolVal, flagName, false, desc)
+			if defaultValue, ok := prop.Default.(bool); ok {
+				bf.boolDefault = &defaultValue
+				*bf.boolVal = defaultValue
+			}
+			cmd.Flags().BoolVar(bf.boolVal, flagName, *bf.boolVal, desc)
 		case kindStringSlice:
 			bf.strSlc = new([]string)
 			cmd.Flags().StringSliceVar(bf.strSlc, flagName, nil, desc)

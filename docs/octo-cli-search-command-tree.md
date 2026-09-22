@@ -11,10 +11,10 @@ octo-cli
 │
 ├─【service 域 · spec 自动注册】
 │
-├─ docs (42) ─ 文档 / 表格 / 白板
+├─ docs (44) ─ 文档 / 表格 / 白板
 │    ├─ 直接        create · list · get · search · rename · delete · forward-grant
 │    ├─ content     get · edit
-│    ├─ sheet       get · edit · replace
+│    ├─ sheet       get · edit · replace · split · deduplicate
 │    │              rows insert · delete
 │    │              columns insert · delete
 │    ├─ scene       get · edit · export

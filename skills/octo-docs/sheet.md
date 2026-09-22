@@ -42,6 +42,110 @@ octo-cli docs sheet edit <docId> --base-version "<token>" \
   --data '{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}'
 ```
 
+### Conditional formatting
+
+Requires the backend conditional-format read/write support; the history-restore
+change alone does not add rule authoring. `docs sheet get` returns
+`sheetConditionalFormats` (first page only), keyed by `logicalId!cfId`. If that
+field is absent, do not assume an empty rule set or claim authoring is supported.
+
+Use `docs sheet edit` with `conditionalFormats` for sparse rule CRUD. Send a
+complete `{priority,rule}` value to create/update one rule; send `null` to delete
+it. Other rules survive. Rules remain compact, not expanded into per-cell styles.
+
+```bash
+octo-cli docs sheet get <docId> --jq '.data.sheetConditionalFormats'
+octo-cli docs sheet edit <docId> --base-version '<fresh-token>' --data '{
+  "conditionalFormats":{"default!duplicates":{
+    "priority":0,
+    "rule":{"cfId":"duplicates","stopIfTrue":false,
+      "ranges":[{"startRow":1,"endRow":99,"startColumn":0,"endColumn":0}],
+      "rule":{"type":"highlightCell","subType":"duplicateValues","style":{"bg":{"rgb":"#FFCCCC"}}}
+    }
+  }}
+}'
+octo-cli docs sheet edit <docId> --base-version '<new-token>' \
+  --data '{"conditionalFormats":{"default!duplicates":null}}'
+```
+
+The inner rule supports Univer highlight-cell rules, color scales, data bars and
+icon sets. Preserve the full config when editing a rule read from the API.
+Limits: 1000 rules and 1 MiB per workbook, 64 KiB and 512 ranges per rule.
+Protected-sheet authorization is checked server-side. Deleting a worksheet also
+removes its rules. Row/column structural operations on a sheet with these rules
+return `409 sheet_conditional_format_unsupported` until server-side rule relocation is supported; never silently drop
+rules to make a structural operation succeed.
+
+The existing `docs versions restore <docId> <versionId>` restores these rules
+together with the sheet when the paired backend restore support is deployed.
+Use a fresh `docs sheet get` afterwards to verify them; there is no separate
+conditional-format restore command. Restoring a pre-feature version clears rules.
+
+### Safe split and duplicate removal
+
+`docs sheet split` and `docs sheet deduplicate` default to **server-side preview**.
+The CLI explicitly sends `preview:true` when omitted; explicit flags override
+`--data`, and an explicit `preview:false` in either form opts into application.
+`preview`, `overwrite`, `header` and `caseSensitive` accept JSON booleans only:
+`null`, strings such as `"false"`, numbers, arrays and objects fail locally with
+`VALIDATION_ERROR`, before HTTP. Explicit flags still override `--data` values.
+Preview requires writer access but does not mutate or create a safety snapshot.
+`--dry-run` only prints the HTTP request; it does **not** preview spreadsheet data.
+
+```bash
+octo-cli docs sheet get <docId>
+octo-cli docs sheet split <docId> --base-version '<token>' --data '{
+  "logicalId":"default","delimiter":",",
+  "range":{"startRow":1,"endRow":10,"startColumn":0,"endColumn":0}
+}'
+octo-cli docs sheet split <docId> --base-version '<same-token>' --preview=false --data '{
+  "logicalId":"default","delimiter":",",
+  "range":{"startRow":1,"endRow":10,"startColumn":0,"endColumn":0}
+}'
+octo-cli docs sheet deduplicate <docId> --base-version '<fresh-token>' --header --data '{
+  "logicalId":"default",
+  "range":{"startRow":0,"endRow":100,"startColumn":0,"endColumn":3}
+}'
+```
+
+Inspect preview `cells`, `range`, `removedRows` and `overwrittenCells`. Apply the
+same operation/options/token with `--preview=false`. Split needs explicit
+`--overwrite` if any nonempty destination to the right would be replaced. Never
+add that flag automatically after a conflict. On `base_version_stale`, re-read
+and preview again; do not blindly refresh the token and reuse an old approval.
+
+Split accepts one column and a literal delimiter, not CSV quoting or displayed
+thousands separators. It preserves leading zeros, long identifiers, empty fields
+and `=`-prefixed strings, writes string type plus text format `@`, and retains
+other destination styles. No warning-suppression command is necessary.
+
+Dedupe compares all selected columns, optionally skips the header and defaults
+to case-insensitive comparisons (`--case-sensitive` opts out). It keeps the first
+record and blank rows, compacts only selected values and clears trailing contents.
+It does not delete worksheet rows or move formatting between coordinates.
+
+Both input and output are bounded to 20,000 cells or a lower deployed write
+limit. Source formulas, active shared filters, overlapping merges, and sheets
+with drawings, links, validations or comments are refused. Source rich-text
+payloads (`p`) are also refused with `cleaning_complex_sheet`, rather than losing
+their inline formatting. Permission/protection
+and version checks apply on the server; application uses one atomic edit and an
+automatic safety snapshot. CLI writes are not a browser's native undo command.
+Restoring that snapshot with `docs versions restore` requires an admin identity;
+writer access to apply cleaning does not grant permission to restore versions.
+
+Deploy backend !147, then !166, before using these commands. A route-level 404
+with `Cannot POST` returns `SHEET_CLEANING_UNAVAILABLE`. Other unstructured 404s
+retain `NOT_FOUND` with guidance to check `docs sheet get` at the same API origin
+and then backend deployment/routing; do not assume the document was deleted.
+Explicit backend document/worksheet error codes remain unchanged. Never emulate
+unavailable cleaning with a whole-sheet rewrite.
+
+Temporary personal filtering belongs to one browser window and has no saved
+server-side view. For private CLI analysis, filter the read output with `--jq`
+(fields are under `.data` in the CLI response envelope);
+never write `filters` to imitate a personal view, because those filters are shared.
+
 ### Insert/delete rows and columns
 
 Use structural commands when rows or columns must be added or removed rather
