@@ -143,13 +143,7 @@ func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.T
 	if !isLoopbackAddr(addr) {
 		fmt.Fprintf(warn, "warning: MCP HTTP server binding %q is not loopback and serves cleartext; terminate TLS at a proxy and/or bind 127.0.0.1\n", addr)
 	}
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
+	srv := newMCPHTTPServer(addr, h)
 
 	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -167,6 +161,20 @@ func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.T
 			return nil
 		}
 		return err
+	}
+}
+
+// newMCPHTTPServer builds the MCP HTTP server with the connection timeouts that
+// bound a slow or idle client. WriteTimeout is intentionally left unset because
+// a legitimate --page-all response can be long; per-call bounding is the
+// operator's --timeout instead.
+func newMCPHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 }
 
