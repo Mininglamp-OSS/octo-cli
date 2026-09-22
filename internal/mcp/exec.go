@@ -31,8 +31,9 @@ type RootBuilder func(f *cmdutil.Factory) *cobra.Command
 // so, the operator-confined upload root that a multipart file_path must stay
 // within.
 type execPolicy struct {
-	httpMode   bool
-	uploadRoot string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled over HTTP
+	httpMode         bool
+	uploadRoot       string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled unless allowLocalUpload
+	allowLocalUpload bool   // operator --allow-local-upload: unconfined pass-through, stdio only
 }
 
 // reservedFlagNames are the engine/root flag names a translated argument must
@@ -340,31 +341,49 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 // cleaned and its symlinks resolved, and the real target must stay within the
 // resolved root — blocking traversal, absolute escapes, and symlink escapes, so
 // host auth/config/environment files are never reachable through MCP.
+// resolveUploadPath enforces the multipart file-path capability boundary on
+// EVERY transport: a model-supplied file_path can otherwise turn call_op into
+// an arbitrary local-file read (file.upload / html.asset.add /
+// loop.attachment.upload then exfiltrate through the bot's space). The default
+// is deny; the model can never toggle it.
+//
+//   - OCTO_MCP_UPLOAD_ROOT set  → confine (both transports): the path (relative
+//     joined to the root) is cleaned and its symlinks resolved, and the real
+//     target must stay within the resolved root — blocking traversal, absolute
+//     escapes, and symlink escapes.
+//   - root unset, stdio + operator --allow-local-upload → pass through, the
+//     documented trusted-local escape hatch (operator flag, not model input).
+//   - root unset otherwise (HTTP always, or stdio without the flag) → refuse.
 func resolveUploadPath(p string, pol execPolicy) (string, error) {
-	if !pol.httpMode {
-		return p, nil
+	root := strings.TrimSpace(pol.uploadRoot)
+	if root == "" {
+		if pol.allowLocalUpload && !pol.httpMode {
+			return p, nil
+		}
+		hint := "set OCTO_MCP_UPLOAD_ROOT to a confined directory to enable uploads"
+		if !pol.httpMode {
+			hint += ", or start `mcp serve --allow-local-upload` for a trusted-local host"
+		}
+		return "", errors.New("local file_path upload is disabled; " + hint)
 	}
-	if strings.TrimSpace(pol.uploadRoot) == "" {
-		return "", errors.New("local file_path upload is disabled for HTTP connections; set OCTO_MCP_UPLOAD_ROOT to a confined directory to enable it")
-	}
-	root, err := filepath.EvalSymlinks(pol.uploadRoot)
+	resolvedRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", fmt.Errorf("configured upload root is not accessible: %w", err)
 	}
-	root, err = filepath.Abs(root)
+	resolvedRoot, err = filepath.Abs(resolvedRoot)
 	if err != nil {
 		return "", fmt.Errorf("configured upload root is invalid: %w", err)
 	}
 	candidate := p
 	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(root, candidate)
+		candidate = filepath.Join(resolvedRoot, candidate)
 	}
 	candidate = filepath.Clean(candidate)
 	resolved, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
 		return "", fmt.Errorf("file_path is not accessible: %w", err)
 	}
-	rel, err := filepath.Rel(root, resolved)
+	rel, err := filepath.Rel(resolvedRoot, resolved)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return "", errors.New("file_path escapes the configured upload root")
 	}

@@ -34,11 +34,12 @@ type Server struct {
 	mapping *Mapping
 	build   RootBuilder
 
-	trusted         TrustedContext
-	credentialToken string                // "" → resolve from env (stdio) unless httpMode
-	httpMode        bool                  // HTTP connection: never inherit the server env credential
-	uploadRoot      string                // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path over HTTP
-	baseGlobals     cmdutil.GlobalOptions // operator serve-time globals (BotID/Profile/Timeout/NoRetry)
+	trusted          TrustedContext
+	credentialToken  string                // "" → resolve from env (stdio) unless httpMode
+	httpMode         bool                  // HTTP connection: never inherit the server env credential
+	uploadRoot       string                // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path (both transports)
+	allowLocalUpload bool                  // operator --allow-local-upload: unconfined stdio upload pass-through
+	baseGlobals      cmdutil.GlobalOptions // operator serve-time globals (BotID/Profile/Timeout/NoRetry/DryRun)
 
 	protocolVersion string
 	clientResources bool
@@ -75,6 +76,15 @@ func (s *Server) WithTrustedContext(tc TrustedContext) *Server { s.trusted = tc;
 // WithBaseGlobals carries the operator's parsed serve-time globals (credential
 // selector + limits) into each call_op.
 func (s *Server) WithBaseGlobals(g cmdutil.GlobalOptions) *Server { s.baseGlobals = g; return s }
+
+// WithUploadPolicy sets the multipart file_path confinement for this connection:
+// root is OCTO_MCP_UPLOAD_ROOT (confine when set); allowLocal is the operator
+// --allow-local-upload opt-in (unconfined stdio pass-through, ignored on HTTP).
+func (s *Server) WithUploadPolicy(root string, allowLocal bool) *Server {
+	s.uploadRoot = root
+	s.allowLocalUpload = allowLocal
+	return s
+}
 
 // makeFactory builds a fresh factory with buffered IO for one call_op, applying
 // the connection credential and the operator globals. A fresh factory per call

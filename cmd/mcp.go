@@ -41,6 +41,7 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
 		forceChannelID   string
 		forceChannelType string
 		forceOnBehalfOf  string
+		allowLocalUpload bool
 	)
 	serve := &cobra.Command{
 		Use:   "serve",
@@ -67,11 +68,17 @@ Deployment (HTTP):
     the operator did not force. Only a proxy that sets and strips these headers
     makes them trustworthy.
   - OCTO_MCP_ALLOWED_ORIGINS (comma-separated) permits browser origins; unset,
-    only loopback origins are accepted (anti DNS-rebinding).
-  - OCTO_MCP_UPLOAD_ROOT confines multipart file_path uploads to one directory;
-    unset, local file_path upload over HTTP is refused.
+    only loopback origins are accepted (anti DNS-rebinding). Setting it replaces
+    the loopback default, so list your loopback origin too if you still use it.
   - initialize / tools/list / search_ops / describe_op / resources/read need no
     bearer, so any peer that can reach the port can enumerate the catalog.
+
+Multipart file_path uploads (file.upload, html.asset.add, loop.attachment.upload)
+are default-deny on BOTH transports so a model cannot read an arbitrary local
+file: set OCTO_MCP_UPLOAD_ROOT to confine uploads to one directory (path is
+cleaned and symlink-resolved and must stay within it), or, on stdio only, pass
+--allow-local-upload to allow unconfined uploads on a trusted-local host. HTTP
+never allows unconfined uploads.
 
 Over-privilege protection: for stdio the forced space / channel / on-behalf-of
 values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*
@@ -119,14 +126,16 @@ envelope and performs no backend mutation for the server's lifetime.`,
 			if err != nil {
 				return err
 			}
-			srv.WithTrustedContext(tc).WithBaseGlobals(base)
+			srv.WithTrustedContext(tc).WithBaseGlobals(base).
+				WithUploadPolicy(os.Getenv("OCTO_MCP_UPLOAD_ROOT"), allowLocalUpload)
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
 	}
 	serve.Flags().StringVar(&httpAddr, "http", "", "serve HTTP (JSON-RPC over POST) on this address (e.g. :8080); default transport is stdio")
-	serve.Flags().StringVar(&forceChannelID, "force-channel-id", "", "stdio: force this channel_id on session-bound message ops")
-	serve.Flags().StringVar(&forceChannelType, "force-channel-type", "", "stdio: force this channel_type on session-bound message ops")
-	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "stdio: force this on_behalf_of identity")
+	serve.Flags().StringVar(&forceChannelID, "force-channel-id", "", "force this channel_id on session-bound message ops (stdio + HTTP)")
+	serve.Flags().StringVar(&forceChannelType, "force-channel-type", "", "force this channel_type on session-bound message ops (stdio + HTTP)")
+	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "force this on_behalf_of identity (stdio + HTTP)")
+	serve.Flags().BoolVar(&allowLocalUpload, "allow-local-upload", false, "stdio only: allow unconfined multipart file_path uploads (trusted-local hosts); default-deny unless OCTO_MCP_UPLOAD_ROOT is set")
 	return serve
 }
 

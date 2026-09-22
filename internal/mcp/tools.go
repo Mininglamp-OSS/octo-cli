@@ -171,13 +171,17 @@ func (s *Server) moduleMap() map[string]any {
 	for _, svc := range s.reg.EnabledServices() {
 		ops := s.reg.ListOperations(svc)
 		samples := make([]string, 0, 3)
-		for i := 0; i < len(ops) && len(samples) < 3; i++ {
+		advertised := 0
+		for i := range ops {
 			if _, div := divergentMCPOps[ops[i].ID]; div {
-				continue // don't sample an op that MCP does not advertise
+				continue // withheld from MCP: exclude from both the count and the samples
 			}
-			samples = append(samples, ops[i].ID)
+			advertised++
+			if len(samples) < 3 {
+				samples = append(samples, ops[i].ID)
+			}
 		}
-		e := svcEntry{Service: svc, OperationCount: len(ops), SampleOps: samples}
+		e := svcEntry{Service: svc, OperationCount: advertised, SampleOps: samples}
 		if name, ok := s.mapping.serviceToSkill[svc]; ok {
 			if meta := s.mapping.skills[name]; meta != nil {
 				e.Skill = &skillNav{
@@ -218,7 +222,7 @@ func (s *Server) navFor(op registry.OperationInfo, forDescribe bool) *skillNav {
 	if om != nil && om.Section != "" {
 		file, _, _ := strings.Cut(om.Section, "#")
 		nav.Section = om.Section
-		nav.SectionURI = "octo://skills/" + meta.Name + "/" + strings.ReplaceAll(om.Section, "#", "#")
+		nav.SectionURI = "octo://skills/" + meta.Name + "/" + om.Section
 		if file != "" && file != "SKILL.md" {
 			nav.ReferenceURI = refResourceURI(meta.Name, file)
 		}
@@ -334,7 +338,7 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if fn == nil {
 		fn = s.makeFactory
 	}
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot}
+	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload}
 	f, outBuf, errBuf := fn(s.trusted)
 	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
 	env = spliceForcedArguments(env, forced)
@@ -380,22 +384,44 @@ func unknownOperationPayload(reg *registry.Registry, operationID string) map[str
 		"error": map[string]any{
 			"type":    "validation",
 			"code":    "UNKNOWN_OPERATION",
-			"message": fmt.Sprintf("unknown operation %q", operationID),
+			"message": fmt.Sprintf("unknown operation %q", truncateRunes(operationID, 200)),
 			"hint":    "call search_ops to discover operation ids",
 		},
 		"candidates": nearestOperations(reg, operationID),
 	}
 }
 
+// truncateRunes caps a possibly-attacker-sized string before it is echoed back
+// in an error message, so a multi-megabyte operation_id is not reflected whole.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// maxRankQueryRunes bounds the attacker-controlled operation_id fed into the
+// edit-distance ranking. describe_op / call_op are reachable without a bearer,
+// and an unbounded id would make levenshtein over all enabled operations an
+// unauthenticated CPU/allocation exhaustion vector, so the ranking input is
+// capped (a real operation_id is far shorter).
+const maxRankQueryRunes = 128
+
 // nearestOperations returns up to five enabled operation ids closest to the
 // query, ranked by edit distance (with a substring bonus) so a small typo like
-// "message.snd" surfaces "message.send" ahead of longer prefix-sharing ids.
+// "message.snd" surfaces "message.send" ahead of longer prefix-sharing ids. The
+// query is capped at maxRankQueryRunes so the ranking cost stays bounded
+// regardless of input size.
 func nearestOperations(reg *registry.Registry, query string) []string {
 	type scored struct {
 		id   string
 		dist int
 	}
 	q := strings.ToLower(query)
+	if r := []rune(q); len(r) > maxRankQueryRunes {
+		q = string(r[:maxRankQueryRunes])
+	}
 	var all []scored
 	for _, op := range reg.EnabledOperations() {
 		id := strings.ToLower(op.ID)

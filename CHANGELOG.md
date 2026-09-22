@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     transport, secret masking, and the JSON envelope are reused unchanged.
   Skills are exposed for progressive on-demand reading through MCP resources
   (`octo://skills/<name>/<file>.md`); clients that do not negotiate resources
-  degrade to a `skill_name` + readable hint and the three tools still work
+  degrade to a skill `name` + readable hint and the three tools still work
   standalone. The service→Skill map comes from each `SKILL.md`'s frontmatter
   `services:` line plus a new embedded `skills/manifest.json`, merged and
   validated fail-fast at start (unknown service/op, uncovered service, missing

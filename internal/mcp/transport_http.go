@@ -1,16 +1,25 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
+
+// defaultHTTPRequestTimeout bounds how long a single HTTP JSON-RPC request may
+// run, so no request outlives the operator's expectations (a slow or stuck
+// handler, or a client that disconnects). It is generous enough for a normal
+// call_op — including a bounded --page-all walk — and overridable via
+// OCTO_MCP_HTTP_REQUEST_TIMEOUT for long-running deployments.
+const defaultHTTPRequestTimeout = 120 * time.Second
 
 // maxHTTPBodyBytes caps a single request body (parity with the stdio message cap).
 const maxHTTPBodyBytes = 8 << 20
@@ -32,6 +41,7 @@ type HTTPHandler struct {
 	baseGlobals    cmdutil.GlobalOptions
 	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
 	uploadRoot     string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
+	requestTimeout time.Duration
 }
 
 // Trusted-context request headers. Space also flows onto the credential so
@@ -63,7 +73,20 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.
 		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted, baseGlobals: base,
 		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
 		uploadRoot:     os.Getenv("OCTO_MCP_UPLOAD_ROOT"),
+		requestTimeout: httpRequestTimeoutFromEnv(),
 	}, nil
+}
+
+// httpRequestTimeoutFromEnv reads OCTO_MCP_HTTP_REQUEST_TIMEOUT (a Go duration)
+// or falls back to the default. A non-positive or malformed value uses the
+// default rather than disabling the bound.
+func httpRequestTimeoutFromEnv() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("OCTO_MCP_HTTP_REQUEST_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultHTTPRequestTimeout
 }
 
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +122,13 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	srv := h.connectionServer(r)
-	resp, has := srv.Dispatch(r.Context(), req)
+	// Bound the request: no single JSON-RPC call may outlive the request
+	// timeout (and a client disconnect cancels it), so a slow or stuck handler
+	// cannot hold a goroutine indefinitely. The deadline flows into call_op's
+	// in-process execution and its outbound HTTP call.
+	ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout)
+	defer cancel()
+	resp, has := srv.Dispatch(ctx, req)
 	w.Header().Set("Content-Type", "application/json")
 	if !has {
 		// A notification: acknowledge with 202 and no body.
