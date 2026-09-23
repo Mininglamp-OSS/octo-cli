@@ -221,6 +221,9 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.
+# Rollout: the HTML backend will be deployed first. Release this CLI workflow
+# and updated skills only after octo-docs-html#34 is deployed and verified on
+# every HTML-serving instance, after the backend rollout has completed.
 # Canonical create has no doc reference: omit --slug. The CLI generates a key.
 octo-cli html publish --html '<h1>hi</h1>' \
   --mount-type group --group-no <group_no> --data '{"meta":{"title":"Launch page"}}'
@@ -229,6 +232,10 @@ octo-cli html publish --html '<h1>hi</h1>' \
 # slug as data.slug; do not infer this from mount_type or doc_id being non-empty.
 # Read the latest HTML and its matching version before editing.
 octo-cli html source <doc-ref>  # data: {slug, version, html}
+# If source returns a route-level 404 but html get can read the same reference, the
+# document exists; check backend deployment/routing and stop the update.
+# Metadata cannot replace source. Do not create a replacement or publish
+# without a version to work around an unavailable source endpoint.
 # Edit data.html; if data.version was 1, publish version 2.
 octo-cli html publish --slug <doc-ref> --version 2 --html "$(cat edited.html)"
 # Omit --idempotency-key on updates. On version_conflict/version_required, the

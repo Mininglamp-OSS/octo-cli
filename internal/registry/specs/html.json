@@ -100,7 +100,7 @@
                   },
                   "version": {
                     "type": "integer",
-                    "description": "New output version: for updates send the source version read before editing plus one. The server requires current latest+1 for bot updates (428 version_required if missing/zero, 409 version_conflict if mismatched). Omit for first publication. Do not increase this value without rereading and editing the latest source."
+                    "description": "New output version: for updates send the source version read before editing plus one. On servers with octo-docs-html#34 deployed, the server requires current latest+1 for bot updates (428 version_required if missing/zero, 409 version_conflict if mismatched). The HTML backend will be deployed and verified on every serving instance before this CLI workflow is released. Omit for first publication. Do not increase this value without rereading and editing the latest source."
                   },
                   "meta": {
                     "type": "object",
@@ -1120,7 +1120,7 @@
       "get": {
         "operationId": "html.source",
         "summary": "Read stored HTML and its version together (needs reader)",
-        "description": "Read the latest published source by default, or select a fixed version. Returns slug, version and full stored HTML from the same read, without the viewer overlay. Retain data.html with data.version, edit that HTML, then publish with version set to the saved version plus one. On version_conflict, read again and reapply the edit; never only increase version and resend stale HTML. Requires octo-docs-html MR !34 to be deployed.",
+        "description": "Read the latest published source by default, or select a fixed version. Returns slug, version and full stored HTML from the same read, without the viewer overlay. Retain data.html with data.version, edit that HTML, then publish with version set to the saved version plus one. On version_conflict, read again and reapply the edit; never only increase version and resend stale HTML. Requires octo-docs-html MR !34 to be deployed. Rollout is backend first: deploy and verify octo-docs-html#34 on every HTML-serving instance before releasing this CLI workflow. A route-level 404 while html get can read the same reference means the source endpoint is unavailable, not that the document is missing; stop and check deployment/routing. Do not infer the source version from metadata, create a replacement document, or fall back to versionless publishing.",
         "x-octo-risk": "read",
         "parameters": [
           {

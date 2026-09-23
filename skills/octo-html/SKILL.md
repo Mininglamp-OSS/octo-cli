@@ -42,9 +42,22 @@ slugs are accepted. The CLI does not persist the reference.
 **Minimum rollout dependency:** this contract requires the canonical-create
 server changes in octo-docs-backend#166 and octo-docs-html#33 to be merged and
 deployed before this CLI is released. Source reads and guarded bot updates also
-require [octo-docs-html#34](https://codex.mlamp.cn/dmwork/octo-docs-html/-/merge_requests/34)
-to be merged and deployed. An older server without `html source` cannot support
-this editing workflow; do not infer a version from metadata or bypass the guard.
+require octo-docs-html#34. **The HTML backend will be deployed first.** The CLI
+release and rollout of its updated skills follow only after the source endpoint
+and publish guard are deployed and verified on every HTML-serving instance.
+Do not release this workflow during a mixed old/new backend rollout.
+
+If `html source` unexpectedly returns a route-level 404, check the same
+reference with `octo-cli html get <doc-ref>` using the same identity and gateway.
+If metadata is readable, the document exists: report that the source endpoint
+is unavailable and the backend deployment or gateway routing needs checking.
+Do not report the document as missing or create a replacement. If both reads
+fail, a 404 alone cannot distinguish a missing/inaccessible document from a
+deployment problem; retain the reference and report the uncertainty.
+Stop this update until source access is restored. Do not infer a version from
+metadata, publish without a version, or switch endpoints to bypass the guard.
+Once the backend is ready, recover actual 409/428 version errors autonomously
+as described below.
 
 ## Auth & space
 
@@ -287,8 +300,11 @@ an element's tag or nearby heading unless necessary.
   roles/identity/Space, or switch endpoints; ask a human document admin to delete
   it. This is not a successful deletion or a missing-membership problem.
 - `401 / 403` — missing or insufficient capability.
-- `404` — document reference (canonical doc_id or legacy slug), comment, or aid
-  not found.
+- `404` — the requested document, comment, or aid may be missing or inaccessible.
+  A route-level 404 from `html source` can instead indicate an unavailable source
+  endpoint. Follow the rollout check above before diagnosing the document as
+  missing: readable metadata confirms it exists but is never a source/version
+  fallback. Do not create a replacement document or publish without the guard.
 - `400 html_contains_javascript` — the published or draft HTML carries
   JavaScript (see the no-JavaScript rule in §1). `details.violations` names every
   offending construct with its `kind` / `tag` / `attr` / `line`; regenerate the
