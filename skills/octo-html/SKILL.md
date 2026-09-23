@@ -1,6 +1,6 @@
 ---
 name: octo-html
-version: 0.2.0
+version: 0.3.0
 description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. Bots cannot delete documents. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
 metadata:
   requires:
@@ -29,7 +29,8 @@ All commands call `$OCTO_API_BASE_URL/docs-html/v1/*` and return the standard
   legacy slug wherever this skill says `<doc-ref>`.
 - **No alias identity and no same-name republish.** Creating again with the same
   `meta.title` creates a different document. To publish another version, supply
-  the saved `data.slug` in the server's legacy-named `slug` field.
+  the saved `data.slug` in the server's legacy-named `slug` field and set
+  `--version` to the version read with `html source` plus one.
 - Do not infer a mode from `mount_type`, `registered`, `status`, or whether
   `data.doc_id` is non-empty. `registered` and `status` report operational state,
   not identity.
@@ -40,7 +41,10 @@ slugs are accepted. The CLI does not persist the reference.
 
 **Minimum rollout dependency:** this contract requires the canonical-create
 server changes in octo-docs-backend#166 and octo-docs-html#33 to be merged and
-deployed before this CLI is released.
+deployed before this CLI is released. Source reads and guarded bot updates also
+require [octo-docs-html#34](https://codex.mlamp.cn/dmwork/octo-docs-html/-/merge_requests/34)
+to be merged and deployed. An older server without `html source` cannot support
+this editing workflow; do not infer a version from metadata or bypass the guard.
 
 ## Auth & space
 
@@ -99,7 +103,10 @@ octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html
 # Unmounted creation follows the same identity contract and also gets doc_id.
 octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","meta":{"title":"Private draft"}}'
 
-# Publish version 2 only after reading source version 1 and editing that HTML.
+# Read HTML and its version together, then edit data.html.
+octo-cli html source <doc-ref>
+# → data: { slug, version, html }
+# Publish version 2 only if the source read returned version 1.
 # Keep the wire field name `slug` and omit
 # idempotency_key. Pass ONLY a slug the server returned earlier: an unregistered
 # slug does not create a canonical document — it produces a legacy unregistered
@@ -126,14 +133,27 @@ octo-cli html get <doc-ref>
 octo-cli html versions <doc-ref>
 ```
 
+`html list` returns the backend's offset envelope as `data` plus `_pagination`
+(`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
+
+Mounts (`group`, `space`, or `thread`) control placement/registration only. For
+`group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
+document-reference format.
+
+WITHOUT `mount_type` the backend skips docs-backend registration, so the HTML
+never shows up in the sidebar file list — this is the #1 "my doc didn't appear"
+gotcha. An unmounted document still receives a canonical `doc_id`; registration
+and identity are separate concerns.
+
 ### Concurrent edits and the existing `--version` flag
 
-Before editing an existing HTML document, read
-`GET /docs-html/v1/docs/{doc-ref}/versions/latest/source` through the gateway
-(or `/v1/docs/{doc-ref}/versions/latest/source` directly from docs-html), using
-the document's authenticated read context. Retain the source bytes and the
-`X-Document-Version` header from that same response. `html get` only returns
-metadata; do not pair a separately fetched version number with older HTML.
+Before editing an existing HTML document, run `octo-cli html source <doc-ref>`.
+Retain `data.html` and `data.version` from that same response. It reads
+`GET /docs-html/v1/docs/{doc-ref}/source` and returns the full stored HTML without
+the viewer overlay. To inspect a fixed historical source, use
+`octo-cli html source <doc-ref> --version 7`; omit `--version` to read latest.
+`html get` only returns metadata; do not pair a separately fetched version
+number with older HTML.
 
 `--version` is the **new output version**. If the source read was version N,
 edit that source and publish with `--version N+1` (a concrete integer, such as
@@ -150,19 +170,9 @@ preserved under `error.detail.error.details`. Read that source, inspect others'
 changes, and reapply the intended edit before submitting its version plus one.
 **Never just increase `--version` and resend stale HTML.** Do not switch to
 publication through drafts or element replacement to bypass a rejected update;
-those APIs retain separate concurrency contracts.
-
-`html list` returns the backend's offset envelope as `data` plus `_pagination`
-(`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
-
-Mounts (`group`, `space`, or `thread`) control placement/registration only. For
-`group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
-document-reference format.
-
-WITHOUT `mount_type` the backend skips docs-backend registration, so the HTML
-never shows up in the sidebar file list — this is the #1 "my doc didn't appear"
-gotcha. An unmounted document still receives a canonical `doc_id`; registration
-and identity are separate concerns.
+draft promotion and element replacement do not substitute for guarded
+full-document publishing. Element replacement's `base_version` locates source
+content; it is not this publish precondition.
 
 ## 2. Author drafts
 
@@ -228,6 +238,16 @@ an element's tag or nearby heading unless necessary.
 
 ## Errors
 
+- `428 VALIDATION_ERROR`, with `error.detail.error.details.code=version_required`
+  — a bot update omitted its output version or sent zero. Read with `html source`,
+  edit that source, then publish its version plus one.
+- `409 CONFLICT`, with `error.detail.error.details.code=version_conflict`
+  — the output version is stale or skips ahead. Read the latest source and
+  reapply the intended edit while preserving others' changes. Never just increase
+  `--version` and resend stale HTML. Both errors exit with code 2; the backend
+  recovery hint is preserved at `error.detail.error.hint` and version/source
+  fields at `error.detail.error.details`.
+
 - `403 bot_delete_forbidden` — terminal bot-deletion policy denial, including
   already-deleted retries on the docs-backend routes. Do not retry, change
   roles/identity/Space, or switch endpoints; ask a human document admin to delete
@@ -246,6 +266,7 @@ an element's tag or nearby heading unless necessary.
 
 ```bash
 octo-cli schema --list html
+octo-cli schema html.source
 octo-cli schema html.publish
 octo-cli schema html.element.replace
 octo-cli schema html.reply

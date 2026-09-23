@@ -65,7 +65,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"event":       2,
 		"docs":        42,
 		"drive":       43,
-		"html":        21,
+		"html":        22,
 		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
@@ -1406,4 +1406,42 @@ func TestPptCommentIdempotencyKeyMatchesBackend(t *testing.T) {
 		return
 	}
 	t.Fatal("comment idempotency key schema missing")
+}
+
+func TestHTMLSourceAndPublishVersionContract(t *testing.T) {
+	r := MustNew()
+	source, ok := r.GetOperation("html.source")
+	if !ok {
+		t.Fatal("missing html.source")
+	}
+	if source.Method != "GET" || source.Path != "/docs-html/v1/docs/{doc_id}/source" || source.ResponseUnwrap != "data" || source.Risk != "read" {
+		t.Fatalf("source descriptor = %+v", source)
+	}
+	if !reflect.DeepEqual(source.UnwrapRequiredFields, []string{"slug", "version", "html"}) {
+		t.Fatalf("source required = %v", source.UnwrapRequiredFields)
+	}
+	for field, kind := range map[string]string{"slug": "string", "version": "integer", "html": "string"} {
+		if source.ResponseSchema.Properties[field].Type != kind {
+			t.Fatalf("source %s is not %s", field, kind)
+		}
+	}
+	if len(source.Parameters) != 2 || source.Parameters[1].Name != "version" || source.Parameters[1].In != "query" || source.Parameters[1].Required {
+		t.Fatalf("source parameters = %+v", source.Parameters)
+	}
+	publish, _ := r.GetOperation("html.publish")
+	if publish.RequestBody.Properties["version"].Type != "integer" {
+		t.Fatal("publish must retain existing integer version")
+	}
+	description := publish.RequestBody.Properties["version"].Description
+	for _, want := range []string{"source version read before editing plus one", "latest+1", "428 version_required", "409 version_conflict"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("publish version description is missing %q", want)
+		}
+	}
+	if strings.Contains(description, "omit to auto-increment") || strings.Contains(description, "optional explicit version") {
+		t.Fatal("publish version restored the superseded auto-increment contract")
+	}
+	if _, ok := publish.RequestBody.Properties["base_version"]; ok {
+		t.Fatal("publish introduced a second concurrency parameter")
+	}
 }

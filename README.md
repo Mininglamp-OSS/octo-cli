@@ -38,7 +38,7 @@ Key properties:
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
 | `docs`    | 38  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, sheet cells (paged read and atomic replace), board scenes, members, comments, versions, attachments |
-| `html`    | 21  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
+| `html`    | 22  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — read source with its version, publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `drive`   | 43  | Network drive — spaces & members, folder/file tree, full-text search, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 46 leaves total |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
@@ -227,8 +227,14 @@ octo-cli html publish --html '<h1>hi</h1>' \
 # Save data.slug from the publish response. For a new document data.slug == data.doc_id, mounted or
 # unmounted. Every later operation uses data.slug. Old documents keep their legacy
 # slug as data.slug; do not infer this from mount_type or doc_id being non-empty.
-# To republish, pass --slug <doc-ref> and omit --idempotency-key. An unknown
-# legacy slug is rejected and cannot create a document.
+# Read the latest HTML and its matching version before editing.
+octo-cli html source <doc-ref>  # data: {slug, version, html}
+# Edit data.html; if data.version was 1, publish version 2.
+octo-cli html publish --slug <doc-ref> --version 2 --html "$(cat edited.html)"
+# Omit --idempotency-key on updates. On version_conflict, read again and
+# reapply the edit; never only increase --version and resend stale HTML.
+# Never invent a reference: an unknown legacy slug does not create a canonical
+# document and will not appear in the sidebar file list.
 octo-cli html list
 octo-cli html versions <doc-ref>
 octo-cli html draft create --html '<h1>wip</h1>'

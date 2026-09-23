@@ -91,7 +91,7 @@ octo-cli docs      create | list | search | get | rename | delete | forward-gran
                comments list|add|get|replies|edit|delete
                versions list|create|state|rename|delete|restore
                attachments presign|get|resolve
-octo-cli html      list | get | publish | versions | rm     (octo-doc HTML docs; distinct backend from `docs`)
+octo-cli html      list | get | source | publish | versions | rm     (octo-doc HTML docs; distinct backend from `docs`)
                draft    save|promote
                share | unshare
                grant    add|list|rm

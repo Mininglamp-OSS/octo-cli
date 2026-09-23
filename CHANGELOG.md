@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
+  matching version in one JSON response. Bot updates read this pair, edit the
+  HTML, and publish with the existing `--version` set to the read version + 1.
+  On a version conflict, reread and reapply the edit before publishing again.
+  Requires the octo-docs-html#34 JSON source endpoint and publish guard
+  to be merged and deployed before releasing this CLI workflow.
+
+### Added
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using
   zero-based coordinates while the backend atomically relocates affected

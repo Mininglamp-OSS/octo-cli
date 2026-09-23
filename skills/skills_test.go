@@ -241,6 +241,24 @@ func TestOctoHTMLSkillCanonicalCreateContract(t *testing.T) {
 	}
 }
 
+func TestHTMLGuardedEditingGuidance(t *testing.T) {
+	b, err := FS.ReadFile("octo-html/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+	for _, want := range []string{"octo-cli html source <doc-ref>", "`data.html` and `data.version`", "version plus one", "Never just increase `--version`", "428 VALIDATION_ERROR", "409 CONFLICT", "error.detail.error.details", "octo-docs-html#34"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("missing guarded edit instruction %q", want)
+		}
+	}
+	for _, stale := range []string{"omit to auto-increment", "optional explicit version", "X-Document-Version", "separate concurrency contracts"} {
+		if strings.Contains(content, stale) {
+			t.Errorf("stale publish guidance %q", stale)
+		}
+	}
+}
+
 func TestOctoSummarySkillEmbedded(t *testing.T) {
 	b, err := FS.ReadFile("octo-summary/SKILL.md")
 	if err != nil {
