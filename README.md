@@ -231,8 +231,9 @@ octo-cli html publish --html '<h1>hi</h1>' \
 octo-cli html source <doc-ref>  # data: {slug, version, html}
 # Edit data.html; if data.version was 1, publish version 2.
 octo-cli html publish --slug <doc-ref> --version 2 --html "$(cat edited.html)"
-# Omit --idempotency-key on updates. On version_conflict, read again and
-# reapply the edit; never only increase --version and resend stale HTML.
+# Omit --idempotency-key on updates. On version_conflict/version_required, the
+# bot rereads, merges and republishes within the same task (up to 3 recovery
+# attempts); never only increase --version and resend stale HTML.
 # Never invent a reference: an unknown legacy slug does not create a canonical
 # document and will not appear in the sidebar file list.
 octo-cli html list

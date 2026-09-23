@@ -168,6 +168,38 @@ past the next version. The backend's `error.details` contains `version`,
 `latest_version`, `next_version`, and `source_path`; in CLI output these are
 preserved under `error.detail.error.details`. Read that source, inspect others'
 changes, and reapply the intended edit before submitting its version plus one.
+
+#### Recover version errors autonomously
+
+**The bot MUST recover from `version_conflict` and `version_required` within
+the same task. Do not end the task by reporting the raw version error to the
+user or ask the user to perform a routine reread/retry.** CLI exit code 2 is a
+tool result for the bot to handle, not the final answer to the user. Only these
+specific version error codes trigger this recovery workflow.
+
+1. Keep the original source, the intended edit, and the same document reference.
+2. Run `octo-cli html source <doc-ref>` again **without `--version`**. Retain
+   the fresh `data.html` and `data.version` together; the version and fixed
+   `source_path` in the earlier error may already be outdated.
+3. Compare the original source, your proposed edit, and the fresh source.
+   Reapply only the user's intended changes to the fresh HTML, preserving
+   concurrent edits. If the requested result is already present, verify it and
+   report completion without publishing a duplicate version.
+4. Publish the newly merged HTML to the **same `--slug`**, with the fresh
+   version plus one. Do not create a new document or reuse a create
+   `idempotency_key` for this update.
+5. If another version error occurs, repeat from step 2. Make up to **three
+   recovery attempts** after the initial rejection; each attempt must reread
+   and merge again. This is a bot workflow, not a CLI HTTP retry of the same body.
+6. After a successful publish, verify the returned version's source and report
+   the completed update and document URL. Mark an edit/comment as applied only
+   after verifying that it was published.
+
+Involve the user only when overlapping changes have incompatible meanings that
+cannot be resolved from their request, another error prevents completion, or
+all three recovery attempts still conflict. Explain the specific unresolved
+change or ongoing contention instead of simply forwarding a version error.
+
 **Never just increase `--version` and resend stale HTML.** Do not switch to
 publication through drafts or element replacement to bypass a rejected update;
 draft promotion and element replacement do not substitute for guarded
@@ -240,13 +272,15 @@ an element's tag or nearby heading unless necessary.
 
 - `428 VALIDATION_ERROR`, with `error.detail.error.details.code=version_required`
   — a bot update omitted its output version or sent zero. Read with `html source`,
-  edit that source, then publish its version plus one.
+  edit that source, then publish its version plus one autonomously using the
+  recovery workflow above; do not stop at the tool error.
 - `409 CONFLICT`, with `error.detail.error.details.code=version_conflict`
   — the output version is stale or skips ahead. Read the latest source and
   reapply the intended edit while preserving others' changes. Never just increase
   `--version` and resend stale HTML. Both errors exit with code 2; the backend
   recovery hint is preserved at `error.detail.error.hint` and version/source
-  fields at `error.detail.error.details`.
+  fields at `error.detail.error.details`. Complete the recovery workflow above
+  before reporting the result to the user.
 
 - `403 bot_delete_forbidden` — terminal bot-deletion policy denial, including
   already-deleted retries on the docs-backend routes. Do not retry, change
