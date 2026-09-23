@@ -99,11 +99,12 @@ octo-cli html publish --data '{"html":"<html><body><h1>Runbook</h1></body></html
 # Unmounted creation follows the same identity contract and also gets doc_id.
 octo-cli html publish --data '{"html":"<html><body><h1>Private draft</h1></body></html>","meta":{"title":"Private draft"}}'
 
-# Publish a later immutable version. Keep the wire field name `slug` and omit
+# Publish version 2 only after reading source version 1 and editing that HTML.
+# Keep the wire field name `slug` and omit
 # idempotency_key. Pass ONLY a slug the server returned earlier: an unregistered
 # slug does not create a canonical document — it produces a legacy unregistered
 # one that never appears in the sidebar file list. Never invent a slug.
-octo-cli html publish --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
+octo-cli html publish --version 2 --data '{"slug":"<doc-ref>","html":"<html><body><h1>Runbook v2</h1></body></html>","meta":{"title":"Runbook"}}'
 
 # An explicit --idempotency-key <same-operation-key> is supported only for
 # retrying this exact creation operation. The CLI-generated key is created once
@@ -124,6 +125,32 @@ octo-cli html list
 octo-cli html get <doc-ref>
 octo-cli html versions <doc-ref>
 ```
+
+### Concurrent edits and the existing `--version` flag
+
+Before editing an existing HTML document, read
+`GET /docs-html/v1/docs/{doc-ref}/versions/latest/source` through the gateway
+(or `/v1/docs/{doc-ref}/versions/latest/source` directly from docs-html), using
+the document's authenticated read context. Retain the source bytes and the
+`X-Document-Version` header from that same response. `html get` only returns
+metadata; do not pair a separately fetched version number with older HTML.
+
+`--version` is the **new output version**. If the source read was version N,
+edit that source and publish with `--version N+1` (a concrete integer, such as
+`--version 2` above). The server's concurrency guard requires this value to
+match its current latest version + 1. Updates must not use omitted or zero
+version, because automatic allocation cannot detect a stale edit. First
+publication can still omit the flag. No new CLI parameter is needed.
+
+HTTP 428 / `version_required` means the update omitted its output version.
+HTTP 409 / `version_conflict` means the requested version is stale or skips
+past the next version. The backend's `error.details` contains `version`,
+`latest_version`, `next_version`, and `source_path`; in CLI output these are
+preserved under `error.detail.error.details`. Read that source, inspect others'
+changes, and reapply the intended edit before submitting its version plus one.
+**Never just increase `--version` and resend stale HTML.** Do not switch to
+publication through drafts or element replacement to bypass a rejected update;
+those APIs retain separate concurrency contracts.
 
 `html list` returns the backend's offset envelope as `data` plus `_pagination`
 (`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
