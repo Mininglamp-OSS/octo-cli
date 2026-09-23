@@ -47,6 +47,13 @@ not current merge or deployment status or an automated publishing gate.
 | Catalogue activation | Merge and deploy after prerequisites; all five choices must work |
 | Capacity | Deploy migration, request/proxy and MySQL packet settings before large-deck acceptance |
 | Frontend | Confirm the picker and rendered template effects in the actual deployed UI |
+| Media ingestion | Deploy native media ingestion, editor resolution and offline export before using uploaded media |
+
+Media ingestion is independent of gallery activation: new uploaded/public-URL
+media needs a backend returning native `ppt-media:` references, a matching editor
+resolver and an exporter that embeds registered same-document attachments.
+Existing bundled template assets keep working without using the ingest endpoint.
+This row adds no release-time probe or publishing configuration.
 
 Keep implementation links, source refs and exact deployed backend/frontend SHAs
 in access-controlled operational evidence. Source refs alone are not proof of

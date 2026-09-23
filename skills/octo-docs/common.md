@@ -165,7 +165,9 @@ does not fetch an epoch or retry a permission conflict on the caller's behalf.
 
 ## Attachments
 
-The docs backend is **presign-only**: the CLI never streams the binary. Uploading
+The attachment-presign flow below is **presign-only**: the CLI never streams the
+binary through these commands. PPT also has a direct authenticated binary-media
+endpoint used by a runtime HTTP client; see `ppt.md` for that distinct flow. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
 the bytes yourself directly to object storage.
 
@@ -199,6 +201,10 @@ drawing's `source` field (see `sheet.md`). Schema: `octo-cli schema docs.attachm
 
 ### External image URLs (including SVG)
 
+The image-node instructions below are for rich-text documents. For PPT images,
+audio and video, use the PPT-specific shared-ingest instructions in `ppt.md`:
+the same endpoint returns native media references on a compatible backend.
+
 Never persist an arbitrary external URL as an image node's only `src`. Current
 Octo clients render images only from trusted storage hosts, so a node such as
 `{"type":"image","attrs":{"src":"https://third-party.example/image.svg"}}`
@@ -210,8 +216,12 @@ through the generic API passthrough:
 
 ```bash
 octo-cli api POST /v1/bot/docs/<docId>/attachments/ingest \
-  --data '{"urls":["https://source.example/diagram.svg"]}'
+  --no-retry --data '{"urls":["https://source.example/diagram.svg"]}'
 ```
+
+Ingestion is not idempotent across requests: replaying a POST can create duplicate
+attachments. Keep successful receipts, retry only failed entries and reconcile an
+uncertain timeout before retrying; do not automatically repeat the whole batch.
 
 Read the new document-scoped `attachId` from `data.mappings`; treat an entry in
 `data.notIngested` as a failed image import and keep it as a normal hyperlink or
