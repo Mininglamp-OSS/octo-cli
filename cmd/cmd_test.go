@@ -261,6 +261,50 @@ func TestCmd_API_WorkspaceIDHeader(t *testing.T) {
 	}
 }
 
+func TestCmd_API_ReportsUnsupportedOctoServerFeatures(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		path     string
+		wantCode string
+	}{
+		{name: "Octo Project", path: "/v1/projects/project-1", wantCode: "OCTO_PROJECT_API_UNSUPPORTED"},
+		{name: "Workspace", path: "/fleet/api/v1/workspaces", wantCode: "WORKSPACE_API_UNSUPPORTED"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.NotFoundHandler())
+			defer srv.Close()
+
+			f := newTestFactoryWithReg()
+			cfg := &config.Config{APIBaseURL: srv.URL, BotToken: "app_test", Format: "json"}
+			cred := &credential.BotCredential{Token: "app_test"}
+			f.SetConfig(cfg)
+			f.SetCredential(cred)
+			f.SetClient(client.New(cfg, cred, client.Options{NoRetry: true}))
+
+			_, stderr, err := execRoot(t, f, "api", "GET", tc.path)
+			if err == nil {
+				t.Fatal("expected unsupported API error")
+			}
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if decodeErr := json.Unmarshal([]byte(stderr), &envelope); decodeErr != nil {
+				t.Fatalf("decode error envelope: %v\n%s", decodeErr, stderr)
+			}
+			if envelope.Error.Code != tc.wantCode {
+				t.Fatalf("error code = %q, want %q", envelope.Error.Code, tc.wantCode)
+			}
+		})
+	}
+}
+
 func TestCmd_API_OmitsWorkspaceHeaderByDefault(t *testing.T) {
 	var gotWorkspaceHeader bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

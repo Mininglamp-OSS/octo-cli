@@ -280,6 +280,111 @@ func TestDo_LoopStructuredNotFoundPreservesBackendError(t *testing.T) {
 	}
 }
 
+func TestDo_OctoServerFeatureUnstructuredNotFoundReportsUnsupportedAPI(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		service     string
+		path        string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name:        "workspace command",
+			service:     "loop",
+			path:        "/fleet/api/v1/workspaces/workspace-1",
+			wantCode:    "WORKSPACE_API_UNSUPPORTED",
+			wantMessage: "this Octo server version does not support Workspace",
+		},
+		{
+			name:        "workspace generic API",
+			path:        "/fleet/api/v1/workspaces",
+			wantCode:    "WORKSPACE_API_UNSUPPORTED",
+			wantMessage: "this Octo server version does not support Workspace",
+		},
+		{
+			name:        "Octo Project detail",
+			path:        "/v1/projects/project-1",
+			wantCode:    "OCTO_PROJECT_API_UNSUPPORTED",
+			wantMessage: "this Octo server version does not support Octo Project",
+		},
+		{
+			name:        "Octo Project collection",
+			path:        "/v1/space/space-1/projects",
+			wantCode:    "OCTO_PROJECT_API_UNSUPPORTED",
+			wantMessage: "this Octo server version does not support Octo Project",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte("404 page not found\n"))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Service: tc.service,
+				Method:  http.MethodGet,
+				Path:    tc.path,
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+			}
+			if ee.Type != "api_error" || ee.Code != tc.wantCode {
+				t.Fatalf("error = %+v, want api_error/%s", ee, tc.wantCode)
+			}
+			if ee.Message != tc.wantMessage {
+				t.Errorf("message = %q, want %q", ee.Message, tc.wantMessage)
+			}
+			if !strings.Contains(ee.Hint, "upgrade") {
+				t.Errorf("hint = %q, want upgrade guidance", ee.Hint)
+			}
+		})
+	}
+}
+
+func TestDo_OctoServerFeatureStructuredNotFoundPreservesBackendError(t *testing.T) {
+	t.Parallel()
+
+	for _, path := range []string{
+		"/fleet/api/v1/workspaces/missing",
+		"/v1/projects/missing",
+		"/v1/space/space-1/projects",
+	} {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"resource not found"}}`))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Method: http.MethodGet,
+				Path:   path,
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+			}
+			if ee.Code != "NOT_FOUND" || ee.Message != "resource not found" {
+				t.Fatalf("error = %+v, want backend NOT_FOUND preserved", ee)
+			}
+		})
+	}
+}
+
 func TestDo_NonLoopUnstructuredNotFoundRemainsNotFound(t *testing.T) {
 	t.Parallel()
 

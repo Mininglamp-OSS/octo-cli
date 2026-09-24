@@ -214,6 +214,24 @@ func TestLoopCommandReportsUnsupportedServerVersion(t *testing.T) {
 	}
 }
 
+func TestLoopWorkspaceCommandReportsUnsupportedServerVersion(t *testing.T) {
+	t.Parallel()
+
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/workspaces/workspace-1" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	})
+	root.SetArgs([]string{"loop", "workspace", "get", "workspace-1", "--workspace-id", "workspace-1"})
+
+	err := root.Execute()
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "WORKSPACE_API_UNSUPPORTED" {
+		t.Fatalf("error = %T %v, want WORKSPACE_API_UNSUPPORTED", err, err)
+	}
+}
+
 func TestLoopExpertTeamEvaluateCommandShape(t *testing.T) {
 	var gotMethod, gotPath, gotWorkspace string
 	var gotBody map[string]any
