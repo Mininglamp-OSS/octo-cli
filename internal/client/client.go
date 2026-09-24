@@ -168,7 +168,7 @@ func (c *Client) Do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req.Method, u, headers, bodyBytes, req.SuppressSpaceHeader)
 	}
 
-	return c.doWithRetry(ctx, req.Method, u, headers, bodyBytes, contentType, req.BinaryResponse, req.OutputPath, req.SuppressSpaceHeader)
+	return c.doWithRetry(ctx, req.Service, req.Method, u, headers, bodyBytes, contentType, req.BinaryResponse, req.OutputPath, req.SuppressSpaceHeader)
 }
 
 func cloneHeaders(headers map[string]string) map[string]string {
@@ -189,7 +189,7 @@ func setHeader(headers map[string]string, name, value string) {
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, service, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry {
 		maxRetries = 0
@@ -213,7 +213,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 			}
 		}
 
-		body, err := c.attempt(ctx, method, urlStr, headers, body, contentType, binaryResp, outputPath, suppressSpaceHeader)
+		body, err := c.attempt(ctx, service, method, urlStr, headers, body, contentType, binaryResp, outputPath, suppressSpaceHeader)
 		if err == nil {
 			return body, nil
 		}
@@ -227,7 +227,7 @@ func (c *Client) doWithRetry(ctx context.Context, method, urlStr string, headers
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, service, method, urlStr string, headers map[string]string, body []byte, contentType string, binaryResp bool, outputPath string, suppressSpaceHeader bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -335,6 +335,10 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 		return respBody, nil
 	}
 
+	if loopAPIUnsupported(service, resp.StatusCode, respBody) {
+		return nil, output.ErrLoopAPIUnsupported()
+	}
+
 	ee := output.ParseBackendError(resp.StatusCode, respBody)
 
 	if isRetryableStatus(resp.StatusCode) {
@@ -345,6 +349,23 @@ func (c *Client) attempt(ctx context.Context, method, urlStr string, headers map
 		return nil, re
 	}
 	return nil, ee
+}
+
+// loopAPIUnsupported distinguishes a missing Fleet public API route from a
+// normal resource-level 404. Fleet public API errors always use the structured
+// {"error":{"code":"..."}} envelope. A Loop 404 without that contract came
+// from an older gateway/backend where /fleet/api/v1 is not mounted.
+func loopAPIUnsupported(service string, status int, body []byte) bool {
+	if service != "loop" || status != http.StatusNotFound {
+		return false
+	}
+
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
 }
 
 // writeFileAtomic writes data to path atomically: it streams the bytes into a
