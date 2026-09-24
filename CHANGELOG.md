@@ -371,6 +371,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
+- **Marketplace Skill imports no longer conflate the visible title with the
+  machine name.** The CLI contract now correctly describes `plugin_name` as the
+  human-facing Marketplace name and `name` as the stable `SKILL.md` machine
+  name. The bundled publishing workflow supplies both fields explicitly and
+  checks existing ownership against `manifest_json.name`, preventing newly
+  imported cards from displaying a machine slug and avoiding duplicate imports
+  hidden by the display-name-only search filter.
 - **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
   body walker visited only non-nil children, so a property *present with value `null`* never
   reached the enum or uint64 check and was forwarded upstream — while the same field with an
