@@ -95,6 +95,28 @@ func ErrLoopAPIUnsupported() *ExitError {
 	}
 }
 
+// ErrOctoProjectAPIUnsupported reports that the configured Octo server does
+// not expose the Octo Project API.
+func ErrOctoProjectAPIUnsupported() *ExitError {
+	return &ExitError{
+		Type:    "api_error",
+		Code:    "OCTO_PROJECT_API_UNSUPPORTED",
+		Message: "this Octo server version does not support Octo Project",
+		Hint:    "upgrade Octo Server or use an environment where /v1/projects is enabled",
+	}
+}
+
+// ErrWorkspaceAPIUnsupported reports that the configured Octo server does not
+// expose the Workspace API required by workspace commands.
+func ErrWorkspaceAPIUnsupported() *ExitError {
+	return &ExitError{
+		Type:    "api_error",
+		Code:    "WORKSPACE_API_UNSUPPORTED",
+		Message: "this Octo server version does not support Workspace",
+		Hint:    "upgrade Octo Server or use an environment where /fleet/api/v1/workspaces is enabled",
+	}
+}
+
 // --- backend error mapping ---
 
 // backendErrorMapping maps matters error codes to CLI taxonomy + hint. See
