@@ -130,7 +130,7 @@ func TestPptGalleryRolloutDocumented(t *testing.T) {
 	if !validPptRolloutTable(string(gate)) {
 		t.Error("release gate has an incomplete or stale dependency table")
 	}
-	for _, phrase := range []string{"## Current rollout dependencies", "Terra", "Orbital", "Player", "Catalogue activation", "Capacity", "Frontend", "permissionEpoch", "merge and deploy"} {
+	for _, phrase := range []string{"## Current rollout dependencies", "Terra", "Orbital", "Player", "Catalogue activation", "Capacity", "Frontend", "Media ingestion", "permissionEpoch", "merge and deploy"} {
 		if !strings.Contains(string(gate), phrase) {
 			t.Errorf("release gate missing dependency %q", phrase)
 		}
@@ -155,6 +155,7 @@ func validPptRolloutTable(text string) bool {
 		"Catalogue activation": "Merge and deploy after prerequisites; all five choices must work",
 		"Capacity":             "Deploy migration, request/proxy and MySQL packet settings before large-deck acceptance",
 		"Frontend":             "Confirm the picker and rendered template effects in the actual deployed UI",
+		"Media ingestion":      "Deploy native media ingestion, editor resolution and offline export before using uploaded media",
 	}
 	seen := make(map[string]bool)
 	for _, line := range strings.Split(section, "\n") {
@@ -186,6 +187,7 @@ func publicPptRolloutTable() string {
 | Catalogue activation | Merge and deploy after prerequisites; all five choices must work |
 | Capacity | Deploy migration, request/proxy and MySQL packet settings before large-deck acceptance |
 | Frontend | Confirm the picker and rendered template effects in the actual deployed UI |
+| Media ingestion | Deploy native media ingestion, editor resolution and offline export before using uploaded media |
 `
 }
 
@@ -221,7 +223,8 @@ func TestPptRolloutGuardRejectsInvalidRows(t *testing.T) {
 		t.Fatal("valid current dependency table rejected")
 	}
 	for name, changed := range map[string]string{
-		"missing rows with prose retained": regexp.MustCompile(`(?m)^\| (Terra|Orbital|Player|Catalogue activation|Capacity|Frontend) \|.*\n`).ReplaceAllString(text, ""),
+		"missing rows with prose retained": regexp.MustCompile(`(?m)^\| (Terra|Orbital|Player|Catalogue activation|Capacity|Frontend|Media ingestion) \|.*\n`).ReplaceAllString(text, ""),
+		"missing media prerequisite":       regexp.MustCompile(`(?m)^\| Media ingestion \|.*\n`).ReplaceAllString(text, ""),
 		"duplicate component":              strings.Replace(text, "| Orbital |", "| Terra |", 1),
 		"unknown component":                strings.Replace(text, "| Terra |", "| Unknown |", 1),
 		"extra source column":              strings.Replace(text, "| Terra |", "| Terra | https://example.invalid/source |", 1),
