@@ -358,7 +358,6 @@ func TestDo_OctoServerFeatureStructuredNotFoundPreservesBackendError(t *testing.
 		"/v1/projects/missing",
 		"/v1/space/space-1/projects",
 	} {
-		path := path
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 

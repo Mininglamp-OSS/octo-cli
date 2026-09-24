@@ -272,7 +272,6 @@ func TestCmd_API_ReportsUnsupportedOctoServerFeatures(t *testing.T) {
 		{name: "Octo Project", path: "/v1/projects/project-1", wantCode: "OCTO_PROJECT_API_UNSUPPORTED"},
 		{name: "Workspace", path: "/fleet/api/v1/workspaces", wantCode: "WORKSPACE_API_UNSUPPORTED"},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
