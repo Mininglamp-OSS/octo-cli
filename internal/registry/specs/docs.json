@@ -842,7 +842,7 @@
       "get": {
         "operationId": "docs.sheet.get",
         "summary": "Read a spreadsheet's live cells, worksheet resources, and base version (needs reader)",
-        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, and sheetDataValidations are returned on the first page only. When checkbox metadata exceeds the size or inspection budget, 413 includes baseVersion and repairDataValidationKey in the CLI error detail; delete that exact internal key with a validation-only PATCH and retry until the read succeeds. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, and sheetConditionalFormats are returned on the first page only. When checkbox metadata exceeds the size or inspection budget, 413 includes baseVersion and repairDataValidationKey in the CLI error detail; delete that exact internal key with a validation-only PATCH and retry until the read succeeds. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit. Also returns sheetConditionalFormats for conditional-format rule management.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -929,6 +929,13 @@
                         "null"
                       ],
                       "description": "paged mode: opaque cursor for the next page (null when hasMore is false); pass back via --cursor"
+                    },
+                    "sheetConditionalFormats": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object"
+                      },
+                      "description": "Compact conditional-format rules keyed by logicalId!cfId. Each value is {priority,rule:{cfId,stopIfTrue,ranges,rule}}; the inner rule uses Univer highlightCell, colorScale, dataBar or iconSet. Never expand a rule into per-cell styles. Requires the paired conditional-format API backend. Returned on the first page only in paged mode."
                     }
                   }
                 }
@@ -940,7 +947,7 @@
       "patch": {
         "operationId": "docs.sheet.edit",
         "summary": "Apply a batch sheet edit — cells, layout, filters, validation, and dropdowns (needs writer)",
-        "description": "Applies one atomic spreadsheet batch under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as If-Match); stale writes return 412 base_version_stale. Existing surfaces are cells, dims, drawings, hyperlinks, merges, and sheets. P0 worksheet resources are: freeze `{logicalId:{startRow,startColumn,xSplit,ySplit}|null}`, filters `{logicalId:{ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[columns],enabledColumns?:[absoluteColumnIds]}|null}`, and dataValidations `{logicalId:[rules]|null}`. The public dataValidations and sheetDataValidations shapes are per-sheet arrays for every validation family, including list, listMultiple, and checkbox; do not send the internal flat `${logicalId}!${uid}` Y.Map shape except for the server-directed deletion-only repair described below. The server requires each rule uid to be unique within the sheet, 1–128 characters, free of `!` and control characters, plus at least one non-empty ranges entry. Checkbox ranges must not overlap another checkbox rule after the complete edit; list and listMultiple overlaps are accepted by the backend and should be sent only when intentional. For a working colored `list` or `listMultiple` dropdown, also send type, formula1 (JSON-serialized option labels), formula2 (the same number of comma-separated colors), showDropDown, and renderMode; omit operator. A listMultiple cell stores its selected labels as a JSON-array string, while a list cell stores the label directly. dataValidations is replace-style per logical sheet: read sheetDataValidations first and resend every rule to keep, but do not write if the deployed read surface omits any validation family on that sheet. null removes a freeze/filter/resource entry, and null or [] removes all validation rules for that sheet. An empty filterColumns array is omitted on readback. When enabledColumns is present it must be a non-empty list of absolute 0-based columns inside ref and select exactly which columns show filter buttons; every filterColumns colId must also appear in enabledColumns. A mismatch or enabledColumns:[] is rejected with 422 sheet_cell_invalid. The server deduplicates and sorts enabledColumns. For example, ref G:M with enabledColumns:[6,12] enables only G and M, not H-L. This controls filter-button visibility only, not read or write access; use protected ranges for access control. Filters are replace-style per logical sheet: read sheetFilters first and resend the complete filter object, including enabledColumns, when changing criteria. Omitting enabledColumns invokes legacy all-columns-in-ref behavior and silently widens the visible controls. An unfrozen freeze axis accepts startRow/startColumn 0 but normalizes it to -1. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Bare and prefixed keys for the default sheet are separate entries; when migrating a legacy key, read sheetDims and clear the bare twin in the same batch, for example `{\"c0\":null,\"default:c0\":200}`. Rows hidden by an active shared filter still participate in a full rectangle rewrite. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. Any one surface may be the only non-empty batch member, but at least one surface must be non-empty. Only doc_type 'sheet' is accepted. Gates: validation-rule count over the max → 413 too_many_data_validations; cell/dim/drawing count over the max → 413 too_many_cells; worksheet-resource key count over the max → 413 too_many_sheet_resources; a single cell's payload too large → 413 cell_too_large; missing base version, malformed shape, or all batches empty → 400 invalid_body; a cell/dim/drawing/hyperlink/merge/tab/freeze/filter/data-validation violating its contract or key shape → 422 sheet_cell_invalid; writes intersecting a protected range → 403 protected_range. If 413 sheet_too_large includes baseVersion and repairDataValidationKey, submit only `{\"dataValidations\":{\"<repairDataValidationKey>\":null}}` with that base version, then retry. The backend accepts this flat-key form only when it deletes checkbox-shaped stored metadata and strictly reduces that metadata; do not invent a flat key.",
+        "description": "Applies one atomic spreadsheet batch under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as If-Match); stale writes return 412 base_version_stale. Existing surfaces are cells, dims, drawings, hyperlinks, merges, and sheets. P0 worksheet resources are: freeze `{logicalId:{startRow,startColumn,xSplit,ySplit}|null}`, filters `{logicalId:{ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[columns],enabledColumns?:[absoluteColumnIds]}|null}`, and dataValidations `{logicalId:[rules]|null}`. The public dataValidations and sheetDataValidations shapes are per-sheet arrays for every validation family, including list, listMultiple, and checkbox; do not send the internal flat `${logicalId}!${uid}` Y.Map shape except for the server-directed deletion-only repair described below. The server requires each rule uid to be unique within the sheet, 1–128 characters, free of `!` and control characters, plus at least one non-empty ranges entry. Checkbox ranges must not overlap another checkbox rule after the complete edit; list and listMultiple overlaps are accepted by the backend and should be sent only when intentional. For a working colored `list` or `listMultiple` dropdown, also send type, formula1 (JSON-serialized option labels), formula2 (the same number of comma-separated colors), showDropDown, and renderMode; omit operator. A listMultiple cell stores its selected labels as a JSON-array string, while a list cell stores the label directly. dataValidations is replace-style per logical sheet: read sheetDataValidations first and resend every rule to keep, but do not write if the deployed read surface omits any validation family on that sheet. null removes a freeze/filter/resource entry, and null or [] removes all validation rules for that sheet. An empty filterColumns array is omitted on readback. When enabledColumns is present it must be a non-empty list of absolute 0-based columns inside ref and select exactly which columns show filter buttons; every filterColumns colId must also appear in enabledColumns. A mismatch or enabledColumns:[] is rejected with 422 sheet_cell_invalid. The server deduplicates and sorts enabledColumns. For example, ref G:M with enabledColumns:[6,12] enables only G and M, not H-L. This controls filter-button visibility only, not read or write access; use protected ranges for access control. Filters are replace-style per logical sheet: read sheetFilters first and resend the complete filter object, including enabledColumns, when changing criteria. Omitting enabledColumns invokes legacy all-columns-in-ref behavior and silently widens the visible controls. An unfrozen freeze axis accepts startRow/startColumn 0 but normalizes it to -1. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Bare and prefixed keys for the default sheet are separate entries; when migrating a legacy key, read sheetDims and clear the bare twin in the same batch, for example `{\"c0\":null,\"default:c0\":200}`. Rows hidden by an active shared filter still participate in a full rectangle rewrite. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. Any one surface may be the only non-empty batch member, but at least one surface must be non-empty. Only doc_type 'sheet' is accepted. Gates: validation-rule count over the max → 413 too_many_data_validations; cell/dim/drawing count over the max → 413 too_many_cells; worksheet-resource key count over the max → 413 too_many_sheet_resources; a single cell's payload too large → 413 cell_too_large; missing base version, malformed shape, or all batches empty → 400 invalid_body; a cell/dim/drawing/hyperlink/merge/tab/freeze/filter/data-validation violating its contract or key shape → 422 sheet_cell_invalid; writes intersecting a protected range → 403 protected_range. If 413 sheet_too_large includes baseVersion and repairDataValidationKey, submit only `{\"dataValidations\":{\"<repairDataValidationKey>\":null}}` with that base version, then retry. The backend accepts this flat-key form only when it deletes checkbox-shaped stored metadata and strictly reduces that metadata; do not invent a flat key. conditionalFormats is a sparse logicalId!cfId map of complete rule upserts or null deletions. Rules are removed with a deleted worksheet. Row/column structural edits on a sheet with conditional formatting are refused until rule relocation is supported.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -1004,6 +1011,13 @@
                   "dataValidations": {
                     "type": "object",
                     "description": "replace-style data-validation arrays keyed by logicalId. This public REST shape covers every validation family, including list, listMultiple, and checkbox; do not use the internal flat `${logicalId}!${uid}` Y.Map shape except when the server returns repairDataValidationKey and explicitly requests one deletion-only repair. The server requires each rule to have a uid unique within that sheet (1–128 characters, no `!` or control characters) and at least one non-empty ranges:[{startRow,startColumn,endRow,endColumn}] entry. Checkbox ranges must not overlap another checkbox rule after the complete edit; list and listMultiple overlaps are accepted by the backend and should be sent only when intentional. It replaces that sheet's entire rule set, so read sheetDataValidations first and resend every rule to keep; do not write if the deployed read surface omits any validation family. Checkbox formula1/formula2 are optional distinct literal strings that default to \"1\"/\"0\", and the server normalizes allowBlank to true. For a working colored dropdown, use type 'list' or 'listMultiple', formula1 as a JSON string array of labels, formula2 as the same number of comma-separated colors, showDropDown:true, renderMode:2, and no operator. These dropdown fields are recommended rendering inputs, not additional server-required fields. A listMultiple cell stores selected labels in v as a JSON-array string; a list cell stores the label directly. The server strips operator from otherwise-valid list rules. null or [] removes all rules for the sheet. Optional. Pass via --data."
+                  },
+                  "conditionalFormats": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": ["object", "null"]
+                    },
+                    "description": "Compact conditional-format rules keyed by logicalId!cfId. Each value is {priority,rule:{cfId,stopIfTrue,ranges,rule}}; the inner rule uses Univer highlightCell, colorScale, dataBar or iconSet. Never expand a rule into per-cell styles. Requires the paired conditional-format API backend. Sparse upserts: send a complete value to create/update one rule, null to delete it; unrelated rules survive. Read a fresh baseVersion first. Maximum 1000 rules/1 MiB per workbook and 64 KiB per rule. Protected worksheets are checked server-side. Pass via --data."
                   }
                 }
               }
@@ -1046,7 +1060,7 @@
         "operationId": "docs.sheet.rows.insert",
         "x-octo-strict-request-schema": true,
         "summary": "Insert rows after an existing spreadsheet row (needs writer)",
-        "description": "Inserts count blank rows immediately after the zero-based afterRow in one logical worksheet. The server atomically shifts cells, row dimensions, hyperlinks, merged ranges, drawing anchors, freeze/filter ranges, data-validation ranges, live comment anchors, and protection ranges, then increments sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version; stale writes return 412 base_version_stale. afterRow is an absolute stored row index within the worksheet's current rowCount, not an ordinal among filter-visible rows. count must be 1..9999 and the resulting sheet cannot exceed 10000 rows. The operation refuses a workbook containing cell formulas with 409 sheet_formula_unsupported because the server cannot safely reproduce Univer formula-reference re-anchoring. Other failures include 403 protected_range, 404 sheet_not_found, 422 sheet_row_out_of_bounds or sheet_row_limit_exceeded, and the normal sheet/document size gates.",
+        "description": "Inserts count blank rows immediately after the zero-based afterRow in one logical worksheet. The server atomically shifts cells, row dimensions, hyperlinks, merged ranges, drawing anchors, freeze/filter ranges, data-validation ranges, live comment anchors, and protection ranges, then increments sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version; stale writes return 412 base_version_stale. afterRow is an absolute stored row index within the worksheet's current rowCount, not an ordinal among filter-visible rows. count must be 1..9999 and the resulting sheet cannot exceed 10000 rows. The operation refuses a workbook containing cell formulas with 409 sheet_formula_unsupported because the server cannot safely reproduce Univer formula-reference re-anchoring. Other failures include 403 protected_range, 404 sheet_not_found, 422 sheet_row_out_of_bounds or sheet_row_limit_exceeded, and the normal sheet/document size gates. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -1133,7 +1147,7 @@
         "operationId": "docs.sheet.rows.delete",
         "x-octo-strict-request-schema": true,
         "summary": "Delete spreadsheet rows (needs writer)",
-        "description": "Deletes count rows beginning at zero-based startRow in one logical worksheet. startRow is an absolute stored row index, not an ordinal among filter-visible rows. The server atomically removes resources anchored wholly inside the deleted rows, shifts later resources upward, shrinks intersecting ranges, and decrements sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version. At least one row must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_row_out_of_bounds.",
+        "description": "Deletes count rows beginning at zero-based startRow in one logical worksheet. startRow is an absolute stored row index, not an ordinal among filter-visible rows. The server atomically removes resources anchored wholly inside the deleted rows, shifts later resources upward, shrinks intersecting ranges, and decrements sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version. At least one row must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_row_out_of_bounds. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -1212,7 +1226,7 @@
         "operationId": "docs.sheet.columns.insert",
         "x-octo-strict-request-schema": true,
         "summary": "Insert columns after an existing spreadsheet column (needs writer)",
-        "description": "Inserts count blank columns immediately after zero-based afterColumn in one logical worksheet. The server atomically shifts column-bearing resources and increments sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. afterColumn is an absolute stored column index within the worksheet's current columnCount, not an ordinal among filter-visible columns. count must be 1..99 and the resulting sheet cannot exceed 100 columns. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds or sheet_column_limit_exceeded.",
+        "description": "Inserts count blank columns immediately after zero-based afterColumn in one logical worksheet. The server atomically shifts column-bearing resources and increments sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. afterColumn is an absolute stored column index within the worksheet's current columnCount, not an ordinal among filter-visible columns. count must be 1..99 and the resulting sheet cannot exceed 100 columns. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds or sheet_column_limit_exceeded. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -1291,7 +1305,7 @@
         "operationId": "docs.sheet.columns.delete",
         "x-octo-strict-request-schema": true,
         "summary": "Delete spreadsheet columns (needs writer)",
-        "description": "Deletes count columns beginning at zero-based startColumn in one logical worksheet. startColumn is an absolute stored column index, not an ordinal among filter-visible columns. The server atomically removes resources anchored wholly inside the deleted columns, shifts later resources left, shrinks intersecting ranges, and decrements sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. At least one column must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds.",
+        "description": "Deletes count columns beginning at zero-based startColumn in one logical worksheet. startColumn is an absolute stored column index, not an ordinal among filter-visible columns. The server atomically removes resources anchored wholly inside the deleted columns, shifts later resources left, shrinks intersecting ranges, and decrements sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. At least one column must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -3015,6 +3029,341 @@
         },
         "x-octo-strict-response-schema": true,
         "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/split": {
+      "post": {
+        "x-octo-strict-request-schema": true,
+        "operationId": "docs.sheet.split",
+        "summary": "Preview or apply literal text-to-columns (needs writer)",
+        "description": "Defaults to server-side preview; --dry-run only prints the HTTP request and is not a data preview. Read a fresh baseVersion, preview, then apply with --preview=false and that same token. Both input and output are bounded to 20000 cells (or the lower deployed write limit). Active filters, source formulas, intersecting merges, drawings, hyperlinks, validations and comments are refused; protection and authorization are checked server-side. Apply is one atomic guarded sheet edit with an automatic safety snapshot. Preserves leading zeros, long numbers, empty fields and formula-looking text; writes strings with text number format @, while retaining destination styles. Overwriting nonempty destinations requires --overwrite.",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "range",
+                  "delimiter"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "Required logical worksheet ID from docs sheet get."
+                  },
+                  "range": {
+                    "type": "object",
+                    "description": "Zero-based source rectangle; split accepts exactly one column. Pass the structured range via --data.",
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
+                    "properties": {
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "preview": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Defaults to true: return planned cells and counts without writing. Explicitly pass --preview=false to apply with the same base-version."
+                  },
+                  "delimiter": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16,
+                    "description": "Literal delimiter, not CSV quoting or displayed number formatting."
+                  },
+                  "overwrite": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit consent to replace nonempty cells to the right; inspect the server preview first."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only preview or atomic application result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "boolean"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "range": {
+                      "type": "object",
+                      "description": "Zero-based affected rectangle of the planned or applied output.",
+                      "required": [
+                        "startRow",
+                        "startColumn",
+                        "endRow",
+                        "endColumn"
+                      ],
+                      "properties": {
+                        "startRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "startColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "rows": {
+                      "type": "integer"
+                    },
+                    "columns": {
+                      "type": "integer"
+                    },
+                    "removedRows": {
+                      "type": "integer"
+                    },
+                    "overwrittenCells": {
+                      "type": "integer"
+                    },
+                    "cells": {
+                      "type": "object",
+                      "description": "Planned replacement cells, returned in preview mode only, keyed by logicalId!row:column (zero-based). Values are complete cell objects, or null to clear the cell."
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "write"
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/deduplicate": {
+      "post": {
+        "x-octo-strict-request-schema": true,
+        "operationId": "docs.sheet.deduplicate",
+        "summary": "Preview or apply duplicate removal inside a selection (needs writer)",
+        "description": "Defaults to server-side preview; --dry-run only prints the HTTP request and is not a data preview. Read a fresh baseVersion, preview, then apply with --preview=false and that same token. Both input and output are bounded to 20000 cells (or the lower deployed write limit). Active filters, source formulas, intersecting merges, drawings, hyperlinks, validations and comments are refused; protection and authorization are checked server-side. Apply is one atomic guarded sheet edit with an automatic safety snapshot. Compares all selected columns, keeps the first record and blank rows, compacts only selected values and clears trailing contents. Does not delete whole rows; destination formatting stays fixed.",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "range"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "Required logical worksheet ID from docs sheet get."
+                  },
+                  "range": {
+                    "type": "object",
+                    "description": "Zero-based source rectangle spanning every column of each record to compact together. Deduplication compares all selected columns; unselected columns do not move. Pass the structured range via --data.",
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
+                    "properties": {
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "preview": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Defaults to true: return planned cells and counts without writing. Explicitly pass --preview=false to apply with the same base-version."
+                  },
+                  "header": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Keep the first selected row out of duplicate comparisons."
+                  },
+                  "caseSensitive": {
+                    "type": "boolean",
+                    "x-octo-flag": "case-sensitive",
+                    "default": false,
+                    "description": "Compare text case exactly; default is case-insensitive."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only preview or atomic application result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "boolean"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "range": {
+                      "type": "object",
+                      "description": "Zero-based affected rectangle of the planned or applied output.",
+                      "required": [
+                        "startRow",
+                        "startColumn",
+                        "endRow",
+                        "endColumn"
+                      ],
+                      "properties": {
+                        "startRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "startColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "rows": {
+                      "type": "integer"
+                    },
+                    "columns": {
+                      "type": "integer"
+                    },
+                    "removedRows": {
+                      "type": "integer"
+                    },
+                    "overwrittenCells": {
+                      "type": "integer"
+                    },
+                    "cells": {
+                      "type": "object",
+                      "description": "Planned replacement cells, returned in preview mode only, keyed by logicalId!row:column (zero-based). Values are complete cell objects, or null to clear the cell."
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "write"
       }
     }
   }

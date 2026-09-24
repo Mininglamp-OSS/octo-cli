@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   route-level 404 while `html get` can read the same reference, report
   an unavailable endpoint/deployment issue rather than a missing document.
   Stop the update; do not create a replacement or fall back to versionless writes.
+- **Spreadsheet productivity CLI** — `docs sheet split` and `docs sheet
+  deduplicate` explicitly send `preview:true` by default; applying requires
+  `--preview=false`, with additional `--overwrite` consent for occupied split
+  destinations. Declared boolean body defaults fill missing fields without
+  overriding `--data`; explicit flags take precedence. Strict request schemas
+  reject non-boolean values (including `null`, strings and numbers) before HTTP;
+  malformed `preview` never silently suppresses the safety gate. Range and
+  delimiter bounds are checked locally. Sheet get/edit also support compact conditional
+  format rules and sparse `null` deletion. **Minimum rollout dependency:**
+  backend MR !147, then MR !166 and its deployment, before release/use of these
+  commands. An explicit missing-route 404 returns `SHEET_CLEANING_UNAVAILABLE`;
+  ambiguous unstructured 404s retain `NOT_FOUND` with deployment-check guidance.
+  Do not emulate cleaning with a whole-sheet rewrite. Safety
+  snapshot recovery through `docs versions restore` requires an admin.
+  **Existing-operation wire change:** omitted `docs sheet replace`
+  `caseSensitive` and `matchesTheWholeCell` now send explicit `false`, matching
+  the backend's existing absent-value defaults. `summary.create` declares
+  `include_archived:false` but remains disabled, so that declaration does not
+  change a callable command. Query and non-boolean body defaults remain
+  backend-owned. Resolved defaults stay internal rather than appearing as
+  `schema` output metadata until materialization is consistent across types.
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using
   zero-based coordinates while the backend atomically relocates affected

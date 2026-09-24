@@ -39,7 +39,7 @@ func TestDocs_TreeShape(t *testing.T) {
 
 	groups := map[string][]string{
 		"content":     {"get", "edit"},
-		"sheet":       {"get", "edit", "replace"},
+		"sheet":       {"get", "edit", "replace", "split", "deduplicate"},
 		"ppt":         {"get", "edit", "export"},
 		"scene":       {"get", "edit", "export"},
 		"members":     {"list", "set", "remove"},
@@ -71,6 +71,8 @@ func TestDocs_RegistryShape(t *testing.T) {
 
 	type want struct{ method, path string }
 	cases := map[string]want{
+		"docs.sheet.split":          {"POST", "/v1/bot/docs/{docId}/sheet/split"},
+		"docs.sheet.deduplicate":    {"POST", "/v1/bot/docs/{docId}/sheet/deduplicate"},
 		"docs.create":               {"POST", "/v1/bot/docs"},
 		"docs.list":                 {"GET", "/v1/bot/docs"},
 		"docs.search":               {"POST", "/v1/bot/docs/search"},
