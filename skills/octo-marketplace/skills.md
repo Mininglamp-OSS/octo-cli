@@ -57,16 +57,18 @@ Do not search the machine or guess a path.
 1. For a directory, copy into a fresh `mktemp -d` and package the copy (exclude
    `.git`, caches, build output; keep `SKILL.md`, referenced files, README,
    LICENSE). Default a missing `version` to `1.0.0` in the staged `SKILL.md`.
-2. Inspect without executing; read `name`/`version` from the root `SKILL.md`.
+2. Inspect without executing; read the stable machine `name` and `version` from
+   the root `SKILL.md`. Choose a concise, human-facing Marketplace display name
+   in the user's language; do not silently reuse the machine slug unless the
+   user explicitly wants that as the visible title.
 3. Check ownership exhaustively: `plugin list --scene-code default --plugin-type
-   skill --mode mine --q <name> --page 1`, then walk `--page` until a short page
-   (there is no `--page-all`, and the default page size is 20). `--q` is a
-   substring match against `plugin_name` only — not the display name set by
-   `--name` — so search the registry name and compare exact names across every
-   page. Checking only page 1 when the owner has more than 20 keyword matches
-   reports a false "no match" and creates a duplicate. Decide create vs. update.
-4. Show the final plan (path, name, version, visibility, category) and get one
-   confirmation.
+   skill --mode mine --page 1 --page-size 100`, then walk `--page` until a short
+   page (there is no `--page-all`). Compare each row's `manifest_json.name` to
+   the exact machine name from `SKILL.md`. Do not filter with `--q`: it searches
+   the human-facing `plugin_name`, so it cannot reliably find an existing skill
+   by machine name. Decide create vs. update.
+4. Show the final plan (path, display name, machine name, version, visibility,
+   category) and get one confirmation.
 5. Presign + upload + parse + import:
 
    ```bash
@@ -75,12 +77,15 @@ Do not search the machine or guess a path.
    octo-cli marketplace skill-upload parse <skill_upload_id>
    octo-cli marketplace skill-parse-task get <parse_task_id>   # poll until success
    octo-cli marketplace plugin import --parse-task-id <parse_task_id> \
-     --name "<name>" --visibility space --version 1.0.0
+     --plugin-name "<display-name>" --name "<skill-name>" \
+     --visibility space --version 1.0.0
    ```
 
-   `plugin import` builds the attachment tree and saves a draft version. Omit
-   `--plugin-id` to create; set it to update an existing owned skill. Optional
-   `--category-id`, `--tags`, `--icon`, `--changelog`.
+   `--plugin-name` is the visible Marketplace title; `--name` is the stable
+   machine name from `SKILL.md`. `plugin import` builds the attachment tree and
+   saves a draft version. Omit `--plugin-id` to create; set it to update an
+   existing owned skill. Optional `--category-id`, `--tags`, `--icon`,
+   `--changelog`.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <plugin-id>` to
    verify the draft.
 7. Publish explicitly:
@@ -97,11 +102,12 @@ If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. Parse
 itself is not idempotent: re-triggering an already-parsed upload returns `409
 CONFLICT` rather than the original task, so poll `skill-parse-task get` instead
 of re-posting. If a create import returns a gateway timeout or RESULT_UNKNOWN,
-re-check `plugin list --scene-code default --plugin-type skill --mode mine --q
-<name>`, walking every page before retrying so the skill is never duplicated. If
-an existing-id import is ambiguous, use `plugin get`, version history, hashes,
-and content comparison instead—the row existed before the request, so finding it
-does not prove the update committed.
+re-check `plugin list --scene-code default --plugin-type skill --mode mine
+--page 1 --page-size 100`, walking every page and comparing
+`manifest_json.name` exactly before retrying so the skill is never duplicated.
+If an existing-id import is ambiguous, use `plugin get`, version history,
+hashes, and content comparison instead—the row existed before the request, so
+finding it does not prove the update committed.
 
 ## Release a new version
 

@@ -594,6 +594,22 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	}
 }
 
+func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.import")
+	if !ok || op.RequestBody == nil {
+		t.Fatal("plugin.import request body not found")
+	}
+	pluginName, ok := op.RequestBody.Properties["plugin_name"]
+	if !ok || !strings.Contains(strings.ToLower(pluginName.Description), "human-facing marketplace display name") {
+		t.Errorf("plugin_name description must identify the display name, got %q", pluginName.Description)
+	}
+	name, ok := op.RequestBody.Properties["name"]
+	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
+		t.Errorf("name description must identify the machine name, got %q", name.Description)
+	}
+}
+
 func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("message.send")

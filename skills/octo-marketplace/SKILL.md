@@ -101,8 +101,10 @@ Marketplace mutations are not transport-retried. A gateway failure may mean the
 server committed the operation, so `RESULT_UNKNOWN` must be resolved by reading
 state before retrying:
 
-- create: walk `plugin list --scene-code default --mode mine --q "<name>"`
-  through every page;
+- create: walk `plugin list --scene-code default --mode mine --q
+  "<display-name>"` through every page; for Skills, follow `skills.md` and
+  compare `manifest_json.name` across the complete owned list because that is
+  the stable machine identity;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
@@ -110,8 +112,8 @@ state before retrying:
 - review decisions: re-read the review request;
 - delist/delete: re-read the plugin.
 
-`--q` matches `plugin_name` substrings only and a page defaults to 20 rows. Stop
-only after an exact match or a short page.
+`--q` matches the human-facing `plugin_name` substrings only and a page defaults
+to 20 rows. Stop only after an exact match or a short page.
 
 ## Pagination and filtering
 
