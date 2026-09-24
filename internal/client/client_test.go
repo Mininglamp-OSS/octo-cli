@@ -203,6 +203,107 @@ func TestDo_BackendErrorParsed(t *testing.T) {
 	}
 }
 
+func TestDo_LoopUnstructuredNotFoundReportsUnsupportedAPI(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "plain text", body: "404 page not found\n"},
+		{name: "HTML", body: "<html><body>Not Found</body></html>"},
+		{name: "gateway JSON", body: `{"message":"route not found"}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Service: "loop",
+				Method:  http.MethodGet,
+				Path:    "/fleet/api/v1/tasks/missing",
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+			}
+			if ee.Type != "api_error" || ee.Code != "LOOP_API_UNSUPPORTED" {
+				t.Fatalf("error = %+v, want api_error/LOOP_API_UNSUPPORTED", ee)
+			}
+			if ee.Message != "this Octo server version does not support Loop" {
+				t.Errorf("message = %q", ee.Message)
+			}
+			if !strings.Contains(ee.Hint, "/fleet/api/v1") {
+				t.Errorf("hint = %q, want Fleet API path", ee.Hint)
+			}
+			if len(ee.Detail) != 0 {
+				t.Errorf("detail = %s, want omitted gateway response", ee.Detail)
+			}
+		})
+	}
+}
+
+func TestDo_LoopStructuredNotFoundPreservesBackendError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"task not found","details":{}}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/tasks/missing",
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+	}
+	if ee.Code != "NOT_FOUND" || ee.Message != "task not found" {
+		t.Fatalf("error = %+v, want backend NOT_FOUND preserved", ee)
+	}
+	if len(ee.Detail) == 0 {
+		t.Error("structured backend error detail must be preserved")
+	}
+}
+
+func TestDo_NonLoopUnstructuredNotFoundRemainsNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("404 page not found\n"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "docs",
+		Method:  http.MethodGet,
+		Path:    "/docs/missing",
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+	}
+	if ee.Code != "NOT_FOUND" {
+		t.Fatalf("code = %q, want NOT_FOUND", ee.Code)
+	}
+}
+
 func TestDo_RetryOn503ThenSucceed(t *testing.T) {
 	var calls int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

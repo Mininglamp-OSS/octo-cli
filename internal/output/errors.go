@@ -84,6 +84,17 @@ func ErrNetwork(msg, hint string) *ExitError {
 	return &ExitError{Type: "network", Code: "NETWORK_ERROR", Message: msg, Hint: hint}
 }
 
+// ErrLoopAPIUnsupported reports that the configured Octo server does not
+// expose the Fleet public API required by Loop commands.
+func ErrLoopAPIUnsupported() *ExitError {
+	return &ExitError{
+		Type:    "api_error",
+		Code:    "LOOP_API_UNSUPPORTED",
+		Message: "this Octo server version does not support Loop",
+		Hint:    "upgrade the Octo backend or use an environment where Fleet /fleet/api/v1 is enabled",
+	}
+}
+
 // --- backend error mapping ---
 
 // backendErrorMapping maps matters error codes to CLI taxonomy + hint. See

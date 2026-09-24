@@ -171,6 +171,49 @@ func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
 	}
 }
 
+func TestLoopCommandReportsUnsupportedServerVersion(t *testing.T) {
+	t.Parallel()
+
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/tasks/task-1" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	})
+	root.SetArgs([]string{"loop", "task", "get", "task-1", "--workspace-id", "workspace-1"})
+
+	err := root.Execute()
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error = %T %v, want LOOP_API_UNSUPPORTED", err, err)
+	}
+
+	var envelope struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(tf.ErrOut.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode error envelope: %v\n%s", err, tf.ErrOut.String())
+	}
+	if envelope.OK {
+		t.Fatal("error envelope ok = true")
+	}
+	if envelope.Error.Type != "api_error" || envelope.Error.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error envelope = %+v", envelope.Error)
+	}
+	if envelope.Error.Message != "this Octo server version does not support Loop" {
+		t.Errorf("message = %q", envelope.Error.Message)
+	}
+	if !strings.Contains(envelope.Error.Hint, "/fleet/api/v1") {
+		t.Errorf("hint = %q, want Fleet API path", envelope.Error.Hint)
+	}
+}
+
 func TestLoopExpertTeamEvaluateCommandShape(t *testing.T) {
 	var gotMethod, gotPath, gotWorkspace string
 	var gotBody map[string]any
