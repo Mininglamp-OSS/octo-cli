@@ -293,14 +293,14 @@ func TestMarketplacePluginImportRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
 	})
 
-	root.SetArgs([]string{"marketplace", "plugin", "import", "--parse-task-id", "task-1", "--name", "全栈清单", "--version", "1.0.0"})
+	root.SetArgs([]string{"marketplace", "plugin", "import", "--parse-task-id", "task-1", "--plugin-name", "全栈清单", "--name", "fullstack-checklist", "--version", "1.0.0"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if gotMethod != http.MethodPost || gotPath != "/market/api/v1/plugins/import" {
 		t.Errorf("got %s %s, want POST /market/api/v1/plugins/import", gotMethod, gotPath)
 	}
-	if gotBody["parse_task_id"] != "task-1" || gotBody["name"] != "全栈清单" || gotBody["version"] != "1.0.0" {
+	if gotBody["parse_task_id"] != "task-1" || gotBody["plugin_name"] != "全栈清单" || gotBody["name"] != "fullstack-checklist" || gotBody["version"] != "1.0.0" {
 		t.Errorf("body = %#v", gotBody)
 	}
 }

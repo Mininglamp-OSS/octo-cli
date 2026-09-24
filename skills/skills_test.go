@@ -399,7 +399,7 @@ func TestOctoMailSkillEmbeddedAndSafe(t *testing.T) {
 	}
 }
 
-func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
+func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testing.T) {
 	b, err := FS.ReadFile("octo-marketplace/skills.md")
 	if err != nil {
 		t.Fatalf("read marketplace skills reference: %v", err)
@@ -408,11 +408,15 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 	for _, want := range []string{
 		"or an accessible skill directory",
 		"mktemp -d",
-		"--mode mine --q <name>", // owned-name lookup on the unified list
+		"--mode mine --page 1 --page-size 100",
+		"`manifest_json.name`",
 		"skill-upload create --file-name",
 		"skill-upload parse <skill_upload_id>",
 		"skill-parse-task get <parse_task_id>",
 		"plugin import --parse-task-id",
+		"--plugin-name \"<display-name>\" --name \"<skill-name>\"",
+		"`--plugin-name` is the visible Marketplace title",
+		"do not silently reuse the machine slug",
 		"plugin publish --plugin-id <plugin-id>",
 		"--parse-task-id <parse-task-id>",
 		"plugin review-request create --data @review.json",
@@ -422,9 +426,14 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 			t.Errorf("publish workflow must contain %q", want)
 		}
 	}
-	// The owned-name ownership check must precede upload initialization.
-	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
+	// The exhaustive machine-name ownership check must precede upload
+	// initialization. The API's q filter searches display names, so using it for
+	// this lookup can miss an existing skill with the same manifest name.
+	if strings.Index(content, "--mode mine --page 1 --page-size 100") > strings.Index(content, "skill-upload create --file-name") {
 		t.Error("owned-name lookup must happen before upload initialization")
+	}
+	if strings.Contains(content, "--mode mine --q <name>") {
+		t.Error("machine-name lookup must not use the display-name q filter")
 	}
 	// Retired per-type commands and presigned-download wording must stay gone;
 	// publication now uses the unified plugin.publish operation above.

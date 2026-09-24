@@ -62,7 +62,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Search keyword. Case-folded substring match against plugin_name ONLY — not the display name, description, tags or publisher. A skill imported with a display --name is therefore not findable by that name."
+            "description": "Search keyword. Case-folded substring match against plugin_name, the human-facing marketplace display name, only — not the machine name in manifest_json.name, description, tags or publisher."
           },
           {
             "name": "tag",
@@ -838,11 +838,11 @@
                   },
                   "plugin_name": {
                     "type": "string",
-                    "description": "Registry identifier written to the plugin_name column and to manifest_json.plugin_name. Distinct from name, not a synonym. Leave it empty and it inherits name; there is no fallback in the other direction. On update an omitted value falls back to the existing row."
+                    "description": "Human-facing marketplace display name written to the plugin_name column and to manifest_json.plugin_name. Distinct from the skill machine name, not a synonym. On create, always supply it explicitly; leaving it empty makes the backend inherit name and exposes the machine slug in the catalog. On update an omitted value falls back to the existing row."
                   },
                   "name": {
                     "type": "string",
-                    "description": "Human display name written to manifest_json.name and to the SKILL.md frontmatter. Distinct from plugin_name, not a synonym. On update an omitted value falls back to the existing row. Note plugin list --q searches plugin_name only, so a display name set here is not searchable."
+                    "description": "Stable skill machine name written to manifest_json.name and to the SKILL.md frontmatter, normally read from the uploaded package's root SKILL.md. Distinct from plugin_name, not a synonym. On update an omitted value falls back to the existing row."
                   },
                   "description": {
                     "type": "string"
