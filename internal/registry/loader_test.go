@@ -63,7 +63,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        42,
+		"docs":        44,
 		"drive":       43,
 		"html":        22,
 		"marketplace": 25,
@@ -1302,6 +1302,8 @@ func TestDocsStrictSchemaAppliesOnlyToExplicitOperations(t *testing.T) {
 		"docs.sheet.rows.delete":    true,
 		"docs.sheet.columns.insert": true,
 		"docs.sheet.columns.delete": true,
+		"docs.sheet.split":          true,
+		"docs.sheet.deduplicate":    true,
 	}
 	for id := range want {
 		if _, ok := r.GetOperation(id); !ok {

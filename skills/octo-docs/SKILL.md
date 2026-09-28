@@ -21,7 +21,7 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
 | Your task | Read |
 |---|---|
-| Read/edit a **spreadsheet** (`doc_type: sheet`): structural row/column edits, find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
+| Read/edit a **spreadsheet** (`doc_type: sheet`): conditional formatting, safe split/deduplication, structural row/column edits, find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
 | Create/edit a **PPT** (`doc_type: html_ppt`): slides, comments, versions and HTML export | **`ppt.md`** |

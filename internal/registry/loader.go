@@ -296,6 +296,7 @@ type SchemaInfo struct {
 	// EnumHint is an opt-in x-octo-enum-hint for request-body enum errors.
 	EnumHint    string `json:"enum_hint,omitempty"`
 	Const       any    `json:"const,omitempty"`
+	Default     any    `json:"-"`
 	Format      string `json:"format,omitempty"`
 	Description string `json:"description,omitempty"`
 	WriteOnly   bool   `json:"write_only,omitempty"`
@@ -901,6 +902,7 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		FlagName:      stringOf(schema["x-octo-flag"]),
 		Secret:        truthy(schema["x-octo-secret"]),
 		WriteOnly:     boolOf(schema["writeOnly"]),
+		Default:       schema["default"],
 		MinLength:     intOf(schema["minLength"]),
 		MaxLength:     intOf(schema["maxLength"]),
 		MinItems:      intOf(schema["minItems"]),
@@ -1033,6 +1035,9 @@ func mergeSchemaIdentity(dst, src *SchemaInfo) {
 	dst.WriteOnly = dst.WriteOnly || src.WriteOnly
 	if dst.Const == nil {
 		dst.Const = src.Const
+	}
+	if dst.Default == nil {
+		dst.Default = src.Default
 	}
 }
 
