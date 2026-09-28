@@ -191,4 +191,4 @@ jobs:
         run: npm test
       - name: Release workflow and PPT contract tests
         working-directory: .
-        run: node --test scripts/release-workflows.test.mjs
+        run: node --test scripts/release-workflows.test.mjs scripts/ppt-media-guidance.test.mjs

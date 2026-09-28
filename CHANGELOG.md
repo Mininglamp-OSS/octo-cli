@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **PPT native media guidance** distinguishes direct binary uploads of authorized
+  local task assets from ingestion of existing public URLs. Signed URLs use stdin
+  and private response handling; native references are inserted with a fresh
+  revision. **Minimum rollout dependency:** use this media workflow only with a
+  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
+  document-owned media. Older image-only attachment responses are not compatible.
+  No new CLI command, publishing gate or size-limit change is introduced.
+
 ### Added
 - **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
   matching version in one JSON response. Bot updates read this pair, edit the

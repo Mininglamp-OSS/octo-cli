@@ -13,7 +13,7 @@
       "get": {
         "operationId": "docs.ppt.export",
         "summary": "Save the live PPT as a self-contained HTML presentation (reader or higher)",
-        "description": "Pass --output slides.html to save the actual file bytes. Without --output, only response metadata is printed. HTML is an offline player, not editable PPTX or PDF. No external assets or collaboration credentials are included.",
+        "description": "Pass --output slides.html to save the actual file bytes. Without --output, only response metadata is printed. HTML is an offline player, not editable PPTX or PDF. On a compatible backend, document-owned ppt-media: attachments are embedded into the export without changing the saved deck. Arbitrary external URLs are not fetched and collaboration credentials are not included. Missing, unauthorized or oversized media causes export failure.",
         "x-octo-risk": "read",
         "x-octo-binary-response": true,
         "parameters": [
