@@ -4,10 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -97,6 +94,20 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	argv, terr := buildArgv(detail, arguments, pol)
 	if terr != nil {
 		return synthErrorEnvelope(output.ErrValidation(terr.Error(), "call describe_op to see the operation's declared arguments")), false
+	}
+
+	if detail.Multipart {
+		if value, ok := arguments["file_path"]; ok && value != nil && fmt.Sprint(value) != "" {
+			file, err := openUpload(fmt.Sprint(value), pol)
+			if err != nil {
+				return synthErrorEnvelope(output.ErrValidation(err.Error(), "check the configured upload root and file path")), false
+			}
+			f.MultipartFile = file
+			defer func() {
+				_ = file.Close() //nolint:errcheck // read-only descriptor cleanup
+				f.MultipartFile = nil
+			}()
+		}
 	}
 
 	// Snapshot the operator globals makeFactory set on f BEFORE build(): root's
@@ -228,7 +239,9 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 				pageAll = b
 			}
 		case k == "file_path" && d.Multipart:
-			filePath = fmt.Sprint(v)
+			if v != nil {
+				filePath = fmt.Sprint(v)
+			}
 		case pathSet[k]:
 			// consumed as a positional below
 		case queryByName[k] != nil:
@@ -332,62 +345,6 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 		argv = append(argv, positionals...)
 	}
 	return argv, nil
-}
-
-// resolveUploadPath enforces the multipart file-path capability boundary.
-// stdio is the trusted/local transport and passes the path through. Over HTTP a
-// model-supplied path is denied unless the operator configured a confined
-// upload root; when configured, the path (relative paths joined to the root) is
-// cleaned and its symlinks resolved, and the real target must stay within the
-// resolved root — blocking traversal, absolute escapes, and symlink escapes, so
-// host auth/config/environment files are never reachable through MCP.
-// resolveUploadPath enforces the multipart file-path capability boundary on
-// EVERY transport: a model-supplied file_path can otherwise turn call_op into
-// an arbitrary local-file read (file.upload / html.asset.add /
-// loop.attachment.upload then exfiltrate through the bot's space). The default
-// is deny; the model can never toggle it.
-//
-//   - OCTO_MCP_UPLOAD_ROOT set  → confine (both transports): the path (relative
-//     joined to the root) is cleaned and its symlinks resolved, and the real
-//     target must stay within the resolved root — blocking traversal, absolute
-//     escapes, and symlink escapes.
-//   - root unset, stdio + operator --allow-local-upload → pass through, the
-//     documented trusted-local escape hatch (operator flag, not model input).
-//   - root unset otherwise (HTTP always, or stdio without the flag) → refuse.
-func resolveUploadPath(p string, pol execPolicy) (string, error) {
-	root := strings.TrimSpace(pol.uploadRoot)
-	if root == "" {
-		if pol.allowLocalUpload && !pol.httpMode {
-			return p, nil
-		}
-		hint := "set OCTO_MCP_UPLOAD_ROOT to a confined directory to enable uploads"
-		if !pol.httpMode {
-			hint += ", or start `mcp serve --allow-local-upload` for a trusted-local host"
-		}
-		return "", errors.New("local file_path upload is disabled; " + hint)
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", fmt.Errorf("configured upload root is not accessible: %w", err)
-	}
-	resolvedRoot, err = filepath.Abs(resolvedRoot)
-	if err != nil {
-		return "", fmt.Errorf("configured upload root is invalid: %w", err)
-	}
-	candidate := p
-	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(resolvedRoot, candidate)
-	}
-	candidate = filepath.Clean(candidate)
-	resolved, err := filepath.EvalSymlinks(candidate)
-	if err != nil {
-		return "", fmt.Errorf("file_path is not accessible: %w", err)
-	}
-	rel, err := filepath.Rel(resolvedRoot, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		return "", errors.New("file_path escapes the configured upload root")
-	}
-	return resolved, nil
 }
 
 // commandWords maps an operationId to its CLI command path words, matching the

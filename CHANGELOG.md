@@ -56,7 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"dry_run": true` envelope and performs no backend mutation for the server's
   lifetime. Over HTTP the credential is per
   connection (the server env credential is never inherited), multipart
-  `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`, `Origin` is
+  `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`: component-by-component
+  no-follow opens (Linux/macOS `openat`; Windows directory-relative `NtCreateFile`)
+  reject symlinks/reparse points and the final descriptor must be a regular file.
+  Multipart assembly reads that already-open descriptor, so replacing a pathname
+  after validation cannot redirect the upload. The explicit stdio opt-in still
+  permits unconfined regular files; HTTP always requires confinement. `Origin` is
   validated (allowlist via `OCTO_MCP_ALLOWED_ORIGINS`, loopback-only by
   default), and `--http` binds cleartext so TLS/loopback termination is the
   operator's responsibility. Existing CLI commands, authentication, output, and

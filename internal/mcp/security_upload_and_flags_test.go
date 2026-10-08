@@ -83,7 +83,7 @@ func TestResolveUploadPath_StdioAllowLocalUploadOptIn(t *testing.T) {
 	}
 }
 
-func TestResolveUploadPath_Containment(t *testing.T) {
+func TestOpenUpload_Containment(t *testing.T) {
 	// Confinement is identical on both transports: only the resolved root wins.
 	for _, httpMode := range []bool{false, true} {
 		root := t.TempDir()
@@ -91,15 +91,15 @@ func TestResolveUploadPath_Containment(t *testing.T) {
 		if err := os.WriteFile(inside, []byte("hi"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		got, err := resolveUploadPath("ok.txt", execPolicy{httpMode: httpMode, uploadRoot: root})
+		got, err := openUpload("ok.txt", execPolicy{httpMode: httpMode, uploadRoot: root})
 		if err != nil {
 			t.Fatalf("httpMode=%v: file inside the root must be allowed: %v", httpMode, err)
 		}
-		if resolvedRoot, _ := filepath.EvalSymlinks(root); !strings.HasPrefix(got, resolvedRoot) {
-			t.Errorf("httpMode=%v: resolved path %q must live under the root %q", httpMode, got, resolvedRoot)
+		if err := got.Close(); err != nil {
+			t.Fatal(err)
 		}
 		// Traversal out of the root is refused.
-		if _, err := resolveUploadPath("../escape.txt", execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
+		if _, err := openUpload("../escape.txt", execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
 			t.Errorf("httpMode=%v: traversal must be refused", httpMode)
 		}
 		// An absolute path outside the root is refused.
@@ -107,7 +107,7 @@ func TestResolveUploadPath_Containment(t *testing.T) {
 		if err := os.WriteFile(outside, []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := resolveUploadPath(outside, execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
+		if _, err := openUpload(outside, execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
 			t.Errorf("httpMode=%v: absolute path outside the root must be refused", httpMode)
 		}
 		// A symlink inside the root pointing outside is refused (real target escapes).
@@ -115,7 +115,7 @@ func TestResolveUploadPath_Containment(t *testing.T) {
 		if err := os.Symlink(outside, link); err != nil {
 			t.Skipf("symlink unsupported here: %v", err)
 		}
-		if _, err := resolveUploadPath("link.txt", execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
+		if _, err := openUpload("link.txt", execPolicy{httpMode: httpMode, uploadRoot: root}); err == nil {
 			t.Errorf("httpMode=%v: symlink escaping the root must be refused", httpMode)
 		}
 	}

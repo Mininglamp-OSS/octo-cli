@@ -73,10 +73,11 @@ Deployment (HTTP):
   - initialize / tools/list / search_ops / describe_op / resources/read need no
     bearer, so any peer that can reach the port can enumerate the catalog.
 
-Multipart file_path uploads (file.upload, html.asset.add, loop.attachment.upload)
+Multipart file_path uploads (file.upload, html.asset.add, attachment.upload)
 are default-deny on BOTH transports so a model cannot read an arbitrary local
 file: set OCTO_MCP_UPLOAD_ROOT to confine uploads to one directory (path is
-cleaned and symlink-resolved and must stay within it), or, on stdio only, pass
+opened relative to directory handles, rejecting symlinks and non-regular files),
+or, on stdio only, pass
 --allow-local-upload to allow unconfined uploads on a trusted-local host. HTTP
 never allows unconfined uploads.
 
