@@ -58,15 +58,17 @@ Do not search the machine or guess a path.
    `.git`, caches, build output; keep `SKILL.md`, referenced files, README,
    LICENSE). Default a missing `version` to `1.0.0` in the staged `SKILL.md`.
 2. Inspect without executing; read the stable machine `name` and `version` from
-   the root `SKILL.md`. Choose a concise, human-facing Marketplace display name
-   in the user's language; do not silently reuse the machine slug unless the
-   user explicitly wants that as the visible title.
+   the root `SKILL.md`. On create, choose a concise, human-facing Marketplace
+   display name in the user's language; do not silently reuse the machine slug
+   unless the user explicitly wants that as the visible title. On update, read
+   the current row with `plugin get` and keep its exact `plugin_name` unless the
+   user explicitly requested a rename.
 3. Check ownership exhaustively: `plugin list --scene-code default --plugin-type
    skill --mode mine --page 1 --page-size 100`, then walk `--page` until a short
    page (there is no `--page-all`). Compare each row's `manifest_json.name` to
-   the exact machine name from `SKILL.md`. Do not filter with `--q`: it searches
-   the human-facing `plugin_name`, so it cannot reliably find an existing skill
-   by machine name. Decide create vs. update.
+   the exact machine name from `SKILL.md`. The display-name search filter cannot
+   reliably find an existing skill by machine name, so scan the complete owned
+   list. Decide create vs. update.
 4. Show the final plan (path, display name, machine name, version, visibility,
    category) and get one confirmation.
 5. Presign + upload + parse + import:
@@ -84,8 +86,9 @@ Do not search the machine or guess a path.
    `--plugin-name` is the visible Marketplace title; `--name` is the stable
    machine name from `SKILL.md`. `plugin import` builds the attachment tree and
    saves a draft version. Omit `--plugin-id` to create; set it to update an
-   existing owned skill. Optional `--category-id`, `--tags`, `--icon`,
-   `--changelog`.
+   existing owned skill. For an update, `<display-name>` must be the current
+   `plugin_name` read in step 2 unless the user explicitly confirmed a rename.
+   Optional `--category-id`, `--tags`, `--icon`, `--changelog`.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <plugin-id>` to
    verify the draft.
 7. Publish explicitly:
@@ -114,8 +117,9 @@ finding it does not prove the update committed.
 First inspect `display_status` with `plugin get`:
 
 - For an unpublished draft, re-run upload/parse and update it with `plugin
-  import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, then run
-  `plugin publish` as in the initial flow.
+  import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, retaining
+  the current `plugin_name` unless the user explicitly requested a rename, then
+  run `plugin publish` as in the initial flow.
 - For an already-published Space skill, **do not call import or upsert**: direct
   edits are rejected so live content cannot bypass review. Upload and parse the
   new archive, then submit that fresh parse task as the frozen upgrade:

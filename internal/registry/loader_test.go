@@ -604,9 +604,53 @@ func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
 	if !ok || !strings.Contains(strings.ToLower(pluginName.Description), "human-facing marketplace display name") {
 		t.Errorf("plugin_name description must identify the display name, got %q", pluginName.Description)
 	}
+	if !strings.Contains(pluginName.Description, "unless the user explicitly requested a rename") {
+		t.Errorf("plugin_name description must preserve the current display name on update, got %q", pluginName.Description)
+	}
 	name, ok := op.RequestBody.Properties["name"]
 	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
 		t.Errorf("name description must identify the machine name, got %q", name.Description)
+	}
+}
+
+func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("plugin.list response schema not found")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Type != "array" || data.Items == nil {
+		t.Fatalf("plugin.list data schema = %+v, want an item array", data)
+	}
+	manifest, ok := data.Items.Properties["manifest_json"]
+	if !ok || manifest.Type != "object" {
+		t.Fatalf("plugin.list item manifest_json schema = %+v", manifest)
+	}
+	if !contains(data.Items.Required, "manifest_json") {
+		t.Fatalf("plugin.list item required fields = %v, want manifest_json", data.Items.Required)
+	}
+	name, ok := manifest.Properties["name"]
+	if !ok || name.Type != "string" {
+		t.Fatalf("plugin.list manifest_json.name schema = %+v", name)
+	}
+	if !contains(manifest.Required, "name") {
+		t.Fatalf("plugin.list manifest_json required fields = %v, want name", manifest.Required)
+	}
+	var qDescription, modeDescription string
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "q" {
+			qDescription = parameter.Description
+		}
+		if parameter.Name == "mode" {
+			modeDescription = parameter.Description
+		}
+	}
+	if !strings.Contains(qDescription, "manifest_json.description") || strings.Contains(qDescription, "description, tags") {
+		t.Errorf("plugin.list q description must match the backend display-name/description search, got %q", qDescription)
+	}
+	if !strings.Contains(modeDescription, "every listing state") {
+		t.Errorf("plugin.list mode description must document owned-state coverage, got %q", modeDescription)
 	}
 }
 

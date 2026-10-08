@@ -417,6 +417,8 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"--plugin-name \"<display-name>\" --name \"<skill-name>\"",
 		"`--plugin-name` is the visible Marketplace title",
 		"do not silently reuse the machine slug",
+		"keep its exact `plugin_name` unless the",
+		"user explicitly requested a rename",
 		"plugin publish --plugin-id <plugin-id>",
 		"--parse-task-id <parse-task-id>",
 		"plugin review-request create --data @review.json",
@@ -426,14 +428,23 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 			t.Errorf("publish workflow must contain %q", want)
 		}
 	}
-	// The exhaustive machine-name ownership check must precede upload
-	// initialization. The API's q filter searches display names, so using it for
-	// this lookup can miss an existing skill with the same manifest name.
-	if strings.Index(content, "--mode mine --page 1 --page-size 100") > strings.Index(content, "skill-upload create --file-name") {
-		t.Error("owned-name lookup must happen before upload initialization")
+	// The exhaustive machine-name ownership step must precede upload
+	// initialization. Check the step itself rather than the first matching flag,
+	// so an unrelated pagination example cannot make this assertion false-green.
+	ownershipStart := strings.Index(content, "3. Check ownership exhaustively:")
+	uploadStart := strings.Index(content, "4. Show the final plan")
+	if ownershipStart < 0 || uploadStart < 0 || ownershipStart >= uploadStart {
+		t.Fatal("publish workflow must keep ownership step 3 before plan/upload step 4")
 	}
-	if strings.Contains(content, "--mode mine --q <name>") {
-		t.Error("machine-name lookup must not use the display-name q filter")
+	ownershipStep := content[ownershipStart:uploadStart]
+	if strings.Index(ownershipStep, "--mode mine --page 1 --page-size 100") < 0 {
+		t.Error("ownership step must walk the complete owned list")
+	}
+	if strings.Contains(ownershipStep, "--q") {
+		t.Error("machine-name ownership step must not use any display-name q filter")
+	}
+	if uploadCommand := strings.Index(content, "skill-upload create --file-name"); uploadCommand < 0 || ownershipStart >= uploadCommand {
+		t.Error("owned-name lookup must happen before upload initialization")
 	}
 	// Retired per-type commands and presigned-download wording must stay gone;
 	// publication now uses the unified plugin.publish operation above.
@@ -441,6 +452,28 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		if strings.Contains(content, gone) {
 			t.Errorf("skills workflow must not reference the retired %q surface", gone)
 		}
+	}
+}
+
+func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("read marketplace skill: %v", err)
+	}
+	content := string(b)
+	createStart := strings.Index(content, "- create: walk")
+	updateStart := strings.Index(content, "- update/import of an existing id:")
+	if createStart < 0 || updateStart < 0 || createStart >= updateStart {
+		t.Fatal("marketplace recovery must document create before update")
+	}
+	createRecovery := content[createStart:updateStart]
+	for _, want := range []string{"--page-size 100", "complete owned list", "`manifest_json.name`"} {
+		if !strings.Contains(createRecovery, want) {
+			t.Errorf("create recovery must contain %q", want)
+		}
+	}
+	if strings.Contains(createRecovery, "--q") {
+		t.Error("create recovery must not filter the ownership scan with --q")
 	}
 }
 
