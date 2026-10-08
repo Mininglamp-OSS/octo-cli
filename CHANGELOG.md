@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     service↔skill module map with no arguments; each hit carries Skill
     navigation metadata (which business Skill to load, a short summary, a
     recommendation level, and the resource URI), never the Skill body.
+    Keyword search keeps the leading 8192 bytes (without splitting UTF-8),
+    then 512 runes, then 16 whitespace-delimited terms before an AND scan.
+    Excess input returns `truncated: true` with a bound notice; ordinary
+    multi-term matching is unchanged. Cancellation/deadline expiry returns an
+    MCP tool error (`isError: true`, `SEARCH_CANCELLED`) without partial hits.
+    The scan checks cancellation between operations and terms on both transports.
   - `describe_op` — the full, zero-drift parameter schema for one operation
     (straight from the embedded spec) plus the operation's Skill reference and
     a short pre-call advice; the Skill never carries a second copy of the

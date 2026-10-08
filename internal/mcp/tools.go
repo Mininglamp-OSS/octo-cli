@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -13,6 +14,48 @@ import (
 // searchOpsPageLimit caps a keyword/domain result page so the per-op skill
 // navigation increment has a hard upper bound.
 const searchOpsPageLimit = 20
+
+// search_ops is bearer-free, so its query is attacker-controlled input on both
+// transports. The scan cost is terms × operations, so the query is bounded
+// BEFORE tokenising and the scan checks ctx, or a single unauthenticated POST
+// can pin a core (the per-request HTTP timeout cannot interrupt a loop that
+// never consults it).
+const (
+	// maxSearchQueryRunes caps the query after truncation (a real query is a few
+	// words; 512 runes is generous). Deterministic: the prefix is kept.
+	maxSearchQueryRunes = 512
+	// maxSearchQueryBytes caps the query BEFORE any rune decode, so a
+	// multi-megabyte multi-byte blob is dropped without scanning it.
+	maxSearchQueryBytes = 8 * 1024
+	// maxSearchTerms caps tokenised terms; excess terms are dropped (a query
+	// that broad is already meaningless — every term must match).
+	maxSearchTerms = 16
+)
+
+// boundSearchQuery applies the search_ops query bounds deterministically: an
+// oversized input keeps its leading bytes/runes, an excessive term count keeps
+// its leading terms. returnedTruncated tells the caller to annotate the result.
+func boundSearchQuery(query string) (q string, terms []string, truncated bool) {
+	if len(query) > maxSearchQueryBytes {
+		end := maxSearchQueryBytes
+		for end > 0 && !utf8.RuneStart(query[end]) {
+			end--
+		}
+		query = query[:end]
+		truncated = true
+	}
+	if r := []rune(query); len(r) > maxSearchQueryRunes {
+		query = string(r[:maxSearchQueryRunes])
+		truncated = true
+	}
+	q = strings.ToLower(query)
+	terms = strings.Fields(q)
+	if len(terms) > maxSearchTerms {
+		terms = terms[:maxSearchTerms]
+		truncated = true
+	}
+	return q, terms, truncated
+}
 
 // tool metadata for tools/list. The three inputSchemas together are < 1 KB;
 // skill navigation lives in return values, never here, so tools/list stays
@@ -22,7 +65,7 @@ func toolDefinitions() []toolDef {
 		{
 			Name:        "search_ops",
 			Description: "List callable Octo operations. Filter by domain and/or keyword. Returns operation ids + one-line summaries + skill navigation metadata (which business Skill to load), NOT full parameter schemas and NOT Skill bodies. Call with no arguments for a service<->skill module map.",
-			InputSchema: rawSchema(`{"type":"object","properties":{"domain":{"type":"string","description":"service name, e.g. docs, message, loop"},"query":{"type":"string","description":"keyword to match against operation id / summary / path"}}}`),
+			InputSchema: rawSchema(`{"type":"object","properties":{"domain":{"type":"string","description":"service name, e.g. docs, message, loop"},"query":{"type":"string","description":"keyword AND match against operation id / summary / path; keeps first 8192 bytes (whole UTF-8 characters), 512 runes and 16 terms; result reports truncation"}}}`),
 		},
 		{
 			Name:        "describe_op",
@@ -86,8 +129,20 @@ type skillNav struct {
 func skillResourceURI(name string) string     { return "octo://skills/" + name + "/SKILL.md" }
 func refResourceURI(name, file string) string { return "octo://skills/" + name + "/" + file }
 
-// searchOps handles the search_ops tool.
-func (s *Server) searchOps(domain, query string) toolResult {
+// searchOps handles the search_ops tool. The query is bounded before
+// tokenising and the scan consults ctx (HTTP request timeout / client
+// cancellation), because search_ops is reachable without a bearer and the scan
+// cost is terms × operations.
+func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult {
+	cancelled := func(err error) toolResult {
+		return jsonToolResult(map[string]any{
+			"operations": []any{},
+			"error":      map[string]any{"code": "SEARCH_CANCELLED", "message": err.Error()},
+		}, true)
+	}
+	if err := ctx.Err(); err != nil {
+		return cancelled(err)
+	}
 	if domain == "" && query == "" {
 		return jsonToolResult(s.moduleMap(), false)
 	}
@@ -113,16 +168,24 @@ func (s *Server) searchOps(domain, query string) toolResult {
 		candidates = s.reg.EnabledOperations()
 	}
 
-	q := strings.ToLower(query)
-	terms := strings.Fields(q)
+	_, terms, queryTruncated := boundSearchQuery(query)
 	ops := make([]opSearchResult, 0, len(candidates))
-	truncated := false
+	truncated := queryTruncated
 	for _, op := range candidates {
+		if err := ctx.Err(); err != nil {
+			return cancelled(err)
+		}
 		if _, div := divergentMCPOps[op.ID]; div {
 			continue // not advertised via MCP; generated schema is uncallable
 		}
-		if len(terms) > 0 && !matchOp(op, terms) {
-			continue
+		if len(terms) > 0 {
+			matched, err := matchOp(ctx, op, terms)
+			if err != nil {
+				return cancelled(err)
+			}
+			if !matched {
+				continue
+			}
 		}
 		if len(ops) >= searchOpsPageLimit {
 			truncated = true
@@ -131,10 +194,20 @@ func (s *Server) searchOps(domain, query string) toolResult {
 		ops = append(ops, opSearchResult{OperationInfo: op, Skill: s.navFor(op, false)})
 	}
 
+	if err := ctx.Err(); err != nil {
+		return cancelled(err)
+	}
 	res := map[string]any{"operations": ops}
 	if truncated {
+		note := ""
+		if queryTruncated {
+			note = fmt.Sprintf("query bounded to %d bytes / %d runes / %d terms; ", maxSearchQueryBytes, maxSearchQueryRunes, maxSearchTerms)
+		}
+		if len(ops) >= searchOpsPageLimit {
+			note += fmt.Sprintf("more than %d matches; narrow with a more specific query or a domain filter", searchOpsPageLimit)
+		}
 		res["truncated"] = true
-		res["note"] = fmt.Sprintf("more than %d matches; narrow with a more specific query or a domain filter", searchOpsPageLimit)
+		res["note"] = strings.TrimSpace(note)
 	}
 	return jsonToolResult(res, false)
 }
@@ -146,15 +219,19 @@ type opSearchResult struct {
 
 // matchOp reports whether every query term appears in the operation's id,
 // summary, or path (case-insensitive AND match), so "send message" finds
-// message.send.
-func matchOp(op registry.OperationInfo, terms []string) bool {
+// message.send. It checks ctx between terms so a cancelled request stops
+// promptly; cancellation is distinct from a non-match, including the last op.
+func matchOp(ctx context.Context, op registry.OperationInfo, terms []string) (bool, error) {
 	hay := strings.ToLower(op.ID + " " + op.Summary + " " + op.Path)
 	for _, t := range terms {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		if !strings.Contains(hay, t) {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, ctx.Err()
 }
 
 // moduleMap returns a service<->skill map for search_ops() with no arguments: a

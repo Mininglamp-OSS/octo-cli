@@ -209,7 +209,7 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		if err := unmarshalArgs(p.Arguments, &a); err != nil {
 			return newErrorResponse(req.ID, codeInvalidParams, "invalid search_ops arguments: "+err.Error())
 		}
-		return newResultResponse(req.ID, s.searchOps(a.Domain, a.Query))
+		return newResultResponse(req.ID, s.searchOps(ctx, a.Domain, a.Query))
 	case "describe_op":
 		var a struct {
 			OperationID string `json:"operation_id"`
