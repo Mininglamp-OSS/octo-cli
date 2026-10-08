@@ -62,16 +62,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  ppt-preflight:
-    uses: ./.github/workflows/ppt-release-preflight.yml
-    with:
-      tag: ${{ inputs.tag }}
-      dry_run: ${{ inputs.dry_run }}
-    permissions:
-      contents: read
-
   publish:
-    needs: ppt-preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read

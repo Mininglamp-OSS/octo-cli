@@ -229,6 +229,17 @@ before invoking.
 | `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo-cli schema <op>`" |
 | `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo-cli matters list`" |
 | `NOT_FOUND` | 404 | `api_error` | "resource not found" |
+| `SHEET_CLEANING_UNAVAILABLE` (CLI-inferred from an explicit missing cleaning route) | 404 | `api_error` | "check the same document with sheet get, then backend deployment/routing; never emulate cleaning with a whole-sheet rewrite" |
+| `cleaning_overwrite_required` | 409 | `validation` | "inspect preview; only after approval apply the same version with overwrite consent" |
+| `cleaning_filtered_sheet` | 422 | `validation` | "do not remove another user's shared filter automatically" |
+| `cleaning_complex_sheet` | 422 | `validation` | "use a plain worksheet; rich-text, drawings, links, validations and comments are not flattened" |
+| `cleaning_formula_unsupported` | 422 | `validation` | "choose plain values rather than formula sources" |
+| `cleaning_merged_range` | 422 | `validation` | "choose an unmerged range" |
+| `cleaning_delimiter_not_found` | 422 | `validation` | "inspect stored values, not displayed number formatting" |
+| `cleaning_single_column_required` | 422 | `validation` | "select one source column" |
+| `cleaning_range_out_of_bounds` | 422 | `validation` | "read sheetList and stay within worksheet dimensions" |
+| `cleaning_invalid_delimiter` | 422 | `validation` | "use a literal delimiter of 1-16 characters" |
+| `sheet_conditional_format_unsupported` | 409 | `validation` | "preserve conditional-format rules; never delete them automatically to bypass structural refusal" |
 | `ASSIGNEE_NOT_FOUND` | 404 | `api_error` | "assignee not in space or invalid UID" |
 | `FORBIDDEN` | 403 | `permission` | "bot lacks permission; check space membership" |
 | `BOT_WORKSPACE_MEMBERSHIP_REQUIRED` | 403 | `permission` | "ask a Workspace owner or admin to add this Bot in Workspace Members" |

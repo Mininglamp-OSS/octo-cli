@@ -51,7 +51,7 @@
       "post": {
         "operationId": "html.publish",
         "summary": "Create an HTML document or publish a later version",
-        "description": "Create by omitting slug; the CLI generates a fresh idempotency_key unless one is supplied explicitly. Every new document receives a canonical doc_id whether mounted or unmounted; response data.slug is the document reference and equals data.doc_id. To publish a later version, pass the previously returned data.slug in the legacy-named slug field and omit idempotency_key. Pass only a slug the server returned earlier: an unregistered slug does not create a canonical document, it produces a legacy unregistered one that never appears in the file list. Old legacy documents continue to use their legacy slug as that reference. A display name is metadata, not identity: publishing the same name without the saved reference creates a different document, so same-name republish is not supported. Do not infer identity mode from mount_type or from whether doc_id is non-empty. Requires the write token (Bearer). The server stamps commentable artifacts and reconciles existing comment anchors.",
+        "description": "Create by omitting slug; the CLI generates a fresh idempotency_key unless one is supplied explicitly. Every new document receives a canonical doc_id whether mounted or unmounted; response data.slug is the document reference and equals data.doc_id. To publish a later version, first run html source <doc-ref> and retain data.html with data.version, edit that source, then pass the previously returned data.slug, set version to the source version plus one, and omit idempotency_key. On version_conflict or version_required, the bot must autonomously reread the latest source, reapply only the intended changes while preserving other edits, and republish to the same slug within the same task, up to three recovery attempts; do not end the task by forwarding a routine version error to the user. Never only increase version and resend stale HTML. Pass only a slug the server returned earlier: an unregistered slug does not create a canonical document, it produces a legacy unregistered one that never appears in the file list. Old legacy documents continue to use their legacy slug as that reference. A display name is metadata, not identity: publishing the same name without the saved reference creates a different document, so same-name republish is not supported. Do not infer identity mode from mount_type or from whether doc_id is non-empty. Requires the write token (Bearer). The server stamps commentable artifacts and reconciles existing comment anchors.",
         "x-octo-risk": "write",
         "x-octo-auto-idempotency-key": "idempotency_key",
         "x-octo-body-variants": [
@@ -100,7 +100,7 @@
                   },
                   "version": {
                     "type": "integer",
-                    "description": "optional explicit version; omit to auto-increment"
+                    "description": "New output version: for updates send the source version read before editing plus one. On servers with octo-docs-html#34 deployed, the server requires current latest+1 for bot updates (428 version_required if missing/zero, 409 version_conflict if mismatched). The HTML backend will be deployed and verified on every serving instance before this CLI workflow is released. Omit for first publication. Do not increase this value without rereading and editing the latest source."
                   },
                   "meta": {
                     "type": "object",
@@ -1106,6 +1106,63 @@
                       "type": "integer"
                     },
                     "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs-html/v1/docs/{doc_id}/source": {
+      "get": {
+        "operationId": "html.source",
+        "summary": "Read stored HTML and its version together (needs reader)",
+        "description": "Read the latest published source by default, or select a fixed version. Returns slug, version and full stored HTML from the same read, without the viewer overlay. Retain data.html with data.version, edit that HTML, then publish with version set to the saved version plus one. On version_conflict, read again and reapply the edit; never only increase version and resend stale HTML. Requires octo-docs-html MR !34 to be deployed. Rollout is backend first: deploy and verify octo-docs-html#34 on every HTML-serving instance before releasing this CLI workflow. A route-level 404 while html get can read the same reference means the source endpoint is unavailable, not that the document is missing; stop and check deployment/routing. Do not infer the source version from metadata, create a replacement document, or fall back to versionless publishing.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "doc_id",
+            "in": "path",
+            "required": true,
+            "description": "Document reference returned as data.slug: canonical doc_id for a new document, or the retained legacy slug for an old document.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "description": "Positive published version to read; omit for latest.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stored source and its matching version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "slug",
+                    "version",
+                    "html"
+                  ],
+                  "properties": {
+                    "slug": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "html": {
                       "type": "string"
                     }
                   }

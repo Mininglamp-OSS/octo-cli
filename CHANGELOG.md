@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **PPT native media guidance** distinguishes direct binary uploads of authorized
+  local task assets from ingestion of existing public URLs. Signed URLs use stdin
+  and private response handling; native references are inserted with a fresh
+  revision. **Minimum rollout dependency:** use this media workflow only with a
+  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
+  document-owned media. Older image-only attachment responses are not compatible.
+  No new CLI command, publishing gate or size-limit change is introduced.
+
 ### Added
 - **`octo-cli mcp serve` (MCP server, v2.3 initial)** — runs octo-cli as a Model
   Context Protocol server over stdio (default, local/trusted-client transport)
@@ -54,6 +63,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exit codes are unchanged — the MCP server is a new front end over the same
   engine.
 
+- **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
+  matching version in one JSON response. Bot updates read this pair, edit the
+  HTML, and publish with the existing `--version` set to the read version + 1.
+  On a version conflict, reread and reapply the edit before publishing again.
+  **Minimum rollout dependency:** the HTML backend will be deployed first;
+  release this CLI workflow and its skills only after octo-docs-html#34 is merged,
+  deployed and verified on every HTML-serving instance. If source returns a
+  route-level 404 while `html get` can read the same reference, report
+  an unavailable endpoint/deployment issue rather than a missing document.
+  Stop the update; do not create a replacement or fall back to versionless writes.
+- **Spreadsheet productivity CLI** — `docs sheet split` and `docs sheet
+  deduplicate` explicitly send `preview:true` by default; applying requires
+  `--preview=false`, with additional `--overwrite` consent for occupied split
+  destinations. Declared boolean body defaults fill missing fields without
+  overriding `--data`; explicit flags take precedence. Strict request schemas
+  reject non-boolean values (including `null`, strings and numbers) before HTTP;
+  malformed `preview` never silently suppresses the safety gate. Range and
+  delimiter bounds are checked locally. Sheet get/edit also support compact conditional
+  format rules and sparse `null` deletion. **Minimum rollout dependency:**
+  backend MR !147, then MR !166 and its deployment, before release/use of these
+  commands. An explicit missing-route 404 returns `SHEET_CLEANING_UNAVAILABLE`;
+  ambiguous unstructured 404s retain `NOT_FOUND` with deployment-check guidance.
+  Do not emulate cleaning with a whole-sheet rewrite. Safety
+  snapshot recovery through `docs versions restore` requires an admin.
+  **Existing-operation wire change:** omitted `docs sheet replace`
+  `caseSensitive` and `matchesTheWholeCell` now send explicit `false`, matching
+  the backend's existing absent-value defaults. `summary.create` declares
+  `include_archived:false` but remains disabled, so that declaration does not
+  change a callable command. Query and non-boolean body defaults remain
+  backend-owned. Resolved defaults stay internal rather than appearing as
+  `schema` output metadata until materialization is consistent across types.
 - **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
   insert|delete`** — structurally adds or removes rows and columns using
   zero-based coordinates while the backend atomically relocates affected
@@ -234,11 +274,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only the old blank/pitch/report/lesson catalogue leaves only `blank` usable
   if this CLI ships first: new gallery IDs fail server-side and old IDs fail
   locally. Update Bot binaries and installed skill copies together after rollout.
-  Supported Release/npm workflows now require fresh five-template Bot create/read
-  probes plus a restricted sharing read/update/stale-epoch rejection/readback
-  check against a configured release target; missing configuration fails closed.
-  Draft/dry runs do not probe. See [PPT release gate](docs/ppt-release-gate.md) for
-  protected-environment setup, frontend confirmation and retained probe documents.
+  GitHub Release/npm publishing uses the existing CI and packaging checks; it
+  does not require PPT-specific credentials or create acceptance documents.
+  This deliberately restores the pre-#173 publishing behavior without a main-only
+  dispatch-ref check or PPT-specific environment approval; operators choose the
+  workflow ref and release tag. Tag and CI-evidence checks remain in place.
+  Live deployment acceptance is an operator-run check when related services
+  change, not a mandatory step on every CLI release. See
+  [PPT deployment compatibility](docs/ppt-release-gate.md).
   Enum errors include the deployment caveat for flags, inline JSON and files.
 - **`octo-cli docs members remove` now requires `--principal-space-id`** — Bot
   membership deletion is an exact Space-qualified mutation. Requiring the

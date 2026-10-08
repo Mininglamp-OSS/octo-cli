@@ -37,8 +37,8 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 38  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, sheet cells (paged read and atomic replace), board scenes, members, comments, versions, attachments |
-| `html`    | 21  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
+| `docs`    | 44  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, sheet cells (paged read, atomic replace, conditional formats, split/deduplication), board scenes, members, comments, versions, attachments |
+| `html`    | 22  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — read source with its version, publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
 | `drive`   | 43  | Network drive — spaces & members, folder/file tree, full-text search, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 46 leaves total |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
@@ -188,7 +188,9 @@ octo-cli docs get html-doc-id              # returns octoDocSlug for HTML docume
 octo-cli html get <octoDocSlug>
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
-octo-cli docs sheet get sheet-9                      # whole sheet + base version token
+octo-cli docs sheet get sheet-9                      # whole sheet + rules + base version token
+octo-cli docs sheet split sheet-9 --base-version '<token>' --data '{"logicalId":"default","delimiter":",","range":{"startRow":0,"endRow":9,"startColumn":0,"endColumn":0}}'
+octo-cli docs sheet deduplicate sheet-9 --base-version '<token>' --header --data '{"logicalId":"default","range":{"startRow":0,"endRow":9,"startColumn":0,"endColumn":3}}'
 octo-cli docs import sheet-9 --file ./report.xlsx    # imports the first visible worksheet
 octo-cli docs export sheet-9 --export-format xlsx -o ./report.xlsx
 octo-cli docs sheet get sheet-9 --limit 500          # page a large sheet; follow --cursor <nextCursor>
@@ -221,14 +223,28 @@ octo-cli docs export board-7 --export-format png -o ./board.png
 
 # HTML docs (octo-doc) — a SEPARATE backend from `docs`. Publish self-contained
 # interactive HTML as immutable versions, then edit a single stamped artifact.
+# Rollout: the HTML backend will be deployed first. Release this CLI workflow
+# and updated skills only after octo-docs-html#34 is deployed and verified on
+# every HTML-serving instance, after the backend rollout has completed.
 # Canonical create has no doc reference: omit --slug. The CLI generates a key.
 octo-cli html publish --html '<h1>hi</h1>' \
   --mount-type group --group-no <group_no> --data '{"meta":{"title":"Launch page"}}'
 # Save data.slug from the publish response. For a new document data.slug == data.doc_id, mounted or
 # unmounted. Every later operation uses data.slug. Old documents keep their legacy
 # slug as data.slug; do not infer this from mount_type or doc_id being non-empty.
-# To republish, pass --slug <doc-ref> and omit --idempotency-key. An unknown
-# legacy slug is rejected and cannot create a document.
+# Read the latest HTML and its matching version before editing.
+octo-cli html source <doc-ref>  # data: {slug, version, html}
+# If source returns a route-level 404 but html get can read the same reference, the
+# document exists; check backend deployment/routing and stop the update.
+# Metadata cannot replace source. Do not create a replacement or publish
+# without a version to work around an unavailable source endpoint.
+# Edit data.html; if data.version was 1, publish version 2.
+octo-cli html publish --slug <doc-ref> --version 2 --html "$(cat edited.html)"
+# Omit --idempotency-key on updates. On version_conflict/version_required, the
+# bot rereads, merges and republishes within the same task (up to 3 recovery
+# attempts); never only increase --version and resend stale HTML.
+# Never invent a reference: an unknown legacy slug does not create a canonical
+# document and will not appear in the sidebar file list.
 octo-cli html list
 octo-cli html versions <doc-ref>
 octo-cli html draft create --html '<h1>wip</h1>'
