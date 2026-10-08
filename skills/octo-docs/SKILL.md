@@ -17,6 +17,10 @@ reference files sit next to this file in the skill directory.
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
+For a named spreadsheet tab, use `docs sheet list <docId>` to discover IDs and
+names, then `docs sheet get <docId> --sheet-id <sheetId> --limit 1000`.
+See `sheet.md` for exact-name selection, scoped pagination and deployment checks.
+
 ## When to read which reference
 
 | Your task | Read |

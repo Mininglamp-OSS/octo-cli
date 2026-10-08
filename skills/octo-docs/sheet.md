@@ -20,6 +20,44 @@ rich-text snapshot, and `t` the cell type. Rows are 0-based and may be 0..9999;
 columns are 0-based and may be 0..99. All five fields round-trip untouched.
 Same read-token-then-guarded-write discipline as the body surface.
 
+### Discover and read one worksheet
+
+When the user requests particular tabs, first inspect the directory instead of
+downloading the entire workbook:
+
+```bash
+octo-cli docs sheet list <docId>
+octo-cli docs sheet get <docId> --sheet-id '<sheetId from the directory>' --limit 1000
+octo-cli docs sheet get <docId> --sheet-name '新剧榜单' --limit 1000
+```
+
+The directory returns `items: [{sheetId,name,order,rowCount,columnCount}]` in tab
+order, without cells or a baseVersion. `sheetId` is the existing persistent
+logicalId, not a generated runtime ID or a tab index. Counts are declared grid
+dimensions, not populated-cell counts. Legacy workbooks without a registry expose
+`default` / `Sheet1`. Both directory and content reads require document reader access.
+
+Use either `--sheet-id` or `--sheet-name`, never both. Match names exactly; prefer
+the returned ID for subsequent requests because users can rename tabs. If the
+requested name is unclear or `ambiguous_sheet_name` returns multiple candidates,
+ask the user which ID to use. `sheet_not_found` means refresh the directory, not
+silently fall back to every worksheet.
+
+A scoped read returns `sheetId` and only that worksheet's cells and associated
+metadata. Filtering happens server-side before pagination and the byte cap;
+filtering a downloaded whole-workbook response with jq is not a substitute.
+Follow `nextCursor` until `hasMore` is false. A new cursor remembers the selected
+worksheet, so continuation may pass only `--cursor` and `--limit`; repeating the
+same ID/name is also supported. A different document or worksheet is rejected.
+Do not decode, construct or modify cursors. The write `baseVersion` remains
+unchanged and is not interchangeable with the cursor's version fingerprint.
+
+These commands require the paired worksheet-directory/scoped-read backend.
+If the directory route is unavailable or `SHEET_READ_SCOPE_UNAVAILABLE` is
+returned, report a deployment mismatch instead of downloading all tabs or
+claiming the worksheet is empty. This feature reduces transferred content;
+it does not promise per-worksheet storage loading.
+
 ```bash
 # Read the LIVE cells + dims + hyperlinks + merges + sheet tabs + freeze +
 # filters + validation/dropdown rules + baseVersion
@@ -693,14 +731,18 @@ via `--number ... --pattern ...`. Common cases (all round-trip verified):
 
 ## Reading a large sheet in pages
 
-A whole-sheet `docs sheet get` of a grid over the server's ~1MB read cap returns
+A whole-sheet `docs sheet get` of a grid over the server's configured read cap returns
 `413 sheet_too_large`. Pass `--limit <n>` to read it in pages instead: each
 response carries `hasMore` and an opaque `nextCursor`; feed that back via
 `--cursor` until `hasMore` is false. Paging slices only the cells; `sheetDims`,
 `sheetHyperLinks`, `sheetMerges`, `sheetList`,
 `sheetFreeze`, `sheetFilters`, and `sheetDataValidations` all come back on the
 first page only. Each page is bounded by both `--limit` and the byte cap, so no
-page exceeds ~1MB regardless of `--limit`.
+page exceeds the configured response budget regardless of `--limit`. Only a
+request with `--limit` or `--cursor` opts into paging; exceeding a whole-read cap
+does not automatically return a cursor. Use worksheet selection to avoid reading
+unneeded tabs. New cursors use a bounded version fingerprint rather than the full
+state vector, preserving the existing workbook-level stale-version check.
 
 ```bash
 cursor=""
