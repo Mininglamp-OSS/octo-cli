@@ -33,11 +33,6 @@ type TrustedContext struct {
 	OnBehalfOf  string
 }
 
-// empty reports whether no trusted value is configured.
-func (tc TrustedContext) empty() bool {
-	return tc.SpaceID == "" && tc.ChannelID == "" && tc.ChannelType == "" && tc.OnBehalfOf == ""
-}
-
 type overridableField int
 
 const (
@@ -141,7 +136,7 @@ var sessionBoundFields = map[string]bool{
 // same-name trap). This is an EXCLUSION (never inject), so it is the safe
 // direction — the coverage guard treats a drive op whose only session-bound
 // field is space_id as classified.
-func isDriveResourceSpaceID(op registry.OperationInfo, fields []string) bool {
+func isDriveResourceSpaceID(op registry.OperationInfo, fields []string) bool { //nolint:gocritic // read-only operation metadata snapshot
 	if op.Service != "drive" || len(fields) == 0 {
 		return false
 	}

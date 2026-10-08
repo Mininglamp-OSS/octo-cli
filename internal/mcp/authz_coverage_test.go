@@ -11,7 +11,7 @@ import (
 
 // sessionBoundFieldsOf returns the session-bound argument names an operation
 // declares (query/body), across params and request body.
-func sessionBoundFieldsOf(reg *registry.Registry, op registry.OperationInfo) []string {
+func sessionBoundFieldsOf(reg *registry.Registry, op registry.OperationInfo) []string { //nolint:gocritic // read-only operation metadata snapshot
 	d, ok := reg.GetOperation(op.ID)
 	if !ok {
 		return nil

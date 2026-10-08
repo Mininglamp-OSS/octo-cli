@@ -48,7 +48,7 @@ func (s *Server) listResources() map[string]any {
 				Services: meta.Services, Requires: meta.Requires,
 			},
 		})
-		refs, _ := fs.Glob(skills.FS, meta.Name+"/*.md")
+		refs, _ := fs.Glob(skills.FS, meta.Name+"/*.md") //nolint:errcheck // pattern uses validated embedded skill names and a fixed suffix
 		sort.Strings(refs)
 		for _, p := range refs {
 			base := p[strings.LastIndexByte(p, '/')+1:]

@@ -67,7 +67,7 @@ var reservedFlagNames = map[string]bool{
 //   - reset (must never be inherited into a per-call run): Format (pinned to
 //     json — the tool result must stay an envelope), Verbose, JQ, PageAll,
 //     PageMax (output/pagination knobs the model does not control).
-func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forcedSpace string) {
+func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forcedSpace string) { //nolint:gocritic // copy operator globals so calls cannot mutate serve-time settings
 	// Propagate operator-set routing/limit/safety knobs.
 	g.BotID = base.BotID
 	g.Profile = base.Profile
@@ -165,7 +165,7 @@ func envelopeOK(b []byte) bool {
 // failures that occur before (or instead of) the engine emitting one.
 func synthErrorEnvelope(err error) []byte {
 	var buf bytes.Buffer
-	_ = output.WriteError(&buf, cmdutil.WrapCLIError(err))
+	_ = output.WriteError(&buf, cmdutil.WrapCLIError(err)) //nolint:errcheck // in-memory buffer write cannot fail
 	return buf.Bytes()
 }
 
@@ -189,7 +189,7 @@ func synthErrorEnvelope(err error) []byte {
 // A query/header argument whose value is JSON null is dropped (null means
 // "omitted", not "send an empty value"), so a null scope parameter cannot empty
 // a required filter on the wire.
-func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) {
+func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) { //nolint:gocyclo // spec-driven argument assembly handles distinct parameter locations and upload policy
 	pathNames := extractPathParams(d.Path)
 	pathSet := make(map[string]bool, len(pathNames))
 	for _, n := range pathNames {
@@ -209,7 +209,7 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 	}
 	declaredBody := map[string]registry.SchemaInfo{}
 	if d.RequestBody != nil {
-		for name, prop := range d.RequestBody.Properties {
+		for name, prop := range d.RequestBody.Properties { //nolint:gocritic // schema properties are read-only values
 			declaredBody[name] = prop
 		}
 	}
@@ -445,7 +445,7 @@ func flagArgs(name string, v any) ([]string, error) {
 // value such as channel_type "1" reaches the wire as the integer 1 the backend
 // expects — matching what a typed CLI flag would send. Anything that does not
 // cleanly convert is left unchanged for the normal validator to judge.
-func coerceToSchema(prop registry.SchemaInfo, v any) any {
+func coerceToSchema(prop registry.SchemaInfo, v any) any { //nolint:gocritic // read-only schema snapshot
 	s, ok := v.(string)
 	if !ok {
 		return v

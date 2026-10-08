@@ -60,7 +60,7 @@ const (
 // OCTO_MCP_ALLOWED_ORIGINS (comma-separated); when unset, only loopback origins
 // are accepted and a request with no Origin header (typical non-browser MCP
 // client) is allowed. Multipart uploads are confined to OCTO_MCP_UPLOAD_ROOT.
-func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.GlobalOptions) (*HTTPHandler, error) {
+func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.GlobalOptions) (*HTTPHandler, error) { //nolint:gocritic // copy operator globals for immutable per-request snapshots
 	reg, err := registry.New()
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck // response write failure means the client disconnected; no response can replace it
 }
 
 // parseAllowedOrigins splits the comma-separated env allowlist, trimming blanks.
@@ -218,5 +218,5 @@ func bearerToken(r *http.Request) string {
 
 func writeHTTPError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(newErrorResponse(id, code, msg))
+	_ = json.NewEncoder(w).Encode(newErrorResponse(id, code, msg)) //nolint:errcheck // response write failure means the client disconnected; no response can replace it
 }

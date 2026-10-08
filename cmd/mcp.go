@@ -117,7 +117,7 @@ envelope and performs no backend mutation for the server's lifetime.`,
 				NoRetry: f.Globals.NoRetry,
 				DryRun:  f.Globals.DryRun,
 			}
-			build := func(ff *cmdutil.Factory) *cobra.Command { return NewRootCmd(ff) }
+			build := NewRootCmd
 
 			if httpAddr != "" {
 				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut)
@@ -144,13 +144,13 @@ envelope and performs no backend mutation for the server's lifetime.`,
 // dropped mid-flight. Read/Idle timeouts bound a slow or idle client;
 // WriteTimeout is left unset because a legitimate --page-all response can be
 // long, and per-call bounding is the operator's --timeout instead.
-func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer) error {
+func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer) error { //nolint:gocritic // capture operator globals by value for connection isolation
 	h, err := mcp.NewHTTPHandler(build, tc, base)
 	if err != nil {
 		return err
 	}
 	if !isLoopbackAddr(addr) {
-		fmt.Fprintf(warn, "warning: MCP HTTP server binding %q is not loopback and serves cleartext; terminate TLS at a proxy and/or bind 127.0.0.1\n", addr)
+		fmt.Fprintf(warn, "warning: MCP HTTP server binding %q is not loopback and serves cleartext; terminate TLS at a proxy and/or bind 127.0.0.1\n", addr) //nolint:errcheck // best-effort stderr warning
 	}
 	srv := newMCPHTTPServer(addr, h)
 

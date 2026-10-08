@@ -214,7 +214,7 @@ func readAll(r *http.Request) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-func postJSON(t *testing.T, url, bearer, space, body string) (int, string) {
+func postJSON(t *testing.T, url, bearer, space, body string) (code int, responseBody string) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -234,7 +234,7 @@ func postJSON(t *testing.T, url, bearer, space, body string) (int, string) {
 	return resp.StatusCode, out.String()
 }
 
-func postJSONWithOrigin(t *testing.T, url, origin, body string) (int, string) {
+func postJSONWithOrigin(t *testing.T, url, origin, body string) (code int, responseBody string) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

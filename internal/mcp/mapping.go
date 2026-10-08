@@ -152,7 +152,7 @@ func BuildMapping(reg *registry.Registry) (*Mapping, error) {
 // described by the invariant it enforces (registry existence, service coverage,
 // single-claim, reference/anchor existence, disabled-service sync, length/level
 // caps).
-func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[string]*skillMeta) []string {
+func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[string]*skillMeta) []string { //nolint:gocyclo // mapping validation accumulates independent drift violations
 	var problems []string
 
 	enabledServices := map[string]bool{}
@@ -274,7 +274,7 @@ func (m *Mapping) validate(reg *registry.Registry, mf *manifestFile, metas map[s
 // SkillFor returns the merged Skill metadata for an operation and whether a
 // mapping exists. A missing mapping is not an error — the caller omits the
 // skill block and the operation stays callable.
-func (m *Mapping) SkillFor(op registry.OperationInfo) (*skillMeta, *opMeta, bool) {
+func (m *Mapping) SkillFor(op registry.OperationInfo) (*skillMeta, *opMeta, bool) { //nolint:gocritic // read-only operation metadata snapshot
 	name, ok := m.serviceToSkill[op.Service]
 	if !ok {
 		return nil, nil, false
@@ -307,7 +307,7 @@ func (m *Mapping) computeEtag() string {
 	}
 	sort.Strings(svcs)
 	for _, s := range svcs {
-		fmt.Fprintf(h, "%s=%s;", s, m.serviceToSkill[s])
+		fmt.Fprintf(h, "%s=%s;", s, m.serviceToSkill[s]) //nolint:errcheck // hash writes never return an error
 	}
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }

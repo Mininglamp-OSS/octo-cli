@@ -133,7 +133,7 @@ func refResourceURI(name, file string) string { return "octo://skills/" + name +
 // tokenising and the scan consults ctx (HTTP request timeout / client
 // cancellation), because search_ops is reachable without a bearer and the scan
 // cost is terms × operations.
-func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult {
+func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult { //nolint:gocyclo // bounded discovery handles domain filtering, cancellation and truncation
 	cancelled := func(err error) toolResult {
 		return jsonToolResult(map[string]any{
 			"operations": []any{},
@@ -155,9 +155,7 @@ func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult
 
 	var candidates []registry.OperationInfo
 	if domain != "" {
-		for _, op := range s.reg.ListOperations(domain) {
-			candidates = append(candidates, op)
-		}
+		candidates = s.reg.ListOperations(domain)
 		if len(candidates) == 0 && s.reg.GetSpec(domain) == nil {
 			return jsonToolResult(map[string]any{
 				"operations": []any{},
@@ -221,7 +219,7 @@ type opSearchResult struct {
 // summary, or path (case-insensitive AND match), so "send message" finds
 // message.send. It checks ctx between terms so a cancelled request stops
 // promptly; cancellation is distinct from a non-match, including the last op.
-func matchOp(ctx context.Context, op registry.OperationInfo, terms []string) (bool, error) {
+func matchOp(ctx context.Context, op registry.OperationInfo, terms []string) (bool, error) { //nolint:gocritic // read-only operation metadata snapshot
 	hay := strings.ToLower(op.ID + " " + op.Summary + " " + op.Path)
 	for _, t := range terms {
 		if err := ctx.Err(); err != nil {
@@ -278,7 +276,7 @@ func (s *Server) moduleMap() map[string]any {
 
 // navFor builds the skill navigation block for one operation, or nil when no
 // mapping covers it. forDescribe includes the per-op advice + section anchor.
-func (s *Server) navFor(op registry.OperationInfo, forDescribe bool) *skillNav {
+func (s *Server) navFor(op registry.OperationInfo, forDescribe bool) *skillNav { //nolint:gocritic // read-only operation metadata snapshot
 	meta, om, ok := s.mapping.SkillFor(op)
 	if !ok {
 		return nil
@@ -327,7 +325,7 @@ func (s *Server) applyResourceHint(nav *skillNav) {
 // matchReference picks the reference file whose registered topics best match
 // the operation's id/summary tokens. A miss returns "" (SKILL.md level). This
 // is a navigation heuristic only — parameter truth is always in describe_op.
-func matchReference(meta *skillMeta, op registry.OperationInfo) string {
+func matchReference(meta *skillMeta, op registry.OperationInfo) string { //nolint:gocritic // read-only operation metadata snapshot
 	if len(meta.References) == 0 {
 		return ""
 	}
@@ -375,7 +373,7 @@ func (s *Server) describeOp(operationID string) toolResult {
 		return jsonToolResult(map[string]any{"ok": false, "error": err.Error()}, true)
 	}
 	var obj map[string]any
-	_ = json.Unmarshal(raw, &obj)
+	_ = json.Unmarshal(raw, &obj) //nolint:errcheck // raw was just marshaled from an operation object
 	if nav := s.navFor(detail.OperationInfo, true); nav != nil {
 		obj["skill"] = nav
 	}

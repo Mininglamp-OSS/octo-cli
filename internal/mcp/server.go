@@ -75,7 +75,7 @@ func (s *Server) WithTrustedContext(tc TrustedContext) *Server { s.trusted = tc;
 
 // WithBaseGlobals carries the operator's parsed serve-time globals (credential
 // selector + limits) into each call_op.
-func (s *Server) WithBaseGlobals(g cmdutil.GlobalOptions) *Server { s.baseGlobals = g; return s }
+func (s *Server) WithBaseGlobals(g cmdutil.GlobalOptions) *Server { s.baseGlobals = g; return s } //nolint:gocritic // copy serve-time globals for connection isolation
 
 // WithUploadPolicy sets the multipart file_path confinement for this connection:
 // root is OCTO_MCP_UPLOAD_ROOT (confine when set); allowLocal is the operator
@@ -98,7 +98,7 @@ func (s *Server) WithUploadPolicy(root string, allowLocal bool) *Server {
 // auth-store credential. Only stdio (the local/trusted transport) resolves from
 // the environment. reg is shared read-only with the connection so a call_op
 // does not re-parse ~600 KB of embedded specs.
-func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer, *bytes.Buffer) {
+func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer, *bytes.Buffer) { //nolint:gocritic // factory callback signature is shared with test overrides
 	streams, _, outBuf, errBuf := cmdutil.NewTestIOStreams()
 	f := cmdutil.NewDefaultFactory()
 	f.IOStreams = streams
@@ -134,7 +134,7 @@ func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer
 // Dispatch handles one JSON-RPC message and returns the response plus whether
 // there is one. A JSON-RPC notification (no id) NEVER receives a response, for
 // any method, so the id check comes first.
-func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, bool) {
+func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, bool) { //nolint:gocritic // request snapshot is immutable during dispatch
 	if req.isNotification() {
 		return rpcResponse{}, false
 	}
@@ -167,7 +167,7 @@ func (s *Server) handleInitialize(params json.RawMessage) map[string]any {
 		} `json:"capabilities"`
 	}
 	if len(params) > 0 {
-		_ = json.Unmarshal(params, &p)
+		_ = json.Unmarshal(params, &p) //nolint:errcheck // optional initialize metadata is best-effort
 	}
 	// Pin the negotiated version to what this server implements rather than
 	// echoing an arbitrary client string: the server supports exactly this
@@ -190,7 +190,7 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse {
+func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic // request snapshot is immutable during dispatch
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
@@ -268,7 +268,7 @@ func isJSONObject(raw json.RawMessage) bool {
 	return false
 }
 
-func (s *Server) handleResourceRead(req rpcRequest) rpcResponse {
+func (s *Server) handleResourceRead(req rpcRequest) rpcResponse { //nolint:gocritic // request snapshot is immutable during dispatch
 	var a struct {
 		URI string `json:"uri"`
 	}

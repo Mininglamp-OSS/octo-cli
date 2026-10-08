@@ -79,5 +79,5 @@ func (s *Server) handleStdioLine(ctx context.Context, line []byte, out io.Writer
 // the trailing newline and does not indent).
 func writeMessage(out io.Writer, resp rpcResponse) {
 	enc := json.NewEncoder(out)
-	_ = enc.Encode(resp)
+	_ = enc.Encode(resp) //nolint:errcheck // best-effort protocol output matches the existing transport contract
 }

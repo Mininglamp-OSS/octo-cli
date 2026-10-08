@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -96,7 +97,7 @@ func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	req := httptest.NewRequest("POST", "/", nil)
+	req := httptest.NewRequest("POST", "/", http.NoBody)
 	req.Header.Set(headerSpaceID, "hdr-space")
 	req.Header.Set(headerOnBehalfOf, "hdr-obo")
 	req.Header.Set(headerChannelID, "hdr-chan") // this field is NOT operator-forced
@@ -126,7 +127,7 @@ func TestBearerToken_CaseInsensitiveScheme(t *testing.T) {
 		"":            "",
 	}
 	for auth, want := range cases {
-		req := httptest.NewRequest("POST", "/", nil)
+		req := httptest.NewRequest("POST", "/", http.NoBody)
 		if auth != "" {
 			req.Header.Set("Authorization", auth)
 		}
