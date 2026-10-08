@@ -437,7 +437,7 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		t.Fatal("publish workflow must keep ownership step 3 before plan/upload step 4")
 	}
 	ownershipStep := content[ownershipStart:uploadStart]
-	if strings.Index(ownershipStep, "--mode mine --page 1 --page-size 100") < 0 {
+	if !strings.Contains(ownershipStep, "--mode mine --page 1 --page-size 100") {
 		t.Error("ownership step must walk the complete owned list")
 	}
 	if strings.Contains(ownershipStep, "--q") {
