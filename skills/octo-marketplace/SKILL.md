@@ -105,8 +105,13 @@ state before retrying:
   --mode mine --page 1 --page-size 100` through the complete owned Skill list,
   re-passing `--page-size 100` on every page, and compare `manifest_json.name`
   against the stable machine name. Follow the detailed procedure in `skills.md`.
-  For other plugin types, use the canonical identity documented in the matching
-  type reference; do not assume `manifest_json.name` is a machine identity;
+  For experts, expert teams, and connectors, walk `plugin list --scene-code
+  default --plugin-type <type> --mode mine --page 1 --page-size 100` until a
+  short page is returned, re-passing `--page-size 100` on every page, and
+  compare each row's `plugin_name` exactly with the title submitted by the
+  create request.
+  If multiple rows match, stop as ambiguous. Do not assume `manifest_json.name`
+  is a machine identity for those types;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /

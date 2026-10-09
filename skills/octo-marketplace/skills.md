@@ -69,9 +69,17 @@ Do not search the machine or guess a path.
    creates a duplicate card. Compare each row's `manifest_json.name` to the
    exact machine name from `SKILL.md`. The display-name search filter cannot
    reliably find an existing skill by machine name, so scan the complete owned
-   list. Decide create vs. update. For an update, retain the matched row's
-   `plugin_id` and current `plugin_name`; omit `--plugin-name` to preserve that
-   title unless the user explicitly requested a rename.
+   list. If any row lacks a non-empty `manifest_json.name`, resolve that row
+   with `plugin get --plugin-id <plugin-id>` before concluding there is no
+   match. If the detail is also missing the machine name, stop with a contract
+   mismatch; do not create. During migration from the previous reversed name
+   guidance, treat an exact `plugin_name` match to either the machine name or
+   intended display name with a different `manifest_json.name` as a possible
+   legacy card: inspect it with `plugin get` and `plugin version list`, and
+   never update solely from the display-name match. Decide create vs. update.
+   For an update, retain the matched row's `plugin_id` and current
+   `plugin_name`; omit `--plugin-name` to preserve that title unless the user
+   explicitly requested a rename.
 4. Show the final plan (path, display name, machine name, version, visibility,
    category) and get one confirmation.
 5. Presign + upload + parse + import:
@@ -115,8 +123,12 @@ of re-posting. If a create import returns a gateway timeout or RESULT_UNKNOWN,
 re-check `plugin list --scene-code default --plugin-type skill --mode mine
 --page 1 --page-size 100`, then re-pass `--page-size 100` on every request while
 walking every page; the default silently falls back to 20 when omitted. Never
-stop after a full page. Compare `manifest_json.name` exactly before retrying so
-the skill is never duplicated.
+stop after a full page. Compare `manifest_json.name` exactly before retrying.
+Resolve any row with a missing or blank machine name through `plugin get
+--plugin-id <plugin-id>`; if the detail still lacks it, stop with a contract
+mismatch instead of retrying the create. Treat an exact `plugin_name` match with
+a different machine name as a possible legacy card and inspect `plugin get` plus
+`plugin version list` before deciding, so the skill is never duplicated.
 If an existing-id import is ambiguous, use `plugin get`, version history,
 hashes, and content comparison instead—the row existed before the request, so
 finding it does not prove the update committed.

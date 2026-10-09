@@ -208,6 +208,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
+  visible title with the machine name.** The CLI contract now correctly
+  describes `plugin_name` as the human-facing Marketplace name and `name` as
+  the stable `SKILL.md` machine name. The bundled create workflow supplies both
+  fields explicitly and checks existing ownership against `manifest_json.name`,
+  preventing newly imported cards from displaying a machine slug and avoiding
+  duplicate imports hidden by a search filter that does not cover machine
+  names. New imports are also rejected locally when `plugin_name` is missing or
+  blank, and a create must omit `plugin_id` entirely rather than pass it as
+  blank or `null`; updates may still omit `plugin_name` to preserve the existing
+  display name, but an explicitly supplied update value must be non-blank.
 - **BREAKING (docs): sharing updates require `permissionEpoch`.** Read the
   current value with `docs share get`, then pass it unchanged to `docs share set`.
   A stale epoch returns HTTP 409; re-read permissions and reconsider the intended
@@ -403,18 +414,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
-- **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
-  visible title with the machine name.** The CLI contract now correctly
-  describes `plugin_name` as the human-facing Marketplace name and `name` as
-  the stable `SKILL.md` machine name. The bundled create workflow supplies both
-  fields explicitly and
-  checks existing ownership against `manifest_json.name`, preventing newly
-  imported cards from displaying a machine slug and avoiding duplicate imports
-  hidden by a search filter that does not cover machine names. New imports are
-  also rejected locally when `plugin_name` is missing or blank, and a create
-  must omit `plugin_id` entirely rather than pass it as blank or `null`; updates
-  may still omit `plugin_name` to preserve the existing display name, but an
-  explicitly supplied update value must be non-blank.
 - **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
   body walker visited only non-nil children, so a property *present with value `null`* never
   reached the enum or uint64 check and was forwarded upstream — while the same field with an

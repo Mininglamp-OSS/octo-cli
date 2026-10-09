@@ -443,6 +443,9 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"re-pass `--page-size 100` on every request",
 		"default silently falls back to 20",
 		"stopping early reports a false \"no match\" and creates a duplicate card",
+		"plugin get --plugin-id",
+		"contract mismatch; do not create",
+		"possible legacy card",
 		"omit `--plugin-name`",
 	} {
 		if !strings.Contains(ownershipText, want) {
@@ -476,6 +479,9 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"re-pass `--page-size 100` on every request",
 		"default silently falls back to 20",
 		"never stop after a full page",
+		"plugin get --plugin-id",
+		"contract mismatch instead of retrying",
+		"possible legacy card",
 	} {
 		if !strings.Contains(recoveryText, want) {
 			t.Errorf("create recovery must contain %q", want)
@@ -506,7 +512,16 @@ func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
 	}
 	createRecovery := content[createStart:updateStart]
 	createRecoveryText := strings.ToLower(strings.Join(strings.Fields(createRecovery), " "))
-	for _, want := range []string{"--plugin-type skill", "--page-size 100", "complete owned skill list", "`manifest_json.name`"} {
+	for _, want := range []string{
+		"--plugin-type skill",
+		"--page-size 100",
+		"complete owned skill list",
+		"`manifest_json.name`",
+		"experts, expert teams, and connectors",
+		"--plugin-type <type>",
+		"`plugin_name` exactly",
+		"short page is returned",
+	} {
 		if !strings.Contains(createRecoveryText, want) {
 			t.Errorf("create recovery must contain %q", want)
 		}
