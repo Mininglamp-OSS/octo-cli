@@ -611,6 +611,19 @@ func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
 	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
 		t.Errorf("name description must identify the machine name, got %q", name.Description)
 	}
+	if len(op.BodyVariants) != 2 {
+		t.Fatalf("plugin.import body variants = %+v, want create and update", op.BodyVariants)
+	}
+	create, update := op.BodyVariants[0], op.BodyVariants[1]
+	if create.Name != "create" || !contains(create.Required, "plugin_name") || !contains(create.Forbidden, "plugin_id") {
+		t.Errorf("plugin.import create variant = %+v", create)
+	}
+	if update.Name != "update" || !contains(update.Required, "plugin_id") {
+		t.Errorf("plugin.import update variant = %+v", update)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--plugin-name") {
+		t.Errorf("plugin.import body variant hint = %q, want --plugin-name guidance", op.BodyVariantsHint)
+	}
 }
 
 func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {

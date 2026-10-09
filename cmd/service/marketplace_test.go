@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -303,6 +304,59 @@ func TestMarketplacePluginImportRequest(t *testing.T) {
 	if gotBody["parse_task_id"] != "task-1" || gotBody["plugin_name"] != "全栈清单" || gotBody["name"] != "fullstack-checklist" || gotBody["version"] != "1.0.0" {
 		t.Errorf("body = %#v", gotBody)
 	}
+}
+
+func TestMarketplacePluginImportRequiresDisplayNameOnlyOnCreate(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "missing plugin name", args: []string{"--parse-task-id", "task-1"}},
+		{name: "empty plugin name", args: []string{"--parse-task-id", "task-1", "--plugin-name", ""}},
+		{name: "whitespace plugin name in data", args: []string{"--data", `{"parse_task_id":"task-1","plugin_name":"   "}`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := false
+			root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+				sent = true
+			})
+			root.SetArgs(append([]string{"marketplace", "plugin", "import"}, tc.args...))
+			exitErr := output.AsExitError(root.Execute())
+			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
+				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
+			}
+			if !strings.Contains(exitErr.Hint, "--plugin-name") {
+				t.Errorf("hint = %q, want --plugin-name guidance", exitErr.Hint)
+			}
+			if sent {
+				t.Error("invalid create request reached HTTP")
+			}
+		})
+	}
+
+	t.Run("update may preserve existing plugin name", func(t *testing.T) {
+		var gotBody map[string]any
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
+		})
+		root.SetArgs([]string{
+			"marketplace", "plugin", "import",
+			"--parse-task-id", "task-1", "--plugin-id", "p1",
+		})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute update without --plugin-name: %v", err)
+		}
+		if gotBody["plugin_id"] != "p1" || gotBody["parse_task_id"] != "task-1" {
+			t.Fatalf("body = %#v, want update identity fields", gotBody)
+		}
+		if _, present := gotBody["plugin_name"]; present {
+			t.Fatalf("body = %#v, omitted plugin_name must remain omitted on update", gotBody)
+		}
+	})
 }
 
 // TestMarketplacePluginInstallRequest pins the install body wiring.

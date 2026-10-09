@@ -885,6 +885,26 @@
         "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
+        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and no --plugin-id; updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name",
+        "x-octo-body-variants": [
+          {
+            "name": "create",
+            "required": [
+              "parse_task_id",
+              "plugin_name"
+            ],
+            "forbidden": [
+              "plugin_id"
+            ]
+          },
+          {
+            "name": "update",
+            "required": [
+              "parse_task_id",
+              "plugin_id"
+            ]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {

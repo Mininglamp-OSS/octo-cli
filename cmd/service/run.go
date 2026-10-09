@@ -713,7 +713,11 @@ func validateBodyVariants(rt *operationRuntime, body map[string]any) error {
 			return nil
 		}
 	}
-	return output.ErrValidation("request body does not match an allowed operation mode", "create without slug (the CLI generates a key when omitted), or republish an existing slug without idempotency_key")
+	hint := rt.detail.BodyVariantsHint
+	if hint == "" {
+		hint = "provide the required fields for exactly one supported operation mode and omit fields forbidden in that mode"
+	}
+	return output.ErrValidation("request body does not match an allowed operation mode", hint)
 }
 
 // missingVariantRequiredValue treats a whitespace-only string as absent, the

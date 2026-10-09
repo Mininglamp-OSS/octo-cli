@@ -407,7 +407,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name. The bundled publishing workflow supplies both fields explicitly and
   checks existing ownership against `manifest_json.name`, preventing newly
   imported cards from displaying a machine slug and avoiding duplicate imports
-  hidden by the display-name-only search filter.
+  hidden by a search filter that does not cover machine names. New imports are
+  also rejected locally when `plugin_name` is missing or blank; updates may
+  still omit it to preserve the existing display name.
 - **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
   body walker visited only non-nil children, so a property *present with value `null`* never
   reached the enum or uint64 check and was forwarded upstream — while the same field with an
