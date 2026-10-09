@@ -611,15 +611,18 @@ func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
 	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
 		t.Errorf("name description must identify the machine name, got %q", name.Description)
 	}
-	if len(op.BodyVariants) != 2 {
-		t.Fatalf("plugin.import body variants = %+v, want create and update", op.BodyVariants)
+	if len(op.BodyVariants) != 3 {
+		t.Fatalf("plugin.import body variants = %+v, want create, update-preserve, and update-rename", op.BodyVariants)
 	}
-	create, update := op.BodyVariants[0], op.BodyVariants[1]
+	create, preserve, rename := op.BodyVariants[0], op.BodyVariants[1], op.BodyVariants[2]
 	if create.Name != "create" || !contains(create.Required, "plugin_name") || !contains(create.Forbidden, "plugin_id") {
 		t.Errorf("plugin.import create variant = %+v", create)
 	}
-	if update.Name != "update" || !contains(update.Required, "plugin_id") {
-		t.Errorf("plugin.import update variant = %+v", update)
+	if preserve.Name != "update-preserve-display-name" || !contains(preserve.Required, "plugin_id") || !contains(preserve.Forbidden, "plugin_name") {
+		t.Errorf("plugin.import update-preserve variant = %+v", preserve)
+	}
+	if rename.Name != "update-rename" || !contains(rename.Required, "plugin_id") || !contains(rename.Required, "plugin_name") {
+		t.Errorf("plugin.import update-rename variant = %+v", rename)
 	}
 	if !strings.Contains(op.BodyVariantsHint, "--plugin-name") {
 		t.Errorf("plugin.import body variant hint = %q, want --plugin-name guidance", op.BodyVariantsHint)
@@ -649,6 +652,10 @@ func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {
 	}
 	if !contains(manifest.Required, "name") {
 		t.Fatalf("plugin.list manifest_json required fields = %v, want name", manifest.Required)
+	}
+	displayStatus, ok := data.Items.Properties["display_status"]
+	if !ok || !reflect.DeepEqual(displayStatus.Enum, []any{"draft", "pending_review", "published", "rejected", "delisted"}) {
+		t.Fatalf("plugin.list display_status schema = %+v", displayStatus)
 	}
 	var qDescription, modeDescription string
 	for _, parameter := range op.Parameters {

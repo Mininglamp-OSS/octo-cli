@@ -163,6 +163,16 @@
                           "listing_state": {
                             "type": "string"
                           },
+                          "display_status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "pending_review",
+                              "published",
+                              "rejected",
+                              "delisted"
+                            ]
+                          },
                           "manifest_json": {
                             "type": "object",
                             "description": "Type-specific manifest included on every list row. For Skills, manifest_json.name is the stable machine identity used for ownership and duplicate checks.",
@@ -885,7 +895,7 @@
         "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
-        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name",
+        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name, but a supplied --plugin-name must be non-empty",
         "x-octo-body-variants": [
           {
             "name": "create",
@@ -898,10 +908,21 @@
             ]
           },
           {
-            "name": "update",
+            "name": "update-preserve-display-name",
             "required": [
               "parse_task_id",
               "plugin_id"
+            ],
+            "forbidden": [
+              "plugin_name"
+            ]
+          },
+          {
+            "name": "update-rename",
+            "required": [
+              "parse_task_id",
+              "plugin_id",
+              "plugin_name"
             ]
           }
         ],
@@ -922,7 +943,7 @@
                   },
                   "plugin_name": {
                     "type": "string",
-                    "description": "Human-facing marketplace display name written to the plugin_name column and to manifest_json.plugin_name. Distinct from the skill machine name, not a synonym. On create, always supply it explicitly; leaving it empty makes the backend inherit name and exposes the machine slug in the catalog. On update, omit it or echo the current plugin_name from plugin.get unless the user explicitly requested a rename; an explicitly supplied different value renames the catalog card."
+                    "description": "Human-facing marketplace display name written to the plugin_name column and to manifest_json.plugin_name. Distinct from the skill machine name, not a synonym. On create, always supply it explicitly; leaving it empty makes the backend inherit name and exposes the machine slug in the catalog. On update, omit it to preserve the current display name unless the user explicitly requested a rename; when supplied, the value must be non-empty and a different value renames the catalog card."
                   },
                   "name": {
                     "type": "string",

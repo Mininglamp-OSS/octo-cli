@@ -306,7 +306,7 @@ func TestMarketplacePluginImportRequest(t *testing.T) {
 	}
 }
 
-func TestMarketplacePluginImportRequiresDisplayNameOnlyOnCreate(t *testing.T) {
+func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -360,6 +360,33 @@ func TestMarketplacePluginImportRequiresDisplayNameOnlyOnCreate(t *testing.T) {
 		})
 	}
 
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "empty plugin name on update", args: []string{"--parse-task-id", "task-1", "--plugin-id", "p1", "--plugin-name", ""}},
+		{name: "whitespace plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":"   "}`}},
+		{name: "null plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":null}`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := false
+			root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+				sent = true
+			})
+			root.SetArgs(append([]string{"marketplace", "plugin", "import"}, tc.args...))
+			exitErr := output.AsExitError(root.Execute())
+			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
+				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
+			}
+			if !strings.Contains(exitErr.Hint, "--plugin-name") {
+				t.Errorf("hint = %q, want --plugin-name guidance", exitErr.Hint)
+			}
+			if sent {
+				t.Error("blank update display name reached HTTP")
+			}
+		})
+	}
+
 	t.Run("update may preserve existing plugin name", func(t *testing.T) {
 		var gotBody map[string]any
 		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +408,28 @@ func TestMarketplacePluginImportRequiresDisplayNameOnlyOnCreate(t *testing.T) {
 		}
 		if _, present := gotBody["plugin_name"]; present {
 			t.Fatalf("body = %#v, omitted plugin_name must remain omitted on update", gotBody)
+		}
+	})
+
+	t.Run("update may explicitly rename with non-empty plugin name", func(t *testing.T) {
+		var gotBody map[string]any
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"plugin":{"plugin_id":"p1"}}}`))
+		})
+		root.SetArgs([]string{
+			"marketplace", "plugin", "import",
+			"--parse-task-id", "task-1", "--plugin-id", "p1",
+			"--plugin-name", "New visible title",
+		})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute update with non-empty --plugin-name: %v", err)
+		}
+		if gotBody["plugin_name"] != "New visible title" {
+			t.Fatalf("body = %#v, want explicit display-name rename", gotBody)
 		}
 	})
 }

@@ -413,7 +413,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hidden by a search filter that does not cover machine names. New imports are
   also rejected locally when `plugin_name` is missing or blank, and a create
   must omit `plugin_id` entirely rather than pass it as blank or `null`; updates
-  may still omit `plugin_name` to preserve the existing display name.
+  may still omit `plugin_name` to preserve the existing display name, but an
+  explicitly supplied update value must be non-blank.
 - **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
   body walker visited only non-nil children, so a property *present with value `null`* never
   reached the enum or uint64 check and was forwarded upstream — while the same field with an
