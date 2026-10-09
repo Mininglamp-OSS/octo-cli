@@ -111,7 +111,8 @@ state before retrying:
   compare each row's `plugin_name` exactly with the title submitted by the
   create request.
   If multiple rows match, stop as ambiguous. Do not assume `manifest_json.name`
-  is a machine identity for those types;
+  is a machine identity for those types. Retry the create only after the
+  relevant scan reaches a short page with zero exact matches;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
