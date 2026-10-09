@@ -101,10 +101,12 @@ Marketplace mutations are not transport-retried. A gateway failure may mean the
 server committed the operation, so `RESULT_UNKNOWN` must be resolved by reading
 state before retrying:
 
-- create: walk `plugin list --scene-code default --mode mine --page 1
-  --page-size 100` through the complete owned list; compare `plugin_type` and
-  `manifest_json.name` against the intended asset type and stable machine name.
-  For Skills, follow the detailed procedure in `skills.md`;
+- create: for Skills, walk `plugin list --scene-code default --plugin-type skill
+  --mode mine --page 1 --page-size 100` through the complete owned Skill list,
+  re-passing `--page-size 100` on every page, and compare `manifest_json.name`
+  against the stable machine name. Follow the detailed procedure in `skills.md`.
+  For other plugin types, use the canonical identity documented in the matching
+  type reference; do not assume `manifest_json.name` is a machine identity;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
@@ -113,8 +115,9 @@ state before retrying:
 - delist/delete: re-read the plugin.
 
 `--q` matches human-facing `plugin_name` and manifest-description substrings,
-not the stable `manifest_json.name`; a page defaults to 20 rows. Stop only after
-an exact match or a short page.
+not the stable `manifest_json.name`; a page defaults to 20 rows. Keep the same
+explicit `--page-size` on every request, and stop only after an exact match or a
+short page.
 
 ## Pagination and filtering
 

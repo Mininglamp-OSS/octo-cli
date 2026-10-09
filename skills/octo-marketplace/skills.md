@@ -60,15 +60,18 @@ Do not search the machine or guess a path.
 2. Inspect without executing; read the stable machine `name` and `version` from
    the root `SKILL.md`. On create, choose a concise, human-facing Marketplace
    display name in the user's language; do not silently reuse the machine slug
-   unless the user explicitly wants that as the visible title. On update, read
-   the current row with `plugin get` and keep its exact `plugin_name` unless the
-   user explicitly requested a rename.
+   unless the user explicitly wants that as the visible title.
 3. Check ownership exhaustively: `plugin list --scene-code default --plugin-type
    skill --mode mine --page 1 --page-size 100`, then walk `--page` until a short
-   page (there is no `--page-all`). Compare each row's `manifest_json.name` to
-   the exact machine name from `SKILL.md`. The display-name search filter cannot
+   page. Re-pass `--page-size 100` on every request: if it is omitted, the
+   default silently falls back to 20. There is no `--page-all`, and a full page
+   is never a stop condition; stopping early reports a false "no match" and
+   creates a duplicate card. Compare each row's `manifest_json.name` to the
+   exact machine name from `SKILL.md`. The display-name search filter cannot
    reliably find an existing skill by machine name, so scan the complete owned
-   list. Decide create vs. update.
+   list. Decide create vs. update. For an update, retain the matched row's
+   `plugin_id` and current `plugin_name`; omit `--plugin-name` to preserve that
+   title unless the user explicitly requested a rename.
 4. Show the final plan (path, display name, machine name, version, visibility,
    category) and get one confirmation.
 5. Presign + upload + parse + import:
@@ -78,17 +81,21 @@ Do not search the machine or guess a path.
    # PUT the bytes to the returned presigned_url with its method/headers
    octo-cli marketplace skill-upload parse <skill_upload_id>
    octo-cli marketplace skill-parse-task get <parse_task_id>   # poll until success
+   # create: pass `--plugin-name` and omit `--plugin-id`
    octo-cli marketplace plugin import --parse-task-id <parse_task_id> \
      --plugin-name "<display-name>" --name "<skill-name>" \
      --visibility space --version 1.0.0
+   # update: pass `--plugin-id` and omit `--plugin-name` to preserve the title
+   octo-cli marketplace plugin import --plugin-id <plugin-id> \
+     --parse-task-id <parse_task_id> --name "<skill-name>" \
+     --visibility space --version <next-version>
    ```
 
    `--plugin-name` is the visible Marketplace title; `--name` is the stable
    machine name from `SKILL.md`. `plugin import` builds the attachment tree and
-   saves a draft version. Omit `--plugin-id` to create; set it to update an
-   existing owned skill. For an update, `<display-name>` must be the current
-   `plugin_name` read in step 2 unless the user explicitly confirmed a rename.
-   Optional `--category-id`, `--tags`, `--icon`, `--changelog`.
+   saves a draft version. On update, add `--plugin-name "<new-display-name>"`
+   only when the user explicitly confirmed a rename. Optional `--category-id`,
+   `--tags`, `--icon`, `--changelog`.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <plugin-id>` to
    verify the draft.
 7. Publish explicitly:
@@ -106,8 +113,10 @@ itself is not idempotent: re-triggering an already-parsed upload returns `409
 CONFLICT` rather than the original task, so poll `skill-parse-task get` instead
 of re-posting. If a create import returns a gateway timeout or RESULT_UNKNOWN,
 re-check `plugin list --scene-code default --plugin-type skill --mode mine
---page 1 --page-size 100`, walking every page and comparing
-`manifest_json.name` exactly before retrying so the skill is never duplicated.
+--page 1 --page-size 100`, then re-pass `--page-size 100` on every request while
+walking every page; the default silently falls back to 20 when omitted. Never
+stop after a full page. Compare `manifest_json.name` exactly before retrying so
+the skill is never duplicated.
 If an existing-id import is ambiguous, use `plugin get`, version history,
 hashes, and content comparison instead—the row existed before the request, so
 finding it does not prove the update committed.
@@ -117,9 +126,9 @@ finding it does not prove the update committed.
 First inspect `display_status` with `plugin get`:
 
 - For an unpublished draft, re-run upload/parse and update it with `plugin
-  import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, retaining
-  the current `plugin_name` unless the user explicitly requested a rename, then
-  run `plugin publish` as in the initial flow.
+  import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, omitting
+  `--plugin-name` to retain the current title unless the user explicitly
+  requested a rename, then run `plugin publish` as in the initial flow.
 - For an already-published Space skill, **do not call import or upsert**: direct
   edits are rejected so live content cannot bypass review. Upload and parse the
   new archive, then submit that fresh parse task as the frozen upgrade:
@@ -167,8 +176,11 @@ package content.
 > the one field, and send the whole document via `--data @plugin.json`.
 > `manifest_json` and `plugin_json` are required on every write, and
 > `manifest_json` must agree with the outer fields (see the invariant in
-> `expert.md`). Note `plugin import` behaves the *opposite* way — omitted fields
-> there fall back to the existing row — so do not carry habits between the two.
+> `expert.md`). For a Skill, preserve the existing `manifest_json.name` exactly:
+> changing it replaces the machine identity used by the next import's ownership
+> check and can cause a duplicate card. Note `plugin import` behaves the
+> *opposite* way — omitted fields there fall back to the existing row — so do
+> not carry habits between the two.
 
 Deletion is destructive and confirmed:
 

@@ -573,8 +573,10 @@ func TestHTMLDraftCreateRejectsSlugWithoutHTTPRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":{}}`))
 	})
 	root.SetArgs([]string{"html", "draft", "create", "--data", `{"html":"wip","slug":"legacy"}`})
-	if err := root.Execute(); err == nil {
-		t.Fatal("draft create with slug unexpectedly succeeded")
+	err := output.AsExitError(root.Execute())
+	const hint = "create a draft with html and an idempotency_key; slug is not accepted on this endpoint"
+	if err == nil || err.Code != "VALIDATION_ERROR" || err.Hint != hint {
+		t.Fatalf("draft create invalid-mode hint = %#v, want %q", err, hint)
 	}
 	if hits != 0 {
 		t.Fatalf("draft create with slug reached backend %d time(s)", hits)

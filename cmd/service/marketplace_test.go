@@ -334,6 +334,32 @@ func TestMarketplacePluginImportRequiresDisplayNameOnlyOnCreate(t *testing.T) {
 		})
 	}
 
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "empty plugin id", args: []string{"--parse-task-id", "task-1", "--plugin-name", "Visible title", "--plugin-id", ""}},
+		{name: "null plugin id", args: []string{"--data", `{"parse_task_id":"task-1","plugin_name":"Visible title","plugin_id":null}`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sent := false
+			root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+				sent = true
+			})
+			root.SetArgs(append([]string{"marketplace", "plugin", "import"}, tc.args...))
+			exitErr := output.AsExitError(root.Execute())
+			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
+				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
+			}
+			if !strings.Contains(exitErr.Hint, "omit --plugin-id entirely") {
+				t.Errorf("hint = %q, want blank plugin_id guidance", exitErr.Hint)
+			}
+			if sent {
+				t.Error("invalid create request reached HTTP")
+			}
+		})
+	}
+
 	t.Run("update may preserve existing plugin name", func(t *testing.T) {
 		var gotBody map[string]any
 		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {

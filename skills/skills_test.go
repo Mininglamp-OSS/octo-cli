@@ -417,8 +417,6 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"--plugin-name \"<display-name>\" --name \"<skill-name>\"",
 		"`--plugin-name` is the visible Marketplace title",
 		"do not silently reuse the machine slug",
-		"keep its exact `plugin_name` unless the",
-		"user explicitly requested a rename",
 		"plugin publish --plugin-id <plugin-id>",
 		"--parse-task-id <parse-task-id>",
 		"plugin review-request create --data @review.json",
@@ -437,11 +435,51 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		t.Fatal("publish workflow must keep ownership step 3 before plan/upload step 4")
 	}
 	ownershipStep := content[ownershipStart:uploadStart]
-	if !strings.Contains(ownershipStep, "--mode mine --page 1 --page-size 100") {
+	ownershipText := strings.ToLower(strings.Join(strings.Fields(ownershipStep), " "))
+	if !strings.Contains(ownershipText, "--mode mine --page 1 --page-size 100") {
 		t.Error("ownership step must walk the complete owned list")
 	}
-	if strings.Contains(ownershipStep, "--q") {
+	for _, want := range []string{
+		"re-pass `--page-size 100` on every request",
+		"default silently falls back to 20",
+		"stopping early reports a false \"no match\" and creates a duplicate card",
+		"omit `--plugin-name`",
+	} {
+		if !strings.Contains(ownershipText, want) {
+			t.Errorf("ownership step must contain %q", want)
+		}
+	}
+	if strings.Contains(ownershipText, "--q") {
 		t.Error("machine-name ownership step must not use any display-name q filter")
+	}
+	importStart := strings.Index(content, "5. Presign + upload + parse + import:")
+	verifyStart := strings.Index(content, "6. Read the returned `plugin_id`")
+	if importStart < 0 || verifyStart < 0 || importStart >= verifyStart {
+		t.Fatal("publish workflow must keep import step 5 before verification step 6")
+	}
+	importText := strings.ToLower(strings.Join(strings.Fields(content[importStart:verifyStart]), " "))
+	for _, want := range []string{
+		"create: pass `--plugin-name` and omit `--plugin-id`",
+		"update: pass `--plugin-id` and omit `--plugin-name`",
+	} {
+		if !strings.Contains(importText, want) {
+			t.Errorf("import step must contain %q", want)
+		}
+	}
+	recoveryStart := strings.Index(content, "If a create import returns")
+	recoveryEnd := strings.Index(content, "If an existing-id import is ambiguous")
+	if recoveryStart < 0 || recoveryEnd < 0 || recoveryStart >= recoveryEnd {
+		t.Fatal("publish workflow must document create recovery before update recovery")
+	}
+	recoveryText := strings.ToLower(strings.Join(strings.Fields(content[recoveryStart:recoveryEnd]), " "))
+	for _, want := range []string{
+		"re-pass `--page-size 100` on every request",
+		"default silently falls back to 20",
+		"never stop after a full page",
+	} {
+		if !strings.Contains(recoveryText, want) {
+			t.Errorf("create recovery must contain %q", want)
+		}
 	}
 	if uploadCommand := strings.Index(content, "skill-upload create --file-name"); uploadCommand < 0 || ownershipStart >= uploadCommand {
 		t.Error("owned-name lookup must happen before upload initialization")
@@ -461,18 +499,19 @@ func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
 		t.Fatalf("read marketplace skill: %v", err)
 	}
 	content := string(b)
-	createStart := strings.Index(content, "- create: walk")
+	createStart := strings.Index(content, "- create: for Skills")
 	updateStart := strings.Index(content, "- update/import of an existing id:")
 	if createStart < 0 || updateStart < 0 || createStart >= updateStart {
 		t.Fatal("marketplace recovery must document create before update")
 	}
 	createRecovery := content[createStart:updateStart]
-	for _, want := range []string{"--page-size 100", "complete owned list", "`manifest_json.name`"} {
-		if !strings.Contains(createRecovery, want) {
+	createRecoveryText := strings.ToLower(strings.Join(strings.Fields(createRecovery), " "))
+	for _, want := range []string{"--plugin-type skill", "--page-size 100", "complete owned skill list", "`manifest_json.name`"} {
+		if !strings.Contains(createRecoveryText, want) {
 			t.Errorf("create recovery must contain %q", want)
 		}
 	}
-	if strings.Contains(createRecovery, "--q") {
+	if strings.Contains(createRecoveryText, "--q") {
 		t.Error("create recovery must not filter the ownership scan with --q")
 	}
 }

@@ -248,8 +248,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected with 400 rather than clamped) and does not advertise the cursor
   extension, so `--page-all` is not registered. Callers that relied on it must
   walk `--page` until a short page. This matters most for the owned-name
-  duplicate check: `--q` is a substring match against `plugin_name` only, so a
-  single unpaged probe can report a false "not found".
+  duplicate check: `--q` is a substring match against `plugin_name` or
+  `manifest_json.description`, but never the machine identity in
+  `manifest_json.name`, so a single unpaged probe can report a false "not
+  found".
 - **BREAKING (marketplace): `plugin upsert` replaces the plugin row; it does not
   patch it.** There is no metadata-only PATCH on the unified API. The backend
   rebuilds the whole plugin from the submitted document, preserving only
@@ -401,15 +403,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that call `octo` must switch to `octo-cli`.
 
 ### Fixed
-- **Marketplace Skill imports no longer conflate the visible title with the
-  machine name.** The CLI contract now correctly describes `plugin_name` as the
-  human-facing Marketplace name and `name` as the stable `SKILL.md` machine
-  name. The bundled publishing workflow supplies both fields explicitly and
+- **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
+  visible title with the machine name.** The CLI contract now correctly
+  describes `plugin_name` as the human-facing Marketplace name and `name` as
+  the stable `SKILL.md` machine name. The bundled create workflow supplies both
+  fields explicitly and
   checks existing ownership against `manifest_json.name`, preventing newly
   imported cards from displaying a machine slug and avoiding duplicate imports
   hidden by a search filter that does not cover machine names. New imports are
-  also rejected locally when `plugin_name` is missing or blank; updates may
-  still omit it to preserve the existing display name.
+  also rejected locally when `plugin_name` is missing or blank, and a create
+  must omit `plugin_id` entirely rather than pass it as blank or `null`; updates
+  may still omit `plugin_name` to preserve the existing display name.
 - **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
   body walker visited only non-nil children, so a property *present with value `null`* never
   reached the enum or uint64 check and was forwarded upstream — while the same field with an

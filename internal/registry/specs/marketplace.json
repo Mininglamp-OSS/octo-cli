@@ -711,7 +711,7 @@
                       },
                       "manifest_json": {
                         "type": "object",
-                        "description": "Type-specific manifest document (required on every write). It must agree with the outer plugin fields: manifest_json.plugin_name == plugin.plugin_name, manifest_json.plugin_type == plugin.plugin_type, and manifest_json.labels == plugin.tags in the same order. Every disagreement returns the same opaque 400 VALIDATION_ERROR with details {\"field\":\"body\",\"reason\":\"invalid\"} and no indication of which field differed, so check all three before retrying."
+                        "description": "Type-specific manifest document (required on every write). It must agree with the outer plugin fields: manifest_json.plugin_name == plugin.plugin_name, manifest_json.plugin_type == plugin.plugin_type, and manifest_json.labels == plugin.tags in the same order. Every disagreement returns the same opaque 400 VALIDATION_ERROR with details {\"field\":\"body\",\"reason\":\"invalid\"} and no indication of which field differed, so check all three before retrying. For a Skill, preserve manifest_json.name exactly on update: it is the machine identity used by the import ownership and duplicate checks."
                       },
                       "plugin_json": {
                         "type": "object",
@@ -885,7 +885,7 @@
         "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
-        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and no --plugin-id; updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name",
+        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name",
         "x-octo-body-variants": [
           {
             "name": "create",
