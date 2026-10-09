@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -360,6 +361,9 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		}
 		return newResultResponse(req.ID, s.getSkill(ctx, a.Intent, a.Domain, a.Query, a.OperationID, a.Depth))
 	case "execute":
+		if err := validateExecuteKeys(p.Arguments); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid execute arguments: "+err.Error())
+		}
 		var a struct {
 			OperationID       string          `json:"operation_id"`
 			Arguments         json.RawMessage `json:"arguments"`
@@ -391,6 +395,50 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 	default:
 		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool: "+p.Name)
 	}
+}
+
+// validateExecuteKeys keeps safety switches fail-closed. Struct unmarshalling
+// alone ignores unknown keys, accepts case-insensitive names, and maps null to
+// scalar zero values. Duplicate keys can also overwrite an earlier dry-run.
+// Only this tool's outer object is strict; operation arguments remain governed
+// by the shared registry/schema validator.
+func validateExecuteKeys(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := d.Token(); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return fmt.Errorf("expected an argument name")
+		}
+		switch key {
+		case "operation_id", "arguments", "dry_run", "schema_fingerprint":
+		default:
+			return fmt.Errorf("unknown argument %q", truncateRunes(key, 200))
+		}
+		if seen[key] {
+			return fmt.Errorf("duplicate argument %q", truncateRunes(key, 200))
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return err
+		}
+		if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("argument %q must not be null", key)
+		}
+	}
+	_, err := d.Token()
+	return err
 }
 
 // unmarshalArgs decodes the tool arguments object, treating an empty/omitted

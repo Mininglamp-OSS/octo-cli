@@ -75,6 +75,8 @@ Deployment (HTTP):
   - OCTO_MCP_ALLOWED_ORIGINS (comma-separated) permits browser origins; unset,
     only loopback origins are accepted (anti DNS-rebinding). Setting it replaces
     the loopback default, so list your loopback origin too if you still use it.
+    This is an origin gate, not browser CORS support; OPTIONS preflight is not
+    implemented. Use a non-browser client or a proxy that implements CORS.
   - initialize / tools/list / search_ops / describe_op / resources/read need no
     bearer, so any peer that can reach the port can enumerate the catalog.
 

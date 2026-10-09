@@ -39,7 +39,7 @@ func twoToolDefinitions() []toolDef {
 		{
 			Name:        "execute",
 			Description: "Invoke one Octo operation by id. arguments is a flat object keyed by the operation's declared params / body fields (see get_skill intent=describe). Returns a structured result: status is one of ok, validation_error, ambiguous, auth_error, result_unknown, execution_error, schema_drift; the engine's JSON envelope is under \"envelope\". Set dry_run=true to construct and locally validate the request WITHOUT calling the backend (no server-side success is implied). Optionally pass the schema_fingerprint from describe: if the operation schema has drifted since you read it, execute returns schema_drift instead of calling. The fingerprint detects schema drift only; it does not prove describe was called this session. Security-sensitive fields forced by the server connection are ignored if supplied.",
-			InputSchema: rawSchema(`{"type":"object","required":["operation_id"],"properties":{"operation_id":{"type":"string"},"arguments":{"type":"object"},"dry_run":{"type":"boolean","description":"construct + validate only; do not send"},"schema_fingerprint":{"type":"string","description":"fingerprint from describe; mismatch => schema_drift"}}}`),
+			InputSchema: rawSchema(`{"type":"object","additionalProperties":false,"required":["operation_id"],"properties":{"operation_id":{"type":"string"},"arguments":{"type":"object"},"dry_run":{"type":"boolean","description":"construct + validate only; do not send"},"schema_fingerprint":{"type":"string","description":"fingerprint from describe; mismatch => schema_drift"}}}`),
 		},
 	}
 }
@@ -100,6 +100,9 @@ func (s *Server) describeSkill(operationID, depth string) toolResult {
 		}, true)
 	}
 
+	if depth != "" && depth != "summary" && depth != "full" {
+		return jsonToolResult(map[string]any{"status": "validation_error", "error": map[string]any{"code": "VALIDATION_ERROR", "message": "depth must be summary or full"}}, true)
+	}
 	var obj map[string]any
 	if depth == "summary" {
 		obj = summaryView(detail)
@@ -124,7 +127,7 @@ func (s *Server) describeSkill(operationID, depth string) toolResult {
 		}
 		sort.Strings(names)
 		obj["server_managed_arguments"] = names
-		obj["server_managed_note"] = "these arguments are forced by the server connection (over-privilege防护); do not supply them"
+		obj["server_managed_note"] = "these arguments are forced by the server connection (over-privilege protection); do not supply them"
 	}
 	obj["depth"] = depth
 	obj["schema_fingerprint"] = schemaFingerprint(detail)
@@ -188,7 +191,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 		return s.multipartDryRun(detail, arguments, current)
 	}
 
-	// Over-privilege防护: force the connection's trusted values, same table as
+	// Over-privilege protection: force the connection's trusted values, same table as
 	// call_op — a shared authz backend, not a second policy.
 	forced := s.trusted.apply(operationID, arguments)
 
@@ -216,7 +219,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 // identity resolution and transport run only on a real call. The limitation is
 // stated in the note rather than silently implied.
 func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[string]any, fingerprint string) toolResult {
-	// Trusted-context projection first (over-privilege防护, #177 B4): a forced
+	// Trusted-context projection first (over-privilege protection, #177 B4): a forced
 	// field wins and is reflected in the plan, and must not be reported as
 	// "missing" when the operator supplies it.
 	s.trusted.apply(detail.ID, args)
@@ -304,7 +307,8 @@ func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, p
 	if d.RequestBody == nil {
 		return nil
 	}
-	_, fileProvided := args["file_path"]
+	filePath, fileProvided := args["file_path"].(string)
+	fileProvided = fileProvided && strings.TrimSpace(filePath) != ""
 	for _, name := range d.RequestBody.Required {
 		prop, isProp := d.RequestBody.Properties[name]
 		if isProp && prop.Type == "string" && prop.Format == "binary" {
