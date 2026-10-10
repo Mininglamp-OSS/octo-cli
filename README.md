@@ -466,3 +466,112 @@ by editing a spec in `internal/registry/specs/`, not Go code.
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## MCP server
+
+JSON-RPC method notifications (no `id`) use the same validation, credentials,
+scope bindings and single-attempt write policy as requests, but emit no RPC
+response (HTTP returns an empty 202 after dispatch). Use requests with an `id`
+for business writes that need a result or outcome reconciliation. MCP clients
+should keep using the standard request/notification message types.
+
+Run `octo-cli mcp serve` for newline-delimited JSON-RPC over stdio. It exposes
+`search_ops`, `describe_op`, and `call_op`, plus embedded Skill resources.
+Credentials and the API base URL use the same environment/profile resolution
+as CLI commands. A runtime supplies trusted session context through operator
+configuration; model arguments cannot override protected operation fields.
+
+For uploads, discovery includes `mcp_arguments.file_path`: provide a path
+relative to `OCTO_MCP_UPLOAD_ROOT`, rather than the backend binary `file` field.
+For HTTP, create a dedicated staging directory with a regular
+`.octo-mcp-upload-root` marker file before starting the server. MCP writes make
+one backend attempt and report ambiguous failures as `RESULT_UNKNOWN`.
+Unconfined local uploads require `--allow-local-upload` on trusted stdio.
+`--http 127.0.0.1:8080` uses POST JSON-RPC with a per-request Authorization
+Bearer; it does not provide SSE or TLS. HTTP rejects stored credential selectors
+`--profile` / `--bot-id`; use `OCTO_API_BASE_URL` to choose its gateway.
+If unset, the CLI's documented production gateway default applies. HTTP rejects `--allow-local-upload`.
+Discovery is bearer-free; execution requires credentials. Multipart bodies
+are buffered in memory. Windows confinement compiles, but native Windows
+junction/reparse-point runtime validation remains a release verification gap.
+Discovery rejects `domain` values over 256 bytes. Metadata and local-validation
+tool results have a 1 MiB encoded-content limit; an oversized result returns
+`RESULT_TOO_LARGE` rather than echoing client input. Authenticated `call_op`
+business responses use the CLI envelope path.
+HTTP accepts at most 8 MiB per JSON-RPC body. Before parsing, it reserves
+in-flight input bytes in separate 8 MiB small-request and 56 MiB large-request
+pools; chunked requests transfer pools after a 64 KiB prefix. An exhausted
+pool returns HTTP 503 with a JSON-RPC error and `Retry-After: 1`.
+This input-capacity reservation is retained through decoding, execution waits,
+backend work, and response writing, and released on success, error, or cancellation.
+It is not an exact heap-size cap: parsed JSON and results add memory. At most two
+HTTP multipart calls may assemble and execute concurrently; waiters keep their
+request reservation. Tool parameters also have a 65,536-value parsing limit.
+HTTP and stdio reject duplicate or unknown JSON-RPC envelope keys and duplicate
+tool-routing argument keys before dispatch, so one request has one method and
+operation interpretation.
+Business `arguments` accept at most 512 top-level keys. Tool parameters accept
+at most 65,536 JSON values in total, including nested object values and array
+members, and at most 64 levels of JSON nesting. `call_op` advertises the
+top-level key bound in its input schema; oversized parameters return JSON-RPC
+`-32602` with the request id before backend I/O.
+The HTTP request timeout (default 120 seconds, configured with
+`OCTO_MCP_HTTP_REQUEST_TIMEOUT`) bounds dispatch and socket response writing.
+A client that stops reading cannot retain the handler and its reservation
+indefinitely. `--timeout` separately bounds outbound backend requests.
+
+HTTP is stateless: each POST receives fresh bearer/context state; initialize
+state is not stored across requests. The server implements `2025-06-18` and
+returns that supported version during initialization; clients must check the
+returned version. `resources/read` is available on every POST, and resource
+URIs identify server resources. There is no HTTP resource-support negotiation;
+clients must read them or load the named Skill with `octo-cli skills`. In MCP,
+resources are a server capability, not a standard client capability (see the
+[MCP lifecycle specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)).
+
+Drive upload prepare/confirm operations do not perform the object-storage PUT;
+use `octo-cli drive upload file` for the complete transfer.
+
+MCP withholds all inline binary-body operations (including scene/PPT export)
+until a binary-result contract exists; use the corresponding CLI with
+`--output <file>`. Redirect operations that return a download URL remain callable.
+
+MCP uploads have a 32 MiB file-size cap. Global server `--dry-run` rejects
+multipart uploads before file lookup, so rehearsal cannot echo file contents.
+
+MCP context bindings are per operation: group_no/im_group_no use the configured
+channel; type-5 thread route `short_id` comes from the `group____short` channel
+binding and cannot be replaced by `X-Octo-Thread-Id`. HTML `thread_id` uses
+`--force-thread-id`, or the channel short ID when a type-5 channel is pinned.
+Conflicting operator type-5 channel and thread IDs are rejected. With a pinned
+channel, HTML placement uses the pinned thread when `--force-thread-id` is
+set (or the channel is type 5), and otherwise uses group placement for type 2;
+conflicting `mount_type` is refused. When a search channel or on-behalf-of
+identity is pinned, nested search filters cannot select another protected
+scope. `message.search.groups` is cross-channel-only and is refused when
+`--force-channel-id` is set; use `message.search` for the pinned channel. It
+remains available without a pinned channel, including OBO-only connections.
+A standalone `--force-thread-id` also forces HTML thread placement and
+discards any caller-supplied group selector.
+
+Loop
+X-Workspace-ID/workspace_id use
+--force-workspace-id, and principalSpaceId uses --force-principal-space-id.
+The principal's membership space is distinct from the execution Space. Drive
+space_id/target_space_id are Drive resource identifiers and remain caller input;
+backend authorization decides whether the bearer can access those resources.
+HTTP scope headers are ignored by default; --trust-context-headers is only for
+a proxy that strips caller headers and supplies verified context. page_all is
+available only for declared paginated operations and must be boolean.
+
+A bare `--http :8080` binds loopback; explicit non-loopback hosts require a proxy/TLS.
+`OCTO_MCP_ALLOWED_ORIGINS` validates Origin headers but does not add browser
+CORS response headers or handle preflight; browser clients need a CORS-capable
+reverse proxy.
+
+Open request schemas (`additionalProperties: true`) accept extra business fields.
+Known top-level scope and engine controls are refused; free-form nested data
+still requires backend authorization. Thread channel
+bindings of type 5 split `group____short` for parent-group and short-id routes.
+HTTP envelopes retain `mcp:connection` credential provenance, and two-tool results
+preserve large JSON integers when wrapping the CLI envelope.
