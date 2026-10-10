@@ -50,6 +50,11 @@ type Factory struct {
 	IOStreams *IOStreams
 	Globals   *GlobalOptions
 
+	// MultipartFile is a caller-owned, already-open upload descriptor. When
+	// supplied, multipart assembly reads it instead of reopening --file.
+	// The caller closes it after execution; ordinary CLI calls leave it nil.
+	MultipartFile *os.File
+
 	ConfigFunc         func() (*config.Config, error)
 	CredentialFunc     func() (*credential.BotCredential, error)
 	ClientFunc         func() (*client.Client, error)

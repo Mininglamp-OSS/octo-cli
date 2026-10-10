@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "skills": {
+    "octo-shared": {
+      "summary_short": "Shared octo-cli knowledge: auth, gateway config, output envelopes, universal flags, error handling."
+    },
+    "octo-messaging": {
+      "summary_short": "Messaging: send/edit/sync, search, groups and threads, event polling; App Bot is DM-only.",
+      "operations": {
+        "message.send": {
+          "level": "required-before-write",
+          "advice": "App Bot can only DM. This op has no idempotency key, so confirm non-delivery before retrying to avoid a duplicate send."
+        }
+      }
+    },
+    "octo-files": {
+      "summary_short": "File upload/download and presigned S3 credentials, plus bot housekeeping (register, user-info, space-members)."
+    },
+    "octo-docs": {
+      "summary_short": "Docs, sheets, whiteboards, and PPT: create and govern, members and sharing, comments and versions.",
+      "references": {
+        "sheet.md": {"topics": ["spreadsheet", "cell", "row", "column", "filter", "sort", "freeze", "validation", "dropdown", "xlsx", "sheet"]},
+        "doc.md": {"topics": ["document", "body", "block", "content"]},
+        "board.md": {"topics": ["whiteboard", "scene", "element", "board"]},
+        "ppt.md": {"topics": ["ppt", "slide", "presentation"]},
+        "common.md": {"topics": ["member", "sharing", "attachment", "comment", "version"]}
+      },
+      "operations": {
+        "docs.create": {
+          "level": "required-before-write",
+          "advice": "Pick the editable surface with doc_type; an optional Idempotency-Key header dedupes retries."
+        },
+        "docs.versions.restore": {
+          "level": "required-before-write",
+          "advice": "Restore overwrites the live document with a prior version; confirm the target version id first."
+        }
+      }
+    },
+    "octo-drive": {
+      "summary_short": "Octo Drive: spaces, folders, upload/download, doc mounts, share links, invites, IM-attachment transfer.",
+      "operations": {
+        "drive.im-transfer.create": {
+          "level": "required-before-write",
+          "advice": "The source message is located by the im_group_no/im_channel_type/im_msg_id triple; a wrong value is a lookup miss, not an error."
+        }
+      }
+    },
+    "octo-html": {
+      "summary_short": "HTML docs (octo-doc): create and govern self-contained interactive HTML, versions, drafts, sharing, comments.",
+      "operations": {
+        "html.publish": {
+          "level": "required-before-write",
+          "advice": "idempotency_key is auto-generated when omitted; reusing a key returns the original document rather than publishing new HTML."
+        },
+        "html.draft.create": {
+          "level": "recommended",
+          "advice": "Never invent a slug; the backend derives it. A draft is not visible in the sidebar until promoted."
+        }
+      }
+    },
+    "octo-loop": {
+      "summary_short": "Octo Loop control plane: tasks, comments, metadata, projects, labels; dispatch to experts and expert-teams."
+    },
+    "octo-mail": {
+      "summary_short": "OCTO Agent Mail: read, search, policy-aware sending, draft preparation, delivery status.",
+      "operations": {
+        "mail.message.send_intent": {
+          "level": "required-before-write",
+          "advice": "Sending needs an explicit user request and a stable X-Octo-Idempotency-Key (8-200 chars) unique to this exact send intent.",
+          "section": "SKILL.md#compose-and-send"
+        },
+        "mail.message.reply_draft": {
+          "level": "required-before-write",
+          "advice": "Prepares a reply draft; the idempotency key must be stable per intent or duplicate protection is lost."
+        },
+        "mail.draft.create_agent": {
+          "level": "required-before-write",
+          "advice": "Agent-authored drafts stay in OCTO Web for owner review; sending needs an explicit user request."
+        }
+      }
+    },
+    "octo-marketplace": {
+      "summary_short": "Marketplace plugins: search, install, publish, review, and update Skills, MCP connectors, and Experts/Teams.",
+      "references": {
+        "skills.md": {"topics": ["skill", "upload", "publish", "parse"]},
+        "mcp.md": {"topics": ["mcp", "connector", "probe"]},
+        "expert.md": {"topics": ["expert", "team", "squad"]}
+      }
+    }
+  }
+}
