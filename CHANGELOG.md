@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- MCP dispatch executes id-less JSON-RPC method notifications through the normal validation and authorization path, then suppresses their response. Decoded malformed id-less messages are also silent. HTTP retains input reservations and deadlines through notification execution; normal requests still receive their result.
+
+- MCP preserves execution status, no-retry advice and dry-run markers when a large error or plan (including multipart previews) exceeds the 1 MiB result limit; only the envelope member is replaced. HTTP budgets in-flight body bytes with a separate small-request reserve. Oversized schema fingerprints return JSON-RPC `-32602`.
+- MCP discovery now provides bounded continuation cursors in both facades; schema fingerprints include safety defaults and caller-visible response rules while ignoring descriptive prose. Skill overrides must own their service, and metadata/audit guards handle bounded domains, Unicode headings and null envelopes.
+
+
 ### Changed
+- MCP business arguments accept at most 512 top-level keys, and tool parameters to 65,536 JSON values including array members (64 levels maximum); both facade schemas advertise the top-level key limit. More than 512 business keys returns JSON-RPC `-32602` for `call_op` and an `execute` tool error with `status: validation_error` and `INVALID_ARGUMENTS`; shared JSON value/depth overflow returns `-32602` for both. All are rejected before backend I/O. Forced channels and standalone forced HTML threads constrain placement, and forced search scope constrains nested filters and refuses cross-channel-only group search when a channel is pinned.
+- MCP HTTP refuses filesystem-root and host-system upload directories; both transports reject ambiguous duplicate JSON-RPC envelope keys. A forced channel with unresolved group or thread fields emits an explicit startup warning listing those fields. Server-error hints no longer reuse definite-refusal advice on 5xx responses.
+- For backend 5xx responses that carry a client-refusal code, direct CLI and MCP now report an uncertain result instead of a definite validation or authentication failure. This changes the CLI error type and can change its exit code; the original backend response remains in error detail. HTML create and publish errors retain the generated idempotency key and resume guidance.
+- MCP review execution safety: strict tool objects on both facades, no automatic retry for non-idempotent writes, response-aware unknown outcomes, and risk-based POST read classification. Correct group/thread context derivation, multipart types, secret-path planning and resource negotiation; document every Autopilot path parameter and limit concurrent HTTP multipart execution to two.
+- MCP review follow-up: classify equivalent channel/workspace scope arguments per operation, require explicit trust for context headers, reject unknown JSON and malformed pagination/array inputs, and reject confined hard links. Use artifact versions, lazy binary-op discovery, and one shared upload limit.
+- MCP global dry-run rejects multipart before file lookup; confined uploads have a 32 MiB size cap.
+- MCP HTTP rejects stored credential selectors instead of silently dropping profile routing. Array-valued query arguments preserve CSV-special characters. Inline binary-body operations are withheld from MCP until a file-result contract exists.
+- The two-tool facade rejects misplaced or duplicate safety fields before backend I/O. Multipart dry-run resolves credentials, rejects empty required parameters, and separates query/header values from form fields. `get_skill` rejects unknown keys.
+- MCP discovery documents the multipart `file_path` binding; uploads resolve credentials before file lookup. Reserved flags and authz table declarations have regression coverage, JSON-RPC parse errors carry a null id, oversized error keys are bounded before rune conversion, and HTTP rejects the stdio-only local-upload flag. Native Windows upload confinement runtime validation remains pending.
 - **PPT native media guidance** distinguishes direct binary uploads of authorized
   local task assets from ingestion of existing public URLs. Signed URLs use stdin
   and private response handling; native references are inserted with a fresh
@@ -17,6 +32,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   No new CLI command, publishing gate or size-limit change is introduced.
 
 ### Added
+- **`octo-cli mcp serve --facade two|both` (two-tool Skill-driven facade)** — an
+  opt-in alternative tool surface over the same MCP engine, folding the three
+  meta-tools into two verbs. It is off by default (`--facade three`), so the
+  existing three-tool behaviour is unchanged; `--facade both` exposes all five
+  for controlled side-by-side comparison.
+  - `get_skill` — a discriminated discovery tool. `intent=search` is the
+    `search_ops` discovery backend (domain/keyword filter, or the service↔skill
+    module map with neither); `intent=describe` returns one operation's full
+    zero-drift schema plus its Skill reference, a schema fingerprint, a
+    per-operation `constraint_enforcement` projection, and progressive `depth`
+    (`summary` outline or `full` schema).
+  - `execute` — invokes one operation through the identical assembly / identity
+    / validation / transport / envelope / authz backend as `call_op`, wrapped in
+    a structured status (`ok` / `validation_error` / `ambiguous` /
+    `execution_error` / `schema_drift` / `result_unknown` / `auth_error`).
+    `dry_run=true` constructs and locally validates the request without sending
+    it (no server-side success implied); for multipart operations it validates
+    required path/query/header/body fields and the file binding without opening,
+    reading, or materializing the file, and never contacts the backend. An
+    optional `schema_fingerprint` from `describe` makes `execute` refuse with
+    `schema_drift` if the embedded schema changed since it was read. The
+    fingerprint is deterministic schema-drift detection only — it does not prove
+    `describe` was called this session; a stateful session challenge is deferred.
+    Machine-readable outcome semantics distinguish `result_unknown` (a mutating
+    request whose outcome is ambiguous after a transport/timeout/5xx — may have
+    applied, do not auto-retry) and `auth_error` (fix the credential) from a
+    plain `execution_error`. Error and degradation hints are facade-aware: under
+    `--facade two` they route to `get_skill`, never the disabled
+    `search_ops` / `describe_op`.
+  The facade reuses the existing registry/schema, Skill mapping/resources and
+  over-privilege protection white-list unchanged; contract and side-by-side comparison
+  tests assert both facades drive the backend to the same wire.
+
+- **`octo-cli mcp serve` (MCP server)** — runs octo-cli as a Model
+  Context Protocol server over stdio (default, local/trusted-client transport)
+  or HTTP (`--http <addr>`): JSON-RPC request/response over POST — one request,
+  one response; no SSE stream or server-managed session yet. It exposes three
+  meta-tools rather than one per operation, so a client's `tools/list` stays a
+  few hundred tokens instead of expanding all embedded operations into resident
+  schemas:
+  - `search_ops` — discover operations by domain/keyword, or a live
+    service↔skill module map with no arguments; each hit carries Skill
+    navigation metadata (which business Skill to load, a short summary, a
+    recommendation level, and the resource URI), never the Skill body.
+    Keyword search keeps the leading 8192 bytes (without splitting UTF-8),
+    then 512 runes, then 16 whitespace-delimited terms before an AND scan.
+    Excess input returns `truncated: true` with a bound notice; ordinary
+    multi-term matching is unchanged. Cancellation/deadline expiry returns an
+    MCP tool error (`isError: true`, `SEARCH_CANCELLED`) without partial hits.
+    The scan checks cancellation between operations and terms on both transports.
+  - `describe_op` — the full, zero-drift parameter schema for one operation
+    (straight from the embedded spec) plus the operation's Skill reference and
+    a short pre-call advice; the Skill never carries a second copy of the
+    schema.
+  - `call_op` — invokes one operation by driving the existing command engine
+    in-process, so identity routing, request assembly, pre-flight validation,
+    transport, secret masking, and the JSON envelope are reused unchanged.
+  Skills are exposed for progressive on-demand reading through MCP resources
+  (`octo://skills/<name>/<file>.md`); clients that do not negotiate resources
+  degrade to a skill `name` + readable hint and the three tools still work
+  standalone. The service→Skill map comes from each `SKILL.md`'s frontmatter
+  `services:` line plus a new embedded `skills/manifest.json`, merged and
+  validated fail-fast at start (unknown service/op, uncovered service, missing
+  reference file or heading anchor, disabled-service drift, and length/level
+  caps are build/CI errors). Security-sensitive arguments (space, session-bound
+  channel, on-behalf-of) can be forced per connection so a model-supplied value
+  is overridden; the white-list is per operation, so a same-named field such as
+  drive's `space_id` is never affected. `--dry-run` turns the whole server into
+  a rehearsal: every `call_op` prints the request it would send as a
+  `"dry_run": true` envelope and performs no backend mutation for the server's
+  lifetime. Over HTTP the credential is per
+  connection (the server env credential is never inherited), multipart
+  `file_path` uploads are confined to `OCTO_MCP_UPLOAD_ROOT`: component-by-component
+  no-follow opens (Linux/macOS `openat`; Windows directory-relative `NtCreateFile`)
+  reject symlinks/reparse points and the final descriptor must be a regular file.
+  Multipart assembly reads that already-open descriptor, so replacing a pathname
+  after validation cannot redirect the upload. The explicit stdio opt-in still
+  permits unconfined regular files; HTTP always requires confinement. `Origin` is
+  validated (allowlist via `OCTO_MCP_ALLOWED_ORIGINS`, loopback-only by
+  default), and `--http` binds cleartext so TLS/loopback termination is the
+  operator's responsibility. Existing CLI command syntax and authentication
+  remain unchanged; the MCP server is a new front end over the same engine.
+
 - **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
   matching version in one JSON response. Bot updates read this pair, edit the
   HTML, and publish with the existing `--version` set to the read version + 1.

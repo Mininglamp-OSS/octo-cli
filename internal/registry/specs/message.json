@@ -24,7 +24,7 @@
                 "required": ["channel_id", "channel_type", "payload"],
                 "properties": {
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5], "description": "1=DM, 2=group, 5=thread" },
                   "stream_no": { "type": "string", "description": "optional stream session identifier" },
                   "on_behalf_of": { "type": "string", "description": "OBO: send as this user persona; requires an active OBO grant + channel scope" },
                   "payload": { "type": "object", "description": "message payload (content, type, mention, etc.). Pass via --data (object, not a flag)." }
@@ -69,7 +69,7 @@
                   "message_id": { "type": "string" },
                   "message_seq": { "type": "integer" },
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer" },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5] },
                   "content_edit": { "type": "string" }
                 }
               }
@@ -94,7 +94,7 @@
                 "required": ["channel_id", "channel_type"],
                 "properties": {
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer" },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5] },
                   "start_message_seq": { "type": "integer" },
                   "end_message_seq": { "type": "integer" },
                   "limit": { "type": "integer", "default": 50, "maximum": 200 },
@@ -126,7 +126,7 @@
                 "required": ["channel_id", "message_ids"],
                 "properties": {
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer", "default": 1 },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5], "default": 1 },
                   "message_ids": { "type": "array", "maxItems": 100, "items": { "type": "string" } }
                 }
               }

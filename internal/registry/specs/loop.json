@@ -5941,6 +5941,16 @@
           "autopilots"
         ],
         "operationId": "autopilot.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -5972,6 +5982,16 @@
           "autopilots"
         ],
         "operationId": "autopilot.update",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "$ref": "#/components/requestBodies/AutopilotUpdate"
         },
@@ -6006,6 +6026,16 @@
           "autopilots"
         ],
         "operationId": "autopilot.delete",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6044,6 +6074,16 @@
           "autopilots"
         ],
         "operationId": "autopilot.trigger",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6083,6 +6123,14 @@
         ],
         "operationId": "autopilot.run.list",
         "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "$ref": "#/components/parameters/Page"
           },
@@ -6128,6 +6176,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.run.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6167,6 +6233,14 @@
         ],
         "operationId": "autopilot.delivery.list",
         "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "$ref": "#/components/parameters/Page"
           },
@@ -6212,6 +6286,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.delivery.get",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6250,6 +6342,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.delivery.replay",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_delivery_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6288,6 +6398,16 @@
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.create",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "$ref": "#/components/requestBodies/AutopilotTriggerCreate"
         },
@@ -6329,6 +6449,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.update",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "$ref": "#/components/requestBodies/AutopilotTriggerUpdate"
         },
@@ -6363,6 +6501,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.trigger_config.delete",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6401,6 +6557,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.webhook_token.rotate",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6439,6 +6613,24 @@
           "autopilots"
         ],
         "operationId": "autopilot.signing_secret.set",
+        "parameters": [
+          {
+            "name": "autopilot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "autopilot_trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "$ref": "#/components/requestBodies/AutopilotSigningSecret"
         },

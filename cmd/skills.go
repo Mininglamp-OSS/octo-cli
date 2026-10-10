@@ -59,41 +59,31 @@ func loadSkills() ([]skillEntry, error) {
 // multi-line or block-scalar descriptions are not supported.
 func parseSkillDescription(b []byte) string {
 	inFrontmatter := false
-	for _, ln := range strings.Split(string(b), "\n") {
+	for _, ln := range strings.Split(strings.TrimPrefix(string(b), "\ufeff"), "\n") {
 		t := strings.TrimSpace(ln)
-		if t == "---" {
-			if inFrontmatter {
-				break
+		if !inFrontmatter {
+			if t == "" {
+				continue
+			}
+			if t != "---" {
+				return "" // later Markdown rules are not frontmatter
 			}
 			inFrontmatter = true
 			continue
 		}
-		if inFrontmatter && strings.HasPrefix(t, "description:") {
+		if t == "---" {
+			break
+		}
+		if strings.HasPrefix(t, "description:") {
 			return strings.TrimSpace(strings.TrimPrefix(t, "description:"))
 		}
 	}
 	return ""
 }
 
-// skillDisabled reports whether the SKILL.md frontmatter sets `disabled: true`.
-// Uses the same single-line frontmatter scan as parseSkillDescription, and the
-// same "true" truthiness as the spec's x-octo-disabled flag (registry.truthy).
+// skillDisabled uses the same visibility rule as MCP resources.
 func skillDisabled(b []byte) bool {
-	inFrontmatter := false
-	for _, ln := range strings.Split(string(b), "\n") {
-		t := strings.TrimSpace(ln)
-		if t == "---" {
-			if inFrontmatter {
-				break
-			}
-			inFrontmatter = true
-			continue
-		}
-		if inFrontmatter && strings.HasPrefix(t, "disabled:") {
-			return strings.TrimSpace(strings.TrimPrefix(t, "disabled:")) == "true"
-		}
-	}
-	return false
+	return skills.DisabledFromFrontmatter(b)
 }
 
 // newSkillsCmd returns `octo-cli skills`. Three mutually exclusive modes:

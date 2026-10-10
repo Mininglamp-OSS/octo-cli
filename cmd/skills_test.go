@@ -20,6 +20,8 @@ func TestParseSkillDescription(t *testing.T) {
 		{"basic", "---\nname: x\ndescription: hello world\n---\nbody", "hello world"},
 		{"trims surrounding space", "---\ndescription:   spaced   \n---", "spaced"},
 		{"no frontmatter", "# title\ndescription: ignored", ""},
+		{"late fence is not frontmatter", "<!-- generated -->\n---\ndescription: ignored\n---", ""},
+		{"leading blank and BOM", "\ufeff\n---\ndescription: visible\n---", "visible"},
 		{"description only in body is ignored", "---\nname: x\n---\ndescription: in body", ""},
 		{"empty input", "", ""},
 	}
