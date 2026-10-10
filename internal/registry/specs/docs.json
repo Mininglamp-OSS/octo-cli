@@ -838,11 +838,53 @@
         }
       }
     },
+    "/v1/bot/docs/{docId}/sheets": {
+      "get": {
+        "operationId": "docs.sheet.list",
+        "summary": "List worksheet IDs and names without downloading cells (needs reader)",
+        "description": "Returns the worksheet directory in tab order: sheetId (the persistent logicalId), name, order, rowCount and columnCount. Does not return cells or a baseVersion. Use this to discover a worksheet before docs sheet get --sheet-id or --sheet-name. An old workbook without sheetList exposes its implicit default / Sheet1 worksheet. Counts describe declared grid size, not populated cells. Requires the worksheet-directory backend; do not fall back to downloading the entire workbook when this endpoint is unavailable.",
+        "x-octo-risk": "read",
+        "x-octo-strict-response-schema": true,
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worksheet directory, without cell content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["docId", "items"],
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["sheetId", "name", "order", "rowCount", "columnCount"],
+                        "properties": {
+                          "sheetId": { "type": "string", "description": "Persistent worksheet logicalId; prefer this over a mutable display name for subsequent reads." },
+                          "name": { "type": "string" },
+                          "order": { "type": "number" },
+                          "rowCount": { "type": "integer" },
+                          "columnCount": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/sheet": {
       "get": {
         "operationId": "docs.sheet.get",
         "summary": "Read a spreadsheet's live cells, worksheet resources, and base version (needs reader)",
-        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, and sheetConditionalFormats are returned on the first page only. When checkbox metadata exceeds the size or inspection budget, 413 includes baseVersion and repairDataValidationKey in the CLI error detail; delete that exact internal key with a validation-only PATCH and retry until the read succeeds. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit. Also returns sheetConditionalFormats for conditional-format rule management.",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, and sheetConditionalFormats are returned on the first page only. When checkbox metadata exceeds the size or inspection budget, 413 includes baseVersion and repairDataValidationKey in the CLI error detail; delete that exact internal key with a validation-only PATCH and retry until the read succeeds. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit. Also returns sheetConditionalFormats for conditional-format rule management. Use docs sheet list to discover persistent worksheet IDs/names, then choose exactly one of --sheet-id or --sheet-name to read only that worksheet. The backend filters cells and associated metadata before pagination and byte limits. Scoped responses carry sheetId; compact cursors retain that scope on subsequent requests, including cursor-only continuation. Missing or ambiguous names never fall back to all worksheets. The original baseVersion write token is unchanged.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -869,7 +911,21 @@
             "schema": {
               "type": "string"
             },
-            "description": "opaque nextCursor from the previous page; also opts into paged reads. A cursor whose snapshot moved returns 409 sheet_changed."
+            "description": "opaque nextCursor from the previous page; also opts into paged reads. New compact cursors bind the document and selected worksheet; cursor-only continuation preserves that scope. Repeating an equivalent selector is allowed, changing scope is rejected. A cursor whose snapshot moved returns 409 sheet_changed."
+          },
+          {
+            "name": "sheetId",
+            "in": "query",
+            "x-octo-flag": "sheet-id",
+            "schema": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "description": "read only this persistent worksheet logicalId, discovered via docs sheet list. Mutually exclusive with --sheet-name. Filters cells and associated metadata before pagination and byte limits. Omit both selectors for the whole workbook. Requires worksheet-scoped read backend support."
+          },
+          {
+            "name": "sheetName",
+            "in": "query",
+            "x-octo-flag": "sheet-name",
+            "schema": { "type": "string", "minLength": 1 },
+            "description": "read only the worksheet with this exact display name. Mutually exclusive with --sheet-id. Missing names return sheet_not_found; duplicates return ambiguous_sheet_name with candidate IDs. Never guesses or falls back to all worksheets."
           }
         ],
         "responses": {
@@ -882,6 +938,10 @@
                   "properties": {
                     "docId": {
                       "type": "string"
+                    },
+                    "sheetId": {
+                      "type": "string",
+                      "description": "resolved logicalId on worksheet-scoped reads and their continuation pages; absent on whole-workbook reads"
                     },
                     "sheetCells": {
                       "type": "object",

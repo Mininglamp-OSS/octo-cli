@@ -81,7 +81,7 @@ octo-cli drive     browse
                im-transfer create
 octo-cli docs      create | list | search | get | rename | delete | forward-grant
                content  get|edit
-               sheet    get|edit|replace|split|deduplicate
+               sheet    list|get|edit|replace|split|deduplicate
                         rows insert|delete
                         columns insert|delete
                ppt      get|edit|export

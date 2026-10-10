@@ -133,6 +133,9 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (url.Va
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := validateSheetReadSelection(rt, q); err != nil {
+		return nil, nil, err
+	}
 	return q, headers, nil
 }
 
@@ -1179,6 +1182,9 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		return err
 	}
 	if f.Globals == nil || !f.Globals.DryRun {
+		if contractErr := validateSheetReadScope(body, rt, req); contractErr != nil {
+			return emitAndReturn(f, contractErr)
+		}
 		if contractErr := validateReadResponse(body, rt); contractErr != nil {
 			return emitAndReturn(f, contractErr)
 		}
