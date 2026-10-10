@@ -1261,7 +1261,7 @@ func TestBuildMultipartBody_FormTextFields(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	raw, ct, err := buildMultipartBody(cmd, rt)
+	raw, ct, err := buildMultipartBody(cmd, rt, nil)
 	if err != nil {
 		t.Fatalf("buildMultipartBody: %v", err)
 	}
@@ -1474,7 +1474,7 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 	empty := ""
 	rt := &operationRuntime{filePath: &empty}
 	cmd := &cobra.Command{Use: "synth"}
-	_, _, err := buildMultipartBody(cmd, rt)
+	_, _, err := buildMultipartBody(cmd, rt, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
