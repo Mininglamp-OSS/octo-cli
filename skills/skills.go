@@ -11,3 +11,12 @@ import "embed"
 //
 //go:embed */*.md
 var FS embed.FS
+
+// Manifest is the embedded skills/manifest.json: the operation-level Skill
+// navigation overrides (level / advice / section), per-skill short summaries,
+// and reference-file topic registrations that the MCP server merges with each
+// SKILL.md's frontmatter `services:` declaration. It ships in the same binary
+// as FS and the OpenAPI specs, so the three can never drift across a release.
+//
+//go:embed manifest.json
+var Manifest []byte

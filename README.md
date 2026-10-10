@@ -466,3 +466,58 @@ by editing a spec in `internal/registry/specs/`, not Go code.
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## MCP server
+
+Run `octo-cli mcp serve` for newline-delimited JSON-RPC over stdio. It exposes
+`search_ops`, `describe_op`, and `call_op`, plus embedded Skill resources.
+Credentials and the API base URL use the same environment/profile resolution
+as CLI commands. A runtime supplies trusted session context through operator
+configuration; model arguments cannot override protected operation fields.
+
+For uploads, discovery includes `mcp_arguments.file_path`: provide a path
+relative to `OCTO_MCP_UPLOAD_ROOT`, rather than the backend binary `file` field.
+Unconfined local uploads require `--allow-local-upload` on trusted stdio.
+`--http 127.0.0.1:8080` uses POST JSON-RPC with a per-request Authorization
+Bearer; it does not provide SSE or TLS. HTTP rejects stored credential selectors
+`--profile` / `--bot-id`; use `OCTO_API_BASE_URL` to choose its gateway.
+If unset, the CLI's documented production gateway default applies. HTTP rejects `--allow-local-upload`.
+Discovery is bearer-free; execution requires credentials. Multipart bodies
+are buffered in memory. Windows confinement compiles, but native Windows
+junction/reparse-point runtime validation remains a release verification gap.
+Drive upload prepare/confirm operations do not perform the object-storage PUT;
+use `octo-cli drive upload file` for the complete transfer.
+
+`--facade two` exposes `get_skill` and `execute`; `--facade both` exposes both
+surfaces. For rehearsal, put `dry_run: true` directly in `execute`'s tool
+arguments, beside `operation_id` and the nested operation `arguments`.
+Unknown or duplicate tool parameter keys and misplaced safety fields are
+rejected before execution. Multipart rehearsal resolves credentials, validates
+metadata, and reports query parameters, headers, and form fields separately;
+it does not open the supplied file or contact a backend. Use paths relative to
+the configured upload root for portable lexical rehearsal checks.
+
+MCP withholds all inline binary-body operations (including scene/PPT export)
+until a binary-result contract exists; use the corresponding CLI with
+`--output <file>`. Redirect operations that return a download URL remain callable.
+
+MCP uploads have a 32 MiB file-size cap. Global server `--dry-run` rejects
+multipart uploads before file lookup, so rehearsal cannot echo file contents.
+
+MCP context bindings are per operation: group_no/im_group_no use the configured
+channel, thread_id uses --force-thread-id, Loop X-Workspace-ID/workspace_id use
+--force-workspace-id, and principalSpaceId uses --force-principal-space-id.
+The principal's membership space is distinct from the execution Space. Drive
+space_id/target_space_id are Drive resource identifiers and remain caller input;
+backend authorization decides whether the bearer can access those resources.
+HTTP scope headers are ignored by default; --trust-context-headers is only for
+a proxy that strips caller headers and supplies verified context. page_all is
+available only for declared paginated operations and must be boolean.
+
+A bare `--http :8080` binds loopback; explicit non-loopback hosts require a proxy/TLS.
+
+Open request schemas (`additionalProperties: true`) accept extra business fields;
+undeclared identity, scope and engine controls are still refused. Thread channel
+bindings of type 5 split `group____short` for parent-group and short-id routes.
+HTTP envelopes retain `mcp:connection` credential provenance, and two-tool results
+preserve large JSON integers when wrapping the CLI envelope.
