@@ -399,7 +399,7 @@ func TestOctoMailSkillEmbeddedAndSafe(t *testing.T) {
 	}
 }
 
-func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
+func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testing.T) {
 	b, err := FS.ReadFile("octo-marketplace/skills.md")
 	if err != nil {
 		t.Fatalf("read marketplace skills reference: %v", err)
@@ -408,11 +408,15 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 	for _, want := range []string{
 		"or an accessible skill directory",
 		"mktemp -d",
-		"--mode mine --q <name>", // owned-name lookup on the unified list
+		"--mode mine --page 1 --page-size 100",
+		"`manifest_json.name`",
 		"skill-upload create --file-name",
 		"skill-upload parse <skill_upload_id>",
 		"skill-parse-task get <parse_task_id>",
 		"plugin import --parse-task-id",
+		"--plugin-name \"<display-name>\" --name \"<skill-name>\"",
+		"`--plugin-name` is the visible Marketplace title",
+		"do not silently reuse the machine slug",
 		"plugin publish --plugin-id <plugin-id>",
 		"--parse-task-id <parse-task-id>",
 		"plugin review-request create --data @review.json",
@@ -422,8 +426,77 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 			t.Errorf("publish workflow must contain %q", want)
 		}
 	}
-	// The owned-name ownership check must precede upload initialization.
-	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
+	// The exhaustive machine-name ownership step must precede upload
+	// initialization. Check the step itself rather than the first matching flag,
+	// so an unrelated pagination example cannot make this assertion false-green.
+	ownershipStart := strings.Index(content, "3. Check ownership exhaustively:")
+	uploadStart := strings.Index(content, "4. Show the final plan")
+	if ownershipStart < 0 || uploadStart < 0 || ownershipStart >= uploadStart {
+		t.Fatal("publish workflow must keep ownership step 3 before plan/upload step 4")
+	}
+	ownershipStep := content[ownershipStart:uploadStart]
+	ownershipText := strings.ToLower(strings.Join(strings.Fields(ownershipStep), " "))
+	if !strings.Contains(ownershipText, "--mode mine --page 1 --page-size 100") {
+		t.Error("ownership step must walk the complete owned list")
+	}
+	for _, want := range []string{
+		"re-pass `--page-size 100` on every request",
+		"default silently falls back to 20",
+		"stopping early reports a false \"no match\" and creates a duplicate card",
+		"if multiple rows match exactly, stop as ambiguous",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"zero-match scan proves only",
+		"visible default placement",
+		"plugin get --plugin-id",
+		"contract mismatch; do not create",
+		"possible legacy card",
+		"omit `--plugin-name`",
+	} {
+		if !strings.Contains(ownershipText, want) {
+			t.Errorf("ownership step must contain %q", want)
+		}
+	}
+	if strings.Contains(ownershipText, "--q") {
+		t.Error("machine-name ownership step must not use any display-name q filter")
+	}
+	importStart := strings.Index(content, "5. Presign + upload + parse + import:")
+	verifyStart := strings.Index(content, "6. Read the returned `plugin_id`")
+	if importStart < 0 || verifyStart < 0 || importStart >= verifyStart {
+		t.Fatal("publish workflow must keep import step 5 before verification step 6")
+	}
+	importText := strings.ToLower(strings.Join(strings.Fields(content[importStart:verifyStart]), " "))
+	for _, want := range []string{
+		"create: pass `--plugin-name` and omit `--plugin-id`",
+		"update: pass `--plugin-id` and omit `--plugin-name`",
+	} {
+		if !strings.Contains(importText, want) {
+			t.Errorf("import step must contain %q", want)
+		}
+	}
+	recoveryStart := strings.Index(content, "If a create import returns")
+	recoveryEnd := strings.Index(content, "If an existing-id import is ambiguous")
+	if recoveryStart < 0 || recoveryEnd < 0 || recoveryStart >= recoveryEnd {
+		t.Fatal("publish workflow must document create recovery before update recovery")
+	}
+	recoveryText := strings.ToLower(strings.Join(strings.Fields(content[recoveryStart:recoveryEnd]), " "))
+	for _, want := range []string{
+		"re-pass `--page-size 100` on every request",
+		"default silently falls back to 20",
+		"never stop after a full page",
+		"if multiple rows match exactly, stop as ambiguous",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"do not retry the create until the ambiguity is resolved",
+		"plugin get --plugin-id",
+		"contract mismatch instead of retrying",
+		"possible legacy card",
+	} {
+		if !strings.Contains(recoveryText, want) {
+			t.Errorf("create recovery must contain %q", want)
+		}
+	}
+	if uploadCommand := strings.Index(content, "skill-upload create --file-name"); uploadCommand < 0 || ownershipStart >= uploadCommand {
 		t.Error("owned-name lookup must happen before upload initialization")
 	}
 	// Retired per-type commands and presigned-download wording must stay gone;
@@ -432,6 +505,68 @@ func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
 		if strings.Contains(content, gone) {
 			t.Errorf("skills workflow must not reference the retired %q surface", gone)
 		}
+	}
+}
+
+func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("read marketplace skill: %v", err)
+	}
+	content := string(b)
+	createStart := strings.Index(content, "- create: for Skills")
+	updateStart := strings.Index(content, "- update/import of an existing id:")
+	if createStart < 0 || updateStart < 0 || createStart >= updateStart {
+		t.Fatal("marketplace recovery must document create before update")
+	}
+	createRecovery := content[createStart:updateStart]
+	createRecoveryText := strings.ToLower(strings.Join(strings.Fields(createRecovery), " "))
+	for _, want := range []string{
+		"--plugin-type skill",
+		"--page-size 100",
+		"complete owned skill list",
+		"`manifest_json.name`",
+		"experts, expert teams, and connectors",
+		"--plugin-type <type>",
+		"`plugin_name` exactly",
+		"short page is returned",
+		"for every asset type",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"zero exact matches",
+	} {
+		if !strings.Contains(createRecoveryText, want) {
+			t.Errorf("create recovery must contain %q", want)
+		}
+	}
+	if strings.Contains(createRecoveryText, "--q") {
+		t.Error("create recovery must not filter the ownership scan with --q")
+	}
+}
+
+func TestOctoMarketplaceOwnershipScanContinuesPastFirstMatch(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("read marketplace skill: %v", err)
+	}
+	content := string(b)
+	guidanceStart := strings.Index(content, "`--q` matches human-facing")
+	guidanceEnd := strings.Index(content, "## Pagination and filtering")
+	if guidanceStart < 0 || guidanceEnd < 0 || guidanceStart >= guidanceEnd {
+		t.Fatal("marketplace skill must keep shared ownership-scan guidance before pagination")
+	}
+	guidance := strings.ToLower(strings.Join(strings.Fields(content[guidanceStart:guidanceEnd]), " "))
+	for _, want := range []string{
+		"continue through a short page even after finding an exact match",
+		"only then decide whether the match is unique",
+		"never stop at the first exact match",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Errorf("ownership scan guidance must contain %q", want)
+		}
+	}
+	if strings.Contains(guidance, "stop only after an exact match or a short page") {
+		t.Error("ownership scan guidance must not permit stopping at the first exact match")
 	}
 }
 

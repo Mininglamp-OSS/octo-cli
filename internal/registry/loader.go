@@ -426,6 +426,9 @@ type OperationDetail struct {
 	// post-alias keys.
 	LosslessIDFields []string      `json:"lossless_id_fields,omitempty"`
 	BodyVariants     []BodyVariant `json:"body_variants,omitempty"`
+	// BodyVariantsHint is the operation-specific recovery guidance returned
+	// when no declared request-body variant matches.
+	BodyVariantsHint string `json:"body_variants_hint,omitempty"`
 	// AutoIdempotencyKey names a request field generated once per command run when absent.
 	AutoIdempotencyKey string `json:"auto_idempotency_key,omitempty"`
 	// ResponseUnwrap selects a dot-separated field from successful JSON responses.
@@ -571,6 +574,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		d.UnwrapRequiredFields = unwrapRequiredFields(doc, op, d.ResponseUnwrap)
 	}
 	d.AutoIdempotencyKey = stringOf(op["x-octo-auto-idempotency-key"])
+	d.BodyVariantsHint = stringOf(op["x-octo-body-variants-hint"])
 	if variants, ok := op["x-octo-body-variants"].([]any); ok {
 		for _, raw := range variants {
 			variant, ok := raw.(map[string]any)

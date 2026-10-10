@@ -101,8 +101,20 @@ Marketplace mutations are not transport-retried. A gateway failure may mean the
 server committed the operation, so `RESULT_UNKNOWN` must be resolved by reading
 state before retrying:
 
-- create: walk `plugin list --scene-code default --mode mine --q "<name>"`
-  through every page;
+- create: for Skills, walk `plugin list --scene-code default --plugin-type skill
+  --mode mine --page 1 --page-size 100` through the complete owned Skill list,
+  re-passing `--page-size 100` on every page, and compare `manifest_json.name`
+  against the stable machine name. Follow the detailed procedure in `skills.md`.
+  For experts, expert teams, and connectors, walk `plugin list --scene-code
+  default --plugin-type <type> --mode mine --page 1 --page-size 100` until a
+  short page is returned, re-passing `--page-size 100` on every page, and
+  compare each row's `plugin_name` exactly with the title submitted by the
+  create request.
+  Do not assume `manifest_json.name` is a machine identity for those non-Skill
+  types. For every asset type, if multiple rows match exactly, stop as
+  ambiguous and ask the user which `plugin_id` is authoritative; never pick a
+  row automatically. Retry the create only after the relevant scan reaches a
+  short page with zero exact matches;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
@@ -110,8 +122,11 @@ state before retrying:
 - review decisions: re-read the review request;
 - delist/delete: re-read the plugin.
 
-`--q` matches `plugin_name` substrings only and a page defaults to 20 rows. Stop
-only after an exact match or a short page.
+`--q` matches human-facing `plugin_name` and manifest-description substrings,
+not the stable `manifest_json.name`; a page defaults to 20 rows. Keep the same
+explicit `--page-size` on every request, and continue through a short page even
+after finding an exact match. Only then decide whether the match is unique;
+never stop at the first exact match.
 
 ## Pagination and filtering
 
