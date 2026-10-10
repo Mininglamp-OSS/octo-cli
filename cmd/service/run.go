@@ -89,13 +89,14 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		ResponseUnwrap:       d.ResponseUnwrap,
 		UnwrapRequiredFields: d.UnwrapRequiredFields,
 	}
+	applyMCPWriteSafety(&req, f)
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
 	if d.Multipart {
-		raw, ct, err := buildMultipartBody(cobraCmd, rt)
+		raw, ct, err := buildMultipartBody(cobraCmd, rt, f.MultipartFile, f.RequirePinnedMultipart)
 		if err != nil {
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
@@ -113,6 +114,15 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, rt, &req)
+}
+
+// applyMCPWriteSafety keeps the ordinary CLI retry policy intact while MCP
+// marks an unsafe write as one-shot with an explicit ambiguous-outcome result.
+func applyMCPWriteSafety(req *client.Request, f *cmdutil.Factory) {
+	if f.MCPUnsafeWrite {
+		req.DisableRetry = true
+		req.UnknownOutcomeOnNetworkFailure = true
+	}
 }
 
 // buildQueryAndHeaders assembles both parameter positions that come from flags.
@@ -653,7 +663,7 @@ func applyGeneratedIdempotencyKey(rt *operationRuntime, body map[string]any) err
 	if value, present := body[name]; present && !emptyAutoIdempotencyValue(value) {
 		return nil
 	}
-	if len(rt.detail.BodyVariants) > 0 && !variantNeedsGeneratedField(rt.detail.BodyVariants, body, name) {
+	if !GeneratesIdempotencyKey(rt.detail, body) {
 		return nil
 	}
 	key := make([]byte, 32)
@@ -662,6 +672,16 @@ func applyGeneratedIdempotencyKey(rt *operationRuntime, body map[string]any) err
 	}
 	body[name] = fmt.Sprintf("octo-cli-%x", key)
 	return nil
+}
+
+// GeneratesIdempotencyKey reports whether this request mode receives the
+// declared replay key. MCP uses the same rule before enabling mutation retries.
+// The command engine still validates the body before sending any request.
+func GeneratesIdempotencyKey(detail *registry.OperationDetail, body map[string]any) bool {
+	if detail == nil || detail.AutoIdempotencyKey == "" {
+		return false
+	}
+	return len(detail.BodyVariants) == 0 || variantNeedsGeneratedField(detail.BodyVariants, body, detail.AutoIdempotencyKey)
 }
 
 func emptyAutoIdempotencyValue(value any) bool {
@@ -1181,13 +1201,10 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
-	if f.Globals == nil || !f.Globals.DryRun {
-		if contractErr := validateSheetReadScope(body, rt, req); contractErr != nil {
-			return emitAndReturn(f, contractErr)
-		}
-		if contractErr := validateReadResponse(body, rt); contractErr != nil {
-			return emitAndReturn(f, contractErr)
-		}
+	if contractErr := validateSuccessResponse(f, rt, req, body); contractErr != nil {
+		annotated := annotateIdempotencyKey(rt, req, contractErr)
+		_ = f.EmitError(annotated) //nolint:errcheck // best-effort emit before returning err
+		return annotated
 	}
 	body, err = normalizeResponse(f, rt, body)
 	if err != nil {
@@ -1204,7 +1221,7 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 			// retry-with-this-key wording it reserves for an unknown outcome;
 			// the fallback covers an operation with required unwrap fields but
 			// no auto key, where there is no key to retry with.
-			unwrapErr := annotateIdempotencyKey(rt, req, output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), ""))
+			unwrapErr := annotateIdempotencyKey(rt, req, remoteResponseError(output.ErrWithHint("internal", "RESPONSE_UNWRAP", err.Error(), "")))
 			if exit := output.AsExitError(unwrapErr); exit != nil && exit.Hint == "" {
 				exit.Hint = "backend response did not match its operation spec"
 			}
@@ -1218,6 +1235,35 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	return f.EmitSuccess(body)
 }
 
+func validateSuccessResponse(f *cmdutil.Factory, rt *operationRuntime, req *client.Request, body []byte) *output.ExitError {
+	if f.Globals != nil && f.Globals.DryRun {
+		return nil
+	}
+	binary := req.BinaryResponse || (rt != nil && rt.detail != nil && rt.detail.BinaryBody)
+	if !binary && len(body) > 0 && !json.Valid(body) {
+		return remoteResponseError(output.ErrWithHint("api_error", "INVALID_BACKEND_RESPONSE", "backend returned invalid JSON", "verify the backend route; a write may already have committed"))
+	}
+	if err := validateSheetReadScope(body, rt, req); err != nil {
+		return remoteResponseError(err)
+	}
+	if err := validateReadResponse(body, rt); err != nil {
+		return remoteResponseError(err)
+	}
+	return nil
+}
+
+// Preserve response provenance when a valid request got an unusable success
+// response. In particular, MCP must not report a possibly committed write as
+// local validation merely because response decoding failed.
+func remoteResponseError(err error) *output.ExitError {
+	exit := output.AsExitError(err)
+	if exit == nil {
+		exit = output.ErrWithHint("api_error", "INVALID_BACKEND_RESPONSE", "backend response did not match its operation spec", "verify the backend route")
+	}
+	exit.ResponseReceived = true
+	return exit
+}
+
 // annotateIdempotencyKey records the key a failed create was sent with, so a
 // caller whose outcome is unknown can retry the SAME creation instead of
 // minting a second document. Without it the generated key dies with the process
@@ -1226,11 +1272,9 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 // address nor delete it.
 //
 // The key always lands in Detail — that is what makes the orphan recoverable,
-// and it costs nothing on a definite refusal. The hint is only rewritten when
-// the outcome is genuinely ambiguous (transport failure, timeout, 5xx) AND no
-// hint was set: a 4xx created nothing, so claiming "outcome unknown" there
-// would be false, and clobbering a curated hint like "ask a Workspace owner to
-// add this Bot" replaces actionable guidance with a misleading retry.
+// and it costs nothing on a definite refusal. For an ambiguous outcome
+// (transport failure, timeout, 5xx), prepend the safe resume guidance and keep
+// any backend hint. A 4xx created nothing, so it must not suggest resuming.
 func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error) error {
 	field, key := requestIdempotencyKey(rt, req)
 	if key == "" {
@@ -1260,9 +1304,14 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 		return err
 	}
 	exit.Detail = detail
-	if exit.Hint == "" && exit.OutcomeUnknown() {
-		exit.Hint = fmt.Sprintf("outcome unknown: retry with --%s %s with the same body to resume the same operation rather than duplicate it",
+	if exit.OutcomeUnknown() {
+		resume := fmt.Sprintf("outcome unknown: retry with --%s %s with the same body to resume the same operation rather than duplicate it",
 			strings.ReplaceAll(field, "_", "-"), key)
+		if exit.Hint == "" {
+			exit.Hint = resume
+		} else {
+			exit.Hint = resume + "; " + exit.Hint
+		}
 	}
 	return exit
 }
@@ -1388,7 +1437,7 @@ func normalizeResponse(f *cmdutil.Factory, rt *operationRuntime, body []byte) ([
 	}
 	out, err := output.NormalizeResponse(body, rt.detail.ResponseFieldAliases, rt.detail.LosslessIDFields)
 	if err != nil {
-		return nil, output.ErrWithHint("internal", "RESPONSE_NORMALIZE", err.Error(), "report the unexpected response shape")
+		return nil, remoteResponseError(output.ErrWithHint("internal", "RESPONSE_NORMALIZE", err.Error(), "report the unexpected response shape"))
 	}
 	return out, nil
 }
@@ -1452,10 +1501,11 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 			return err
 		}
 		if contractErr := validateReadResponse(body, rt); contractErr != nil {
-			return emitAndReturn(f, contractErr)
+			return emitAndReturn(f, remoteResponseError(contractErr))
 		}
 		data, nextCursor, hasMore, perr := parsePage(body, pag)
 		if perr != nil {
+			perr = remoteResponseError(perr)
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
 		}

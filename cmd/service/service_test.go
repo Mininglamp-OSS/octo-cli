@@ -1273,7 +1273,7 @@ func TestBuildMultipartBody_FormTextFields(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	raw, ct, err := buildMultipartBody(cmd, rt)
+	raw, ct, err := buildMultipartBody(cmd, rt, nil, false)
 	if err != nil {
 		t.Fatalf("buildMultipartBody: %v", err)
 	}
@@ -1486,7 +1486,7 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 	empty := ""
 	rt := &operationRuntime{filePath: &empty}
 	cmd := &cobra.Command{Use: "synth"}
-	_, _, err := buildMultipartBody(cmd, rt)
+	_, _, err := buildMultipartBody(cmd, rt, nil, false)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1626,6 +1626,53 @@ func TestHTMLMutationUnwrapFailsOpenOnBodylessSuccess(t *testing.T) {
 // html.publish declares doc_id and slug required, and a null or scalar data
 // carries neither. Reporting success there makes a caller persist an empty
 // document reference and lose the document it just created.
+func TestRCGeneratedIdempotencyKeyStillExplainsResumeOnFiveHundred(t *testing.T) {
+	for _, op := range []string{"html.publish", "html.draft.create"} {
+		t.Run(op, func(t *testing.T) {
+			detail, ok := registry.MustNew().GetOperation(op)
+			if !ok || detail.AutoIdempotencyKey == "" {
+				t.Fatalf("%s does not declare an auto key", op)
+			}
+			key := "generated-key-123"
+			request := &client.Request{Body: map[string]any{detail.AutoIdempotencyKey: key}}
+			for _, status := range []int{500, 503} {
+				original := output.ParseBackendError(status, []byte(`{"error":{"code":"VALIDATION_ERROR","message":"reported by backend"}}`))
+				err := annotateIdempotencyKey(&operationRuntime{detail: detail}, request, original)
+				exit := output.AsExitError(err)
+				if exit == nil || exit.Code != "RESULT_UNKNOWN" || !strings.Contains(exit.Hint, "--idempotency-key "+key) || !strings.Contains(exit.Hint, "backend returned a server error") {
+					t.Fatalf("%s status %d: missing safe resume and uncertainty: %+v", op, status, exit)
+				}
+			}
+			definite := output.ParseBackendError(400, []byte(`{"error":{"code":"VALIDATION_ERROR","message":"rejected"}}`))
+			annotateIdempotencyKey(&operationRuntime{detail: detail}, request, definite)
+			if strings.Contains(definite.Hint, "resume the same operation") {
+				t.Fatalf("definite 400 must not advise resume: %q", definite.Hint)
+			}
+		})
+	}
+}
+
+func TestRCHTMLPublishFiveHundredReturnsSentKeyToCaller(t *testing.T) {
+	var sentKey string
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		sentKey, _ = body["idempotency_key"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"VALIDATION_ERROR","message":"upstream response uncertain"}}`))
+	})
+	root.SetArgs([]string{"html", "publish", "--html", "<p>new</p>"})
+	if err := root.Execute(); err == nil {
+		t.Fatal("503 must not be reported as success")
+	}
+	if sentKey == "" || !strings.Contains(tf.ErrOut.String(), sentKey) || !strings.Contains(tf.ErrOut.String(), "resume the same operation") {
+		t.Fatalf("caller did not receive the sent idempotency key and resume guidance: key=%q output=%s", sentKey, tf.ErrOut.String())
+	}
+}
+
 func TestHTMLPublishUnwrapRejectsNullAndScalarData(t *testing.T) {
 	for _, body := range []string{`{"data":null}`, `{"data":"oops"}`, `{"data":123}`} {
 		t.Run(body, func(t *testing.T) {
