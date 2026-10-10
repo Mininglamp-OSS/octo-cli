@@ -76,7 +76,12 @@ Do not search the machine or guess a path.
    guidance, treat an exact `plugin_name` match to either the machine name or
    intended display name with a different `manifest_json.name` as a possible
    legacy card: inspect it with `plugin get` and `plugin version list`, and
-   never update solely from the display-name match. Decide create vs. update.
+   never update solely from the display-name match. If multiple rows match
+   exactly, stop as ambiguous and ask the user which `plugin_id` is
+   authoritative; never pick a row automatically. A zero-match scan proves
+   only that no matching owned Skill with a visible default placement was
+   found; disclose this limitation in the final plan and inspect any known
+   `plugin_id` before creating. Decide create vs. update.
    For an update, retain the matched row's `plugin_id` and current
    `plugin_name`; omit `--plugin-name` to preserve that title unless the user
    explicitly requested a rename.
@@ -128,7 +133,10 @@ Resolve any row with a missing or blank machine name through `plugin get
 --plugin-id <plugin-id>`; if the detail still lacks it, stop with a contract
 mismatch instead of retrying the create. Treat an exact `plugin_name` match with
 a different machine name as a possible legacy card and inspect `plugin get` plus
-`plugin version list` before deciding, so the skill is never duplicated.
+`plugin version list` before deciding, so the skill is never duplicated. If
+multiple rows match exactly, stop as ambiguous and ask the user which
+`plugin_id` is authoritative; never pick a row automatically. Do not retry the
+create until the ambiguity is resolved.
 If an existing-id import is ambiguous, use `plugin get`, version history,
 hashes, and content comparison instead—the row existed before the request, so
 finding it does not prove the update committed.

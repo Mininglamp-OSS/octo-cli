@@ -307,13 +307,17 @@ func TestMarketplacePluginImportRequest(t *testing.T) {
 }
 
 func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
+	const variantHint = "all imports require a non-empty --parse-task-id; creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name, but a supplied --plugin-name must be non-empty"
+
 	for _, tc := range []struct {
-		name string
-		args []string
+		name        string
+		args        []string
+		wantMessage string
+		wantHint    string
 	}{
-		{name: "missing plugin name", args: []string{"--parse-task-id", "task-1"}},
-		{name: "empty plugin name", args: []string{"--parse-task-id", "task-1", "--plugin-name", ""}},
-		{name: "whitespace plugin name in data", args: []string{"--data", `{"parse_task_id":"task-1","plugin_name":"   "}`}},
+		{name: "missing plugin name", args: []string{"--parse-task-id", "task-1"}, wantMessage: "request body does not match an allowed operation mode", wantHint: variantHint},
+		{name: "empty plugin name", args: []string{"--parse-task-id", "task-1", "--plugin-name", ""}, wantMessage: "request body field plugin_name must contain at least 1 character(s)", wantHint: "pass values that satisfy the operation schema via --data JSON or matching body flags"},
+		{name: "whitespace plugin name in data", args: []string{"--data", `{"parse_task_id":"task-1","plugin_name":"   "}`}, wantMessage: "request body does not match an allowed operation mode", wantHint: variantHint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sent := false
@@ -325,8 +329,8 @@ func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
 			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
 				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
 			}
-			if !strings.Contains(exitErr.Hint, "--plugin-name") {
-				t.Errorf("hint = %q, want --plugin-name guidance", exitErr.Hint)
+			if exitErr.Message != tc.wantMessage || exitErr.Hint != tc.wantHint {
+				t.Errorf("error = %#v, want message %q and hint %q", exitErr, tc.wantMessage, tc.wantHint)
 			}
 			if sent {
 				t.Error("invalid create request reached HTTP")
@@ -351,8 +355,8 @@ func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
 			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
 				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
 			}
-			if !strings.Contains(exitErr.Hint, "omit --plugin-id entirely") {
-				t.Errorf("hint = %q, want blank plugin_id guidance", exitErr.Hint)
+			if exitErr.Message != "request body does not match an allowed operation mode" || exitErr.Hint != variantHint {
+				t.Errorf("error = %#v, want exact operation-mode guidance", exitErr)
 			}
 			if sent {
 				t.Error("invalid create request reached HTTP")
@@ -361,12 +365,14 @@ func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-		args []string
+		name        string
+		args        []string
+		wantMessage string
+		wantHint    string
 	}{
-		{name: "empty plugin name on update", args: []string{"--parse-task-id", "task-1", "--plugin-id", "p1", "--plugin-name", ""}},
-		{name: "whitespace plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":"   "}`}},
-		{name: "null plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":null}`}},
+		{name: "empty plugin name on update", args: []string{"--parse-task-id", "task-1", "--plugin-id", "p1", "--plugin-name", ""}, wantMessage: "request body field plugin_name must contain at least 1 character(s)", wantHint: "pass values that satisfy the operation schema via --data JSON or matching body flags"},
+		{name: "whitespace plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":"   "}`}, wantMessage: "request body does not match an allowed operation mode", wantHint: variantHint},
+		{name: "null plugin name on update", args: []string{"--data", `{"parse_task_id":"task-1","plugin_id":"p1","plugin_name":null}`}, wantMessage: "request body does not match an allowed operation mode", wantHint: variantHint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sent := false
@@ -378,14 +384,32 @@ func TestMarketplacePluginImportRejectsBlankDisplayNames(t *testing.T) {
 			if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" {
 				t.Fatalf("error = %#v, want local VALIDATION_ERROR", exitErr)
 			}
-			if !strings.Contains(exitErr.Hint, "--plugin-name") {
-				t.Errorf("hint = %q, want --plugin-name guidance", exitErr.Hint)
+			if exitErr.Message != tc.wantMessage || exitErr.Hint != tc.wantHint {
+				t.Errorf("error = %#v, want message %q and hint %q", exitErr, tc.wantMessage, tc.wantHint)
 			}
 			if sent {
 				t.Error("blank update display name reached HTTP")
 			}
 		})
 	}
+
+	t.Run("empty parse task names the field", func(t *testing.T) {
+		sent := false
+		root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+			sent = true
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "import", "--parse-task-id", "", "--plugin-name", "Visible title"})
+		exitErr := output.AsExitError(root.Execute())
+		if exitErr == nil || exitErr.Code != "VALIDATION_ERROR" || exitErr.Message != "request body field parse_task_id must contain at least 1 character(s)" {
+			t.Fatalf("error = %#v, want field-specific parse_task_id validation", exitErr)
+		}
+		if exitErr.Hint != "pass values that satisfy the operation schema via --data JSON or matching body flags" {
+			t.Errorf("hint = %q, want generic schema guidance", exitErr.Hint)
+		}
+		if sent {
+			t.Error("blank parse_task_id reached HTTP")
+		}
+	})
 
 	t.Run("update may preserve existing plugin name", func(t *testing.T) {
 		var gotBody map[string]any

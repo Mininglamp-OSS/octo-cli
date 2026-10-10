@@ -18,7 +18,7 @@
       "get": {
         "operationId": "plugin.list",
         "summary": "List marketplace plugins",
-        "description": "List plugins visible in the current Space, filtered by scene and type. A non-empty scene_code joins the visible placement table so only catalog-placed plugins appear; every create attaches a visible default placement. mode=mine returns caller-owned rows regardless of listing state (including draft, published, and delisted); display_status may additionally be pending_review or rejected. Every row includes manifest_json. Replaces the legacy /experts, /squads, /mcps, /skills list endpoints. Contract verified against octo-marketplace 3f7859146f40c9af00ccdafd08980e5fe0642190.",
+        "description": "List plugins visible in the current Space, filtered by scene and type. A non-empty scene_code joins the visible placement table so only catalog-placed plugins appear. Current creates attach a visible default placement, but legacy rows with a missing or hidden default placement are excluded by this scene-scoped list even with mode=mine. Subject to that placement filter, mode=mine returns caller-owned rows regardless of listing state (including draft, published, and delisted); display_status may additionally be pending_review or rejected. Every row includes manifest_json. Replaces the legacy /experts, /squads, /mcps, /skills list endpoints. Contract verified against octo-marketplace 3f7859146f40c9af00ccdafd08980e5fe0642190.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -892,10 +892,10 @@
       "post": {
         "operationId": "plugin.import",
         "summary": "Import a skill plugin from a completed parse task",
-        "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Omit plugin_id to create, or set it to update an existing skill plugin. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
+        "description": "Finalize a skill upload: pass the parse_task_id from the upload+parse pipeline. Creating requires a non-empty plugin_name and an omitted plugin_id; updating requires plugin_id. Unlike plugin.upsert, this path is NOT a full replace: on update an omitted plugin_name, name, description, category_id, visibility or icon falls back to the existing row rather than clearing it.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
-        "x-octo-body-variants-hint": "creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name, but a supplied --plugin-name must be non-empty",
+        "x-octo-body-variants-hint": "all imports require a non-empty --parse-task-id; creating a skill requires a non-empty --plugin-name display name and must omit --plugin-id entirely (blank or null still counts as supplied); updating requires a non-empty --plugin-id and may omit --plugin-name to preserve the current display name, but a supplied --plugin-name must be non-empty",
         "x-octo-body-variants": [
           {
             "name": "create",
@@ -935,7 +935,8 @@
                 "additionalProperties": false,
                 "properties": {
                   "parse_task_id": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "plugin_id": {
                     "type": "string",
@@ -943,11 +944,12 @@
                   },
                   "plugin_name": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Human-facing marketplace display name written to the plugin_name column and to manifest_json.plugin_name. Distinct from the skill machine name, not a synonym. On create, always supply it explicitly; leaving it empty makes the backend inherit name and exposes the machine slug in the catalog. On update, omit it to preserve the current display name unless the user explicitly requested a rename; when supplied, the value must be non-empty and a different value renames the catalog card."
                   },
                   "name": {
                     "type": "string",
-                    "description": "Stable skill machine name written to manifest_json.name and to the SKILL.md frontmatter, normally read from the uploaded package's root SKILL.md. Distinct from plugin_name, not a synonym. On update an omitted value falls back to the existing row."
+                    "description": "Stable skill machine name written to manifest_json.name and to the SKILL.md frontmatter, normally read from the uploaded package's root SKILL.md. Distinct from plugin_name, not a synonym. On create an omitted value is derived from the uploaded package. On update an omitted value falls back to the existing row."
                   },
                   "description": {
                     "type": "string"

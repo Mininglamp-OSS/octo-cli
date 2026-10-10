@@ -443,6 +443,11 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"re-pass `--page-size 100` on every request",
 		"default silently falls back to 20",
 		"stopping early reports a false \"no match\" and creates a duplicate card",
+		"if multiple rows match exactly, stop as ambiguous",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"zero-match scan proves only",
+		"visible default placement",
 		"plugin get --plugin-id",
 		"contract mismatch; do not create",
 		"possible legacy card",
@@ -479,6 +484,10 @@ func TestOctoMarketplacePublishFlowChecksOwnedMachineNameBeforeMutation(t *testi
 		"re-pass `--page-size 100` on every request",
 		"default silently falls back to 20",
 		"never stop after a full page",
+		"if multiple rows match exactly, stop as ambiguous",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"do not retry the create until the ambiguity is resolved",
 		"plugin get --plugin-id",
 		"contract mismatch instead of retrying",
 		"possible legacy card",
@@ -521,6 +530,10 @@ func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
 		"--plugin-type <type>",
 		"`plugin_name` exactly",
 		"short page is returned",
+		"for every asset type",
+		"ask the user which `plugin_id` is authoritative",
+		"never pick a row automatically",
+		"zero exact matches",
 	} {
 		if !strings.Contains(createRecoveryText, want) {
 			t.Errorf("create recovery must contain %q", want)

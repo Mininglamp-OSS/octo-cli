@@ -567,19 +567,29 @@ func TestHTMLCanonicalDraftCreate(t *testing.T) {
 }
 
 func TestHTMLDraftCreateRejectsSlugWithoutHTTPRequest(t *testing.T) {
-	hits := 0
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		_, _ = w.Write([]byte(`{"data":{}}`))
-	})
-	root.SetArgs([]string{"html", "draft", "create", "--data", `{"html":"wip","slug":"legacy"}`})
-	err := output.AsExitError(root.Execute())
-	const hint = "create a draft with html and an idempotency_key; slug is not accepted on this endpoint"
-	if err == nil || err.Code != "VALIDATION_ERROR" || err.Hint != hint {
-		t.Fatalf("draft create invalid-mode hint = %#v, want %q", err, hint)
-	}
-	if hits != 0 {
-		t.Fatalf("draft create with slug reached backend %d time(s)", hits)
+	const hint = "create a draft with non-empty html; the CLI generates idempotency_key when omitted; slug is not accepted on this endpoint"
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "slug is forbidden", body: `{"html":"wip","slug":"legacy"}`},
+		{name: "html is blank", body: `{"html":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := 0
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				_, _ = w.Write([]byte(`{"data":{}}`))
+			})
+			root.SetArgs([]string{"html", "draft", "create", "--data", tc.body})
+			err := output.AsExitError(root.Execute())
+			if err == nil || err.Code != "VALIDATION_ERROR" || err.Hint != hint {
+				t.Fatalf("draft create invalid-mode hint = %#v, want %q", err, hint)
+			}
+			if hits != 0 {
+				t.Fatalf("invalid draft create reached backend %d time(s)", hits)
+			}
+		})
 	}
 }
 

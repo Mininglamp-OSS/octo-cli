@@ -196,7 +196,7 @@
         "description": "Create a new draft without a document reference. The CLI generates a fresh idempotency_key unless one is supplied explicitly; the response data.slug is the canonical document reference for later draft save/promote and publish operations.",
         "x-octo-risk": "write",
         "x-octo-auto-idempotency-key": "idempotency_key",
-        "x-octo-body-variants-hint": "create a draft with html and an idempotency_key; slug is not accepted on this endpoint",
+        "x-octo-body-variants-hint": "create a draft with non-empty html; the CLI generates idempotency_key when omitted; slug is not accepted on this endpoint",
         "x-octo-body-variants": [
           {
             "name": "create",
