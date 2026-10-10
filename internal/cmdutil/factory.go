@@ -50,6 +50,11 @@ type Factory struct {
 	IOStreams *IOStreams
 	Globals   *GlobalOptions
 
+	// MultipartFile is a caller-owned, already-open upload descriptor. When
+	// supplied, multipart assembly reads it instead of reopening --file.
+	// The caller closes it after execution; ordinary CLI calls leave it nil.
+	MultipartFile *os.File
+
 	ConfigFunc         func() (*config.Config, error)
 	CredentialFunc     func() (*credential.BotCredential, error)
 	ClientFunc         func() (*client.Client, error)
@@ -794,3 +799,21 @@ func (f *Factory) Out() io.Writer { return f.IOStreams.Out }
 
 // ErrOut returns the factory's stderr writer.
 func (f *Factory) ErrOut() io.Writer { return f.IOStreams.ErrOut }
+
+// WithCredentialProvider installs a connection-owned provider while preserving
+// the cache used by output identity and all downstream credential consumers.
+// Configure it before executing the Factory's command tree.
+func (f *Factory) WithCredentialProvider(provider func() (*credential.BotCredential, error)) {
+	f.cred = nil
+	f.CredentialFunc = func() (*credential.BotCredential, error) {
+		if f.cred != nil {
+			return f.cred, nil
+		}
+		cred, err := provider()
+		if err != nil {
+			return nil, err
+		}
+		f.cred = cred
+		return cred, nil
+	}
+}

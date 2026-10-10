@@ -453,3 +453,6 @@ func formatEnum(values []any) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// ReservedFlagNames returns a fresh snapshot of operation and global reserved flags.
+func ReservedFlagNames() map[string]bool {return buildReservedFlagNames()}
