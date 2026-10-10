@@ -124,8 +124,9 @@ state before retrying:
 
 `--q` matches human-facing `plugin_name` and manifest-description substrings,
 not the stable `manifest_json.name`; a page defaults to 20 rows. Keep the same
-explicit `--page-size` on every request, and stop only after an exact match or a
-short page.
+explicit `--page-size` on every request, and continue through a short page even
+after finding an exact match. Only then decide whether the match is unique;
+never stop at the first exact match.
 
 ## Pagination and filtering
 

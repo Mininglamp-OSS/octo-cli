@@ -544,6 +544,32 @@ func TestOctoMarketplaceRecoveryUsesStableMachineIdentity(t *testing.T) {
 	}
 }
 
+func TestOctoMarketplaceOwnershipScanContinuesPastFirstMatch(t *testing.T) {
+	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
+	if err != nil {
+		t.Fatalf("read marketplace skill: %v", err)
+	}
+	content := string(b)
+	guidanceStart := strings.Index(content, "`--q` matches human-facing")
+	guidanceEnd := strings.Index(content, "## Pagination and filtering")
+	if guidanceStart < 0 || guidanceEnd < 0 || guidanceStart >= guidanceEnd {
+		t.Fatal("marketplace skill must keep shared ownership-scan guidance before pagination")
+	}
+	guidance := strings.ToLower(strings.Join(strings.Fields(content[guidanceStart:guidanceEnd]), " "))
+	for _, want := range []string{
+		"continue through a short page even after finding an exact match",
+		"only then decide whether the match is unique",
+		"never stop at the first exact match",
+	} {
+		if !strings.Contains(guidance, want) {
+			t.Errorf("ownership scan guidance must contain %q", want)
+		}
+	}
+	if strings.Contains(guidance, "stop only after an exact match or a short page") {
+		t.Error("ownership scan guidance must not permit stopping at the first exact match")
+	}
+}
+
 // TestOctoDriveSkillEmbedded confirms the drive skill ships in the binary,
 // stays discoverable, and leads with the facts an Agent gets wrong without
 // being told: the credential is shared with every other domain, file ids must be
