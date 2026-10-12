@@ -220,7 +220,7 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		if a.OperationID == "" {
 			return newResultResponse(req.ID, jsonToolResult(missingArg("operation_id"), true))
 		}
-		return newResultResponse(req.ID, s.describeOp(a.OperationID))
+		return newResultResponse(req.ID, s.describeOp(ctx, a.OperationID))
 	case "call_op":
 		var a struct {
 			OperationID string          `json:"operation_id"`

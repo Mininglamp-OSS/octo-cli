@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestNearestOperations_BoundsRankingInput(t *testing.T) {
 	reg := registry.MustNew()
 	huge := strings.Repeat("a", 5<<20) // 5 MiB, well past the 8 MiB body cap headroom
 	done := make(chan []string, 1)
-	go func() { done <- nearestOperations(reg, huge) }()
+	go func() { got, _ := nearestOperations(context.Background(), reg, huge); done <- got }()
 	select {
 	case <-done:
 		// returned promptly — the input was capped
@@ -26,7 +27,10 @@ func TestNearestOperations_BoundsRankingInput(t *testing.T) {
 		t.Fatal("nearestOperations did not bound a multi-megabyte operation_id")
 	}
 	// A normal typo still ranks correctly after the bound.
-	got := nearestOperations(reg, "message.snd")
+	got, err := nearestOperations(context.Background(), reg, "message.snd")
+	if err != nil {
+		t.Fatal(err)
+	}
 	var hasSend bool
 	for _, c := range got {
 		if c == "message.send" {
@@ -43,7 +47,10 @@ func TestNearestOperations_BoundsRankingInput(t *testing.T) {
 func TestUnknownOperationPayload_TruncatesEchoedID(t *testing.T) {
 	reg := registry.MustNew()
 	huge := strings.Repeat("x", 1<<20)
-	payload := unknownOperationPayload(reg, huge)
+	payload, err := unknownOperationPayload(context.Background(), reg, huge)
+	if err != nil {
+		t.Fatal(err)
+	}
 	msg := payload["error"].(map[string]any)["message"].(string)
 	if len([]rune(msg)) > 260 {
 		t.Errorf("echoed operation_id must be truncated, message len=%d", len([]rune(msg)))

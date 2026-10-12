@@ -352,15 +352,15 @@ func matchReference(meta *skillMeta, op registry.OperationInfo) string { //nolin
 }
 
 // describeOp handles the describe_op tool.
-func (s *Server) describeOp(operationID string) toolResult {
+func (s *Server) describeOp(ctx context.Context, operationID string) toolResult {
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return unknownOperationResult(ctx, s.reg, operationID)
 	}
 	// Disabled services must not be describable: GetOperation resolves them
 	// for introspection, but the MCP surface withholds them like search/call.
 	if s.reg.ServiceDisabled(detail.Service) {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return unknownOperationResult(ctx, s.reg, operationID)
 	}
 	// A divergent op's generated schema does not describe its callable shape, so
 	// do not advertise it; point at the CLI instead.
@@ -441,7 +441,7 @@ func (s *Server) execPolicy() execPolicy {
 func (s *Server) callOp(ctx context.Context, operationID string, arguments map[string]any) toolResult {
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
-		return jsonToolResult(unknownOperationPayload(s.reg, operationID), true)
+		return unknownOperationResult(ctx, s.reg, operationID)
 	}
 	if s.reg.ServiceDisabled(detail.Service) {
 		return rawToolResult(synthErrorEnvelope(disabledOpError(operationID)), true)
@@ -498,60 +498,127 @@ func spliceForcedArguments(env []byte, forced map[string]bool) []byte {
 	return append(out, '\n')
 }
 
+// opLookupCancelled is the structured result when the request context ends
+// while an unknown operation_id is being ranked. No candidates are returned: a
+// partial ranking would be misleading.
+func opLookupCancelled(err error) toolResult {
+	return jsonToolResult(map[string]any{
+		"ok": false,
+		"error": map[string]any{
+			"type":    "cancelled",
+			"code":    "REQUEST_CANCELLED",
+			"message": err.Error(),
+		},
+	}, true)
+}
+
+// unknownOperationResult renders the unknown-operation failure for describe_op /
+// call_op, or the cancellation result if ctx ends during ranking.
+func unknownOperationResult(ctx context.Context, reg *registry.Registry, operationID string) toolResult {
+	payload, err := unknownOperationPayload(ctx, reg, operationID)
+	if err != nil {
+		return opLookupCancelled(err)
+	}
+	return jsonToolResult(payload, true)
+}
+
 // unknownOperationPayload closes the failure loop: it returns
 // near-miss candidate ids and points at search_ops, instead of a bare error.
-func unknownOperationPayload(reg *registry.Registry, operationID string) map[string]any {
+// operation_id is attacker-controlled on the bearer-free HTTP surface, so it is
+// byte-bounded once, before any lowercase or rune decode.
+func unknownOperationPayload(ctx context.Context, reg *registry.Registry, operationID string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	bounded, _ := boundOperationID(operationID)
+	candidates, err := nearestOperations(ctx, reg, bounded)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"ok": false,
 		"error": map[string]any{
 			"type":    "validation",
 			"code":    "UNKNOWN_OPERATION",
-			"message": fmt.Sprintf("unknown operation %q", truncateRunes(operationID, 200)),
+			"message": fmt.Sprintf("unknown operation %q", truncateRunes(operationID, maxEchoedOperationIDRunes)),
 			"hint":    "call search_ops to discover operation ids",
 		},
-		"candidates": nearestOperations(reg, operationID),
+		"candidates": candidates,
+	}, nil
+}
+
+const (
+	// maxOperationIDBytes caps an unknown operation_id BEFORE any allocation
+	// proportional to the input (lowercase, []rune). It covers the echo and
+	// ranking caps below even for 4-byte runes.
+	maxOperationIDBytes = 1024
+	// maxEchoedOperationIDRunes caps the id reflected in the error message.
+	maxEchoedOperationIDRunes = 200
+	// maxRankQueryRunes bounds the operation_id fed into the edit-distance
+	// ranking (a real operation_id is far shorter).
+	maxRankQueryRunes = 128
+)
+
+// boundOperationID keeps at most maxOperationIDBytes leading bytes of s, cut on
+// a UTF-8 rune boundary, mirroring boundSearchQuery. It slices without copying,
+// so every later lowercase / []rune conversion is proportional to the bound,
+// not to the request.
+func boundOperationID(s string) (string, bool) {
+	if len(s) <= maxOperationIDBytes {
+		return s, false
 	}
+	end := maxOperationIDBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end], true
 }
 
 // truncateRunes caps a possibly-attacker-sized string before it is echoed back
 // in an error message, so a multi-megabyte operation_id is not reflected whole.
+// The byte bound runs first, so the rune decode only ever sees a bounded prefix.
 func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
+	s, cut := boundOperationID(s)
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
 	}
-	return string(r[:n]) + "…"
+	if cut {
+		return s + "…"
+	}
+	return s
 }
-
-// maxRankQueryRunes bounds the attacker-controlled operation_id fed into the
-// edit-distance ranking. describe_op / call_op are reachable without a bearer,
-// and an unbounded id would make levenshtein over all enabled operations an
-// unauthenticated CPU/allocation exhaustion vector, so the ranking input is
-// capped (a real operation_id is far shorter).
-const maxRankQueryRunes = 128
 
 // nearestOperations returns up to five enabled operation ids closest to the
 // query, ranked by edit distance (with a substring bonus) so a small typo like
-// "message.snd" surfaces "message.send" ahead of longer prefix-sharing ids. The
-// query is capped at maxRankQueryRunes so the ranking cost stays bounded
-// regardless of input size.
-func nearestOperations(reg *registry.Registry, query string) []string {
+// "message.snd" surfaces "message.send" ahead of longer prefix-sharing ids.
+// describe_op / call_op are reachable without a bearer, so the query is bounded
+// to maxRankQueryRunes before it is lowercased and ranking checks ctx per
+// operation; a cancelled ctx returns its error and no partial ranking.
+func nearestOperations(ctx context.Context, reg *registry.Registry, query string) ([]string, error) {
 	type scored struct {
 		id   string
 		dist int
 	}
-	q := strings.ToLower(query)
-	if r := []rune(q); len(r) > maxRankQueryRunes {
-		q = string(r[:maxRankQueryRunes])
+	query, _ = boundOperationID(query)
+	if r := []rune(query); len(r) > maxRankQueryRunes {
+		query = string(r[:maxRankQueryRunes])
 	}
-	var all []scored
-	for _, op := range reg.EnabledOperations() {
+	q := strings.ToLower(query)
+	ops := reg.EnabledOperations()
+	all := make([]scored, 0, len(ops))
+	for _, op := range ops {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		id := strings.ToLower(op.ID)
 		d := levenshtein(id, q)
 		if strings.Contains(id, q) || strings.Contains(q, id) {
 			d -= 5 // strong bonus for containment
 		}
 		all = append(all, scored{op.ID, d})
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].dist != all[j].dist {
@@ -563,7 +630,7 @@ func nearestOperations(reg *registry.Registry, query string) []string {
 	for i := 0; i < len(all) && i < 5; i++ {
 		out = append(out, all[i].id)
 	}
-	return out
+	return out, nil
 }
 
 // levenshtein is the classic edit distance, used only to rank near-miss
@@ -576,12 +643,13 @@ func levenshtein(a, b string) int {
 	if lb == 0 {
 		return la
 	}
-	prev := make([]int, lb+1)
+	// Two rows, swapped per iteration, so ranking allocates O(lb) per
+	// operation rather than O(la*lb).
+	prev, cur := make([]int, lb+1), make([]int, lb+1)
 	for j := 0; j <= lb; j++ {
 		prev[j] = j
 	}
 	for i := 1; i <= la; i++ {
-		cur := make([]int, lb+1)
 		cur[0] = i
 		for j := 1; j <= lb; j++ {
 			cost := 1
@@ -590,7 +658,7 @@ func levenshtein(a, b string) int {
 			}
 			cur[j] = min3(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
 		}
-		prev = cur
+		prev, cur = cur, prev
 	}
 	return prev[lb]
 }
