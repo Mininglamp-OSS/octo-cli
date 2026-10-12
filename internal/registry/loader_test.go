@@ -594,6 +594,149 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	}
 }
 
+func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.import")
+	if !ok || op.RequestBody == nil {
+		t.Fatal("plugin.import request body not found")
+	}
+	pluginName, ok := op.RequestBody.Properties["plugin_name"]
+	if !ok || !strings.Contains(strings.ToLower(pluginName.Description), "human-facing marketplace display name") {
+		t.Errorf("plugin_name description must identify the display name, got %q", pluginName.Description)
+	}
+	if !strings.Contains(pluginName.Description, "unless the user explicitly requested a rename") {
+		t.Errorf("plugin_name description must preserve the current display name on update, got %q", pluginName.Description)
+	}
+	importDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins/import", "post")
+	if !strings.Contains(importDescription, "Creating requires a non-empty plugin_name") {
+		t.Errorf("plugin.import description must document the create-time display-name requirement, got %q", importDescription)
+	}
+	if pluginName.MinLength != 1 {
+		t.Errorf("plugin_name min length = %d, want 1", pluginName.MinLength)
+	}
+	parseTask, ok := op.RequestBody.Properties["parse_task_id"]
+	if !ok || parseTask.MinLength != 1 {
+		t.Errorf("parse_task_id schema = %+v, want minLength 1", parseTask)
+	}
+	name, ok := op.RequestBody.Properties["name"]
+	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
+		t.Errorf("name description must identify the machine name, got %q", name.Description)
+	}
+	if !strings.Contains(name.Description, "derived from the uploaded package") {
+		t.Errorf("name description must document its create fallback, got %q", name.Description)
+	}
+	if len(op.BodyVariants) != 3 {
+		t.Fatalf("plugin.import body variants = %+v, want create, update-preserve, and update-rename", op.BodyVariants)
+	}
+	create, preserve, rename := op.BodyVariants[0], op.BodyVariants[1], op.BodyVariants[2]
+	if create.Name != "create" || !contains(create.Required, "plugin_name") || !contains(create.Forbidden, "plugin_id") {
+		t.Errorf("plugin.import create variant = %+v", create)
+	}
+	if contains(create.Required, "name") {
+		t.Errorf("plugin.import create variant unexpectedly requires name despite package-derived fallback: %+v", create)
+	}
+	if preserve.Name != "update-preserve-display-name" || !contains(preserve.Required, "plugin_id") || !contains(preserve.Forbidden, "plugin_name") {
+		t.Errorf("plugin.import update-preserve variant = %+v", preserve)
+	}
+	if rename.Name != "update-rename" || !contains(rename.Required, "plugin_id") || !contains(rename.Required, "plugin_name") {
+		t.Errorf("plugin.import update-rename variant = %+v", rename)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--plugin-name") {
+		t.Errorf("plugin.import body variant hint = %q, want --plugin-name guidance", op.BodyVariantsHint)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--parse-task-id") {
+		t.Errorf("plugin.import body variant hint = %q, want --parse-task-id guidance", op.BodyVariantsHint)
+	}
+}
+
+func TestBodyVariantsAlwaysDeclareActionableHint(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, summary := range r.ListAllOperations() {
+		op, ok := r.GetOperation(summary.ID)
+		if !ok || len(op.BodyVariants) == 0 {
+			continue
+		}
+		checked++
+		if strings.TrimSpace(op.BodyVariantsHint) == "" {
+			t.Errorf("%s declares body variants without x-octo-body-variants-hint", op.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no body-variant operations found")
+	}
+}
+
+func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("plugin.list response schema not found")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Type != "array" || data.Items == nil {
+		t.Fatalf("plugin.list data schema = %+v, want an item array", data)
+	}
+	manifest, ok := data.Items.Properties["manifest_json"]
+	if !ok || manifest.Type != "object" {
+		t.Fatalf("plugin.list item manifest_json schema = %+v", manifest)
+	}
+	if !contains(data.Items.Required, "manifest_json") {
+		t.Fatalf("plugin.list item required fields = %v, want manifest_json", data.Items.Required)
+	}
+	name, ok := manifest.Properties["name"]
+	if !ok || name.Type != "string" {
+		t.Fatalf("plugin.list manifest_json.name schema = %+v", name)
+	}
+	if !contains(manifest.Required, "name") {
+		t.Fatalf("plugin.list manifest_json required fields = %v, want name", manifest.Required)
+	}
+	displayStatus, ok := data.Items.Properties["display_status"]
+	if !ok || !reflect.DeepEqual(displayStatus.Enum, []any{"draft", "pending_review", "published", "rejected", "delisted"}) {
+		t.Fatalf("plugin.list display_status schema = %+v", displayStatus)
+	}
+	var qDescription, modeDescription string
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "q" {
+			qDescription = parameter.Description
+		}
+		if parameter.Name == "mode" {
+			modeDescription = parameter.Description
+		}
+	}
+	if !strings.Contains(qDescription, "manifest_json.description") || strings.Contains(qDescription, "description, tags") {
+		t.Errorf("plugin.list q description must match the backend display-name/description search, got %q", qDescription)
+	}
+	if !strings.Contains(modeDescription, "every listing state") {
+		t.Errorf("plugin.list mode description must document owned-state coverage, got %q", modeDescription)
+	}
+	listDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins", "get")
+	if !strings.Contains(listDescription, "legacy rows with a missing or hidden default placement") || !strings.Contains(listDescription, "even with mode=mine") {
+		t.Errorf("plugin.list description must disclose the legacy placement limitation, got %q", listDescription)
+	}
+}
+
+func rawOperationDescription(t *testing.T, r *Registry, service, path, method string) string {
+	t.Helper()
+	paths, ok := r.GetSpec(service)["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s spec paths missing", service)
+	}
+	pathItem, ok := paths[path].(map[string]any)
+	if !ok {
+		t.Fatalf("%s path %s missing", service, path)
+	}
+	operation, ok := pathItem[method].(map[string]any)
+	if !ok {
+		t.Fatalf("%s %s operation missing", method, path)
+	}
+	description, ok := operation["description"].(string)
+	if !ok {
+		t.Fatalf("%s %s description missing", method, path)
+	}
+	return description
+}
+
 func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("message.send")
