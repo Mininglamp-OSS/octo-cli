@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -377,16 +378,63 @@ func (s *Server) describeOp(operationID string) toolResult {
 	if nav := s.navFor(detail.OperationInfo, true); nav != nil {
 		obj["skill"] = nav
 	}
-	if managed := s.trusted.serverManaged(operationID); len(managed) > 0 {
+	managed := s.trusted.serverManaged(operationID)
+	note := "these arguments are forced by the server connection (over-privilege protection); do not supply them"
+	if binary := multipartBinaryProperties(detail); len(binary) > 0 {
+		spliceUploadArgument(obj, detail, binary, s.execPolicy())
+		for _, b := range binary {
+			managed[b] = true
+		}
+		note = "these arguments are set by the server (connection-forced scope values, or the multipart payload read from file_path); do not supply them"
+	}
+	if len(managed) > 0 {
 		names := make([]string, 0, len(managed))
 		for k := range managed {
 			names = append(names, k)
 		}
 		sort.Strings(names)
 		obj["server_managed_arguments"] = names
-		obj["server_managed_note"] = "these arguments are forced by the server connection (over-privilege protection); do not supply them"
+		obj["server_managed_note"] = note
 	}
 	return jsonToolResult(obj, false)
+}
+
+// spliceUploadArgument rewrites a multipart operation's describe_op object to
+// its callable shape: the binary body property maps to the reserved --file
+// flag and is always refused by call_op, so it is marked server-managed and
+// dropped from request_body.required, and the MCP-only file_path argument that
+// actually carries the upload is advertised under mcp_arguments.
+func spliceUploadArgument(obj map[string]any, d *registry.OperationDetail, binary []string, pol execPolicy) {
+	if rb, ok := obj["request_body"].(map[string]any); ok {
+		if props, ok := rb["properties"].(map[string]any); ok {
+			for _, b := range binary {
+				if prop, ok := props[b].(map[string]any); ok {
+					prop["server_managed"] = true
+					prop["description"] = "multipart payload; not settable — supply " + uploadArgument + " instead"
+				}
+			}
+		}
+		if req, ok := rb["required"].([]any); ok {
+			kept := make([]any, 0, len(req))
+			for _, r := range req {
+				if name, _ := r.(string); !slices.Contains(binary, name) {
+					kept = append(kept, r)
+				}
+			}
+			if len(kept) == 0 {
+				delete(rb, "required")
+			} else {
+				rb["required"] = kept
+			}
+		}
+	}
+	obj["mcp_arguments"] = map[string]any{uploadArgument: uploadArgumentSchema(d, pol)}
+}
+
+// execPolicy is the connection's upload/transport posture, shared by
+// describe_op (advertised file_path semantics) and call_op (enforcement).
+func (s *Server) execPolicy() execPolicy {
+	return execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload}
 }
 
 // callOp handles the call_op tool.
@@ -413,9 +461,8 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if fn == nil {
 		fn = s.makeFactory
 	}
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload}
 	f, outBuf, errBuf := fn(s.trusted)
-	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
+	env, okRun := executeOperation(ctx, s.build, f, detail, arguments, s.execPolicy(), outBuf, errBuf)
 	env = spliceForcedArguments(env, forced)
 	return rawToolResult(env, !okRun)
 }

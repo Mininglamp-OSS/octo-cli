@@ -79,7 +79,9 @@ file: set OCTO_MCP_UPLOAD_ROOT to confine uploads to one directory (path is
 opened relative to directory handles, rejecting symlinks and non-regular files),
 or, on stdio only, pass
 --allow-local-upload to allow unconfined uploads on a trusted-local host. HTTP
-never allows unconfined uploads.
+never allows unconfined uploads. describe_op advertises file_path (and the
+connection's upload mode) for these operations; the spec's raw "file" body
+property is server-managed and cannot be set.
 
 Over-privilege protection: for stdio the forced space / channel / on-behalf-of
 values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*

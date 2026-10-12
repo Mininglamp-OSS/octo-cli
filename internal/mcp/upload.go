@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // uploadLocation performs lexical policy checks only. Path validation is not
@@ -62,6 +66,77 @@ func uploadTraversal(p string) bool {
 
 func escapesUploadRoot(p string) bool {
 	return !filepath.IsLocal(p)
+}
+
+// uploadArgument is the MCP-only multipart input. The spec's binary body
+// property (always the "file" form part) maps to the reserved --file flag and
+// can never be set directly; call_op reads the payload from file_path instead.
+const uploadArgument = "file_path"
+
+// multipartBinaryProperties returns the declared binary body properties of a
+// multipart operation, sorted. These are server-managed: the payload is the
+// descriptor opened from file_path, never a caller-supplied value.
+func multipartBinaryProperties(d *registry.OperationDetail) []string {
+	if !d.Multipart || d.RequestBody == nil {
+		return nil
+	}
+	var names []string
+	for name, prop := range d.RequestBody.Properties { //nolint:gocritic // schema properties are read-only values
+		if prop.Format == "binary" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// uploadMode reports how this connection treats file_path, mirroring
+// uploadLocation: "confined" (OCTO_MCP_UPLOAD_ROOT set), "unconfined" (stdio
+// --allow-local-upload), or "disabled" (default-deny; always so over HTTP
+// without an upload root).
+func uploadMode(pol execPolicy) string {
+	switch {
+	case strings.TrimSpace(pol.uploadRoot) != "":
+		return "confined"
+	case pol.allowLocalUpload && !pol.httpMode:
+		return "unconfined"
+	default:
+		return "disabled"
+	}
+}
+
+// uploadArgumentSchema is the file_path entry describe_op splices into a
+// multipart operation, so discovery advertises the only argument that actually
+// performs an upload.
+func uploadArgumentSchema(d *registry.OperationDetail, pol execPolicy) map[string]any {
+	binary := multipartBinaryProperties(d)
+	required := false
+	if d.RequestBody != nil {
+		for _, r := range d.RequestBody.Required {
+			if slices.Contains(binary, r) {
+				required = true
+			}
+		}
+	}
+	mode := uploadMode(pol)
+	var desc string
+	switch mode {
+	case "confined":
+		desc = "Path of the regular file to upload, relative to the server's configured upload root (an absolute path must lie inside it). " +
+			"Traversal (..), symlinks, and non-regular files are rejected."
+	case "unconfined":
+		desc = "Path of the regular local file to upload (trusted stdio host: uploads are not confined to a root). Non-regular files are rejected."
+	default:
+		desc = "Uploads are disabled on this server: the operator has not set OCTO_MCP_UPLOAD_ROOT" +
+			" (or, on stdio only, --allow-local-upload). Any file_path will be rejected."
+	}
+	return map[string]any{
+		"type":           "string",
+		"required":       required,
+		"description":    desc + " The file is sent as the multipart \"" + strings.Join(binary, ", ") + "\" part.",
+		"upload_mode":    mode,
+		"replaces_field": binary,
+	}
 }
 
 // resolveUploadPath supplies the display/filename flag. It never grants access;

@@ -155,14 +155,15 @@ func multipartOp() *registry.OperationDetail {
 func TestBuildArgv_MultipartRejectsUndeclaredAndReservedKeys(t *testing.T) {
 	d := multipartOp()
 	// Identity/scope/output flags must never be injectable through multipart keys.
+	// These keys are undeclared by multipartOp, so this pins the declared-only
+	// guard; the reserved-flag guard itself is pinned by reserved_flags_test.go.
 	for _, k := range []string{"profile", "bot_id", "space", "verbose", "format", "data"} {
 		_, err := buildArgv(d, map[string]any{"file_path": "/tmp/f", k: "evil"}, execPolicy{allowLocalUpload: true})
 		if err == nil {
 			t.Errorf("multipart key %q must be rejected, was accepted", k)
 		}
 	}
-	// A non-reserved but UNDECLARED key must also be rejected (isolates the
-	// declared-only guard, independent of the reserved-flag guard).
+	// A non-reserved but UNDECLARED key must also be rejected.
 	if _, err := buildArgv(d, map[string]any{"file_path": "/tmp/f", "arbitrary_extra": "x"}, execPolicy{allowLocalUpload: true}); err == nil {
 		t.Errorf("undeclared multipart key must be rejected")
 	}

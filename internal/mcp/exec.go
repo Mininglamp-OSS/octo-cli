@@ -281,6 +281,9 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			}
 			fn := strings.ReplaceAll(k, "_", "-")
 			if reservedFlagNames[fn] {
+				if prop.Format == "binary" {
+					return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set; it is the multipart payload, supply %s instead", k, fn, uploadArgument)
+				}
 				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
 			}
 			vs, err := flagArgs(fn, coerceToSchema(prop, v))
@@ -317,6 +320,10 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 	if pageAll && d.Pagination != nil {
 		flags = append(flags, "--page-all")
 	}
+	// Appended after the key loop on purpose: with cobra's last-wins flag
+	// semantics the confined path also beats any --file a future guard
+	// regression might let through. The reserved-flag guard above remains the
+	// boundary when file_path is omitted.
 	if filePath != "" {
 		resolved, err := resolveUploadPath(filePath, pol)
 		if err != nil {

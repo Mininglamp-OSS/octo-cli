@@ -37,7 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `describe_op` — the full, zero-drift parameter schema for one operation
     (straight from the embedded spec) plus the operation's Skill reference and
     a short pre-call advice; the Skill never carries a second copy of the
-    schema.
+    schema. For multipart uploads (`file.upload`, `html.asset.add`,
+    `attachment.upload`) it advertises the MCP-only `file_path` argument under
+    `mcp_arguments`, with an `upload_mode` (`confined`, `unconfined`, or
+    `disabled`) matching what `call_op` enforces on that connection; the spec's
+    binary `file` property is listed in `server_managed_arguments` and is not
+    advertised as required, because it maps to the reserved `--file` flag and
+    `call_op` always refuses it.
   - `call_op` — invokes one operation by driving the existing command engine
     in-process, so identity routing, request assembly, pre-flight validation,
     transport, secret masking, and the JSON envelope are reused unchanged.
