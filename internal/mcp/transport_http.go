@@ -115,9 +115,10 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body exceeds 8 MiB limit", http.StatusRequestEntityTooLarge)
 		return
 	}
-	var req rpcRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		writeHTTPError(w, nil, codeParseError, "parse error: "+err.Error())
+	req, bad := decodeRequest(body)
+	if bad != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(*bad) //nolint:errcheck // response write failure means the client disconnected; no response can replace it
 		return
 	}
 

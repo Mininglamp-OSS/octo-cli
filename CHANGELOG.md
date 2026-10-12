@@ -47,6 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `call_op` — invokes one operation by driving the existing command engine
     in-process, so identity routing, request assembly, pre-flight validation,
     transport, secret masking, and the JSON envelope are reused unchanged.
+  An unknown `operation_id` on `describe_op` / `call_op` returns
+  `UNKNOWN_OPERATION` with up to five near-miss candidates. The id is cut to its
+  leading 1024 bytes (whole UTF-8 characters) before any lowercase or rune
+  decode, and the echoed id is capped at 200 runes. Cancellation/deadline expiry
+  during ranking returns `REQUEST_CANCELLED` with no candidates.
+  JSON-RPC responses always carry an `id` member: malformed JSON (`-32700`) and
+  invalid requests (`-32600`: not an object, wrongly typed members, an id that
+  is not a string/number/null, or a missing method) echo the id when it can be
+  determined and `"id": null` otherwise, on both transports.
   Skills are exposed for progressive on-demand reading through MCP resources
   (`octo://skills/<name>/<file>.md`); clients that do not negotiate resources
   degrade to a skill `name` + readable hint and the three tools still work
