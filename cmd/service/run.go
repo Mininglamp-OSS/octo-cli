@@ -95,7 +95,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		req.OutputPath = *rt.outputPath
 	}
 	if d.Multipart {
-		raw, ct, err := buildMultipartBody(cobraCmd, rt)
+		raw, ct, err := buildMultipartBody(cobraCmd, rt, f.MultipartFile)
 		if err != nil {
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
