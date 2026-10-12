@@ -19,18 +19,22 @@ import (
 // io.Copy (not ReadFile) to keep memory proportional to the copy buffer
 // rather than file size. The file is attached under the "file" form field
 // (backend uses FormFile("file")). Any promoted body flags the user set are
-// included as form text fields.
-func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime) (body []byte, contentType string, err error) {
+// included as form text fields. A pinned descriptor is borrowed from the caller
+// and is never reopened or closed here.
+func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *os.File) (body []byte, contentType string, err error) { //nolint:gocyclo // multipart assembly handles borrowed descriptors, typed fields and I/O failures
 	if rt.filePath == nil || *rt.filePath == "" {
 		return nil, "", output.ErrValidation("--file is required for multipart upload", "pass --file <path>")
 	}
 	path := *rt.filePath
 
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, "", output.ErrValidation(fmt.Sprintf("--file: %v", err), "check path and permissions")
+	f := pinned
+	if f == nil {
+		f, err = os.Open(path)
+		if err != nil {
+			return nil, "", output.ErrValidation(fmt.Sprintf("--file: %v", err), "check path and permissions")
+		}
+		defer f.Close() //nolint:errcheck // ordinary CLI owns the file; MCP owns its pinned descriptor
 	}
-	defer f.Close() //nolint:errcheck // best-effort close; read-only file
 
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
