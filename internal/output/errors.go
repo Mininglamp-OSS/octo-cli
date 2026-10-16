@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ExitError is the canonical CLI error representation. All errors reaching the
@@ -19,6 +20,10 @@ type ExitError struct {
 	// the error did not come from an HTTP response. It distinguishes a definite
 	// server-side refusal (4xx) from an outcome the caller cannot determine.
 	HTTPStatus int `json:"-"`
+	// ResponseReceived marks errors raised while validating a successful HTTP
+	// response. They are not local request-validation failures; the response
+	// status is unavailable to that layer, and a write may already be committed.
+	ResponseReceived bool `json:"-"`
 }
 
 // OutcomeUnknown reports whether the request may have been applied despite the
@@ -27,6 +32,12 @@ type ExitError struct {
 func (e *ExitError) OutcomeUnknown() bool {
 	if e == nil {
 		return false
+	}
+	if e.ResponseReceived {
+		return true
+	}
+	if e.HTTPStatus == 0 {
+		return e.Type == "network" // transport may have sent before failing
 	}
 	return e.HTTPStatus < 400 || e.HTTPStatus > 499
 }
@@ -190,8 +201,36 @@ func ParsePublicAPIError(status int, body []byte) *ExitError {
 func withStatus(err *ExitError, status int) *ExitError {
 	if err != nil {
 		err.HTTPStatus = status
+		// A backend may commit a write before returning 5xx. Its body code
+		// cannot turn that uncertain outcome into a definite validation or
+		// authentication refusal, even when the code is in our mapping table.
+		if status >= 500 && status <= 599 {
+			// Do not expose a client-refusal code on an ambiguous 5xx. Keep
+			// inherently server-side codes such as INTERNAL_ERROR intact.
+			if !serverErrorCode(err.Code, status) {
+				err.Code = "RESULT_UNKNOWN"
+			}
+			if err.Type != "network" {
+				err.Type = "api_error"
+			}
+			uncertain := "backend returned a server error; request outcome is unknown; if this was a write, it may already have committed; verify its state before resending"
+			// A mapped error code supplies a CLI-authored hint for a definite
+			// refusal. On 5xx that code is not trustworthy: carrying the hint
+			// forward would tell an agent to fix credentials or stop permanently
+			// even though the write may have committed. Keep only neutral advice.
+			err.Hint = uncertain
+		}
 	}
 	return err
+}
+
+func serverErrorCode(code string, status int) bool {
+	switch strings.ToUpper(code) {
+	case "INTERNAL_ERROR", "UPSTREAM_UNAVAILABLE", "AUTH_UNAVAILABLE", "INTERNAL":
+		return true
+	default:
+		return strings.EqualFold(code, fmt.Sprintf("HTTP_%d", status))
+	}
 }
 
 func parseBackendError(status int, body []byte, publicAPI bool) *ExitError {

@@ -9,6 +9,24 @@ import (
 	"testing"
 )
 
+func TestRCFiveHundredNeverCarriesMappedRefusalAdvice(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"code":"UNAUTHORIZED","message":"fixture"}}`,
+		`{"error":{"code":"bot_delete_forbidden","message":"fixture"}}`,
+		`{"error":"rate_limited","message":"fixture"}`,
+	} {
+		err := ParseBackendError(503, []byte(body))
+		if err.Type != "api_error" || !err.OutcomeUnknown() || !strings.Contains(err.Hint, "outcome is unknown") {
+			t.Fatalf("503 must remain uncertain: %+v", err)
+		}
+		for _, forbidden := range []string{"backend guidance", "check OCTO_TOKEN", "bots cannot delete", "retry after cooldown"} {
+			if strings.Contains(err.Hint, forbidden) {
+				t.Fatalf("mapped refusal advice leaked onto 503: %+v", err)
+			}
+		}
+	}
+}
+
 // wrappedErr is a local stand-in for a retry sentinel that embeds an
 // *ExitError. Clients of AsExitError must still reach the structured error
 // through the Unwrap chain.
@@ -62,6 +80,28 @@ func TestAsExitError_NilAndPlainError(t *testing.T) {
 	}
 	if AsExitError(errors.New("plain")) != nil {
 		t.Error("plain error should return nil")
+	}
+}
+
+func TestMappedBackendCodeKeepsFiveHundredOutcomeUncertain(t *testing.T) {
+	for _, parse := range []struct {
+		name string
+		fn   func(int, []byte) *ExitError
+	}{{"legacy", ParseBackendError}, {"public", ParsePublicAPIError}} {
+		for _, code := range []string{"VALIDATION_ERROR", "UNAUTHORIZED", "NOT_FOUND", "unauthorized"} {
+			body := []byte(fmt.Sprintf(`{"error":{"code":%q,"message":"reported by backend"}}`, code))
+			definite := parse.fn(400, body)
+			uncertain := parse.fn(503, body)
+			if uncertain.Type == definite.Type && uncertain.Hint == definite.Hint {
+				t.Errorf("%s %s: a 503 is indistinguishable from definite 400", parse.name, code)
+			}
+			if uncertain.Type != "api_error" || uncertain.Code != "RESULT_UNKNOWN" || !uncertain.OutcomeUnknown() {
+				t.Errorf("%s %s: 503 must preserve uncertain remote outcome: %+v", parse.name, code, uncertain)
+			}
+			if !strings.Contains(uncertain.Hint, "if this was a write") {
+				t.Errorf("%s %s: uncertain hint must be safe for reads and writes: %q", parse.name, code, uncertain.Hint)
+			}
+		}
 	}
 }
 

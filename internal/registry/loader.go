@@ -1244,7 +1244,7 @@ func truthy(v any) bool {
 	case bool:
 		return t
 	case string:
-		return t == "true"
+		return strings.EqualFold(strings.TrimSpace(t), "true")
 	default:
 		return false
 	}

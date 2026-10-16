@@ -573,6 +573,19 @@ func newBinaryClient(srv *httptest.Server) *Client {
 	return c
 }
 
+func TestDo_UnexpectedRedirectPreservesResponseProvenance(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "/elsewhere")
+		w.WriteHeader(http.StatusSeeOther)
+	}))
+	defer srv.Close()
+	_, err := newBinaryClient(srv).Do(context.Background(), &Request{Method: http.MethodPost, Path: "/send"})
+	exit := output.AsExitError(err)
+	if exit == nil || exit.HTTPStatus != http.StatusSeeOther || !exit.ResponseReceived || !exit.OutcomeUnknown() {
+		t.Fatalf("unexpected redirect lost possible-write provenance: %+v", exit)
+	}
+}
+
 func TestDo_BinaryResponse_RedirectReturnsLocationEnvelope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "https://cdn.example.com/object?sig=abc")
