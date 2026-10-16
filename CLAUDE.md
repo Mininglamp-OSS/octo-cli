@@ -157,7 +157,7 @@ Universal flags: `--format`, `--jq`/`-q`, `--dry-run`, `--verbose`, `--timeout`,
 - Errors wrap with `fmt.Errorf("context: %w", err)`; CLI errors use the `*output.ExitError` taxonomy so envelopes stay structured.
 - The `internal/output` package is a leaf — it must not import other `internal/*` packages.
 - No mutable package-level globals; state flows through the Factory. The only package-level `var` declarations allowed are (a) ldflags-injected build metadata (`cmd/build.go`), (b) `//go:embed` file systems (`internal/registry`), and (c) immutable lookup tables (e.g. `backendErrorMapping` in `internal/output/errors.go`, `httpMethods` in `internal/registry/loader.go`). These are const-equivalent — never mutated at runtime — and exist only because Go doesn't permit `const` for their types.
-- External deps limited to cobra, gojq, `golang.org/x/term` (hidden token prompt in `octo-cli auth login`), and the standard library.
+- External deps limited to cobra, pflag, gojq, `golang.org/x/sys`, `golang.org/x/term` (hidden token prompt in `octo-cli auth login`), and the standard library.
 - All text in English.
 
 ## Test Discipline
@@ -202,3 +202,5 @@ octo-cli completion fish   > ~/.config/fish/completions/octo-cli.fish
 ```
 
 Version metadata is injected via `-ldflags` at release time (see `cmd/build.go`).
+
+- **MCP:** `mcp serve` reuses the Registry and generated command engine. Multipart discovery documents the synthetic `file_path` binding separately from non-settable backend binary fields. HTTP credentials are pinned per request; trusted session fields remain per-operation policy, never global same-name injection.
