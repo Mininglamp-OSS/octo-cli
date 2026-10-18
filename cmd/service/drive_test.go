@@ -86,11 +86,14 @@ func TestDrive_RegistryShape(t *testing.T) {
 		"drive.blob.get":    {"GET", "/v1/bot/drive/blobs/{blob_id}"},
 		"drive.blob.list":   {"GET", "/v1/bot/drive/blobs"},
 		"drive.blob.delete": {"DELETE", "/v1/bot/drive/blobs/{blob_id}"},
-		// upload + download (4)
-		"drive.upload.prepare": {"POST", "/v1/bot/drive/files/prepare-upload"},
-		"drive.upload.confirm": {"POST", "/v1/bot/drive/files/{file_id}/confirm-upload"},
-		"drive.upload.cancel":  {"POST", "/v1/bot/drive/files/{file_id}/cancel-upload"},
-		"drive.download.url":   {"GET", "/v1/bot/drive/files/{file_id}/download"},
+		// upload + download (7)
+		"drive.upload.prepare":       {"POST", "/v1/bot/drive/files/prepare-upload"},
+		"drive.upload.confirm":       {"POST", "/v1/bot/drive/files/{file_id}/confirm-upload"},
+		"drive.upload.cancel":        {"POST", "/v1/bot/drive/files/{file_id}/cancel-upload"},
+		"drive.upload.parts_presign": {"POST", "/v1/bot/drive/files/{file_id}/upload/parts-presign"},
+		"drive.upload.complete":      {"POST", "/v1/bot/drive/files/{file_id}/upload/complete"},
+		"drive.upload.abort":         {"POST", "/v1/bot/drive/files/{file_id}/upload/abort"},
+		"drive.download.url":         {"GET", "/v1/bot/drive/files/{file_id}/download"},
 		// docs (4)
 		"drive.doc.mount":      {"POST", "/v1/bot/drive/docs"},
 		"drive.doc.unmount":    {"DELETE", "/v1/bot/drive/docs/{file_id}"},
