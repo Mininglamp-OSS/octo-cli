@@ -380,7 +380,10 @@ func withCancel(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, moun
 	return ee
 }
 
-func responseSecretMetadataForOperation(f *cmdutil.Factory, operationID string) (string, []string, error) {
+func responseSecretMetadataForOperation(
+	f *cmdutil.Factory,
+	operationID string,
+) (serviceName string, responseSecretFields []string, err error) {
 	reg := f.Registry()
 	if reg == nil {
 		return "", nil, output.ErrWithHint("internal", "REGISTRY_UNAVAILABLE",

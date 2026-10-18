@@ -995,6 +995,15 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		// path parameter (invite / share token) would otherwise reach the default
 		// stderr error envelope — no --verbose needed to leak it.
 		msg := redactSecrets(err.Error(), req.SecretValues)
+		if len(req.ResponseSecretFields) > 0 {
+			// Go parses Location before CheckRedirect runs. A malformed redirect
+			// therefore surfaces here as a *url.Error containing the raw signed
+			// URL, before the response can reach redactRedirectLocation. There is
+			// no structured field to isolate, so fail closed rather than echo an
+			// arbitrary transport error from an operation that can return a
+			// response secret.
+			msg = "transport error"
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}

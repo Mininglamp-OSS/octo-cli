@@ -599,6 +599,54 @@ func TestDo_BinaryResponse_RedirectReturnsLocationEnvelope(t *testing.T) {
 	}
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) {
+	const marker = "retry-log-response-secret-53223604"
+	signedLocation := "https://objects.example.test/object?" + marker + "&signature=%zz"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // make the retry loop exit immediately after its first diagnostic
+
+	var diagnostics bytes.Buffer
+	c := New(
+		&config.Config{APIBaseURL: "https://api.example.test"},
+		nil,
+		Options{Verbose: true, ErrOut: &diagnostics},
+	)
+	c.httpClient = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, &url.Error{
+				Op:  "Get",
+				URL: signedLocation,
+				Err: errors.New("failed to parse Location header"),
+			}
+		}),
+	}
+
+	_, err := c.Do(ctx, &Request{
+		Method:               http.MethodPost,
+		Path:                 "/v1/user/drive/files/42/upload/parts-presign",
+		ResponseSecretFields: []string{"parts[].url"},
+	})
+	if err == nil {
+		t.Fatal("expected the transport error to fail")
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("response secret reached the returned error: %v", err)
+	}
+	if !strings.Contains(diagnostics.String(), "retry #1") {
+		t.Fatalf("expected retry diagnostics to be exercised, got %q", diagnostics.String())
+	}
+	if strings.Contains(diagnostics.String(), marker) {
+		t.Fatalf("response secret reached retry diagnostics:\n%s", diagnostics.String())
+	}
+}
+
 func TestDo_BinaryResponse_InlineBodyReturnsMetadata(t *testing.T) {
 	payload := bytes.Repeat([]byte{0xff}, 128)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

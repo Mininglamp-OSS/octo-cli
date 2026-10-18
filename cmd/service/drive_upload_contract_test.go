@@ -34,6 +34,24 @@ func rootWithDriveURL(t *testing.T, baseURL string) (*cobra.Command, *cmdutil.Te
 	return root, tf
 }
 
+func rootWithDriveURLForResponseSecretTest(
+	t *testing.T,
+	baseURL string,
+	verbose bool,
+) (*cobra.Command, *cmdutil.TestFactory) {
+	t.Helper()
+	root, tf := rootWithDriveURL(t, baseURL)
+	const token = "bf_bot"
+	cfg := &config.Config{APIBaseURL: baseURL, BotToken: token, Format: "json"}
+	cred := &credential.BotCredential{Token: token, Source: "test"}
+	tf.SetClient(client.New(cfg, cred, client.Options{
+		NoRetry: true,
+		Verbose: verbose,
+		ErrOut:  tf.ErrOut,
+	}))
+	return root, tf
+}
+
 func TestDrive_PartsPresignURLIsDeclaredResponseSecret(t *testing.T) {
 	op, ok := registry.MustNew().GetOperation("drive.upload.parts_presign")
 	if !ok || op.ResponseSchema == nil {
@@ -231,5 +249,90 @@ func TestDrive_PartsPresignRedirectRedactsLocation(t *testing.T) {
 	}
 	if !strings.Contains(visible, "REDACTED") {
 		t.Fatalf("expected redirect Location to fail closed, got %q", visible)
+	}
+}
+
+func TestDrive_PartsPresignResponseSecretNeverLeaksToDefaultOrVerboseStderr(t *testing.T) {
+	const marker = "service-response-secret-53223604"
+
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+		location    string
+	}{
+		{
+			name:        "JSON body",
+			status:      http.StatusBadRequest,
+			contentType: "application/json",
+			body: `{"error":"invalid_argument","message":"part rejected","details":{"parts":[` +
+				`{"part_number":1,"url":"https://objects.example.test/upload?` + marker + `"}]}}`,
+		},
+		{
+			name:        "plain text body",
+			status:      http.StatusBadGateway,
+			contentType: "text/plain",
+			body:        "storage failed for https://objects.example.test/upload?" + marker,
+		},
+		{
+			name:     "valid redirect",
+			status:   http.StatusFound,
+			location: "https://objects.example.test/redirect?" + marker,
+			body:     "https://objects.example.test/redirect?" + marker,
+		},
+		{
+			name:     "malformed redirect",
+			status:   http.StatusFound,
+			location: "https://objects.example.test/redirect?" + marker + "=%zz",
+		},
+	}
+
+	for _, tc := range tests {
+		for _, verbose := range []bool{false, true} {
+			name := fmt.Sprintf("%s/verbose=%t", tc.name, verbose)
+			t.Run(name, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					if tc.contentType != "" {
+						w.Header().Set("Content-Type", tc.contentType)
+					}
+					if tc.location != "" {
+						w.Header().Set("Location", tc.location)
+					}
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				t.Cleanup(srv.Close)
+
+				root, tf := rootWithDriveURLForResponseSecretTest(t, srv.URL, verbose)
+				tf.Globals.Verbose = verbose
+				args := []string{
+					"drive", "upload", "parts-presign", "42",
+					"--upload-id", "upload-1",
+					"--data", `{"part_numbers":[1]}`,
+				}
+				root.SetArgs(args)
+
+				err := root.Execute()
+				if err == nil {
+					t.Fatal("expected the response to fail")
+				}
+				ee := output.AsExitError(err)
+				if ee == nil {
+					t.Fatalf("expected a structured error, got %v", err)
+				}
+				visible := strings.Join([]string{
+					err.Error(),
+					ee.Message,
+					ee.Hint,
+					string(ee.Detail),
+					tf.Out.String(),
+					tf.ErrOut.String(),
+				}, "\n")
+				if strings.Contains(visible, marker) {
+					t.Fatalf("response secret reached visible output:\n%s", visible)
+				}
+			})
+		}
 	}
 }
