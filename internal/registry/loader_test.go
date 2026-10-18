@@ -85,6 +85,39 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	}
 }
 
+func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
+	r := MustNew()
+
+	prepare, ok := r.GetOperation("drive.upload.prepare")
+	if !ok || prepare.ResponseSchema == nil {
+		t.Fatal("drive.upload.prepare response schema not found")
+	}
+	for _, field := range []string{"upload_mode", "upload_url"} {
+		if _, ok := prepare.ResponseSchema.Properties[field]; !ok {
+			t.Errorf("drive.upload.prepare response is missing %s", field)
+		}
+		if contains(prepare.ResponseSchema.Required, field) {
+			t.Errorf("drive.upload.prepare response %s must remain optional", field)
+		}
+	}
+
+	presign, ok := r.GetOperation("drive.upload.parts_presign")
+	if !ok || presign.RequestBody == nil {
+		t.Fatal("drive.upload.parts_presign request schema not found")
+	}
+	if want := []string{"upload_id", "part_numbers"}; !reflect.DeepEqual(presign.RequestBody.Required, want) {
+		t.Errorf("drive.upload.parts_presign required = %v, want %v", presign.RequestBody.Required, want)
+	}
+	partNumbers, ok := presign.RequestBody.Properties["part_numbers"]
+	if !ok {
+		t.Fatal("drive.upload.parts_presign is missing part_numbers")
+	}
+	if partNumbers.Type != "array" || partNumbers.MinItems != 1 || partNumbers.MaxItems != 20 {
+		t.Errorf("drive.upload.parts_presign part_numbers = type %q, minItems %d, maxItems %d; want array, 1, 20",
+			partNumbers.Type, partNumbers.MinItems, partNumbers.MaxItems)
+	}
+}
+
 func TestLoopWorkspaceManagementOperationsAreHidden(t *testing.T) {
 	r := MustNew()
 	hidden := []string{"workspace.create", "workspace.update", "workspace.delete"}
