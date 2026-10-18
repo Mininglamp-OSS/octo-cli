@@ -441,6 +441,68 @@ func TestDrive_RequestShapes(t *testing.T) {
 	}
 }
 
+// TestDrive_UploadCapabilityHeader proves the low-level prepare command exposes
+// the capability declaration required by the frozen multipart contract. The
+// header is optional so legacy single-part calls remain byte-identical.
+func TestDrive_UploadCapabilityHeader(t *testing.T) {
+	var gotCapability string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		gotCapability = r.Header.Get("X-Drive-Upload-Capabilities")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"file_id":7,"upload_url":"https://storage.example/put"}`))
+	})
+	root.SetArgs([]string{
+		"drive", "upload", "prepare",
+		"--space-id", "shared:s1",
+		"--name", "large.bin",
+		"--size", "134217728",
+		"--content-type", "application/octet-stream",
+		"--upload-capabilities", "multipart-v1",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotCapability != "multipart-v1" {
+		t.Errorf("X-Drive-Upload-Capabilities = %q, want multipart-v1", gotCapability)
+	}
+}
+
+// TestDrive_CompleteNestedIDsStayLossless drives the generated complete leaf
+// through the real response normalizer. Both nested Blob ids above 2^53 must
+// leave as decimal strings, not JSON numbers an Agent could round.
+func TestDrive_CompleteNestedIDsStayLossless(t *testing.T) {
+	const id = "9007199254740993"
+	const parentID = "9007199254740995"
+
+	root, tf := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"file":{"id":` + id + `,"parent_id":` + parentID + `,"name":"large.bin"},"size":134217728}`))
+	})
+	root.SetArgs([]string{
+		"drive", "upload", "complete", "7",
+		"--data", `{"upload_id":"upload-1","parts":[{"part_number":1,"etag":"etag-1"}]}`,
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var env struct {
+		Data struct {
+			File struct {
+				ID       any `json:"id"`
+				ParentID any `json:"parent_id"`
+			} `json:"file"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v (%s)", err, tf.Out.String())
+	}
+	if env.Data.File.ID != id {
+		t.Errorf("data.file.id = %#v, want decimal string %q", env.Data.File.ID, id)
+	}
+	if env.Data.File.ParentID != parentID {
+		t.Errorf("data.file.parent_id = %#v, want decimal string %q", env.Data.File.ParentID, parentID)
+	}
+}
+
 // TestDrive_IMTransferRequiresChannelType guards the required-field contract:
 // im_channel_type picks the route the backend reads the source message through,
 // so omitting it would send a body the backend decodes as the uint8 zero value —

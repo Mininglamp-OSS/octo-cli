@@ -574,6 +574,9 @@
         "description": "Step 1 of 3. `drive upload file` runs the whole sequence; use this only when driving the PUT yourself. The PUT must echo content_type (and content_disposition when present) and send exactly max_file_size bytes, with no Authorization header.",
         "x-octo-risk": "write",
         "x-octo-lossless-id-fields": ["file_id"],
+        "parameters": [
+          { "name": "X-Drive-Upload-Capabilities", "in": "header", "required": false, "x-octo-flag": "upload-capabilities", "schema": { "type": "string" }, "description": "set to multipart-v1 to declare multipart upload support; required only when the server selects multipart for an eligible large file" }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -701,6 +704,7 @@
         "summary": "Complete and verify a multipart upload (idempotent, low-level)",
         "description": "Submit the uploaded parts in ascending part_number order. Repeating this operation for the same upload_id is idempotent. The response size is the object size verified by the server after completing the upload.",
         "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["file.id", "file.parent_id"],
         "parameters": [
           { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "pending multipart drive file id" }
         ],
@@ -721,7 +725,7 @@
                       "type": "object",
                       "required": ["part_number", "etag"],
                       "properties": {
-                        "part_number": { "type": "integer", "format": "uint64", "description": "one-based part number, ordered ascending for complete" },
+                        "part_number": { "type": "integer", "format": "uint64", "minimum": 1, "maximum": 10000, "description": "one-based part number, ordered ascending for complete" },
                         "etag": { "type": "string", "description": "object-storage ETag returned by the part PUT" }
                       }
                     }
