@@ -684,7 +684,7 @@
                         "required": ["part_number", "url", "expires_at"],
                         "properties": {
                           "part_number": { "type": "integer", "format": "uint64", "description": "one-based part number" },
-                          "url": { "type": "string", "description": "short-lived presigned PUT URL; never log it or include it in error output" },
+                          "url": { "type": "string", "x-octo-secret": true, "description": "short-lived presigned PUT URL; never log it or include it in error output" },
                           "expires_at": { "type": "string", "description": "per-part expiry; the only client signal that this part URL must be re-signed" }
                         }
                       }

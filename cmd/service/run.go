@@ -85,6 +85,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
 		SecretValues:         collectSecrets(cobraCmd, rt, pathValues),
+		ResponseSecretFields: d.ResponseSecretFields,
 		SensitiveJSONFields:  writeOnlyBodyFields(d.RequestBody),
 		ResponseUnwrap:       d.ResponseUnwrap,
 		UnwrapRequiredFields: d.UnwrapRequiredFields,
@@ -810,10 +811,11 @@ func topLevelBodyFlagNames(rt *operationRuntime) map[string]string {
 }
 
 // bodySchemaValidator walks a resolved request body against the operation's
-// request schema, enforcing required fields, minItems and enum vocabularies
-// before anything is sent. Loop additionally enforces the extended constraints
-// retained from its Public API schema. It covers the merged body — promoted
-// flags AND --data — because --data is not a raw passthrough on this path.
+// request schema, enforcing required fields, array bounds and enum vocabularies
+// before anything is sent. Declared numeric bounds are enforced regardless of
+// service strictness; Loop additionally enforces the remaining extended
+// constraints retained from its Public API schema. It covers the merged body —
+// promoted flags AND --data — because --data is not a raw passthrough on this path.
 type bodySchemaValidator struct {
 	flagFor                     map[string]string // wire field name → promoted flag name (top level only)
 	enforcePublicAPIConstraints bool              // extended JSON Schema constraints (Loop or explicit service opt-in)
@@ -857,7 +859,7 @@ func (v bodySchemaValidator) validateByType(
 	case "array":
 		return v.validateArray(schema, value, path, flagName)
 	case "integer", "number":
-		if v.enforcePublicAPIConstraints {
+		if v.enforcePublicAPIConstraints || schema.Minimum != nil || schema.Maximum != nil {
 			return validateNumber(schema, value, path)
 		}
 	case "string":
@@ -1113,7 +1115,7 @@ func (v bodySchemaValidator) validateArray(schema *registry.SchemaInfo, value an
 	if schema.MinItems > 0 && len(items) < schema.MinItems {
 		return schemaError(fmt.Sprintf("field %s must contain at least %d item(s)", bodyPath(path), schema.MinItems))
 	}
-	if v.enforcePublicAPIConstraints && schema.MaxItems > 0 && len(items) > schema.MaxItems {
+	if schema.MaxItems > 0 && len(items) > schema.MaxItems {
 		return schemaError(fmt.Sprintf("field %s must contain at most %d item(s)", bodyPath(path), schema.MaxItems))
 	}
 	if schema.Items == nil {

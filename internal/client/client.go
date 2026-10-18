@@ -98,6 +98,12 @@ type Request struct {
 	// traces and --dry-run output, whether it appears in the URL path or the
 	// request body. The values still go on the wire unchanged.
 	SecretValues []string
+	// ResponseSecretFields lists response-schema paths marked x-octo-secret.
+	// On a non-2xx response, the client extracts the actual values at these
+	// paths (at any envelope depth) and treats them as secrets for error
+	// redaction. Opaque non-JSON bodies fail closed because there is no
+	// structure to bound the redaction to.
+	ResponseSecretFields []string
 	// SensitiveJSONFields lists top-level writeOnly request properties that
 	// must be redacted from dry-run and verbose diagnostic output.
 	SensitiveJSONFields []string
@@ -1069,7 +1075,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	redactedBody := redactResponseBody(respBody, req.SecretValues)
+	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, req.ResponseSecretFields)
 	parseError := output.ParseBackendError
 	if req.Service == "loop" {
 		parseError = output.ParsePublicAPIError
@@ -1084,6 +1090,108 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		return nil, re
 	}
 	return nil, ee
+}
+
+// redactBackendErrorBody extends the historical request-secret redaction with
+// values named by write-only response schema secrets. A schema path may be
+// wrapped by a backend error envelope (for example under "details"), so exact
+// path values are collected at any depth. URL-shaped strings are also treated
+// as secret for these operations: a proxy may move the URL from its declared
+// field into a free-form message. Non-JSON bodies fail closed.
+func redactBackendErrorBody(body []byte, requestSecrets, responseSecretFields []string) []byte {
+	if len(body) == 0 || len(responseSecretFields) == 0 {
+		return redactResponseBody(body, requestSecrets)
+	}
+	if !json.Valid(body) {
+		return []byte(secretMask)
+	}
+
+	var parsed any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&parsed); err != nil {
+		return []byte(secretMask)
+	}
+
+	secrets := append([]string(nil), requestSecrets...)
+	for _, field := range responseSecretFields {
+		secrets = append(secrets, responseSecretValues(parsed, field)...)
+	}
+	collectURLValues(parsed, &secrets)
+	return redactResponseBody(body, secrets)
+}
+
+// responseSecretValues finds a schema path starting at every object/array node,
+// so an error envelope wrapping the normal response payload does not evade
+// redaction. Path segments are dot-separated; an array segment ends in [].
+func responseSecretValues(root any, path string) []string {
+	segments := strings.Split(path, ".")
+	var values []string
+	var visit func(any)
+	visit = func(node any) {
+		values = append(values, valuesAtResponsePath(node, segments)...)
+		switch typed := node.(type) {
+		case map[string]any:
+			for _, child := range typed {
+				visit(child)
+			}
+		case []any:
+			for _, child := range typed {
+				visit(child)
+			}
+		}
+	}
+	visit(root)
+	return values
+}
+
+func valuesAtResponsePath(node any, segments []string) []string {
+	if len(segments) == 0 {
+		if value, ok := node.(string); ok && value != "" {
+			return []string{value}
+		}
+		return nil
+	}
+	object, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	segment := segments[0]
+	array := strings.HasSuffix(segment, "[]")
+	name := strings.TrimSuffix(segment, "[]")
+	child, ok := object[name]
+	if !ok {
+		return nil
+	}
+	if array {
+		items, ok := child.([]any)
+		if !ok {
+			return nil
+		}
+		var values []string
+		for _, item := range items {
+			values = append(values, valuesAtResponsePath(item, segments[1:])...)
+		}
+		return values
+	}
+	return valuesAtResponsePath(child, segments[1:])
+}
+
+func collectURLValues(node any, values *[]string) {
+	switch typed := node.(type) {
+	case string:
+		if strings.Contains(typed, "://") {
+			*values = append(*values, typed)
+		}
+	case map[string]any:
+		for _, child := range typed {
+			collectURLValues(child, values)
+		}
+	case []any:
+		for _, child := range typed {
+			collectURLValues(child, values)
+		}
+	}
 }
 
 // WriteFileAtomic exposes the client's all-or-nothing local file writer for
