@@ -1306,7 +1306,7 @@
           "file_id": { "type": "string", "description": "pending drive file id, decimal string" },
           "status": { "type": "string", "enum": ["pending"] },
           "upload_mode": { "type": "string", "enum": ["single", "multipart"], "description": "server-selected upload mode; the client must not request or override a mode" },
-          "upload_url": { "type": "string", "description": "presigned single-part PUT URL, present only for the single branch. Never send a caller credential to it or log it." },
+          "upload_url": { "type": "string", "x-octo-secret": true, "description": "presigned single-part PUT URL, present only for the single branch. Never send a caller credential to it or log it." },
           "upload_id": { "type": "string", "description": "object-storage multipart upload id, present only for the multipart branch; this is not a credential and cannot be used as a signature" },
           "part_size": { "type": "integer", "format": "uint64", "description": "server-computed part size in KiB for the multipart branch; the client must execute this value and must not override it" },
           "part_count": { "type": "integer", "format": "uint64", "description": "server-computed multipart part count, at most 10000; the client must not override it" },

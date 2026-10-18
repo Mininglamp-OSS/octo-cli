@@ -3,6 +3,7 @@ package registry
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -87,6 +88,16 @@ func TestAllDomainOperationCounts(t *testing.T) {
 
 func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
 	r := MustNew()
+
+	for _, route := range []string{
+		"/v1/bot/drive/files/7/upload/parts-presign",
+		"/v1/user/drive/files/7/upload/parts-presign",
+	} {
+		op, ok := r.GetOperationByRoute("drive", http.MethodPost, route)
+		if !ok || op.ID != "drive.upload.parts_presign" {
+			t.Errorf("GetOperationByRoute(%q) = %v, %v; want drive.upload.parts_presign", route, op, ok)
+		}
+	}
 
 	prepare, ok := r.GetOperation("drive.upload.prepare")
 	if !ok || prepare.ResponseSchema == nil {

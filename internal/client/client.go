@@ -19,12 +19,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // Retry defaults per architecture-design.md §6.2.
@@ -117,6 +119,29 @@ type Request struct {
 // secretMask replaces a redacted value in verbose / dry-run output. It is a
 // fixed string so the secret's length is not revealed either.
 const secretMask = "***REDACTED***"
+
+var responseSecretRegistry = sync.OnceValue(registry.MustNew)
+
+func responseSecretFieldsFor(req *Request) []string {
+	if len(req.ResponseSecretFields) > 0 {
+		return req.ResponseSecretFields
+	}
+	op, ok := responseSecretRegistry().GetOperationByRoute(req.Service, req.Method, req.Path)
+	if !ok {
+		return nil
+	}
+	return op.ResponseSecretFields
+}
+
+func redactRedirectLocation(location string, requestSecrets, responseSecretFields []string) string {
+	if location == "" {
+		return ""
+	}
+	if len(responseSecretFields) > 0 {
+		return secretMask
+	}
+	return redactSecrets(location, requestSecrets)
+}
 
 // redactSecrets masks every non-empty SecretValues entry found in s. Values are
 // masked longest-first so a secret that contains another as a substring cannot
@@ -1006,6 +1031,10 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 
 	c.verbosef("← %d (%d bytes)", resp.StatusCode, len(respBody))
+	var responseSecrets []string
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		responseSecrets = responseSecretFieldsFor(req)
+	}
 
 	// Redirects (3xx) are not followed automatically — surface the Location
 	// header as a JSON envelope when the caller opted into binary/redirect
@@ -1013,11 +1042,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		if req.BinaryResponse {
-			// Redacted like the sibling 3xx error path below. No secret-bearing
-			// operation declares a binary response today, so this does not fire —
-			// but the two renderings of the same header disagreeing is the kind of
-			// asymmetry that becomes a finding a round later.
-			loc := redactSecrets(resp.Header.Get("Location"), req.SecretValues)
+			loc := redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, responseSecrets)
 			env := map[string]any{
 				"url":    loc,
 				"status": resp.StatusCode,
@@ -1029,7 +1054,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		}
 		return nil, output.ErrAPI(
 			fmt.Sprintf("HTTP_%d", resp.StatusCode),
-			fmt.Sprintf("unexpected redirect to %q", redactSecrets(resp.Header.Get("Location"), req.SecretValues)),
+			fmt.Sprintf("unexpected redirect to %q", redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, responseSecrets)),
 			"",
 		)
 	}
@@ -1075,7 +1100,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, req.ResponseSecretFields)
+	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, responseSecrets)
 	parseError := output.ParseBackendError
 	if req.Service == "loop" {
 		parseError = output.ParsePublicAPIError
@@ -1184,7 +1209,10 @@ func collectURLValues(node any, values *[]string) {
 			*values = append(*values, typed)
 		}
 	case map[string]any:
-		for _, child := range typed {
+		for key, child := range typed {
+			if strings.Contains(key, "://") {
+				*values = append(*values, key)
+			}
 			collectURLValues(child, values)
 		}
 	case []any:

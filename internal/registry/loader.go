@@ -507,9 +507,83 @@ func (r *Registry) GetOperation(operationID string) (*OperationDetail, bool) {
 	return nil, false
 }
 
+// GetOperationByRoute resolves an operation from the concrete request path
+// sent by the command layer. It accepts both the spec's declared mount and
+// every equivalent x-octo-mount-by-token-kind spelling, so transport-level
+// metadata still resolves after identity routing has swapped /v1/bot for
+// /v1/user.
+func (r *Registry) GetOperationByRoute(service, method, requestPath string) (*OperationDetail, bool) {
+	doc := r.specs[service]
+	if doc == nil {
+		return nil, false
+	}
+	var found *OperationDetail
+	walkOperations(doc, func(pathStr, candidateMethod string, op map[string]any) {
+		if found != nil || !strings.EqualFold(method, candidateMethod) || truthy(op["x-octo-cli-hidden"]) {
+			return
+		}
+		candidate := buildDetail(service, doc, pathStr, candidateMethod, op)
+		for _, route := range operationRoutePaths(candidate) {
+			if routeMatchesPath(route, requestPath) {
+				found = candidate
+				return
+			}
+		}
+	})
+	return found, found != nil
+}
+
 // --- internals ---
 
 var httpMethods = []string{"get", "put", "post", "delete", "patch", "options", "head"}
+
+func operationRoutePaths(detail *OperationDetail) []string {
+	paths := []string{detail.Path}
+	seen := map[string]struct{}{detail.Path: {}}
+	for _, from := range detail.MountByTokenKind {
+		suffix, ok := strings.CutPrefix(detail.Path, from)
+		if !ok {
+			continue
+		}
+		for _, to := range detail.MountByTokenKind {
+			route := to + suffix
+			if _, exists := seen[route]; exists {
+				continue
+			}
+			seen[route] = struct{}{}
+			paths = append(paths, route)
+		}
+		break
+	}
+	return paths
+}
+
+func routeMatchesPath(template, requestPath string) bool {
+	if query := strings.IndexByte(requestPath, '?'); query >= 0 {
+		requestPath = requestPath[:query]
+	}
+	want := splitRoutePath(template)
+	got := splitRoutePath(requestPath)
+	if len(want) != len(got) {
+		return false
+	}
+	for i := range want {
+		if strings.HasPrefix(want[i], "{") && strings.HasSuffix(want[i], "}") {
+			if got[i] == "" {
+				return false
+			}
+			continue
+		}
+		if want[i] != got[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func splitRoutePath(path string) []string {
+	return strings.Split(strings.Trim(path, "/"), "/")
+}
 
 func walkOperations(doc map[string]any, fn func(path, method string, op map[string]any)) {
 	paths, ok := doc["paths"].(map[string]any)

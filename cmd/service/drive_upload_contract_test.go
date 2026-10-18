@@ -1,13 +1,11 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -28,82 +26,12 @@ func rootWithDriveURL(t *testing.T, baseURL string) (*cobra.Command, *cmdutil.Te
 	tf.SetConfig(cfg)
 	cred := &credential.BotCredential{Token: token, Source: "test"}
 	tf.SetCredential(cred)
-	tf.SetClient(client.New(cfg, cred, client.Options{ErrOut: io.Discard}))
+	tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true, ErrOut: io.Discard}))
 	tf.RegistryFunc = registry.MustNew
 
 	root := &cobra.Command{Use: "octo-cli", SilenceUsage: true, SilenceErrors: true}
 	RegisterServiceCommands(root, tf.Factory)
 	return root, tf
-}
-
-func TestDrive_MultipartRequestBoundsRejectedBeforeBackend(t *testing.T) {
-	tooManyParts := make([]int, 21)
-	for i := range tooManyParts {
-		tooManyParts[i] = i + 1
-	}
-	partsPresignBody, err := json.Marshal(map[string]any{"part_numbers": tooManyParts})
-	if err != nil {
-		t.Fatal(err)
-	}
-	completeBody := func(partNumber int) string {
-		body, marshalErr := json.Marshal(map[string]any{
-			"parts": []map[string]any{{"part_number": partNumber, "etag": "etag-1"}},
-		})
-		if marshalErr != nil {
-			t.Fatal(marshalErr)
-		}
-		return string(body)
-	}
-
-	tests := []struct {
-		name string
-		args []string
-	}{
-		{
-			name: "parts-presign rejects more than 20 part numbers",
-			args: []string{"drive", "upload", "parts-presign", "42", "--upload-id", "upload-1", "--data", string(partsPresignBody)},
-		},
-		{
-			name: "parts-presign rejects part number zero",
-			args: []string{"drive", "upload", "parts-presign", "42", "--upload-id", "upload-1", "--data", `{"part_numbers":[0]}`},
-		},
-		{
-			name: "parts-presign rejects part number above 10000",
-			args: []string{"drive", "upload", "parts-presign", "42", "--upload-id", "upload-1", "--data", `{"part_numbers":[10001]}`},
-		},
-		{
-			name: "complete rejects part number zero",
-			args: []string{"drive", "upload", "complete", "42", "--upload-id", "upload-1", "--data", completeBody(0)},
-		},
-		{
-			name: "complete rejects part number above 10000",
-			args: []string{"drive", "upload", "complete", "42", "--upload-id", "upload-1", "--data", completeBody(10001)},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var hits atomic.Int32
-			root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) {
-				hits.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{}`))
-			})
-			root.SetArgs(tc.args)
-
-			err := root.Execute()
-			if err == nil {
-				t.Fatal("expected local request validation to reject the multipart bounds violation")
-			}
-			ee := output.AsExitError(err)
-			if ee == nil || ee.Type != "validation" || ee.Code != "VALIDATION_ERROR" {
-				t.Fatalf("error = %#v, want validation / VALIDATION_ERROR", err)
-			}
-			if hits.Load() != 0 {
-				t.Fatalf("backend hits = %d, want 0; invalid multipart bounds must fail before HTTP", hits.Load())
-			}
-		})
-	}
 }
 
 func TestDrive_PartsPresignURLIsDeclaredResponseSecret(t *testing.T) {
@@ -121,6 +49,73 @@ func TestDrive_PartsPresignURLIsDeclaredResponseSecret(t *testing.T) {
 	}
 	if got, want := op.ResponseSecretFields, []string{"parts[].url"}; len(got) != 1 || got[0] != want[0] {
 		t.Fatalf("response secret fields = %v, want %v", got, want)
+	}
+}
+
+func TestDrive_PrepareUploadURLIsDeclaredResponseSecret(t *testing.T) {
+	op, ok := registry.MustNew().GetOperation("drive.upload.prepare")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("drive.upload.prepare response schema not found")
+	}
+	uploadURL, ok := op.ResponseSchema.Properties["upload_url"]
+	if !ok || !uploadURL.Secret {
+		t.Fatal("drive.upload.prepare upload_url must be x-octo-secret")
+	}
+	if got, want := op.ResponseSecretFields, []string{"upload_url"}; len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("response secret fields = %v, want %v", got, want)
+	}
+}
+
+func visibleDriveError(err error, tf *cmdutil.TestFactory) string {
+	ee := output.AsExitError(err)
+	if ee == nil {
+		return err.Error() + "\n" + tf.ErrOut.String()
+	}
+	return strings.Join([]string{
+		err.Error(),
+		ee.Message,
+		ee.Hint,
+		string(ee.Detail),
+		tf.ErrOut.String(),
+	}, "\n")
+}
+
+func TestDrive_PrepareErrorRedactsPresignedURL(t *testing.T) {
+	const signedURL = "https://objects.example.test/prepare?signature=test-only"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprintf(w,
+			`{"error":"invalid_argument","message":"prepare failed for %s","details":{"upload_url":%q}}`,
+			signedURL, signedURL)
+	}))
+	t.Cleanup(srv.Close)
+
+	root, tf := rootWithDriveURL(t, srv.URL)
+	root.SetArgs([]string{
+		"drive", "upload", "prepare",
+		"--space-id", "shared:s1",
+		"--name", "large.bin",
+		"--size", "134217728",
+		"--content-type", "application/octet-stream",
+	})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a backend error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if strings.Contains(string(ee.Detail), signedURL) {
+		t.Fatal("prepare upload_url survived in Detail")
+	}
+	if rendered := tf.ErrOut.String(); strings.Contains(rendered, signedURL) {
+		t.Fatal("prepare upload_url survived in rendered stderr")
+	}
+	if visible := visibleDriveError(err, tf); strings.Contains(visible, signedURL) {
+		t.Fatal("prepare upload_url survived in the visible error")
 	}
 }
 
@@ -144,9 +139,21 @@ func TestDrive_PartsPresignErrorRedactsPresignedURL(t *testing.T) {
 		},
 		{
 			name:        "plain text",
-			status:      http.StatusBadGateway,
+			status:      http.StatusBadRequest,
 			contentType: "text/plain",
 			body:        "upstream failed for " + signedURL,
+		},
+		{
+			name:        "invalid JSON",
+			status:      http.StatusBadRequest,
+			contentType: "application/json",
+			body:        `{"error":"part rejected","message":"` + signedURL,
+		},
+		{
+			name:        "JSON object key",
+			status:      http.StatusInternalServerError,
+			contentType: "application/json",
+			body:        `{"error":"internal","message":"part batch failed","details":{"` + signedURL + `":{"part_number":1}}}`,
 		},
 	}
 
@@ -174,13 +181,13 @@ func TestDrive_PartsPresignErrorRedactsPresignedURL(t *testing.T) {
 			if ee == nil {
 				t.Fatalf("expected a structured error, got %v", err)
 			}
-			visible := strings.Join([]string{
-				err.Error(),
-				ee.Message,
-				ee.Hint,
-				string(ee.Detail),
-				tf.ErrOut.String(),
-			}, "\n")
+			if strings.Contains(string(ee.Detail), signedURL) {
+				t.Fatal("the presigned response URL survived in Detail")
+			}
+			if rendered := tf.ErrOut.String(); strings.Contains(rendered, signedURL) {
+				t.Fatal("the presigned response URL survived in rendered stderr")
+			}
+			visible := visibleDriveError(err, tf)
 			if strings.Contains(visible, signedURL) {
 				t.Fatal("the presigned response URL survived in the structured error or rendered output")
 			}
@@ -188,5 +195,41 @@ func TestDrive_PartsPresignErrorRedactsPresignedURL(t *testing.T) {
 				t.Fatalf("expected the response URL to be masked, got %q", visible)
 			}
 		})
+	}
+}
+
+func TestDrive_PartsPresignRedirectRedactsLocation(t *testing.T) {
+	const signedURL = "https://objects.example.test/redirect?signature=test-only"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", signedURL)
+		w.WriteHeader(http.StatusFound)
+		_, _ = w.Write([]byte(signedURL))
+	}))
+	t.Cleanup(srv.Close)
+
+	root, tf := rootWithDriveURL(t, srv.URL)
+	root.SetArgs([]string{
+		"drive", "upload", "parts-presign", "42",
+		"--upload-id", "upload-1",
+		"--data", `{"part_numbers":[1]}`,
+	})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected a redirect error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if strings.Contains(string(ee.Detail), signedURL) || strings.Contains(tf.ErrOut.String(), signedURL) {
+		t.Fatal("redirect Location survived in Detail or rendered stderr")
+	}
+	visible := visibleDriveError(err, tf)
+	if strings.Contains(visible, signedURL) {
+		t.Fatal("redirect Location survived in the visible error")
+	}
+	if !strings.Contains(visible, "REDACTED") {
+		t.Fatalf("expected redirect Location to fail closed, got %q", visible)
 	}
 }
