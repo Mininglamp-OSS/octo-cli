@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -180,6 +182,88 @@ func TestAPISecretsForPath_StripsQueryAndFragment(t *testing.T) {
 					t.Errorf("recovered %q, want the bare token %q — a query string must not be "+
 						"captured as part of the value either", v, token)
 				}
+			}
+		})
+	}
+}
+
+func TestAPIResponseSecretFieldsForRequest_UsesOperationMounts(t *testing.T) {
+	reg := registry.MustNew()
+
+	for _, tc := range []struct {
+		name, method, path string
+		want               []string
+	}{
+		{
+			name:   "prepare on the bot mount",
+			method: http.MethodPost,
+			path:   "/v1/bot/drive/files/prepare-upload",
+			want:   []string{"upload_url"},
+		},
+		{
+			name:   "prepare on the user mount",
+			method: http.MethodPost,
+			path:   "/v1/user/drive/files/prepare-upload",
+			want:   []string{"upload_url"},
+		},
+		{
+			name:   "parts presign on the user mount",
+			method: http.MethodPost,
+			path:   "/v1/user/drive/files/42/upload/parts-presign",
+			want:   []string{"parts[].url"},
+		},
+		{
+			name:   "an operation without response secrets",
+			method: http.MethodPost,
+			path:   "/v1/bot/drive/files/42/upload/abort",
+			want:   nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiResponseSecretFieldsForRequest(reg, tc.method, tc.path)
+			if len(got) != len(tc.want) {
+				t.Fatalf("response secret fields = %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("response secret fields[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestAPI_MasksPrepareUploadURLOnDeclaredMounts(t *testing.T) {
+	const signedURL = "https://objects.example.test/prepare?signature=api-test-only"
+
+	for _, path := range []string{
+		"/v1/bot/drive/files/prepare-upload",
+		"/v1/user/drive/files/prepare-upload",
+	} {
+		t.Run(path, func(t *testing.T) {
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprintf(w,
+					`{"error":"invalid_argument","message":"prepare rejected %s","details":{"upload_url":%q}}`,
+					signedURL, signedURL)
+			}, nil)
+
+			err := env.run("api", http.MethodPost, path,
+				"--data", `{"space_id":"shared:s1","name":"large.bin","size":7,"content_type":"application/octet-stream"}`)
+			if err == nil {
+				t.Fatal("expected the prepare request to fail")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			visible := strings.Join([]string{err.Error(), string(ee.Detail), env.tf.ErrOut.String()}, "\n")
+			if strings.Contains(visible, signedURL) {
+				t.Fatalf("api error exposed the prepare upload_url:\n%s", visible)
+			}
+			if !strings.Contains(visible, "REDACTED") {
+				t.Fatalf("api error did not show the response secret was masked:\n%s", visible)
 			}
 		})
 	}

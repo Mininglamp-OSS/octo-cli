@@ -19,14 +19,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
-	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
 // Retry defaults per architecture-design.md §6.2.
@@ -119,19 +117,6 @@ type Request struct {
 // secretMask replaces a redacted value in verbose / dry-run output. It is a
 // fixed string so the secret's length is not revealed either.
 const secretMask = "***REDACTED***"
-
-var responseSecretRegistry = sync.OnceValue(registry.MustNew)
-
-func responseSecretFieldsFor(req *Request) []string {
-	if len(req.ResponseSecretFields) > 0 {
-		return req.ResponseSecretFields
-	}
-	op, ok := responseSecretRegistry().GetOperationByRoute(req.Service, req.Method, req.Path)
-	if !ok {
-		return nil
-	}
-	return op.ResponseSecretFields
-}
 
 func redactRedirectLocation(location string, requestSecrets, responseSecretFields []string) string {
 	if location == "" {
@@ -1031,18 +1016,13 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 
 	c.verbosef("← %d (%d bytes)", resp.StatusCode, len(respBody))
-	var responseSecrets []string
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		responseSecrets = responseSecretFieldsFor(req)
-	}
-
 	// Redirects (3xx) are not followed automatically — surface the Location
 	// header as a JSON envelope when the caller opted into binary/redirect
 	// handling (file.download). Any other endpoint returning 3xx is treated
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		if req.BinaryResponse {
-			loc := redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, responseSecrets)
+			loc := redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, req.ResponseSecretFields)
 			env := map[string]any{
 				"url":    loc,
 				"status": resp.StatusCode,
@@ -1054,7 +1034,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		}
 		return nil, output.ErrAPI(
 			fmt.Sprintf("HTTP_%d", resp.StatusCode),
-			fmt.Sprintf("unexpected redirect to %q", redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, responseSecrets)),
+			fmt.Sprintf("unexpected redirect to %q", redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, req.ResponseSecretFields)),
 			"",
 		)
 	}
@@ -1100,7 +1080,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, responseSecrets)
+	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, req.ResponseSecretFields)
 	parseError := output.ParseBackendError
 	if req.Service == "loop" {
 		parseError = output.ParsePublicAPIError

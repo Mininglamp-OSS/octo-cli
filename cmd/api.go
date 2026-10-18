@@ -85,6 +85,7 @@ flags are not auto-generated and --page-all is not available.`,
 				_ = f.EmitError(serr) //nolint:errcheck // best-effort emit before returning err
 				return serr
 			}
+			responseSecretFields := apiResponseSecretFieldsForRequest(f.Registry(), method, path)
 
 			cli, err := f.Client()
 			if err != nil {
@@ -99,7 +100,8 @@ flags are not auto-generated and --page-all is not available.`,
 				Body:    body,
 				// Recovered from the registry rather than from a command definition,
 				// because this command's path is whatever the caller typed.
-				SecretValues: secrets,
+				SecretValues:         secrets,
+				ResponseSecretFields: responseSecretFields,
 			})
 			if err != nil {
 				_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -200,6 +202,17 @@ func matchOperation(reg *registry.Registry, method, path string) *registry.Opera
 		}
 	}
 	return nil
+}
+
+func apiResponseSecretFieldsForRequest(reg *registry.Registry, method, path string) []string {
+	if reg == nil {
+		return nil
+	}
+	d := matchOperation(reg, method, path)
+	if d == nil {
+		return nil
+	}
+	return d.ResponseSecretFields
 }
 
 // bodySecretValues walks the supplied body against the schema and returns the values sitting
