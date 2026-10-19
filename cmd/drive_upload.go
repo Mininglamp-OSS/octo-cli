@@ -268,14 +268,8 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		}
 	default:
 		// Unknown values are deliberately routed through the legacy single path
-		// (decision 1). No multipart header can have produced this response,
-		// because the second prepare is only attempted after a capability error.
-		if capabilityDeclared {
-			cause := output.ErrWithHint("internal", "UPLOAD_MODE_CONFLICT",
-				fmt.Sprintf("prepare-upload returned unknown upload_mode %q after a multipart capability declaration", prepared.UploadMode),
-				"the server owns the mode; report the unexpected response")
-			return failErr(f, withCancel(cmd, f, cli, mount, fileID, cause))
-		}
+		// (decision 1), including after a capability negotiation. The safe
+		// transfer-URL checks below still gate this fallback.
 	}
 
 	// From here on every failure path must try to cancel the pending row.

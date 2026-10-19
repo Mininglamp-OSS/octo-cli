@@ -15,9 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mininglamp-OSS/octo-cli/internal/client"
-	"github.com/Mininglamp-OSS/octo-cli/internal/config"
-	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
@@ -437,23 +434,15 @@ func multipartAPIHandlerForCompletion(
 	}
 }
 
-func TestDriveUploadFile_CompleteRetriesNetworkButNotResultUnknown(t *testing.T) {
-	t.Run("network failure retries to success", func(t *testing.T) {
+func TestDriveUploadFile_CompleteRetrySemantics(t *testing.T) {
+	t.Run("explicit HTTP 500 retries to success", func(t *testing.T) {
 		src := writeMultipartTestFile(t, []byte("abcdefgh"))
 		var completeCalls, aborts atomic.Int32
 		var env *driveTestEnv
 		env = newDriveTestEnv(t, "bf_bot", multipartAPIHandlerForCompletion(t, &env, func(w http.ResponseWriter, r *http.Request) {
 			if completeCalls.Add(1) == 1 {
-				hijacker, ok := w.(http.Hijacker)
-				if !ok {
-					t.Fatal("test server does not support hijacking")
-				}
-				conn, _, err := hijacker.Hijack()
-				if err != nil {
-					t.Errorf("hijack: %v", err)
-					return
-				}
-				_ = conn.Close()
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":"internal","message":"temporary failure"}`))
 				return
 			}
 			_, _ = w.Write([]byte(`{"file":{"id":7,"parent_id":0},"size":8}`))
@@ -474,7 +463,7 @@ func TestDriveUploadFile_CompleteRetriesNetworkButNotResultUnknown(t *testing.T)
 		}
 	})
 
-	t.Run("RESULT_UNKNOWN is not retried and not aborted", func(t *testing.T) {
+	t.Run("transport failure is one request and RESULT_UNKNOWN", func(t *testing.T) {
 		src := writeMultipartTestFile(t, []byte("abcdefgh"))
 		var completeCalls, aborts atomic.Int32
 		var env *driveTestEnv
@@ -492,9 +481,6 @@ func TestDriveUploadFile_CompleteRetriesNetworkButNotResultUnknown(t *testing.T)
 			w.Header().Set("ETag", `"etag"`)
 			w.WriteHeader(http.StatusOK)
 		})
-		cfg := &config.Config{APIBaseURL: env.api.URL, BotToken: "bf_bot", Format: "json"}
-		cred := &credential.BotCredential{Token: "bf_bot", Source: "test"}
-		env.tf.SetClient(client.New(cfg, cred, client.Options{NoRetry: true, ErrOut: env.tf.ErrOut}))
 
 		err := env.run("drive", "upload", "file", src, "--space-id", "s1")
 		if err == nil {
@@ -505,12 +491,131 @@ func TestDriveUploadFile_CompleteRetriesNetworkButNotResultUnknown(t *testing.T)
 			t.Fatalf("code = %v, want RESULT_UNKNOWN", err)
 		}
 		if got := completeCalls.Load(); got != 1 {
-			t.Errorf("complete calls = %d, want 1 because RESULT_UNKNOWN must not be retried", got)
+			t.Errorf("complete calls = %d, want 1 because a transport failure must not be retried", got)
 		}
 		if aborts.Load() != 0 {
 			t.Error("an ambiguous completion must not be aborted")
 		}
 	})
+}
+
+func TestDriveUploadFile_UnknownModeAfterCapabilityNegotiationFallsBackToSingle(t *testing.T) {
+	const payload = "single"
+	var prepareCalls, storeCalls, confirms int
+	var capabilityHeaders []string
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			prepareCalls++
+			capabilityHeaders = append(capabilityHeaders, r.Header.Get(multipartCapabilityHeader))
+			if prepareCalls == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":"client_capability_required","message":"multipart-v1 required"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"file_id":7,"upload_mode":"future-mode","upload_url":"` + env.store.URL + `/single","content_type":"text/plain"}`))
+		case strings.HasSuffix(r.URL.Path, "/confirm-upload"):
+			confirms++
+			_, _ = w.Write([]byte(`{"id":7,"parent_id":0,"name":"single.bin"}`))
+		default:
+			t.Errorf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+	}, func(w http.ResponseWriter, r *http.Request) {
+		storeCalls++
+		w.WriteHeader(http.StatusOK)
+	})
+
+	src := writeMultipartTestFile(t, []byte(payload))
+	if err := env.run("drive", "upload", "file", src, "--space-id", "s1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if prepareCalls != 2 {
+		t.Fatalf("prepare calls = %d, want 2", prepareCalls)
+	}
+	if len(capabilityHeaders) != 2 || capabilityHeaders[0] != "" || capabilityHeaders[1] != multipartCapabilityValue {
+		t.Errorf("prepare capability headers = %#v, want [empty multipart-v1]", capabilityHeaders)
+	}
+	if storeCalls != 1 || confirms != 1 {
+		t.Errorf("single fallback calls: store=%d confirm=%d, want 1/1", storeCalls, confirms)
+	}
+}
+
+func TestDriveUploadFile_DirectMultipartResponsePinsCurrentConflict(t *testing.T) {
+	src := writeMultipartTestFile(t, []byte("abcdefgh"))
+	prepareCalls, abortCalls, presignCalls := 0, 0, 0
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			prepareCalls++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 2, 1)))
+		case strings.HasSuffix(r.URL.Path, "/upload/abort"):
+			abortCalls++
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case strings.HasSuffix(r.URL.Path, "/upload/parts-presign"):
+			presignCalls++
+			t.Error("direct multipart response must not presign until the capability contract is decided")
+		default:
+			t.Errorf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+	}, nil)
+
+	err := env.run("drive", "upload", "file", src, "--space-id", "s1")
+	if err == nil {
+		t.Fatal("expected UPLOAD_MODE_CONFLICT for a direct multipart response")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "UPLOAD_MODE_CONFLICT" {
+		t.Fatalf("code = %v, want UPLOAD_MODE_CONFLICT", err)
+	}
+	if prepareCalls != 1 || abortCalls != 1 || presignCalls != 0 {
+		t.Errorf("calls: prepare=%d abort=%d presign=%d, want 1/1/0", prepareCalls, abortCalls, presignCalls)
+	}
+}
+
+func TestDriveUploadFile_CompleteErrorDoesNotLeakSignedURL(t *testing.T) {
+	const marker = "COMPLETE_SIGNATURE_MUST_NOT_LEAK"
+	signedURL := "https://storage.example/upload?sig=" + marker
+	src := writeMultipartTestFile(t, []byte("abcdefgh"))
+	var completeCalls, aborts atomic.Int32
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", multipartAPIHandlerForCompletion(t, &env, func(w http.ResponseWriter, r *http.Request) {
+		completeCalls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = fmt.Fprintf(w, `{"error":"internal","message":"completion failed","details":{"url":%q}}`, signedURL)
+	}, &aborts), func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("ETag", `"etag"`)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := env.run("drive", "upload", "file", src, "--space-id", "s1")
+	if err == nil {
+		t.Fatal("expected completion to fail")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected structured error, got %v", err)
+	}
+	var structured map[string]any
+	if decodeErr := json.Unmarshal(env.tf.ErrOut.Bytes(), &structured); decodeErr != nil {
+		t.Fatalf("parse structured stderr: %v (%s)", decodeErr, env.tf.ErrOut.String())
+	}
+	visible := err.Error() + "\n" + ee.Message + "\n" + ee.Hint + "\n" + string(ee.Detail) + "\n" +
+		env.tf.Out.String() + "\n" + env.tf.ErrOut.String()
+	hits := strings.Count(visible, marker)
+	t.Logf("complete signed URL marker hits = %d", hits)
+	if hits != 0 {
+		t.Errorf("complete signed URL marker hits = %d, want 0: %s", hits, visible)
+	}
+	if got := completeCalls.Load(); got != multipartCompleteAttempts {
+		t.Errorf("complete calls = %d, want finite retry total %d", got, multipartCompleteAttempts)
+	}
+	if aborts.Load() != 1 {
+		t.Errorf("aborts = %d, want 1 after explicit 5xx retries are exhausted", aborts.Load())
+	}
 }
 
 func TestDriveUploadFile_InterruptedMultipartAbortsWithDetachedContext(t *testing.T) {

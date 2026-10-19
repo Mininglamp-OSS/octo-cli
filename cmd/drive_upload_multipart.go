@@ -26,6 +26,7 @@ const (
 	multipartPresignBatchMax  = 20
 	multipartPartCountMax     = 10000
 	multipartMaxPartRetries   = 3
+	multipartCompleteAttempts = 4
 )
 
 // Multipart retrying is intentionally short: half a second total keeps a
@@ -156,7 +157,7 @@ func uploadMultipart(
 	completed, err := completeMultipartUpload(ctx, cli, f, mount, fileID, prepared.UploadID, etags)
 	if err != nil {
 		ee := output.AsExitError(err)
-		if ee != nil && (ee.Code == "RESULT_UNKNOWN" || ee.OutcomeUnknown()) {
+		if ee != nil && ee.Code == "RESULT_UNKNOWN" {
 			return nil, err
 		}
 		return nil, withMultipartAbort(cmd, f, cli, mount, fileID, prepared.UploadID, err)
@@ -573,6 +574,15 @@ func completeMultipartUpload(
 	if err != nil {
 		return nil, err
 	}
+	// The frozen complete response schema has no URL field, but a backend error
+	// envelope can still echo the presigned URL the client already handles. Pull
+	// that secret path from the related presign operation so the client's generic
+	// response-error redactor recognises the error body as URL-bearing.
+	_, presignResponseSecretFields, err := responseSecretMetadataForOperation(f, "drive.upload.parts_presign")
+	if err != nil {
+		return nil, err
+	}
+	responseSecretFields = appendUniqueStrings(responseSecretFields, presignResponseSecretFields...)
 	parts := make([]map[string]any, len(etags))
 	for i, etag := range etags {
 		parts[i] = map[string]any{
@@ -580,23 +590,73 @@ func completeMultipartUpload(
 			"etag":        etag,
 		}
 	}
-	raw, err := cli.Do(ctx, &client.Request{
-		Service:                        serviceName,
-		Method:                         http.MethodPost,
-		Path:                           mount + "/files/" + fileID + "/upload/complete",
-		Body:                           map[string]any{"upload_id": uploadID, "parts": parts},
-		ResponseSecretFields:           responseSecretFields,
-		SuppressSpaceHeader:            true,
-		UnknownOutcomeOnNetworkFailure: true,
-	})
-	if err != nil {
-		if ee := output.AsExitError(err); ee != nil && ee.Code == "RESULT_UNKNOWN" {
-			ee.Hint = "completion may already have succeeded; inspect the file status before starting a new upload, and do not retry this upload_id blindly"
-			ee.Detail = appendCompleteContext(ee.Detail, fileID, uploadID)
-		}
-		return nil, err
+	request := &client.Request{
+		Service:              serviceName,
+		Method:               http.MethodPost,
+		Path:                 mount + "/files/" + fileID + "/upload/complete",
+		Body:                 map[string]any{"upload_id": uploadID, "parts": parts},
+		ResponseSecretFields: responseSecretFields,
+		SuppressSpaceHeader:  true,
+		DisableRetry:         true,
 	}
-	return raw, nil
+
+	var lastErr error
+	for attempt := 1; attempt <= multipartCompleteAttempts; attempt++ {
+		raw, doErr := cli.Do(ctx, request)
+		if doErr == nil {
+			return raw, nil
+		}
+		lastErr = doErr
+
+		ee := output.AsExitError(doErr)
+		if ee == nil {
+			return nil, doErr
+		}
+		if ee.Type == "network" && ee.HTTPStatus == 0 {
+			return nil, markCompleteResultUnknown(ee, fileID, uploadID)
+		}
+		// A response is definitive even when its status is 5xx: the server is
+		// available and complete is idempotent, so retry a bounded number of times.
+		// Transport failures have no HTTP status and returned above without retry.
+		if ee.HTTPStatus < 500 || attempt == multipartCompleteAttempts {
+			return nil, doErr
+		}
+
+		timer := time.NewTimer(multipartRetryBaseDelay * time.Duration(1<<(attempt-1)))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, output.ErrNetwork(ctx.Err().Error(), "request cancelled")
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func appendUniqueStrings(base []string, values ...string) []string {
+	base = append([]string(nil), base...)
+	for _, value := range values {
+		found := false
+		for _, existing := range base {
+			if existing == value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			base = append(base, value)
+		}
+	}
+	return base
+}
+
+func markCompleteResultUnknown(ee *output.ExitError, fileID, uploadID string) error {
+	unknown := *ee
+	unknown.Code = "RESULT_UNKNOWN"
+	unknown.Message = "the request may have been accepted, but no definitive response was received"
+	unknown.Hint = "completion may already have succeeded; inspect the file status before starting a new upload, and do not retry this upload_id blindly"
+	unknown.Detail = appendCompleteContext(unknown.Detail, fileID, uploadID)
+	return &unknown
 }
 
 func appendCompleteContext(detail json.RawMessage, fileID, uploadID string) json.RawMessage {
