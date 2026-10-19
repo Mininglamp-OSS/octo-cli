@@ -171,7 +171,7 @@ Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope
 
 `drive upload file` runs prepare → upload → complete/confirm. The upload goes out on a separate HTTP client that carries **no** Octo credential or space header — the presigned URL is its own authorisation.
 
-The server owns mode selection. A prepare response with `upload_mode:"multipart"` uses the multipart scheduler; `"single"`, a missing value, or an unknown value uses the legacy single-part path. For zero-regression compatibility, the first prepare request does not declare a capability. If the server answers `409 client_capability_required`, the command retries once with `X-Drive-Upload-Capabilities: multipart-v1` and schedules from that effective prepare snapshot. A first response that directly selects multipart also schedules without a third prepare. An unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT`, with the pending row cancelled. Low-level callers can send the header directly with `drive upload prepare --upload-capabilities multipart-v1`.
+The server owns mode selection. `drive upload file` sends exactly one prepare request and always declares `X-Drive-Upload-Capabilities: multipart-v1`; the server ignores the header below its multipart threshold and returns a multipart snapshot when scheduling is required. There is no probe request or 409 retry. A multipart response enters the scheduler directly; `"single"`, a missing value, or an unknown value uses the legacy single-part path. An unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT`, with the pending row cancelled. Low-level callers can also send the header with `drive upload prepare --upload-capabilities multipart-v1`.
 
 The multipart path:
 
@@ -255,7 +255,7 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 | `PARTIAL_FILE_REPLACED` | validation / 2 | something replaced the part file or the destination mid-download; nothing was published, re-run in a directory only you can write |
 | `UPLOAD_FAILED` | api_error / 1 | the presigned PUT was rejected or the confirm failed; the detail carries `file_id` and whether the pending row was cancelled |
 | `file_too_large` | validation / 2 | the declared size exceeds the server's effective limit; the message includes that limit. Do not retry unchanged |
-| `client_capability_required` | validation / 2 | the server requires a declared upload capability; `upload file` performs this handshake automatically. Low-level prepare can pass `--upload-capabilities multipart-v1` |
+| `client_capability_required` | validation / 2 | the server requires a declared upload capability; `upload file` always declares it on its single prepare request. Low-level prepare can pass `--upload-capabilities multipart-v1` |
 | `upload_session_not_active` | validation / 2 | the multipart session already completed, expired, or was aborted; inspect the file state instead of retrying blindly |
 | `RESULT_UNKNOWN` | network / 1 | completion may have succeeded. Inspect the file before retrying; the CLI deliberately does not abort or replay this request |
 | `INVALID_FLAG` | validation / 2 | a positional id starting with `-` was parsed as a flag; pass it as the named flag or after `--` |

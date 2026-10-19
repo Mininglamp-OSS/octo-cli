@@ -119,13 +119,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `octo-drive` Skill. There is deliberately no `drive org` subtree — the
   product's member picker is a frontend filter over the space roster, not a
   backend search.
-  - **Server-owned multipart scheduling.** `upload file` first prepares without
-    a capability header for compatibility, then retries once with
-    `X-Drive-Upload-Capabilities: multipart-v1` only after
-    `409 client_capability_required`. `single`, missing, and unknown
-    `upload_mode` values keep the legacy path; unknown without `upload_url` is
-    `UPLOAD_MODE_CONFLICT`. A direct first-response `multipart` also schedules
-    without another prepare. Multipart streams parts with
+  - **Server-owned multipart scheduling.** `upload file` sends one prepare
+    request that always declares `X-Drive-Upload-Capabilities: multipart-v1`;
+    the server ignores it below the multipart threshold and otherwise returns a
+    complete multipart snapshot. `single`, missing, and unknown `upload_mode`
+    values keep the legacy path; unknown without `upload_url` is
+    `UPLOAD_MODE_CONFLICT`. A `multipart` response enters the scheduler directly.
+    Multipart streams parts with
     `io.NewSectionReader`, respects `max_concurrent_parts`, groups presign
     requests at 20 parts or fewer, retries individual parts, re-signs only a
     rejected 403 part, reads each ETag, and writes progress to stderr. Completion
