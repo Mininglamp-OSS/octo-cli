@@ -689,7 +689,7 @@
                         }
                       }
                     },
-                    "part_size": { "type": "integer", "format": "uint64", "description": "optional server part size in KiB for re-sign alignment; prepare-upload remains authoritative" }
+                    "part_size": { "type": "integer", "format": "uint64", "description": "optional server part size in bytes for re-sign alignment; the server has already converted KiB to bytes, so the client slices by bytes directly and must not convert again; prepare-upload remains authoritative" }
                   }
                 }
               }
@@ -1308,7 +1308,7 @@
           "upload_mode": { "type": "string", "enum": ["single", "multipart"], "description": "server-selected upload mode; the client must not request or override a mode" },
           "upload_url": { "type": "string", "x-octo-secret": true, "description": "presigned single-part PUT URL, present only for the single branch. Never send a caller credential to it or log it." },
           "upload_id": { "type": "string", "description": "object-storage multipart upload id, present only for the multipart branch; this is not a credential and cannot be used as a signature" },
-          "part_size": { "type": "integer", "format": "uint64", "description": "server-computed part size in KiB for the multipart branch; the client must execute this value and must not override it" },
+          "part_size": { "type": "integer", "format": "uint64", "description": "server-computed part size in bytes for the multipart branch; the server has already converted KiB to bytes, so the client slices by bytes directly and must not convert again; the client must execute this value and must not override it" },
           "part_count": { "type": "integer", "format": "uint64", "description": "server-computed multipart part count, at most 10000; the client must not override it" },
           "max_concurrent_parts": { "type": "integer", "format": "uint64", "description": "server-recommended maximum concurrent parts; the client may be more conservative but must not exceed it" },
           "object_path": { "type": "string", "description": "final object-storage key" },

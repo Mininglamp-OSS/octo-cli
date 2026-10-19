@@ -198,7 +198,7 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		return failErr(f, err)
 	}
 
-	raw, capabilityDeclared, err := prepareDriveUploadRequest(
+	raw, err := prepareDriveUploadRequest(
 		cmd.Context(),
 		cli,
 		mount,
@@ -232,15 +232,6 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 
 	switch prepared.UploadMode {
 	case "multipart":
-		if !capabilityDeclared {
-			cause := output.ErrWithHint("internal", "UPLOAD_MODE_CONFLICT",
-				"prepare-upload selected multipart without the required capability declaration",
-				"the server must answer client_capability_required before the CLI retries with X-Drive-Upload-Capabilities: multipart-v1; report the backend response")
-			if prepared.UploadID != "" {
-				return failErr(f, withMultipartAbort(cmd, f, cli, mount, fileID, prepared.UploadID, cause))
-			}
-			return failErr(f, withCancel(cmd, f, cli, mount, fileID, cause))
-		}
 		completed, uerr := uploadMultipart(cmd, f, cli, mount, file, size, &prepared)
 		if uerr != nil {
 			return failErr(f, uerr)
@@ -260,16 +251,9 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		}
 		return f.EmitSuccessWithMeta(normalized, output.EnvelopeMeta{Notice: notice})
 	case "single", "":
-		if capabilityDeclared {
-			cause := output.ErrWithHint("internal", "UPLOAD_MODE_CONFLICT",
-				"prepare-upload accepted the multipart capability declaration but selected single mode",
-				"the server owns the mode; report the contradictory prepare response")
-			return failErr(f, withCancel(cmd, f, cli, mount, fileID, cause))
-		}
 	default:
-		// Unknown values are deliberately routed through the legacy single path
-		// (decision 1), including after a capability negotiation. The safe
-		// transfer-URL checks below still gate this fallback.
+		// Missing and unknown modes deliberately use the legacy single path. The
+		// safe transfer-URL checks below still gate that fallback.
 	}
 
 	// From here on every failure path must try to cancel the pending row.
