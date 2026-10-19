@@ -39,7 +39,7 @@ Key properties:
 |-----------|-----|----------------------------------------------------------------|
 | `docs`    | 45  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, worksheet discovery and scoped/paged reads, sheet edits (atomic replace, conditional formats, split/deduplication), board scenes, members, comments, versions, attachments |
 | `html`    | 22  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — read source with its version, publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
-| `drive`   | 43  | Network drive — spaces & members, folder/file tree, full-text search, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 46 leaves total |
+| `drive`   | 46  | Network drive — spaces & members, folder/file tree, full-text search, single-part and resumable-style multipart blob upload, signed download, online-document mounts, share links, invites, IM-attachment transfer. Six hand-written composites bring the command tree to 49 leaves |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
@@ -127,6 +127,10 @@ octo-cli thread create group-abc --name "design review"
 # Files
 octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
+
+# Drive — the server chooses single-part or multipart upload; the same command
+# handles both. Multipart progress is written to stderr, never to the JSON stdout.
+octo-cli drive upload file ./large.bin --space-id <drive-space-id>
 
 # Agent Mail — policy-aware send; the server may accept it or save a Draft
 # depending on the mailbox's current outbound mode.
