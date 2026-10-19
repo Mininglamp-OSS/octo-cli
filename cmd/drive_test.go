@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -41,6 +43,7 @@ type driveTestEnv struct {
 	// assert what was (and was not) sent to it.
 	storeRequests []*http.Request
 	storeBodies   []string
+	storeMu       sync.Mutex
 }
 
 // newDriveTestEnv builds the environment. apiHandler serves the drive API;
@@ -51,8 +54,11 @@ func newDriveTestEnv(t *testing.T, token string, apiHandler, storeHandler http.H
 
 	env.store = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		env.storeMu.Lock()
 		env.storeRequests = append(env.storeRequests, r.Clone(r.Context()))
 		env.storeBodies = append(env.storeBodies, string(body))
+		env.storeMu.Unlock()
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		if storeHandler != nil {
 			storeHandler(w, r)
 			return
