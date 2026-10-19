@@ -123,12 +123,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a capability header for compatibility, then retries once with
     `X-Drive-Upload-Capabilities: multipart-v1` only after
     `409 client_capability_required`. `single`, missing, and unknown
-    `upload_mode` values keep the legacy path. Multipart streams parts with
+    `upload_mode` values keep the legacy path; unknown without `upload_url` is
+    `UPLOAD_MODE_CONFLICT`. A direct first-response `multipart` also schedules
+    without another prepare. Multipart streams parts with
     `io.NewSectionReader`, respects `max_concurrent_parts`, groups presign
     requests at 20 parts or fewer, retries individual parts, re-signs only a
     rejected 403 part, reads each ETag, and writes progress to stderr. Completion
-    treats `RESULT_UNKNOWN` as ambiguous and neither retries nor aborts it;
-    incomplete sessions get a detached five-second best-effort abort.
+    retries explicit HTTP 5xx responses a bounded number of times, sends a
+    connection interruption or timeout only once, and treats `RESULT_UNKNOWN` as
+    ambiguous by neither retrying nor aborting it. Incomplete sessions get a
+    detached five-second best-effort abort.
   - **Dual identity, one command surface.** A `uk_*` user API key acts as the
     real person and routes to `/v1/user/drive/*`; `bf_*` / `app_*` act as the bot
     and route to `/v1/bot/drive/*`. The routing is spec metadata, not code, so the

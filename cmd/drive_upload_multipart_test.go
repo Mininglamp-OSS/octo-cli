@@ -101,6 +101,42 @@ func multipartStoreHandler(
 	}
 }
 
+func TestIsCapabilityRequiredRequiresHTTP409AndCode(t *testing.T) {
+	tests := []struct {
+		name string
+		err  *output.ExitError
+		want bool
+	}{
+		{
+			name: "capability required conflict",
+			err:  &output.ExitError{HTTPStatus: http.StatusConflict, Code: "client_capability_required"},
+			want: true,
+		},
+		{
+			name: "same code on server error",
+			err:  &output.ExitError{HTTPStatus: http.StatusInternalServerError, Code: "client_capability_required"},
+		},
+		{
+			name: "other conflict code",
+			err:  &output.ExitError{HTTPStatus: http.StatusConflict, Code: "other_error"},
+		},
+		{
+			name: "transport failure",
+			err:  &output.ExitError{Type: "network", Code: "client_capability_required"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCapabilityRequired(tt.err); got != tt.want {
+				t.Fatalf("isCapabilityRequired(%+v) = %t, want %t", tt.err, got, tt.want)
+			}
+		})
+	}
+	if isCapabilityRequired(nil) {
+		t.Fatal("nil error must not trigger capability negotiation")
+	}
+}
+
 func TestDriveUploadFile_MultipartHappyPath(t *testing.T) {
 	const fileID = "18446744073709551615"
 	payload := make([]byte, 41*4)
@@ -123,7 +159,13 @@ func TestDriveUploadFile_MultipartHappyPath(t *testing.T) {
 		case r.URL.Path == "/v1/bot/drive/files/prepare-upload":
 			mu.Lock()
 			prepareHeaders = append(prepareHeaders, r.Header.Get(multipartCapabilityHeader))
+			call := len(prepareHeaders)
 			mu.Unlock()
+			if call == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":"client_capability_required","message":"multipart-v1 required","required_capability":"multipart-v1"}`))
+				return
+			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(multipartPrepareBody(fileID, 4, 41, 2)))
 		case strings.HasSuffix(r.URL.Path, "/upload/parts-presign"):
@@ -159,8 +201,8 @@ func TestDriveUploadFile_MultipartHappyPath(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(prepareHeaders) != 1 || prepareHeaders[0] != multipartCapabilityValue {
-		t.Fatalf("prepare capability headers = %#v, want [multipart-v1]", prepareHeaders)
+	if len(prepareHeaders) != 2 || prepareHeaders[0] != "" || prepareHeaders[1] != multipartCapabilityValue {
+		t.Fatalf("prepare capability headers = %#v, want [empty multipart-v1]", prepareHeaders)
 	}
 	if len(presignBatches) != 3 {
 		t.Fatalf("presign batches = %v, want 3 batches", presignBatches)
@@ -211,7 +253,7 @@ func TestDriveUploadFile_MultipartHappyPath(t *testing.T) {
 	}
 }
 
-func TestDriveUploadFile_SingleModesAlwaysDeclareCapability(t *testing.T) {
+func TestDriveUploadFile_SingleModesDoNotDeclareCapability(t *testing.T) {
 	for _, mode := range []string{"single", "", "future-mode"} {
 		name := mode
 		if name == "" {
@@ -247,8 +289,8 @@ func TestDriveUploadFile_SingleModesAlwaysDeclareCapability(t *testing.T) {
 			if err := env.run("drive", "upload", "file", src, "--space-id", "s1"); err != nil {
 				t.Fatalf("execute: %v", err)
 			}
-			if prepareHeader != multipartCapabilityValue {
-				t.Errorf("single/missing/unknown mode capability header = %q, want %q", prepareHeader, multipartCapabilityValue)
+			if prepareHeader != "" {
+				t.Errorf("single/missing/unknown mode sent capability header %q", prepareHeader)
 			}
 			if storeCalls != 1 || confirms != 1 {
 				t.Errorf("single path calls: store=%d confirm=%d, want 1/1", storeCalls, confirms)
@@ -268,8 +310,8 @@ func TestDriveUploadFile_MultipartPartRetryAndResign(t *testing.T) {
 		env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
-				if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-					t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+				if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+					t.Errorf("direct multipart prepare sent capability header %q", got)
 				}
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 3, 1)))
@@ -330,8 +372,8 @@ func TestDriveUploadFile_MultipartPartRetryAndResign(t *testing.T) {
 		env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
-				if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-					t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+				if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+					t.Errorf("direct multipart prepare sent capability header %q", got)
 				}
 				w.WriteHeader(http.StatusCreated)
 				_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 3, 1)))
@@ -394,8 +436,8 @@ func multipartAPIHandlerForCompletion(
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
-			if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-				t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+			if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+				t.Errorf("direct multipart prepare sent capability header %q", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 2, 1)))
@@ -474,12 +516,12 @@ func TestDriveUploadFile_CompleteRetrySemantics(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected completion to fail")
 		}
+		if got := completeCalls.Load(); got != 1 {
+			t.Fatalf("complete calls = %d, want 1 because a transport failure must not be retried", got)
+		}
 		ee := output.AsExitError(err)
 		if ee == nil || ee.Code != "RESULT_UNKNOWN" {
 			t.Fatalf("code = %v, want RESULT_UNKNOWN", err)
-		}
-		if got := completeCalls.Load(); got != 1 {
-			t.Errorf("complete calls = %d, want 1 because a transport failure must not be retried", got)
 		}
 		if aborts.Load() != 0 {
 			t.Error("an ambiguous completion must not be aborted")
@@ -487,7 +529,7 @@ func TestDriveUploadFile_CompleteRetrySemantics(t *testing.T) {
 	})
 }
 
-func TestDriveUploadFile_UnknownModeAlwaysFallsBackToSingle(t *testing.T) {
+func TestDriveUploadFile_UnknownModeFallsBackToSingle(t *testing.T) {
 	const payload = "single"
 	var prepareCalls, storeCalls, confirms int
 	var capabilityHeaders []string
@@ -517,11 +559,94 @@ func TestDriveUploadFile_UnknownModeAlwaysFallsBackToSingle(t *testing.T) {
 	if prepareCalls != 1 {
 		t.Fatalf("prepare calls = %d, want 1", prepareCalls)
 	}
-	if len(capabilityHeaders) != 1 || capabilityHeaders[0] != multipartCapabilityValue {
-		t.Errorf("prepare capability headers = %#v, want [multipart-v1]", capabilityHeaders)
+	if len(capabilityHeaders) != 1 || capabilityHeaders[0] != "" {
+		t.Errorf("prepare capability headers = %#v, want [empty]", capabilityHeaders)
 	}
 	if storeCalls != 1 || confirms != 1 {
 		t.Errorf("single fallback calls: store=%d confirm=%d, want 1/1", storeCalls, confirms)
+	}
+}
+
+func TestDriveUploadFile_UnknownModeAfterCapabilityNegotiationFallsBackToSingle(t *testing.T) {
+	const payload = "single"
+	var prepareCalls, storeCalls, confirms int
+	var capabilityHeaders []string
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			prepareCalls++
+			capabilityHeaders = append(capabilityHeaders, r.Header.Get(multipartCapabilityHeader))
+			if prepareCalls == 1 {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"error":"client_capability_required","message":"multipart-v1 required"}`))
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"file_id":7,"upload_mode":"future-mode","upload_url":"` + env.store.URL + `/single","content_type":"text/plain"}`))
+		case strings.HasSuffix(r.URL.Path, "/confirm-upload"):
+			confirms++
+			_, _ = w.Write([]byte(`{"id":7,"parent_id":0,"name":"single.bin"}`))
+		default:
+			t.Errorf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+	}, func(w http.ResponseWriter, r *http.Request) {
+		storeCalls++
+		w.WriteHeader(http.StatusOK)
+	})
+
+	src := writeMultipartTestFile(t, []byte(payload))
+	if err := env.run("drive", "upload", "file", src, "--space-id", "s1"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if prepareCalls != 2 {
+		t.Fatalf("prepare calls = %d, want 2", prepareCalls)
+	}
+	if len(capabilityHeaders) != 2 || capabilityHeaders[0] != "" || capabilityHeaders[1] != multipartCapabilityValue {
+		t.Errorf("prepare capability headers = %#v, want [empty multipart-v1]", capabilityHeaders)
+	}
+	if storeCalls != 1 || confirms != 1 {
+		t.Errorf("single fallback calls: store=%d confirm=%d, want 1/1", storeCalls, confirms)
+	}
+}
+
+func TestDriveUploadFile_UnknownModeWithoutUploadURLIsModeConflict(t *testing.T) {
+	var prepareCalls, cancelCalls int
+	var env *driveTestEnv
+	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+			prepareCalls++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"file_id":7,"upload_mode":"future-mode","content_type":"text/plain"}`))
+		case strings.HasSuffix(r.URL.Path, "/cancel-upload"):
+			cancelCalls++
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Errorf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+	}, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("no object PUT may run without a usable single upload_url")
+	})
+
+	src := writeMultipartTestFile(t, []byte("single"))
+	err := env.run("drive", "upload", "file", src, "--space-id", "s1")
+	if err == nil {
+		t.Fatal("expected upload mode conflict")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "UPLOAD_MODE_CONFLICT" {
+		t.Fatalf("code = %v, want UPLOAD_MODE_CONFLICT", err)
+	}
+	if !strings.Contains(ee.Message, "neither single nor multipart") ||
+		!strings.Contains(ee.Message, "did not include upload_url") {
+		t.Errorf("message = %q, want the unknown-mode/no-upload_url explanation", ee.Message)
+	}
+	if prepareCalls != 1 {
+		t.Errorf("prepare calls = %d, want 1", prepareCalls)
+	}
+	if cancelCalls != 1 {
+		t.Errorf("cancel calls = %d, want 1 for the pending row", cancelCalls)
 	}
 }
 
@@ -539,8 +664,8 @@ func TestDriveUploadFile_DirectMultipartResponseUsesMultipartPath(t *testing.T) 
 			mu.Lock()
 			prepareCalls++
 			mu.Unlock()
-			if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-				t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+			if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+				t.Errorf("direct multipart prepare sent capability header %q", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 2, 1)))
@@ -640,8 +765,8 @@ func TestDriveUploadFile_InterruptedMultipartAbortsWithDetachedContext(t *testin
 	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
-			if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-				t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+			if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+				t.Errorf("direct multipart prepare sent capability header %q", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 2, 1)))
@@ -729,8 +854,8 @@ func TestDriveUploadFile_MultipartErrorDoesNotLeakPartURL(t *testing.T) {
 	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
-			if got := r.Header.Get(multipartCapabilityHeader); got != multipartCapabilityValue {
-				t.Errorf("prepare capability header = %q, want %q", got, multipartCapabilityValue)
+			if got := r.Header.Get(multipartCapabilityHeader); got != "" {
+				t.Errorf("direct multipart prepare sent capability header %q", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(multipartPrepareBody("7", 4, 2, 1)))

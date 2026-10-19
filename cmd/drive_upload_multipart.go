@@ -34,9 +34,11 @@ const (
 // while the delays still widen and let a brief outage recover.
 const multipartRetryBaseDelay = 50 * time.Millisecond
 
-// prepareDriveUploadRequest declares multipart-v1 on every prepare. The header
-// is safe for old servers (unknown headers are ignored) and lets current servers
-// select multipart directly without an exploratory failed request.
+// prepareDriveUploadRequest performs the capability handshake without guessing
+// the mode locally. The first request is byte-compatible with the legacy
+// single-part prepare. Only a client_capability_required refusal causes the
+// second request to declare multipart-v1; that second reply is the one effective
+// snapshot used for the rest of the command.
 func prepareDriveUploadRequest(
 	ctx context.Context,
 	cli *client.Client,
@@ -51,15 +53,30 @@ func prepareDriveUploadRequest(
 		Method:               http.MethodPost,
 		Path:                 mount + "/files/prepare-upload",
 		Body:                 body,
-		Headers:              map[string]string{multipartCapabilityHeader: multipartCapabilityValue},
 		ResponseSecretFields: responseSecretFields,
 		SuppressSpaceHeader:  true,
 	}
 	raw, err := cli.Do(ctx, request)
 	if err != nil {
+		if !isCapabilityRequired(err) {
+			return nil, enrichFileTooLargeError(err, size)
+		}
+		request.Headers = map[string]string{
+			multipartCapabilityHeader: multipartCapabilityValue,
+		}
+		raw, err = cli.Do(ctx, request)
+	}
+	if err != nil {
 		return nil, enrichFileTooLargeError(err, size)
 	}
 	return raw, nil
+}
+
+func isCapabilityRequired(err error) bool {
+	ee := output.AsExitError(err)
+	return ee != nil &&
+		ee.HTTPStatus == http.StatusConflict &&
+		ee.Code == "client_capability_required"
 }
 
 // enrichFileTooLargeError turns the backend's top-level 413 fields into a

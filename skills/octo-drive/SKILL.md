@@ -171,7 +171,7 @@ Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope
 
 `drive upload file` runs prepare → upload → complete/confirm. The upload goes out on a separate HTTP client that carries **no** Octo credential or space header — the presigned URL is its own authorisation.
 
-The server owns mode selection. A prepare response with `upload_mode:"multipart"` uses the multipart scheduler; `"single"`, a missing value, or an unknown value uses the legacy single-part path. For zero-regression compatibility, the first prepare request does not declare a capability. If the server answers `409 client_capability_required`, the command retries once with `X-Drive-Upload-Capabilities: multipart-v1` and schedules from that effective prepare snapshot. Low-level callers can send the header directly with `drive upload prepare --upload-capabilities multipart-v1`.
+The server owns mode selection. A prepare response with `upload_mode:"multipart"` uses the multipart scheduler; `"single"`, a missing value, or an unknown value uses the legacy single-part path. For zero-regression compatibility, the first prepare request does not declare a capability. If the server answers `409 client_capability_required`, the command retries once with `X-Drive-Upload-Capabilities: multipart-v1` and schedules from that effective prepare snapshot. A first response that directly selects multipart also schedules without a third prepare. An unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT`, with the pending row cancelled. Low-level callers can send the header directly with `drive upload prepare --upload-capabilities multipart-v1`.
 
 The multipart path:
 
@@ -205,7 +205,7 @@ For single-part uploads, a failure after the pending row exists cancels it. The 
 
 If `pending_file` is not `cancelled`, run `octo-cli drive upload cancel <file-id>` yourself.
 
-Completion is intentionally cautious about ambiguous outcomes. Network failures on `upload complete` can be retried, but `RESULT_UNKNOWN` means the request may already have committed: the CLI does not retry or abort that session. Inspect the file's actual state before starting another upload.
+Completion is intentionally cautious about ambiguous outcomes. An explicit HTTP 5xx response is a definite, idempotent failure and gets a bounded retry. A connection interruption or timeout may mean the request already reached the server: that path sends exactly one request and returns `RESULT_UNKNOWN`; the CLI does not retry or abort the session. Inspect the file's actual state before starting another upload.
 
 A `413 file_too_large` from prepare reports the declared size and the server's effective limit; no upload bytes are sent and no pending multipart session is created.
 

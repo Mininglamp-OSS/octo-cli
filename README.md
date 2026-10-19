@@ -129,7 +129,9 @@ octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
 
 # Drive — the server chooses single-part or multipart upload; the same command
-# handles both. Multipart progress is written to stderr, never to the JSON stdout.
+# handles both. The first prepare is legacy-compatible, a 409
+# client_capability_required retries once with multipart-v1, and a direct
+# multipart response still uses the scheduler. Multipart progress goes to stderr.
 octo-cli drive upload file ./large.bin --space-id <drive-space-id>
 
 # Agent Mail — policy-aware send; the server may accept it or save a Draft
