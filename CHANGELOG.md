@@ -105,19 +105,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields, task lifecycle status including `in_review`, and a daemon-oriented
   task credential policy. The shared OpenAPI registry now resolves referenced
   parameters, request bodies, responses, nullable unions, and composed schemas.
-- **`octo-cli drive` domain** (46 commands) — network drive over octo-drive:
+- **`octo-cli drive` domain** (49 commands) — network drive over octo-drive:
   spaces and members, folder/file tree and `browse`, full-text `search`, blob registration,
-  two-phase upload and signed download, online-document mounts, share links,
-  invites, and IM-attachment transfer. 40 leaves are generated from the new
-  `drive.json` spec (43 operations); six are hand-written because they are not a
+  single-part and multipart upload plus signed download, online-document mounts,
+  share links, invites, and IM-attachment transfer. 43 leaves are generated from
+  the `drive.json` spec (46 operations); six are hand-written because they are not a
   single request or take an argument shape the engine cannot express:
-  `upload file` (prepare → presigned PUT → confirm, with best-effort cancel on
-  failure), `download file` and `share download` (signed URL → atomic local
+  `upload file` (prepare → single PUT/confirm or multipart parts → complete,
+  with best-effort cancel/abort on incomplete failure), `download file` and
+  `share download` (signed URL → atomic local
   write), `share create` (branches on blob vs mounted document),
   `share blob-create` (positional file id), and `share access`. Ships with the
   `octo-drive` Skill. There is deliberately no `drive org` subtree — the
   product's member picker is a frontend filter over the space roster, not a
   backend search.
+  - **Server-owned multipart scheduling.** `upload file` sends one prepare
+    request that always declares `X-Drive-Upload-Capabilities: multipart-v1`;
+    the server ignores it below the multipart threshold and otherwise returns a
+    complete multipart snapshot. `single`, missing, and unknown `upload_mode`
+    values keep the legacy path; unknown without `upload_url` is
+    `UPLOAD_MODE_CONFLICT`. A `multipart` response enters the scheduler directly.
+    Multipart streams parts with
+    `io.NewSectionReader`, respects `max_concurrent_parts`, groups presign
+    requests at 20 parts or fewer, retries individual parts, re-signs only a
+    rejected 403 part, reads each ETag, and writes progress to stderr. Completion
+    retries explicit HTTP 5xx responses a bounded number of times, sends a
+    connection interruption or timeout only once, and treats `RESULT_UNKNOWN` as
+    ambiguous by neither retrying nor aborting it. Incomplete sessions get a
+    detached five-second best-effort abort.
   - **Dual identity, one command surface.** A `uk_*` user API key acts as the
     real person and routes to `/v1/user/drive/*`; `bf_*` / `app_*` act as the bot
     and route to `/v1/bot/drive/*`. The routing is spec metadata, not code, so the

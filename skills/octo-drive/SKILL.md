@@ -10,7 +10,7 @@ metadata:
 
 # octo-drive — network drive operations
 
-45 commands over one backend. Everything is scoped to a **drive space**: either your personal space or a shared one you are a member of.
+49 commands over one backend. Everything is scoped to a **drive space**: either your personal space or a shared one you are a member of.
 
 ## 1. Credentials — nothing drive-specific
 
@@ -169,7 +169,35 @@ Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope
 
 ## 4. Upload and download in detail
 
-`drive upload file` runs prepare → PUT to object storage → confirm. The PUT goes out on a separate HTTP client that carries **no** Octo credential — the presigned URL is its own authorisation. If anything fails after the pending row exists, the CLI cancels it and the error reports the `file_id` plus the cancel outcome:
+`drive upload file` runs prepare → upload → complete/confirm. The upload goes out on a separate HTTP client that carries **no** Octo credential or space header — the presigned URL is its own authorisation.
+
+The server owns mode selection. `drive upload file` sends exactly one prepare request and always declares `X-Drive-Upload-Capabilities: multipart-v1`; the server ignores the header below its multipart threshold and returns a multipart snapshot when scheduling is required. There is no probe request or 409 retry. A multipart response enters the scheduler directly; `"single"`, a missing value, or an unknown value uses the legacy single-part path. An unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT`, with the pending row cancelled. Low-level callers can also send the header with `drive upload prepare --upload-capabilities multipart-v1`.
+
+The multipart path:
+
+- treats `part_size` as bytes, matching the backend response;
+- opens the local file once, then streams every part with exact offsets and `Content-Length` instead of reading the file into memory;
+- signs all parts in batches of at most 20, covering `1..part_count` without gaps;
+- uploads with at most the server's `max_concurrent_parts` workers;
+- retries a failed part up to three times; `403` re-signs only that part, while other terminal 4xx responses stop the scheduler;
+- reads each part's `ETag` and completes with `{upload_id, parts:[{part_number, etag}]}`.
+
+Progress goes to stderr only. `--dry-run` describes the prepare request and local file, but fetches no URL, sends no bytes, and creates no pending row.
+
+Both identities use the same command surface; only the credential and backend mount differ:
+
+```bash
+OCTO_TOKEN="$BOT_TOKEN" octo-cli drive upload file ./large.bin --space-id "$SPACE"
+OCTO_TOKEN="$USER_API_KEY" octo-cli drive upload file ./large.bin --space-id "$SPACE"
+```
+
+If the attempt fails before completion, the CLI best-effort aborts the incomplete multipart session using a detached five-second timeout. It never aborts after a successful complete. If cleanup also fails, the message includes a recovery command:
+
+```bash
+octo-cli drive upload abort <file-id> --data '{"upload_id":"<upload-id>"}'
+```
+
+For single-part uploads, a failure after the pending row exists cancels it. The error reports the `file_id` plus the cancel outcome:
 
 ```json
 {"ok":false,"error":{"code":"UPLOAD_FAILED","detail":{"file_id":"42","pending_file":"cancelled"}}}
@@ -177,9 +205,13 @@ Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope
 
 If `pending_file` is not `cancelled`, run `octo-cli drive upload cancel <file-id>` yourself.
 
+Completion is intentionally cautious about ambiguous outcomes. An explicit HTTP 5xx response is a definite, idempotent failure and gets a bounded retry. A connection interruption or timeout may mean the request already reached the server: that path sends exactly one request and returns `RESULT_UNKNOWN`; the CLI does not retry or abort the session. Inspect the file's actual state before starting another upload.
+
+A `413 file_too_large` from prepare reports the declared size and the server's effective limit; no upload bytes are sent and no pending multipart session is created.
+
 `drive download file` and `drive share download` write to a randomly-named partial file next to the destination, fsync, then rename — an interrupted transfer never leaves a truncated file, and a pre-created symlink at a guessable path cannot redirect the write. **An existing destination is refused** unless you pass `--overwrite`. The result carries a `sha256` you can verify.
 
-The low-level steps stay available (`upload prepare|confirm|cancel`, `download url`) if you need to drive the transfer yourself.
+The low-level steps stay available (`upload prepare|parts-presign|complete|abort|confirm|cancel`, `download url`) if you need to drive the transfer yourself.
 
 `drive blob create` is a different thing and is rarely what you want: it registers an object **already** in storage rather than uploading one. The backend verifies it — an `--object-path` storage does not hold is `invalid_argument`, and a `--size` that conflicts with the stored object is rejected (`--size 0` for a non-empty object included) — so it can no longer produce a row that lists fine and 404s on download. If storage is unreachable the probe is inconclusive and you get a 500 to retry, not `invalid_argument`. It still persists no download URL, so `share download` on such a row answers `not_found`. Use `drive upload file` unless the bytes are already in the bucket.
 
@@ -222,6 +254,10 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 | `INVALID_PROXY` | validation / 2 | the proxy value in this environment is not a usable URL. The value is never echoed, because a proxy URL often carries credentials |
 | `PARTIAL_FILE_REPLACED` | validation / 2 | something replaced the part file or the destination mid-download; nothing was published, re-run in a directory only you can write |
 | `UPLOAD_FAILED` | api_error / 1 | the presigned PUT was rejected or the confirm failed; the detail carries `file_id` and whether the pending row was cancelled |
+| `file_too_large` | validation / 2 | the declared size exceeds the server's effective limit; the message includes that limit. Do not retry unchanged |
+| `client_capability_required` | validation / 2 | the server requires a declared upload capability; `upload file` always declares it on its single prepare request. Low-level prepare can pass `--upload-capabilities multipart-v1` |
+| `upload_session_not_active` | validation / 2 | the multipart session already completed, expired, or was aborted; inspect the file state instead of retrying blindly |
+| `RESULT_UNKNOWN` | network / 1 | completion may have succeeded. Inspect the file before retrying; the CLI deliberately does not abort or replay this request |
 | `INVALID_FLAG` | validation / 2 | a positional id starting with `-` was parsed as a flag; pass it as the named flag or after `--` |
 
 ## 7. Destructive commands
@@ -246,7 +282,7 @@ drive member      list | add | set-role | remove
 drive folder      create | list | rename | move | delete
 drive file        get | move | copy | rename
 drive blob        create | get | list | delete
-drive upload      file | prepare | confirm | cancel
+drive upload      file | prepare | parts-presign | complete | abort | confirm | cancel
 drive download    file | url
 drive doc         mount | unmount | list | candidates
 drive share       create | blob-create | list | revoke | access | download

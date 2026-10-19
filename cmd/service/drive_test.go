@@ -395,6 +395,24 @@ func TestDrive_RequestShapes(t *testing.T) {
 			wantBody: `{"content_type":"application/pdf","name":"a.pdf","size":1048576,"space_id":"shared:s1"}`,
 		},
 		{
+			name:     "upload parts presign sends upload id and part numbers",
+			args:     []string{"drive", "upload", "parts-presign", "18446744073709551615", "--data", `{"upload_id":"upload-1","part_numbers":[1,20,10000]}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/parts-presign",
+			wantBody: `{"part_numbers":[1,20,10000],"upload_id":"upload-1"}`,
+		},
+		{
+			name:     "upload complete sends ascending part etags",
+			args:     []string{"drive", "upload", "complete", "18446744073709551615", "--data", `{"upload_id":"upload-1","parts":[{"part_number":1,"etag":"etag-1"},{"part_number":2,"etag":"etag-2"}]}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/complete",
+			wantBody: `{"parts":[{"etag":"etag-1","part_number":1},{"etag":"etag-2","part_number":2}],"upload_id":"upload-1"}`,
+		},
+		{
+			name:     "upload abort sends only upload id",
+			args:     []string{"drive", "upload", "abort", "18446744073709551615", "--data", `{"upload_id":"upload-1"}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/abort",
+			wantBody: `{"upload_id":"upload-1"}`,
+		},
+		{
 			name:     "im-transfer keeps the message id a string",
 			args:     []string{"drive", "im-transfer", "create", "--im-group-no", "g1", "--im-channel-type", "2", "--im-msg-id", "9007199254740993", "--target-space-id", "shared:s1"},
 			wantPath: "/v1/bot/drive/blobs/transfer-from-im",

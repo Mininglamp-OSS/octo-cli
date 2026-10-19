@@ -208,7 +208,7 @@ Notes:
 
 ---
 
-## Domain 8: drive (octo-drive, 45 commands)
+## Domain 8: drive (octo-drive, 49 commands)
 
 All three token kinds are accepted. The mount is chosen from the kind, so the
 command surface is identical either way: `uk_*` → `/v1/user/drive/*` (acts as the
@@ -226,51 +226,60 @@ JavaScript-style parser into a different file's id.
 
 | # | Command | Method | Path | Risk |
 |---|---------|--------|------|------|
-| 51 | `octo-cli drive space create` | POST | {mount}/spaces | write |
-| 52 | `octo-cli drive space list` | GET | {mount}/spaces | read |
-| 53 | `octo-cli drive space ensure-personal` | POST | {mount}/spaces/personal | write (idempotent) |
-| 54 | `octo-cli drive space get <space-id>` | GET | {mount}/spaces/:id | read |
-| 55 | `octo-cli drive space rename <space-id>` | PUT | {mount}/spaces/:id | write |
-| 56 | `octo-cli drive space delete <space-id>` | DELETE | {mount}/spaces/:id | high-risk-write |
-| 57 | `octo-cli drive member list <space-id>` | GET | {mount}/spaces/:id/members | read |
-| 58 | `octo-cli drive member add <space-id>` | POST | {mount}/spaces/:id/members | write |
-| 59 | `octo-cli drive member set-role <space-id> <uid>` | PUT | {mount}/spaces/:id/members/:uid | write |
-| 60 | `octo-cli drive member remove <space-id> <uid>` | DELETE | {mount}/spaces/:id/members/:uid | high-risk-write |
-| 61 | `octo-cli drive browse` | GET | {mount}/browse | read |
-| 62 | `octo-cli drive folder create` | POST | {mount}/folders | write |
-| 63 | `octo-cli drive folder list <space-id> <parent-id>` | GET | {mount}/folders/:space_id/:parent_id | read |
-| 64 | `octo-cli drive folder rename <folder-id>` | PATCH | {mount}/folders/:id/rename | write |
-| 65 | `octo-cli drive folder move <folder-id>` | PATCH | {mount}/folders/:id/move | write |
-| 66 | `octo-cli drive folder delete <folder-id>` | DELETE | {mount}/folders/:id | high-risk-write |
-| 67 | `octo-cli drive file get <file-id>` | GET | {mount}/files/:id | read |
-| 68 | `octo-cli drive file move <file-id>` | POST | {mount}/files/:id/move | write |
-| 69 | `octo-cli drive file copy <file-id>` | POST | {mount}/files/:id/copy | write |
-| 70 | `octo-cli drive file rename <file-id>` | POST | {mount}/files/:id/rename | write |
-| 71 | `octo-cli drive blob create` | POST | {mount}/blobs | write |
-| 72 | `octo-cli drive blob get <blob-id>` | GET | {mount}/blobs/:id | read |
-| 73 | `octo-cli drive blob list` | GET | {mount}/blobs | read |
-| 74 | `octo-cli drive blob delete <blob-id>` | DELETE | {mount}/blobs/:id | high-risk-write |
-| 75 | `octo-cli drive upload prepare` | POST | {mount}/files/prepare-upload | write |
-| 76 | `octo-cli drive upload confirm <file-id>` | POST | {mount}/files/:id/confirm-upload | write |
-| 77 | `octo-cli drive upload cancel <file-id>` | POST | {mount}/files/:id/cancel-upload | write (idempotent) |
-| 78 | `octo-cli drive upload file <local-path>` | — | composite: prepare → PUT → confirm | write |
-| 79 | `octo-cli drive download url <file-id>` | GET | {mount}/files/:id/download | read |
-| 80 | `octo-cli drive download file <file-id>` | — | composite: download-url → object GET | read + local write |
-| 81 | `octo-cli drive doc mount` | POST | {mount}/docs | write |
-| 82 | `octo-cli drive doc unmount <file-id>` | DELETE | {mount}/docs/:id | high-risk-write |
-| 83 | `octo-cli drive doc list` | GET | {mount}/docs | read |
-| 84 | `octo-cli drive doc candidates` | GET | {mount}/mountable-docs | read |
-| 85 | `octo-cli drive share create <file-id>` | — | composite: file get → blob token or doc link | write |
-| 86 | `octo-cli drive share blob-create <file-id>` | POST | {mount}/shares | write |
-| 87 | `octo-cli drive share list` | GET | {mount}/shares | read |
-| 88 | `octo-cli drive share revoke <share-id>` | DELETE | {mount}/shares/:id | high-risk-write |
-| 89 | `octo-cli drive share access <share-url>` | POST | {mount}/shares/:token/access | read |
-| 90 | `octo-cli drive share download <share-url>` | POST | {mount}/shares/:token/download | read + local write |
-| 91 | `octo-cli drive invite create <space-id>` | POST | {mount}/spaces/:id/invites | write |
-| 92 | `octo-cli drive invite list <space-id>` | GET | {mount}/spaces/:id/invites | read |
-| 93 | `octo-cli drive invite revoke <space-id> <invite-id>` | DELETE | {mount}/spaces/:id/invites/:invite_id | high-risk-write |
-| 94 | `octo-cli drive invite accept <invite-token>` | POST | {mount}/invites/:token/accept | write (idempotent) |
-| 95 | `octo-cli drive im-transfer create` | POST | {mount}/blobs/transfer-from-im | write (idempotent) |
+| 51 | `octo-cli drive search` | POST | {mount}/search | read |
+| 52 | `octo-cli drive space create` | POST | {mount}/spaces | write |
+| 53 | `octo-cli drive space list` | GET | {mount}/spaces | read |
+| 54 | `octo-cli drive space ensure-personal` | POST | {mount}/spaces/personal | write (idempotent) |
+| 55 | `octo-cli drive space get <space-id>` | GET | {mount}/spaces/:id | read |
+| 56 | `octo-cli drive space rename <space-id>` | PUT | {mount}/spaces/:id | write |
+| 57 | `octo-cli drive space delete <space-id>` | DELETE | {mount}/spaces/:id | high-risk-write |
+| 58 | `octo-cli drive member list <space-id>` | GET | {mount}/spaces/:id/members | read |
+| 59 | `octo-cli drive member add <space-id>` | POST | {mount}/spaces/:id/members | write |
+| 60 | `octo-cli drive member set-role <space-id> <uid>` | PUT | {mount}/spaces/:id/members/:uid | write |
+| 61 | `octo-cli drive member remove <space-id> <uid>` | DELETE | {mount}/spaces/:id/members/:uid | high-risk-write |
+| 62 | `octo-cli drive browse` | GET | {mount}/browse | read |
+| 63 | `octo-cli drive folder create` | POST | {mount}/folders | write |
+| 64 | `octo-cli drive folder list <space-id> <parent-id>` | GET | {mount}/folders/:space_id/:parent_id | read |
+| 65 | `octo-cli drive folder rename <folder-id>` | PATCH | {mount}/folders/:id/rename | write |
+| 66 | `octo-cli drive folder move <folder-id>` | PATCH | {mount}/folders/:id/move | write |
+| 67 | `octo-cli drive folder delete <folder-id>` | DELETE | {mount}/folders/:id | high-risk-write |
+| 68 | `octo-cli drive file get <file-id>` | GET | {mount}/files/:id | read |
+| 69 | `octo-cli drive file move <file-id>` | POST | {mount}/files/:id/move | write |
+| 70 | `octo-cli drive file copy <file-id>` | POST | {mount}/files/:id/copy | write |
+| 71 | `octo-cli drive file rename <file-id>` | POST | {mount}/files/:id/rename | write |
+| 72 | `octo-cli drive blob create` | POST | {mount}/blobs | write |
+| 73 | `octo-cli drive blob get <blob-id>` | GET | {mount}/blobs/:id | read |
+| 74 | `octo-cli drive blob list` | GET | {mount}/blobs | read |
+| 75 | `octo-cli drive blob delete <blob-id>` | DELETE | {mount}/blobs/:id | high-risk-write |
+| 76 | `octo-cli drive upload prepare` | POST | {mount}/files/prepare-upload | write |
+| 77 | `octo-cli drive upload parts-presign <file-id>` | POST | {mount}/files/:id/upload/parts-presign | write |
+| 78 | `octo-cli drive upload complete <file-id>` | POST | {mount}/files/:id/upload/complete | write (idempotent) |
+| 79 | `octo-cli drive upload abort <file-id>` | POST | {mount}/files/:id/upload/abort | write (idempotent) |
+| 80 | `octo-cli drive upload confirm <file-id>` | POST | {mount}/files/:id/confirm-upload | write |
+| 81 | `octo-cli drive upload cancel <file-id>` | POST | {mount}/files/:id/cancel-upload | write (idempotent) |
+| 82 | `octo-cli drive upload file <local-path>` | — | composite: prepare → single PUT/confirm or multipart parts → complete | write |
+| 83 | `octo-cli drive download url <file-id>` | GET | {mount}/files/:id/download | read |
+| 84 | `octo-cli drive download file <file-id>` | — | composite: download-url → object GET | read + local write |
+| 85 | `octo-cli drive doc mount` | POST | {mount}/docs | write |
+| 86 | `octo-cli drive doc unmount <file-id>` | DELETE | {mount}/docs/:id | high-risk-write |
+| 87 | `octo-cli drive doc list` | GET | {mount}/docs | read |
+| 88 | `octo-cli drive doc candidates` | GET | {mount}/mountable-docs | read |
+| 89 | `octo-cli drive share create <file-id>` | — | composite: file get → blob token or doc link | write |
+| 90 | `octo-cli drive share blob-create <file-id>` | POST | {mount}/shares | write |
+| 91 | `octo-cli drive share list` | GET | {mount}/shares | read |
+| 92 | `octo-cli drive share revoke <share-id>` | DELETE | {mount}/shares/:id | high-risk-write |
+| 93 | `octo-cli drive share access <share-url>` | POST | {mount}/shares/:token/access | read |
+| 94 | `octo-cli drive share download <share-url>` | POST | {mount}/shares/:token/download | read + local write |
+| 95 | `octo-cli drive invite create <space-id>` | POST | {mount}/spaces/:id/invites | write |
+| 96 | `octo-cli drive invite list <space-id>` | GET | {mount}/spaces/:id/invites | read |
+| 97 | `octo-cli drive invite revoke <space-id> <invite-id>` | DELETE | {mount}/spaces/:id/invites/:invite_id | high-risk-write |
+| 98 | `octo-cli drive invite accept <invite-token>` | POST | {mount}/invites/:token/accept | write (idempotent) |
+| 99 | `octo-cli drive im-transfer create` | POST | {mount}/blobs/transfer-from-im | write (idempotent) |
+
+The domain has 46 registry operations and 49 command-tree leaves: 43 generated
+leaves plus six hand-written composites. Three composites (`upload file`,
+`download file`, `share create`) are composite-only; the other three replace
+generated leaves while retaining their spec operations for schema discovery.
 
 Flags:
 - space create / rename: --name
@@ -282,8 +291,11 @@ Flags:
 - file move: --parent-id; file copy: --parent-id, --name; file rename: --name
 - blob create: --space-id, --parent-id, --name, --object-path, --size, --content-type, --source (user-mount is Type-1 only). The backend **verifies the object**: an `--object-path` storage does not hold is `invalid_argument`, and a `--size` that conflicts with the stored object is rejected (including `--size 0` for a non-empty object — 0 is a stated count, not an omission). An inconclusive probe (storage unreachable/timeout) surfaces as a 500, not `invalid_argument`. A row created this way carries no persisted download URL, so `share download` on it is `not_found` — use `upload file` for a shareable blob.
 - blob list: --space-id (required), --parent-id
-- upload prepare: --space-id, --parent-id, --name, --size, --content-type; upload confirm: --actual-size
-- upload file: --space-id (required), --parent-id, --name, --content-type
+- upload prepare: --space-id, --parent-id, --name, --size, --content-type, --upload-capabilities; upload confirm: --actual-size; parts-presign: --data (upload_id + ≤20 part_numbers); complete: --data (upload_id + part_number/etag array); abort: --data (upload_id)
+- upload file: --space-id (required), --parent-id, --name, --content-type. The server chooses single or multipart; multipart follows `part_size` in bytes, streams each part with `io.NewSectionReader`, caps concurrency at `max_concurrent_parts`, batches presign requests at ≤20 parts, and retries an individual part up to three times. A 403 re-signs only that part; terminal 4xx responses stop scheduling.
+- upload file sends exactly one prepare request and always declares `X-Drive-Upload-Capabilities: multipart-v1`. The server ignores the header below its multipart threshold and otherwise returns a complete multipart snapshot; the CLI does not probe with a second prepare. A multipart response enters the scheduler directly. Missing, `single`, and unknown `upload_mode` values preserve the legacy single-part path; an unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT` and is cancelled.
+- multipart complete treats an explicit HTTP 5xx response as a definite, idempotent failure and retries it a bounded number of times. A connection interruption or timeout has no definite HTTP status: it is sent once, returns `RESULT_UNKNOWN`, and is neither retried nor aborted because the server may already have committed the file. Incomplete sessions are aborted with a detached five-second cleanup context; a successful complete never aborts.
+- upload file reports progress on stderr. A 413 `file_too_large` is enriched with the server's effective limit and sends no upload bytes or pending session.
 - download file: --output/-o (required), --overwrite
 - doc mount: --space-id, --parent-id, --doc-id, --source (user-mount|docs-sync; no --doc-title: the title and doc_space_id are read server-side from the document metadata)
 - doc list: --space-id (required), --parent-id; doc candidates: --space-id (required), --page, --page-size
@@ -509,11 +521,11 @@ Notes:
 | file | 4 | 4 | 0 | 4 | 0 |
 | bot | 6 | 6 | 0 | 6 | 0 |
 | event | 2 | 2 | 0 | 2 | 0 |
-| drive | 45 | 45 (needs a resolvable space) | 0 | 45 | 0 |
-| **Total** | **101** | **83** | **18** | **101** | **0** |
+| drive | 49 | 49 (needs a resolvable space) | 0 | 49 | 0 |
+| **Total** | **105** | **87** | **18** | **105** | **0** |
 
-- **App Bot**: 83/101 commands available (82%)
-- **User Bot**: 101/101 commands available (100%)
+- **App Bot**: 87/105 commands available (83%)
+- **User Bot**: 105/105 commands available (100%)
 - **App Bot blocked**: group write (4) + thread all (8) + message search (6) = 18 commands
 - **drive** additionally accepts a `uk_*` user API key, which acts as the real
   person rather than a bot. An `app_*` token reaches drive only if the server can
