@@ -1479,6 +1479,7 @@ func TestTruthy(t *testing.T) {
 	}{
 		{true, true},
 		{"true", true},
+		{"TRUE", true},
 		{false, false},
 		{"false", false},
 		{"", false},

@@ -1041,11 +1041,14 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 			}
 			return json.Marshal(env)
 		}
-		return nil, output.ErrAPI(
+		redirectErr := output.ErrAPI(
 			fmt.Sprintf("HTTP_%d", resp.StatusCode),
 			fmt.Sprintf("unexpected redirect to %q", redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, req.ResponseSecretFields)),
 			"",
 		)
+		redirectErr.HTTPStatus = resp.StatusCode
+		redirectErr.ResponseReceived = true
+		return nil, redirectErr
 	}
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

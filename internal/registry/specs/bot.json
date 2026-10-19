@@ -157,7 +157,7 @@
                 "required": ["channel_id", "channel_type"],
                 "properties": {
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer" },
+                  "channel_type": { "type": "integer", "enum": [1, 2, 5] },
                   "on_behalf_of": { "type": "string", "description": "OBO: send the typing indicator as this user persona" }
                 }
               }
