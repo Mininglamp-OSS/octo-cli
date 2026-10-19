@@ -90,13 +90,14 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		ResponseUnwrap:       d.ResponseUnwrap,
 		UnwrapRequiredFields: d.UnwrapRequiredFields,
 	}
+	applyMCPWriteSafety(&req, f)
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
 	if d.Multipart {
-		raw, ct, err := buildMultipartBody(cobraCmd, rt)
+		raw, ct, err := buildMultipartBody(cobraCmd, rt, f.MultipartFile)
 		if err != nil {
 			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 			return err
@@ -114,6 +115,15 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	}
 
 	return emitOnce(ctx, f, rt, &req)
+}
+
+// applyMCPWriteSafety keeps the ordinary CLI retry policy intact while MCP
+// marks an unsafe write as one-shot with an explicit ambiguous-outcome result.
+func applyMCPWriteSafety(req *client.Request, f *cmdutil.Factory) {
+	if f.MCPUnsafeWrite {
+		req.DisableRetry = true
+		req.UnknownOutcomeOnNetworkFailure = true
+	}
 }
 
 // buildQueryAndHeaders assembles both parameter positions that come from flags.

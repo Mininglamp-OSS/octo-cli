@@ -237,6 +237,23 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"expert_team_expert", "expert_skill", "expert_connector"},
 		why:  "octo-marketplace upstream/main@50a1be3 reviewSubmitRequest reuses relationRequest and SubmitReview maps the same relation-type matrix as plugin.upsert"},
 
+	// Bot message channels deliberately match the public DM/group/thread contract.
+	{op: "bot.typing", in: "body", field: "channel_type",
+		want: []string{"1", "2", "5"},
+		why:  "common.ChannelTypePerson/Group/CommunityTopic define 1/2/5; the approved local octo-server hotfix on deployed 4a5bcb8 adds this allowlist to Bot messaging handlers. This deliberately narrows the previously unchecked uint8 field; search APIs are separate."},
+	{op: "message.send", in: "body", field: "channel_type",
+		want: []string{"1", "2", "5"},
+		why:  "common.ChannelTypePerson/Group/CommunityTopic define 1/2/5; the approved local octo-server hotfix on deployed 4a5bcb8 adds this allowlist to Bot messaging handlers. This deliberately narrows the previously unchecked uint8 field; search APIs are separate."},
+	{op: "message.sync", in: "body", field: "channel_type",
+		want: []string{"1", "2", "5"},
+		why:  "common.ChannelTypePerson/Group/CommunityTopic define 1/2/5; the approved local octo-server hotfix on deployed 4a5bcb8 adds this allowlist to Bot messaging handlers. This deliberately narrows the previously unchecked uint8 field; search APIs are separate."},
+	{op: "message.edit", in: "body", field: "channel_type",
+		want: []string{"1", "2", "5"},
+		why:  "common.ChannelTypePerson/Group/CommunityTopic define 1/2/5; the approved local octo-server hotfix on deployed 4a5bcb8 adds this allowlist to Bot messaging handlers. This deliberately narrows the previously unchecked uint8 field; search APIs are separate."},
+	{op: "message.read-receipt", in: "body", field: "channel_type",
+		want: []string{"1", "2", "5"},
+		why:  "common.ChannelTypePerson/Group/CommunityTopic define 1/2/5; the approved local octo-server hotfix on deployed 4a5bcb8 adds this allowlist to Bot messaging handlers. This deliberately narrows the previously unchecked uint8 field; search APIs are separate."},
+
 	// --- message ---
 	{op: "message.search", in: "body", field: "sort",
 		want: []string{"time_desc", "time_asc", "relevance"},
