@@ -677,6 +677,45 @@ func TestDriveUploadFile_CompleteErrorDoesNotLeakSignedURL(t *testing.T) {
 	}
 }
 
+func TestMultipartAbortRecoveryHintDoesNotInterpolateServerUploadID(t *testing.T) {
+	tests := []struct {
+		name     string
+		uploadID string
+		wantNote string
+	}{
+		{
+			name:     "safe token",
+			uploadID: "upload-1",
+			wantNote: "Copy file_id and upload_id",
+		},
+		{
+			name:     "double quote",
+			uploadID: `upload"-quoted`,
+			wantNote: "contains quoting characters",
+		},
+		{
+			name:     "single quote",
+			uploadID: `upload'-quoted`,
+			wantNote: "contains quoting characters",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hint := multipartAbortRecoveryHint(tt.uploadID)
+			t.Logf("upload_id=%q hint=%q", tt.uploadID, hint)
+			if strings.Contains(hint, tt.uploadID) {
+				t.Errorf("hint interpolated the server upload_id %q: %s", tt.uploadID, hint)
+			}
+			if !strings.Contains(hint, `<file_id>`) || !strings.Contains(hint, `<upload_id>`) {
+				t.Errorf("hint must use file and upload placeholders: %s", hint)
+			}
+			if !strings.Contains(hint, tt.wantNote) {
+				t.Errorf("hint %q does not contain %q", hint, tt.wantNote)
+			}
+		})
+	}
+}
+
 func TestDriveUploadFile_InterruptedMultipartAbortsWithDetachedContext(t *testing.T) {
 	src := writeMultipartTestFile(t, []byte("abcdefgh"))
 	ctx, cancel := context.WithCancel(context.Background())

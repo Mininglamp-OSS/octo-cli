@@ -74,7 +74,9 @@ func enrichFileTooLargeError(err error, declaredSize uint64) error {
 		MaxSizeKB json.Number `json:"max_size_kb"`
 		Size      json.Number `json:"size"`
 	}
-	_ = json.Unmarshal(ee.Detail, &fields)
+	if uerr := json.Unmarshal(ee.Detail, &fields); uerr != nil {
+		return err
+	}
 
 	maxKB := fields.MaxSizeKB.String()
 	if maxKB == "" || maxKB == "0" {
@@ -709,9 +711,20 @@ func withMultipartAbort(
 		ee.Detail = detail
 	}
 	if strings.HasPrefix(abortResult, "abort_failed:") {
-		ee.Hint = strings.TrimSpace(ee.Hint +
-			" The incomplete multipart session could not be aborted — run `octo-cli drive upload abort " +
-			fileID + " --data '{\"upload_id\":\"" + uploadID + "\"}'`.")
+		ee.Hint = strings.TrimSpace(ee.Hint + multipartAbortRecoveryHint(uploadID))
 	}
 	return ee
+}
+
+// multipartAbortRecoveryHint intentionally keeps the server-provided upload_id
+// out of the shell command. The structured error detail already carries the
+// value safely as JSON; placeholders avoid letting a quoted upload_id escape
+// the command shown to the user.
+func multipartAbortRecoveryHint(uploadID string) string {
+	const command = " The incomplete multipart session could not be aborted — run " +
+		"`octo-cli drive upload abort <file_id> --data '{\"upload_id\":\"<upload_id>\"}'`."
+	if strings.ContainsAny(uploadID, "'\"") {
+		return command + " The server-provided upload_id contains quoting characters; copy it from the structured error detail rather than editing the command."
+	}
+	return command + " Copy file_id and upload_id from the structured error detail."
 }
