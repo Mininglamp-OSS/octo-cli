@@ -200,6 +200,57 @@ func TestDriveComposites_DryRunReportsTheResolvedMount(t *testing.T) {
 	}
 }
 
+// TestDrivePrepare_MultipartFieldsStayLossless drives the generated prepare
+// leaf through the real command tree and response normalizer. The composite
+// consumes these fields directly, so a decode path that rounds the integer
+// geometry or drops one of them would break multipart scheduling.
+func TestDrivePrepare_MultipartFieldsStayLossless(t *testing.T) {
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bot/drive/files/prepare-upload" {
+			t.Errorf("path: got %q", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{
+			"file_id":18446744073709551615,
+			"upload_mode":"multipart",
+			"upload_id":"upload-1",
+			"part_size":9007199254740993,
+			"part_count":10000,
+			"max_concurrent_parts":7
+		}`))
+	}, nil)
+
+	if err := env.run(
+		"drive", "upload", "prepare",
+		"--space-id", "shared:s1",
+		"--name", "large.bin",
+		"--size", "134217728",
+		"--content-type", "application/octet-stream",
+		"--upload-capabilities", "multipart-v1",
+	); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	wantRaw := map[string]string{
+		"file_id":              `"18446744073709551615"`,
+		"upload_mode":          `"multipart"`,
+		"upload_id":            `"upload-1"`,
+		"part_size":            `9007199254740993`,
+		"part_count":           `10000`,
+		"max_concurrent_parts": `7`,
+	}
+	var envelope struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(env.tf.Out.Bytes(), &envelope); err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	for field, want := range wantRaw {
+		if got := string(envelope.Data[field]); got != want {
+			t.Errorf("%s = %s, want %s", field, got, want)
+		}
+	}
+}
+
 // --- transfer redirects are re-validated per hop ---
 
 // TestDriveTransfer_UnsafeRedirectFailsClosed asserts assertSafeTransferURL is
