@@ -1,0 +1,1430 @@
+package client
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+)
+
+// escapedSecrets are the values that defeated the old mask. redactSecrets did a
+// literal strings.ReplaceAll over the *already-marshalled* body, and
+// json.Marshal rewrites `"` to `\"`, `\` to `\\` and a newline to `\n` first —
+// so the literal was no longer present and the substitution found nothing to
+// replace. The mask silently no-oped on exactly the passwords a user is most
+// likely to choose, and because the transport retries, the line was emitted once
+// per attempt.
+var escapedSecrets = []struct {
+	name  string
+	value string
+}{
+	{"double quote", `p@ss"word`},
+	{"backslash", `p@ss\word`},
+	{"quote and backslash", `p@ss"w\ord`},
+	{"newline", "p@ss\nword"},
+	{"tab and control char", "p@ss\tword\x01"},
+	{"unicode escape territory", "p@ss\u2028word"},
+	{"escape-free control", `plain-hunter2`},
+}
+
+// TestSecretValues_JSONEscapingDoesNotDefeatTheMask asserts a password whose
+// JSON encoding differs from its literal is still masked in the verbose trace,
+// and still reaches the wire intact.
+func TestSecretValues_JSONEscapingDoesNotDefeatTheMask(t *testing.T) {
+	for _, tc := range escapedSecrets {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, _ := io.ReadAll(r.Body)
+				gotBody = string(raw)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer srv.Close()
+
+			var trace bytes.Buffer
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "bf_t"},
+				Options{Verbose: true, ErrOut: &trace},
+			)
+			if _, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/bot/drive/shares",
+				Body:         map[string]any{"file_id": json.Number("1"), "password": tc.value},
+				SecretValues: []string{tc.value},
+			}); err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+
+			// The wire keeps the real value; redaction is a logging concern.
+			var sent map[string]any
+			if err := json.Unmarshal([]byte(gotBody), &sent); err != nil {
+				t.Fatalf("parse sent body %q: %v", gotBody, err)
+			}
+			if sent["password"] != tc.value {
+				t.Errorf("wire password: got %q, want %q", sent["password"], tc.value)
+			}
+
+			assertTraceMasks(t, trace.String(), tc.value)
+		})
+	}
+}
+
+// TestSecretValues_JSONEscapingDoesNotDefeatTheDryRunMask is the same property
+// on the other surface. A dry-run description is meant to be safe to paste into
+// a ticket, so it is the one a masked-but-not-really value hurts most.
+func TestSecretValues_JSONEscapingDoesNotDefeatTheDryRunMask(t *testing.T) {
+	for _, tc := range escapedSecrets {
+		t.Run(tc.name, func(t *testing.T) {
+			c := New(
+				&config.Config{APIBaseURL: "https://octo.test"},
+				&credential.BotCredential{Token: "bf_t"},
+				Options{DryRun: true, ErrOut: io.Discard},
+			)
+			body, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/bot/drive/shares",
+				Body:         map[string]any{"password": tc.value},
+				SecretValues: []string{tc.value},
+			})
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			assertTraceMasks(t, string(body), tc.value)
+		})
+	}
+}
+
+// TestSecretValues_NestedAndRepeatedSecretsAreMasked covers the structural walk:
+// a secret below the root object, inside an array, and appearing more than once.
+func TestSecretValues_NestedAndRepeatedSecretsAreMasked(t *testing.T) {
+	const secret = `p@ss"w\ord`
+
+	var trace bytes.Buffer
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "bf_t"},
+		Options{Verbose: true, ErrOut: &trace},
+	)
+	if _, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPost,
+		Path:   "/v1/bot/probe",
+		Body: map[string]any{
+			"top":    secret,
+			"nested": map[string]any{"inner": secret},
+			"list":   []any{"safe", secret},
+			"strs":   []string{secret},
+			"joined": "prefix-" + secret + "-suffix",
+			"id":     json.Number("18446744073709551615"),
+		},
+		SecretValues: []string{secret},
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	assertTraceMasks(t, trace.String(), secret)
+	// The structural walk must copy a json.Number through unchanged, or a uint64
+	// id would stop being reported at full precision.
+	if !strings.Contains(trace.String(), "18446744073709551615") {
+		t.Errorf("the masked body lost uint64 precision:\n%s", trace.String())
+	}
+}
+
+// TestTransportError_DoesNotLeakASecretPathParameter pins the error envelope.
+//
+// *url.Error.Error() embeds the full request URL, so an x-octo-secret *path*
+// parameter — drive.invite.accept's invite_token, drive.share.access /
+// share.download's share_token — was formatted straight into the ExitError. That
+// is not a --verbose surface: it is the structured error on stderr, emitted
+// unconditionally, which for a CLI whose callers capture stderr into logs and
+// model context is a wider exposure than the trace the masking was built for.
+func TestTransportError_DoesNotLeakASecretPathParameter(t *testing.T) {
+	const token = "SUPERSECRETINVITETOKEN123"
+
+	// A closed listener address: the request fails at dial time with a *url.Error.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: deadURL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/invites/" + token + "/accept",
+		SecretValues: []string{token},
+	})
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if strings.Contains(ee.Message, token) {
+		t.Errorf("the error envelope leaked the invite token: %s", ee.Message)
+	}
+	if !strings.Contains(ee.Message, secretMask) {
+		t.Errorf("the error envelope should show the masked value: %s", ee.Message)
+	}
+	// The rest of the diagnostic must survive — the point is redaction, not
+	// swallowing the reason.
+	if !strings.Contains(ee.Message, "127.0.0.1") {
+		t.Errorf("the error envelope should still name the host: %s", ee.Message)
+	}
+}
+
+// TestTransportError_RedactionSurvivesRetries checks every attempt's error text,
+// not just the last: the retry loop re-formats the transport error each time.
+func TestTransportError_RedactionSurvivesRetries(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+
+	var trace bytes.Buffer
+	c := New(
+		&config.Config{APIBaseURL: deadURL},
+		&credential.BotCredential{Token: "uk_t"},
+		// Verbose so the per-retry "last error" lines are captured too.
+		Options{Verbose: true, ErrOut: &trace, Timeout: "2s"},
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, err := c.Do(ctx, &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + token + "/access",
+		SecretValues: []string{token},
+	})
+	if err == nil {
+		t.Fatal("expected a transport error")
+	}
+	if ee := output.AsExitError(err); ee != nil && strings.Contains(ee.Message, token) {
+		t.Errorf("the final error leaked the share token: %s", ee.Message)
+	}
+	if strings.Contains(trace.String(), token) {
+		t.Errorf("a retry trace line leaked the share token:\n%s", trace.String())
+	}
+}
+
+// assertTraceMasks fails when secret appears in text in any encoding, and when
+// the mask is missing altogether (which would mean the value was dropped rather
+// than masked).
+func assertTraceMasks(t *testing.T, text, secret string) {
+	t.Helper()
+	if strings.Contains(text, secret) {
+		t.Errorf("output leaked the secret verbatim:\n%s", text)
+	}
+	for _, form := range secretForms(secret) {
+		if form == secret {
+			continue
+		}
+		if strings.Contains(text, form) {
+			t.Errorf("output leaked the secret as %q:\n%s", form, text)
+		}
+	}
+	if !strings.Contains(text, secretMask) {
+		t.Errorf("output should show the masked value:\n%s", text)
+	}
+}
+
+// TestBackendError_DoesNotLeakASecretItEchoes pins the response half of the
+// error-envelope leak. The transport half (a *url.Error carrying the request URL)
+// was closed first; this is the other one — a backend error body that echoes the
+// value it was given.
+//
+// For drive.share.access / drive.share.download / drive.invite.accept the id *is*
+// the secret, and a not-found message naming the requested id is the most natural
+// thing for a backend to write. ParseBackendError copies the backend's message
+// into the envelope and the whole body into Detail, so an unredacted response body
+// put the token on stderr unconditionally — no --verbose needed.
+func TestBackendError_DoesNotLeakASecretItEchoes(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+	const password = "P@ssw0rd-SECRET"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		// The shape a backend naturally produces: the requested path, which
+		// contains the token, echoed back in the message.
+		body := `{"code":"not_found","message":"share ` + r.URL.Path +
+			` not found (password attempt \"` + password + `\")"}`
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + token + "/access",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	})
+	if err == nil {
+		t.Fatal("expected a backend error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	for _, secret := range []string{token, password} {
+		if strings.Contains(ee.Message, secret) {
+			t.Errorf("the error message leaked %q: %s", secret, ee.Message)
+		}
+		if strings.Contains(string(ee.Detail), secret) {
+			t.Errorf("the error detail leaked %q: %s", secret, ee.Detail)
+		}
+	}
+	if !strings.Contains(ee.Message, secretMask) && !strings.Contains(string(ee.Detail), secretMask) {
+		t.Errorf("expected the masked value to be visible: %s / %s", ee.Message, ee.Detail)
+	}
+	// The mask contains no quote or backslash, so a JSON Detail stays parseable.
+	if len(ee.Detail) > 0 && !json.Valid(ee.Detail) {
+		t.Errorf("redaction broke the JSON detail: %s", ee.Detail)
+	}
+	// The backend's own diagnostic must survive.
+	if !strings.Contains(ee.Message, "not_found") && ee.Code != "NOT_FOUND" {
+		t.Errorf("the backend's error classification was lost: code=%q message=%q", ee.Code, ee.Message)
+	}
+}
+
+// TestRedactBodyValue_UnknownShapesFailSafe covers the fallback branch. Every
+// secret-bearing body today is a map[string]any, but the engine already builds a
+// map[string]string elsewhere, and the day one of those carries a secret the mask
+// must not silently no-op.
+func TestRedactBodyValue_UnknownShapesFailSafe(t *testing.T) {
+	const secret = `p@ss"w\ord`
+	secrets := []string{secret}
+
+	cases := []struct {
+		name string
+		body any
+	}{
+		{"map[string]string", map[string]string{"password": secret}},
+		{"struct", struct {
+			Password string `json:"password"`
+		}{Password: secret}},
+		{"pointer to struct", &struct {
+			Password string `json:"password"`
+		}{Password: secret}},
+		{"slice of maps", []map[string]string{{"password": secret}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			buf, err := json.Marshal(redactBodyValue(tc.body, secrets))
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			for _, form := range secretForms(secret) {
+				if strings.Contains(string(buf), form) {
+					t.Errorf("the fallback passed the secret through as %q: %s", form, buf)
+				}
+			}
+			if !strings.Contains(string(buf), secretMask) {
+				t.Errorf("expected the mask in the rendered body: %s", buf)
+			}
+		})
+	}
+}
+
+// TestRedactBodyValue_PreservesScalarsAndNumbers guards the fallback's blast
+// radius: it must not reshape values the structural walk already handles, and a
+// json.Number must keep its exact digits.
+func TestRedactBodyValue_PreservesScalarsAndNumbers(t *testing.T) {
+	body := map[string]any{
+		"id":    json.Number("18446744073709551615"),
+		"count": 7,
+		"ratio": 1.5,
+		"flag":  true,
+		"none":  nil,
+		"name":  "public",
+	}
+	buf, err := json.Marshal(redactBodyValue(body, []string{"unrelated-secret"}))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"id":18446744073709551615`, `"count":7`, `"ratio":1.5`, `"flag":true`, `"none":null`, `"name":"public"`} {
+		if !strings.Contains(string(buf), want) {
+			t.Errorf("rendered body lost %s: %s", want, buf)
+		}
+	}
+}
+
+// TestBackendError_RedactionKeepsTheBodyParseable is the round-4 correction to
+// the round-2 fix. redactSecretBytes substituted over the encoded bytes, and the
+// substitution is unanchored — so a one-character or punctuation-bearing password
+// rewrote the response's own syntax, ParseBackendError could no longer read the
+// backend's `code`, and an agent branching on it silently degraded to the generic
+// status code and lost `detail`. Nothing leaked; the machine-readable contract
+// broke instead.
+func TestBackendError_RedactionKeepsTheBodyParseable(t *testing.T) {
+	// Every one of these is a substring of the response body below, which is what
+	// made the textual substitution destructive.
+	for _, password := range []string{"correct-horse-battery", "e", `"`, "s", "o", "a", `\`, "the", " "} {
+		t.Run(strconv.Quote(password), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"wrong_password","message":"the share password is incorrect"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/TOKENABC/access",
+				Body:         map[string]any{"password": password},
+				SecretValues: []string{password},
+			})
+			if err == nil {
+				t.Fatal("expected a backend error")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			// The backend's machine-readable code must survive redaction: it is
+			// what an agent branches on.
+			if ee.Code != "wrong_password" {
+				t.Errorf("code: got %q, want wrong_password (redaction must not break parsing)", ee.Code)
+			}
+			if len(ee.Detail) == 0 {
+				t.Error("detail was lost; redaction must not make the body unparseable")
+			}
+		})
+	}
+}
+
+// TestBackendError_RedactionSurvivesForeignJSONEscaping covers the other half of
+// the same asymmetry. secretForms is built from json.Marshal's spelling, which is
+// exhaustive for a Go producer and not for JSON in general — a producer that
+// writes `\/` for a slash defeated a substitution over encoded text. Parsing the
+// body first and walking the decoded values does not care how it was spelled.
+func TestBackendError_RedactionSurvivesForeignJSONEscaping(t *testing.T) {
+	const password = "a/b"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		// `\/` is legal JSON and is what several non-Go encoders emit.
+		_, _ = w.Write([]byte(`{"error":"wrong_password","message":"bad password a\/b for share"}`))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/TOKENABC/access",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{password},
+	})
+	if err == nil {
+		t.Fatal("expected a backend error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if strings.Contains(ee.Message, password) || strings.Contains(string(ee.Detail), password) {
+		t.Errorf("a foreign-escaped secret survived redaction: %s / %s", ee.Message, ee.Detail)
+	}
+	if ee.Code != "wrong_password" {
+		t.Errorf("code: got %q, want wrong_password", ee.Code)
+	}
+}
+
+// TestBackendError_NonJSONBodyStillRedacted keeps the fallback covered: a body
+// with no structure to walk must still be text-substituted rather than passed
+// through.
+func TestBackendError_NonJSONBodyStillRedacted(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("upstream refused share " + token + " (not JSON at all)"))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + token + "/access",
+		SecretValues: []string{token},
+	})
+	if err == nil {
+		t.Fatal("expected a backend error")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if strings.Contains(ee.Message, token) || strings.Contains(string(ee.Detail), token) {
+		t.Errorf("a non-JSON body leaked the token: %s / %s", ee.Message, ee.Detail)
+	}
+}
+
+// TestReplaceSecretForm_ShortSecretsUseTokenBoundaries pins the guard that keeps
+// short-secret masking from shredding unrelated text, and — just as important —
+// that it still masks a genuine echo.
+func TestReplaceSecretForm_ShortSecretsUseTokenBoundaries(t *testing.T) {
+	cases := []struct {
+		name   string
+		text   string
+		secret string
+		masked bool
+	}{
+		// Must NOT mask: the letters occur inside unrelated words.
+		{"single letter inside a word", `{"error":"wrong_password"}`, "a", false},
+		{"single letter inside prose", "the share password is incorrect", "e", false},
+		{"short run inside a word", `{"error":"wrong_password"}`, "pass", false},
+		// Must mask: a genuine echo of the value.
+		{"whole field value", `{"password":"abc123"}`, "abc123", true},
+		{"delimited in prose", "bad password abc123 for share", "abc123", true},
+		{"whole string", "abc123", "abc123", true},
+		{"delimited by punctuation", "password=(a1b2)", "a1b2", true},
+		{"single letter as a whole value", `{"password":"e"}`, "e", true},
+		// A long secret is masked unconditionally, boundaries or not.
+		{"long secret inside a longer run", "xxSUPERSECRETTOKENVALUExx", "SUPERSECRETTOKENVALUE", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := replaceSecretForm(tc.text, tc.secret)
+			if masked := strings.Contains(got, secretMask); masked != tc.masked {
+				t.Errorf("replaceSecretForm(%q, %q) = %q; masked=%v, want %v",
+					tc.text, tc.secret, got, masked, tc.masked)
+			}
+			if tc.masked && strings.Contains(got, tc.secret) && len([]rune(tc.secret)) >= shortSecretRunes {
+				t.Errorf("a long secret survived: %q", got)
+			}
+		})
+	}
+}
+
+// TestReplaceSecretForm_ShortSecretIsStillMaskedInEveryEchoShape guards the
+// boundary rule against being too clever: every shape a backend or a log line
+// realistically echoes a value in must still be masked.
+func TestReplaceSecretForm_ShortSecretIsStillMaskedInEveryEchoShape(t *testing.T) {
+	const secret = "pw7"
+	shapes := []string{
+		`{"password":"pw7"}`,
+		`password=pw7`,
+		`password: pw7`,
+		`"pw7"`,
+		`bad password 'pw7' rejected`,
+		`/v1/user/drive/shares/pw7/access`,
+		`pw7`,
+		`[pw7]`,
+		`pw7 at the start`,
+		`at the end pw7`,
+	}
+	for _, shape := range shapes {
+		got := replaceSecretForm(shape, secret)
+		if strings.Contains(got, secret) {
+			t.Errorf("echo shape %q left the secret in place: %q", shape, got)
+		}
+	}
+}
+
+// Round-8 P1-3. Round 5 made response-side redaction structural so it stopped
+// corrupting the body's syntax; round 8 found it still destroys the body's
+// *meaning*. redactResponseBody preserves object keys and masks string values —
+// and the drive error envelope carries its machine-readable code in a value
+// ({"error":"wrong_password"}). A masked code fails looksLikeErrorCode, parsing
+// falls back to codeFromStatus, and that branch set no Detail at all.
+//
+// The consequence is behavioural, not cosmetic: on `share access` the caller
+// cannot tell "wrong password, retry" from "no permission, stop".
+//
+// The trigger set is ordinary, not exotic: any secret of 8+ runes appearing
+// anywhere in the code value, and any shorter secret that is a "_"-delimited
+// component of it — password, wrong, not, found, denied, expired, invalid.
+func TestBackendError_MachineReadableCodeSurvivesRedaction(t *testing.T) {
+	cases := []struct {
+		name     string
+		password string
+	}{
+		{"long secret unrelated to the code", "correct-horse-battery-staple"},
+		{"mixed-case secret", "Passw0rd!"},
+		// The two from the round-8 report: 8 runes takes the unconditional
+		// substring path, and 5 runes passes the token-boundary rule because "_"
+		// is not a word byte.
+		{"exactly the short-secret threshold", "password"},
+		{"a boundary-delimited component of the code", "wrong"},
+		// Every other component of a realistic code vocabulary.
+		{"component: not", "not"},
+		{"component: found", "found"},
+		{"component: denied", "denied"},
+		{"component: expired", "expired"},
+		{"component: invalid", "invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"error":"wrong_password","message":"the share password is incorrect"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/TOKENABC/access",
+				Body:         map[string]any{"password": tc.password},
+				SecretValues: []string{tc.password},
+			})
+			if err == nil {
+				t.Fatal("expected a backend error")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			// Case-sensitive on purpose: the fallback produces FORBIDDEN, and an
+			// EqualFold comparison against "wrong_password" would not have noticed
+			// that the real code was gone.
+			if ee.Code != "wrong_password" {
+				t.Errorf("code = %q, want exactly \"wrong_password\"; the caller branches on this to tell "+
+					"a retryable wrong password from a terminal permission failure", ee.Code)
+			}
+			if len(ee.Detail) == 0 {
+				t.Error("detail is empty; the fallback branch must carry the backend payload")
+			}
+			// The secret itself must still be gone from everything human-readable.
+			if strings.Contains(ee.Message, tc.password) {
+				t.Errorf("the message leaked the password: %s", ee.Message)
+			}
+		})
+	}
+}
+
+// TestBackendError_FallbackCarriesDetail pins the other half independently of
+// redaction: a body that matches no envelope family at all still has to reach the
+// caller as detail, or the only copy of the backend's answer is a truncated
+// sentence inside message.
+func TestBackendError_FallbackCarriesDetail(t *testing.T) {
+	cases := []struct {
+		name       string
+		body       string
+		wantDetail bool
+	}{
+		{"unrecognised JSON shape", `{"unexpected":"shape","n":1}`, true},
+		{"JSON array", `[{"a":1}]`, true},
+		{"free-text error value", `{"error":"missing X-Space-Id"}`, true},
+		// Not JSON: embedding it raw would produce an invalid envelope, so detail
+		// stays empty and message carries the text.
+		{"not JSON at all", `upstream exploded`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ee := output.ParseBackendError(http.StatusBadGateway, []byte(tc.body))
+			if ee == nil {
+				t.Fatal("expected an ExitError")
+			}
+			if tc.wantDetail {
+				if len(ee.Detail) == 0 {
+					t.Errorf("detail is empty for %s; the backend payload was dropped", tc.name)
+				} else if !json.Valid(ee.Detail) {
+					t.Errorf("detail is not valid JSON, so the envelope would be malformed: %s", ee.Detail)
+				}
+			} else if len(ee.Detail) != 0 && !json.Valid(ee.Detail) {
+				t.Errorf("non-JSON body was spliced into detail as-is: %s", ee.Detail)
+			}
+		})
+	}
+}
+
+// Round-9 P2-1. The code-position exemption added in round 8 was unbounded: any
+// value shaped like a code survived unmasked in the code position, so a
+// caller-supplied id that happens to be all lower-case
+// (`drive share revoke lowercasesecretid` against a backend echoing it as the code)
+// reached stderr verbatim.
+//
+// The tension the review identified is real and is why this is a rule rather than a
+// patch: exempting the code position protects the error contract, bounding the
+// exemption protects the secret, and the `not_found` case sits exactly where the
+// two conflict — there the secret *is* a valid code. The rule below resolves it by
+// asking whether the value is a code the CLI *recognises*, which no caller-supplied
+// id can become.
+//
+//  1. a recognised code (present in backendErrorMapping) is never masked, even when
+//     it equals a declared secret — the value is drawn from a closed vocabulary the
+//     CLI prints on every such failure, so leaving it discloses nothing, while
+//     masking it destroys the distinction the caller branches on;
+//  2. an unrecognised value in the code position that equals a declared secret IS
+//     masked — nothing vouches for it, so the secret wins;
+//  3. an unrecognised value that is not a declared secret is left alone, so a code
+//     the backend adds tomorrow still reaches the caller.
+func TestBackendError_CodeExemptionFollowsTheRule(t *testing.T) {
+	cases := []struct {
+		name       string
+		code       string // what the backend puts in the code position
+		secret     string // the declared secret for the request
+		absent     string // what must not survive; defaults to code
+		wantMasked bool
+		clause     string
+	}{
+		{
+			name: "clause 1: a recognised code equal to the secret stays",
+			code: "not_found", secret: "not_found", wantMasked: false,
+			clause: "recognised codes are a closed vocabulary; masking breaks the contract and hides nothing",
+		},
+		{
+			name: "clause 1: a recognised code unrelated to the secret stays",
+			code: "wrong_password", secret: "hunter2hunter2", wantMasked: false,
+			clause: "recognised code",
+		},
+		{
+			name: "clause 2: an unrecognised code equal to the secret is masked",
+			code: "lowercasesecretid", secret: "lowercasesecretid", wantMasked: true,
+			clause: "nothing vouches for this value, so the secret wins",
+		},
+		{
+			name: "clause 2: an unrecognised snake_case id equal to the secret is masked",
+			code: "abc_123_def_456", secret: "abc_123_def_456", wantMasked: true,
+			clause: "shape alone is not evidence",
+		},
+		{
+			name: "clause 3: an unrecognised code unrelated to the secret stays",
+			code: "quota_exhausted", secret: "hunter2hunter2", wantMasked: false,
+			clause: "a code the backend adds tomorrow must still reach the caller",
+		},
+		{
+			// The gate that admits a value to the rule at all. Without it every clause
+			// below is unreachable for a value like this: it is not a recognised code
+			// and it is not equal to the secret, so clause 3 would exempt it verbatim
+			// and the token inside would reach the caller in full.
+			name: "shape gate: a sentence embedding the share token is not a code",
+			code: "share token -Ab3cD_ef7Gh9jK is revoked", secret: "-Ab3cD_ef7Gh9jK",
+			absent: "-Ab3cD_ef7Gh9jK", wantMasked: true,
+			clause: "a code is a single identifier; a prose message carrying a token is not one, and must go through masking",
+		},
+		{
+			name: "shape gate: a base64url token in the code position is masked",
+			code: "-Ab3cD_ef7Gh9jK", secret: "-Ab3cD_ef7Gh9jK", wantMasked: true,
+			clause: "mixed case and base64url punctuation are not code shape, so a token can never be vouched for",
+		},
+		// Clause 2 originally compared for equality, which left the same value
+		// leaking whenever the backend wrapped it in code shape. The three rows
+		// below are all code-shaped, none equals the secret, and each carries it
+		// whole. The bound that matters is not "is this value the secret" but
+		// "would masking this value remove a secret from it".
+		{
+			name: "clause 2: a code that prefixes a recognised code onto the secret is masked",
+			code: "not_found_sharesecretid", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "code shape is trivially satisfied by wrapping the id, so equality is the wrong test",
+		},
+		{
+			name: "clause 2: a code that suffixes onto the secret is masked",
+			code: "sharesecretid_not_found", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "same value, other side",
+		},
+		{
+			name: "clause 2: a code that embeds the secret between segments is masked",
+			code: "share_sharesecretid_error", secret: "sharesecretid",
+			absent: "sharesecretid", wantMasked: true,
+			clause: "same value, in the middle",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"` + tc.code + `","message":"something went wrong"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + tc.secret,
+				SecretValues: []string{tc.secret},
+			})
+			if err == nil {
+				t.Fatal("expected a backend error")
+			}
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			visible := ee.Code + " " + string(ee.Detail)
+			if tc.wantMasked {
+				absent := tc.absent
+				if absent == "" {
+					absent = tc.code
+				}
+				if strings.Contains(visible, absent) {
+					t.Errorf("%q survived in the code position but nothing vouches for it (%s):\ncode=%q detail=%s",
+						absent, tc.clause, ee.Code, ee.Detail)
+				}
+				return
+			}
+			if ee.Code != tc.code {
+				t.Errorf("code = %q, want %q — %s", ee.Code, tc.code, tc.clause)
+			}
+		})
+	}
+}
+
+// TestBackendError_CodePositionAgreesWithOtherCodeKeys is the property the leak
+// violated most visibly: the exemption applies to `error` and `code` at the top of an
+// envelope but not to a `code` nested in an array, so the *same content* was masked
+// under errors[].code and left intact under error. Two keys behaving differently for
+// identical bytes is how a leak survives review — each site looks defensible alone.
+func TestBackendError_CodePositionAgreesWithOtherCodeKeys(t *testing.T) {
+	const secret = "sharesecretid"
+	const value = "not_found_" + secret
+
+	for _, tc := range []struct{ name, body string }{
+		{"exempt position", `{"error":"` + value + `","message":"x"}`},
+		{"non-exempt position", `{"errors":[{"code":"` + value + `"}],"message":"x"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if visible := ee.Code + " " + string(ee.Detail); strings.Contains(visible, secret) {
+				t.Errorf("the secret survived in a %s:\ncode=%q detail=%s", tc.name, ee.Code, ee.Detail)
+			}
+		})
+	}
+}
+
+// TestResponseMask_ASecretInAKeyPositionIsMasked is round-12 P2-1.
+//
+// The structural walk copied object keys verbatim, on the stated grounds that keys
+// "carry the response contract, never a secret" and that leaving them alone "is what
+// keeps the body parseable". The second half was the reason for the first, and it was
+// carried over from the textual substitution it replaced: rewriting a key inside a
+// *decoded* map and re-marshalling produces valid JSON by construction, which is why
+// redactBodyKeysAndValues has always masked keys on the request side. So the claim
+// protected nothing here, and a backend that keys a map by a caller-supplied id — the
+// ordinary shape of a per-id batch result — put a share token straight into the
+// printed envelope.
+//
+// The rule is the same one clause 2 of the code exemption settled on: mask when masking
+// would remove a secret, and leave alone otherwise. A contract field name cannot become
+// a declared secret, so no contract is lost.
+func TestResponseMask_ASecretInAKeyPositionIsMasked(t *testing.T) {
+	const secret = "SHARETOKEN123"
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"key at the top level", `{"error":"not_found","` + secret + `":"no such share","message":"x"}`},
+		{"key nested under a field", `{"error":"not_found","results":{"` + secret + `":"missing"}}`},
+		{"key inside an array element", `{"error":"not_found","items":[{"` + secret + `":1}]}`},
+		{"secret embedded in a longer key", `{"error":"not_found","share_` + secret + `_state":"gone"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+
+			if strings.Contains(string(ee.Detail), secret) {
+				t.Errorf("the secret survived in a key position: %s", ee.Detail)
+			}
+
+			// The whole reason keys were left alone. If masking them broke this, the
+			// cure would be worse than the leak, so it is asserted rather than argued.
+			var reparsed map[string]any
+			if uerr := json.Unmarshal(ee.Detail, &reparsed); uerr != nil {
+				t.Fatalf("the redacted body is no longer parseable JSON: %v\n%s", uerr, ee.Detail)
+			}
+			// And the contract still reaches the caller: masking keys must not touch
+			// the machine-readable code.
+			if reparsed["error"] != "not_found" {
+				t.Errorf("the backend code was lost: %s", ee.Detail)
+			}
+			if ee.Code != "not_found" {
+				t.Errorf("ee.Code = %q, want not_found", ee.Code)
+			}
+		})
+	}
+}
+
+// TestResponseMask_KeyMaskingDoesNotDestroyTheContract is round-13 P2-5, a side effect
+// of the key masking added last round.
+//
+// I argued that a short secret could not disturb a contract key because short secrets are
+// only substituted at a token boundary. That covers a secret sitting *inside* "code"; it
+// does not cover a secret that *is* "code". An exact match is replaced regardless of
+// length, so a caller whose password happens to be an English word like "code" or
+// "message" had the envelope's own field names masked — destroying exactly what the round-10
+// exemption rule exists to protect.
+//
+// The fix applies clause 1's argument to the key instead of the value: a key that names
+// the envelope contract is fixed by the API, so masking it hides nothing a caller could
+// not already predict, while breaking what they branch on. Compatibility with the value
+// rule is therefore total — the key decides *which* rule applies, and a contract key is
+// never rewritten, so the value's exemption decision cannot change.
+func TestResponseMask_KeyMaskingDoesNotDestroyTheContract(t *testing.T) {
+	for _, secret := range []string{"code", "error", "message", "detail", "errors", "data"} {
+		t.Run("secret is the word "+secret, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				// Every contract key present at once, so the case for each word asserts
+				// that *that* key survived rather than that some other one did.
+				_, _ = w.Write([]byte(`{"error":"not_found","code":"not_found","message":"no such share",` +
+					`"detail":{"a":1},"errors":[],"data":null}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/x/access",
+				Body:         map[string]any{"password": secret},
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if ee.Code != "not_found" {
+				t.Errorf("the backend code was destroyed by masking a contract key: ee.Code = %q, detail = %s",
+					ee.Code, ee.Detail)
+			}
+			var reparsed map[string]any
+			if uerr := json.Unmarshal(ee.Detail, &reparsed); uerr != nil {
+				t.Fatalf("redacted body is not parseable: %v", uerr)
+			}
+			if _, ok := reparsed[secret]; !ok {
+				t.Errorf("the contract key %q was masked away, so a caller can no longer read it: %s",
+					secret, ee.Detail)
+			}
+		})
+	}
+}
+
+// TestResponseMask_CollidingKeysAreDeterministic is P2-6. Two keys that both carry
+// secrets mask to the same string and collapse to one entry — which is accepted, since
+// both names were being destroyed on purpose. What is not acceptable is that *which* value
+// survived depended on Go's randomised map iteration order, so the same input produced
+// different output between runs. For a CLI whose callers parse this, nondeterminism is a
+// defect in its own right, and it also makes any test over it flaky rather than failing.
+func TestResponseMask_CollidingKeysAreDeterministic(t *testing.T) {
+	// Two *whole* keys, each a declared secret, so both mask to exactly the same
+	// string and genuinely collide. An earlier version of this test used one secret
+	// with two different suffixes, which masks to two distinct keys and collides with
+	// nothing — it would have passed no matter what this code did.
+	const secretA = "SHARETOKENAAA"
+	const secretB = "SHARETOKENBBB"
+	body := `{"error":"not_found","` + secretA + `":"first","` + secretB + `":"second"}`
+
+	var seen []string
+	for i := 0; i < 64; i++ {
+		got := string(redactResponseBody([]byte(body), []string{secretA, secretB}))
+		if strings.Contains(got, secretA) || strings.Contains(got, secretB) {
+			t.Fatalf("a secret survived: %s", got)
+		}
+		seen = append(seen, got)
+	}
+	for i := range seen {
+		if seen[i] != seen[0] {
+			t.Fatalf("redaction is not deterministic across runs:\n  %s\n  %s", seen[0], seen[i])
+		}
+	}
+}
+
+// TestBackendError_AShortSecretNeverSurvivesInTheCodePosition is round-14 P1-3.
+//
+// Two rules met and produced a leak neither intended. replaceSecretForm masks a secret
+// shorter than shortSecretRunes only at a token boundary, which is right for prose — a
+// four-character password is a substring of half the English language. isExemptCode's
+// clause 2 then asked the masker "would masking change this value", and read "no" as "this
+// value carries no secret". For a short password echoed with an adjacent alphanumeric
+// character, the masker says no because of the boundary rule, so clause 3 exempted the
+// value and printed it.
+//
+// One constant was deciding two different questions: "is this value distinctive enough to
+// search for globally" and "may this value be disclosed". They are separated now — the
+// boundary rule stays for prose, and a declared secret is never exempt in the code
+// position regardless of its length or of what the masker would do.
+//
+// The second failure is the contract: the password became ee.Code, so a caller branching
+// on the code got the user's password instead of FORBIDDEN. Suppressing the field restores
+// it, because redaction runs before ParseBackendError and the status-derived fallback then
+// supplies a real code.
+//
+// The fixture puts the value under `error`, not a top-level `code`, and that matters: review
+// found the two ee.Code assertions inert because ParseBackendError only ever reads a code
+// from `error.code` (layer 1) or a bare `error` string (layer 2), never from a top-level
+// `code`. Against the old fixture ee.Code was always the status-derived FORBIDDEN, so
+// reverting the production fix left the test green and only the ee.Detail check bit. With
+// `error` the code position is real and all three assertions carry weight.
+func TestBackendError_AShortSecretNeverSurvivesInTheCodePosition(t *testing.T) {
+	// Every row is under shortSecretRunes, which is the rule under test: at 8 runes or more
+	// the masker replaces unconditionally and the boundary rule never gets a say, so a
+	// longer password would witness nothing here. TestBackendError_DoesNotLeakASecretItEchoes
+	// covers the long case.
+	for _, password := range []string{"1234", "pin99", "abc123", "pw12345"} {
+		t.Run("password="+password, func(t *testing.T) {
+			// A trailing alphanumeric character is all it takes to defeat the boundary
+			// rule, and a backend echoing the value into its code does exactly that. The
+			// value stays snake_case-shaped so looksLikeErrorCode accepts it and layer 2
+			// really does read it as the code.
+			body := `{"error":"` + password + `x","message":"bad password ` + password + `x for share"}`
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/tok/access",
+				Body:         map[string]any{"password": password},
+				SecretValues: []string{password},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if strings.Contains(ee.Code, password) {
+				t.Errorf("the password became the machine-readable code: ee.Code = %q", ee.Code)
+			}
+			if strings.Contains(string(ee.Detail), password) {
+				t.Errorf("the password survived in the printed detail: %s", ee.Detail)
+			}
+			// The contract must be restored, not merely made non-secret: a caller
+			// branching on the code needs a real one.
+			if ee.Code == "" || ee.Code == secretMask {
+				t.Errorf("ee.Code = %q — suppressing the field must fall back to the status-derived code", ee.Code)
+			}
+		})
+	}
+}
+
+// TestBackendError_ARecognisedCodeIsStillExemptFromTheNewRule pins clause 1 against the
+// change above. The new rule must not swallow a recognised code that happens to equal a
+// declared secret: that vocabulary is closed and this CLI prints those codes on every
+// failure of their kind, so masking one hides nothing and destroys what callers branch on.
+// It is the reason clause 1 comes first.
+func TestBackendError_ARecognisedCodeIsStillExemptFromTheNewRule(t *testing.T) {
+	for _, secret := range []string{"not_found", "wrong_password"} {
+		t.Run("secret="+secret, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"` + secret + `","message":"x"}`))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodDelete,
+				Path:         "/v1/user/drive/shares/" + secret,
+				SecretValues: []string{secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if ee.Code != secret {
+				t.Errorf("ee.Code = %q, want %q — a recognised code stays exempt (clause 1)", ee.Code, secret)
+			}
+		})
+	}
+}
+
+// TestSecretForms_ASCIIEscapedSpellingIsMasked is round-14's \uXXXX item. The reviewer
+// marked it "derived from reading, not reproduced", so this test is the reproduction and
+// the fix's lock at once.
+//
+// What I confirmed: secretForms generates the literal, url.PathEscape, url.QueryEscape and
+// Go's json.Marshal spelling. Go's marshaller emits non-ASCII as UTF-8 and only escapes
+// <, > and & — it never produces \uXXXX for a letter. Python's json.dumps does, by
+// default (ensure_ascii=True). On the JSON path this does not matter, because the body is
+// parsed and ä is decoded back to ä before the walk sees it. The gap is exactly the
+// non-JSON fallback, which is a plain text substitution over bytes that were never
+// decoded — and non-JSON error bodies are the nginx and WAF pages, which is where a
+// blocked request's content can get echoed.
+//
+// So: a real gap, narrower than it first looks (it needs a non-ASCII secret *and* a
+// non-JSON body), and cheap to close by adding the spelling to the form list.
+func TestSecretForms_ASCIIEscapedSpellingIsMasked(t *testing.T) {
+	for _, secret := range []string{"pässwörd", "naïve-pass", "日本語パス", "mixed-ä-1"} {
+		t.Run(secret, func(t *testing.T) {
+			// What a Python backend with ensure_ascii=True writes for this value.
+			var encoded strings.Builder
+			for _, r := range secret {
+				if r < 0x80 {
+					encoded.WriteRune(r)
+					continue
+				}
+				fmt.Fprintf(&encoded, "\\u%04x", r)
+			}
+			// A non-JSON error page echoing it: no structure to walk, so the client
+			// falls back to text substitution.
+			body := "<html><body>403 blocked: bad password " + encoded.String() + "</body></html>"
+
+			got := string(redactResponseBody([]byte(body), []string{secret}))
+			if strings.Contains(got, encoded.String()) {
+				t.Errorf("the ASCII-escaped spelling of the secret survived the text fallback:\n%s", got)
+			}
+			if strings.Contains(got, secret) {
+				t.Errorf("the literal spelling survived:\n%s", got)
+			}
+		})
+	}
+}
+
+// TestBackendError_AShortSecretNeverSurvivesANonJSONBody is round-16 P1-2.
+//
+// The structural walk is only reached for a body that parses as JSON. The text fallback
+// called bare redactSecrets, which is the masker with its prose boundary rule intact — and
+// that rule declines a secret shorter than shortSecretRunes unless it sits at a token
+// boundary, so one adjacent alphanumeric character defeats it. ParseBackendError then copies
+// the whole body into Message, which the envelope prints on stderr with no --verbose needed.
+//
+// The shape is ordinary rather than contrived: `password` is x-octo-secret with maxLength 72
+// and no minLength, so a 1-7 character password is an accepted input, and a WAF or reverse
+// proxy answering with text/html is the usual way a non-JSON body arrives.
+//
+// This is the same defect that was closed for the code position two rounds ago, still open
+// one branch away — so the fix gives the fallback the same disclosure test rather than a
+// second boundary rule.
+func TestBackendError_AShortSecretNeverSurvivesANonJSONBody(t *testing.T) {
+	for _, password := range []string{"1", "pw", "9", "pin99", "abc123", "pw12345"} {
+		t.Run("password="+password, func(t *testing.T) {
+			// The trailing character is what defeats the boundary rule; a WAF echoing a
+			// rejected field value into prose does exactly this.
+			body := "<html><body>blocked by WAF: password=" + password + "x rejected</body></html>"
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			var errOut bytes.Buffer
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: &errOut},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/tok/access",
+				Body:         map[string]any{"password": password},
+				SecretValues: []string{password},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if strings.Contains(ee.Message, password) {
+				t.Errorf("the password reached the printed message verbatim: %s", ee.Message)
+			}
+			if strings.Contains(string(ee.Detail), password) {
+				t.Errorf("the password reached the printed detail verbatim: %s", ee.Detail)
+			}
+			// The contract must survive: suppressing the body must not also destroy the
+			// status-derived code a caller branches on.
+			if ee.Code == "" {
+				t.Error("suppressing the body left no machine-readable code")
+			}
+		})
+	}
+}
+
+// TestBackendError_ANonJSONBodyWithoutASecretKeepsItsDiagnostic is the allow direction of
+// P1-2's fix, and the reason it is a disclosure test rather than an unconditional
+// suppression: a text body that echoes nothing must still reach the operator in full.
+// Suppressing every non-JSON body would trade a leak for a blind CLI.
+func TestBackendError_ANonJSONBodyWithoutASecretKeepsItsDiagnostic(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+	const body = "upstream refused: the storage gateway is out of capacity"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + token + "/access",
+		SecretValues: []string{token},
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	if !strings.Contains(ee.Message, "out of capacity") {
+		t.Errorf("a secret-free text body lost its diagnostic: %s", ee.Message)
+	}
+}
+
+// TestBackendError_AJSONPrefixDoesNotTruncateTheDiagnostic is round-16 P1-4.
+//
+// redactResponseBody decoded one value and did not require EOF — the same trap decodeStrict
+// was added to this branch to close on the *input* side, live on the output side one file
+// away. Any body that merely starts with a complete JSON token was rewritten to just that
+// token and the backend's real answer was thrown away: `404 page not found`, which is what
+// Go's own http.NotFound writes, became the number 404.
+//
+// The direction is over-redaction rather than disclosure, so it is not a leak — it destroys
+// the message/detail contract this CLI exists to hand to an agent, which is worse in the
+// case an operator most needs the text.
+func TestBackendError_AJSONPrefixDoesNotTruncateTheDiagnostic(t *testing.T) {
+	const token = "SUPERSECRETSHARETOKEN"
+
+	for _, tc := range []struct{ name, body, want string }{
+		{"a number then prose", "404 page not found", "page not found"},
+		{"a status line then prose", "502 Bad Gateway\nupstream refused", "upstream refused"},
+		{"a literal then prose", "true, but the gateway rejected the request", "gateway rejected"},
+		{"null then prose", "null — the upstream sent no object", "sent no object"},
+		{"a JSON object then prose", `{"a":1} and then the proxy's own note`, "proxy's own note"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method: http.MethodPost,
+				// A declared secret is required for redaction to run at all, and it
+				// appears nowhere in the body — so nothing here should be suppressed.
+				Path:         "/v1/user/drive/shares/" + token + "/access",
+				SecretValues: []string{token},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if !strings.Contains(ee.Message, tc.want) {
+				t.Errorf("the diagnostic was truncated to a JSON prefix: message = %q, want it to "+
+					"contain %q", ee.Message, tc.want)
+			}
+		})
+	}
+}
+
+// TestResponseMask_ADeclaredSecretIsMaskedInEveryJSONScalarKind is round-16 P1-3, response
+// half.
+//
+// redactBodyValue masked a leaf only in `case string`; json.Number, bool and the numeric Go
+// kinds were returned verbatim, on the reading that a secret is always a string. A backend
+// echoing a declared value with a different JSON type therefore defeated redaction with no
+// mistake on the caller's part — an all-digit share password or an integer id echoed as a
+// number is the ordinary shape, not an adversarial one.
+//
+// The type is the only variable across these rows: the same value as a JSON string is
+// already masked today, and that row is included as the control.
+func TestResponseMask_ADeclaredSecretIsMaskedInEveryJSONScalarKind(t *testing.T) {
+	for _, tc := range []struct{ name, secret, encoded string }{
+		{"a number", "90071992547409931", `90071992547409931`},
+		{"a number, as the control string", "90071992547409931", `"90071992547409931"`},
+		{"a short numeric password", "8675309", `8675309`},
+		{"a float-shaped secret", "1.5", `1.5`},
+		{"a boolean-shaped secret", "true", `true`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"message":"rejected","detail":{"share_token":` + tc.encoded + `}}`
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/tok/access",
+				SecretValues: []string{tc.secret},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if strings.Contains(string(ee.Detail), tc.secret) {
+				t.Errorf("a declared secret echoed as %s survived response redaction: %s",
+					tc.name, ee.Detail)
+			}
+			if strings.Contains(ee.Message, tc.secret) {
+				t.Errorf("a declared secret echoed as %s survived into the message: %s",
+					tc.name, ee.Message)
+			}
+		})
+	}
+}
+
+// TestResponseMask_OrdinaryNumbersAreNotSuppressed is the allow direction for the scalar
+// rule. Masking a number keys off the value's own spelling, so an unrelated id must come
+// through untouched — otherwise the rule trades a leak for an unreadable diagnostic, which
+// is the failure mode the boundary rule exists to prevent in prose.
+func TestResponseMask_OrdinaryNumbersAreNotSuppressed(t *testing.T) {
+	const secret = "SUPERSECRETSHARETOKEN"
+	body := `{"message":"rejected","detail":{"file_id":9007199254740993,"quota":0,"ok":false}}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "uk_t"},
+		Options{NoRetry: true, ErrOut: io.Discard},
+	)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/user/drive/shares/" + secret + "/access",
+		SecretValues: []string{secret},
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("expected a structured error, got %v", err)
+	}
+	for _, want := range []string{"9007199254740993", "false"} {
+		if !strings.Contains(string(ee.Detail), want) {
+			t.Errorf("an unrelated scalar %q was suppressed out of the diagnostic: %s", want, ee.Detail)
+		}
+	}
+}
+
+// TestResponseMask_AShortSecretNeverSurvivesInAKeyPosition is the key-position member of the
+// same family as P1-2, found while auditing every place the boundary rule decides a
+// disclosure question. maskKey called bare redactSecrets, so a non-contract key spelled
+// "<password>x" was declined by the boundary rule and published — the value leaves had
+// already been given the suppression rule, and the key rule had not moved with them.
+//
+// The shape is the one the key rule was introduced for: a backend keying a per-id result map
+// by a caller-supplied value.
+func TestResponseMask_AShortSecretNeverSurvivesInAKeyPosition(t *testing.T) {
+	for _, password := range []string{"1", "pw", "pin99", "pw12345"} {
+		t.Run("password="+password, func(t *testing.T) {
+			body := `{"message":"rejected","detail":{"` + password + `x":"per-id result"}}`
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+
+			c := New(
+				&config.Config{APIBaseURL: srv.URL},
+				&credential.BotCredential{Token: "uk_t"},
+				Options{NoRetry: true, ErrOut: io.Discard},
+			)
+			_, err := c.Do(context.Background(), &Request{
+				Method:       http.MethodPost,
+				Path:         "/v1/user/drive/shares/tok/access",
+				SecretValues: []string{password},
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("expected a structured error, got %v", err)
+			}
+			if strings.Contains(string(ee.Detail), password) {
+				t.Errorf("the password survived in a key position: %s", ee.Detail)
+			}
+		})
+	}
+}

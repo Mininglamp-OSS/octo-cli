@@ -1,12 +1,13 @@
 # octo-docs — Common features (comments, versions, members, attachments)
 
-Read this for capabilities that apply across all doc kinds. Jump to the section
-you need:
+Read this for shared document management and document/sheet/board comments and
+versions. For PPT comments, versions, export and media usage, read `ppt.md`.
+Jump to the section you need:
 
 - [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
 - [Versions](#versions) — snapshot / preview / rename / delete / restore
 - [Members & sharing](#members--sharing) — roles, forward-grant
-- [Attachments](#attachments) — presign + upload file/image bytes
+- [Attachments](#attachments) — presign/upload local bytes and ingest external images
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
@@ -99,10 +100,15 @@ kind — a document/sheet as `{kind:"document", doc, sheetCells, sheetDims, ...}
 board as `{kind:"board", scene, ...}`. It is a preview, not the live document, and
 is not writable. To read the **live** content, use `docs content get` (`doc.md`),
 `docs sheet get` (`sheet.md`), or `docs scene get` (`board.md`).
+For a text document, every returned sheet map (`sheetCells`, `sheetDims`,
+`sheetList`, `sheetFreeze`, `sheetFilters`, and `sheetDataValidations`) is an
+empty `{}`. For a sheet snapshot, `sheetList` carries each tab's optional
+`rowCount` / `columnCount`; missing counts identify a legacy 1000-by-100 tab.
 
 `restore` is non-destructive and records a safety snapshot first, so it is itself
 undoable. For a sheet, restore rolls back the full grid — cells, column-width /
-row-height dims, AND floating images — to the target version.
+row-height dims, floating images, hyperlinks, merges, sheet tabs, freeze panes,
+shared filters, and data-validation rules — to the target version.
 Schema: `octo-cli schema docs.versions.restore`.
 
 ---
@@ -110,23 +116,31 @@ Schema: `octo-cli schema docs.versions.restore`.
 ## Members & sharing
 
 ```bash
-octo-cli docs members list   <docId>                             # admin
-octo-cli docs members set    <docId> --uid <uid> --role writer   # add/upsert; role: reader|writer|admin
-octo-cli docs members remove <docId> <uid>                       # admin; owner cannot be removed
+octo-cli docs members list   <docId>                             # admin; items include principalSpaceId
+octo-cli docs members set    <docId> --uid <uid> --role writer   # authenticated Bot Space; role: reader|commenter|writer|admin
+octo-cli docs members set    <docId> --uid <uid> --role writer --principal-space-id <spaceId>
+octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # required; owner cannot be removed
 
 # Grant-only forward access (never downgrades). Only reader|writer are grantable.
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 
 # Space-level share scope — read/set who in the space can reach the doc.
-octo-cli docs share get <docId>                                       # reader; {docId, shareScope, shareRole}
-octo-cli docs share set <docId> --scope restricted                    # admin; only owner/members can access
-octo-cli docs share set <docId> --scope anyone_in_space --role read   # admin; every space member gets read
-octo-cli docs share set <docId> --scope anyone_in_space --role edit   # admin; every space member gets edit
+octo-cli docs share get <docId>  # read the current settings and permissionEpoch first
+# Each alternative below needs a fresh epoch from that read, not a fixed/example value.
+octo-cli docs share set <docId> --scope restricted --permissionEpoch <epoch>
+octo-cli docs share set <docId> --scope anyone_in_space --role read --permissionEpoch <epoch>
+octo-cli docs share set <docId> --scope anyone_in_space --role edit --permissionEpoch <epoch>
 ```
 
-`docs members set` is a PUT-upsert: it adds the member if absent or changes the
-role if already present. The target uid must be a real Octo user — a miss returns
-`404 user_not_found` and writes no ghost member. Schema: `octo-cli schema docs.members.set`.
+`docs members set` is a Space-qualified Bot mutation. Omit
+`--principal-space-id` to use the authenticated Bot Space, or pass that same
+Space explicitly; either form can add a member or update an existing role. A
+foreign Space is never queried through the directory and can only update an
+existing exact `(docId, uid, principalSpaceId)` row; if that row is absent, the
+backend returns `404`. A uid can have distinct member rows in multiple Spaces,
+so `docs members remove` always requires `--principal-space-id` and deletes the
+exact qualified row. Schemas:
+`octo-cli schema docs.members.set` and `octo-cli schema docs.members.remove`.
 
 `docs share set` changes the space-level share scope. Two scopes: `restricted`
 (only the owner and explicit members reach the doc — the default) and
@@ -140,11 +154,20 @@ Error codes: `400 invalid_scope` (unknown scope), `400 invalid_role`
 `404` (missing or cross-space doc), `409` (archived doc). Schema:
 `octo-cli schema docs.share.set`.
 
+Every share update requires `--permissionEpoch` from a fresh `docs share get`.
+This is the permission version, not the document/PPT content revision. A missing
+or invalid epoch fails local validation. On `409 share_settings_conflict`,
+re-read the current sharing settings and re-evaluate the change before submitting;
+do not automatically overwrite a concurrent administrator's decision. The CLI
+does not fetch an epoch or retry a permission conflict on the caller's behalf.
+
 ---
 
 ## Attachments
 
-The docs backend is **presign-only**: the CLI never streams the binary. Uploading
+The attachment-presign flow below is **presign-only**: the CLI never streams the
+binary through these commands. PPT also has a direct authenticated binary-media
+endpoint used by a runtime HTTP client; see `ppt.md` for that distinct flow. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
 the bytes yourself directly to object storage.
 
@@ -175,3 +198,54 @@ Once uploaded, reference the `attachId` from a document body's image node (see
 `doc.md`) or a whiteboard file ref (see `board.md`). NOTE: a spreadsheet's floating
 images do NOT use this attachment flow — they inline the base64 bytes in the
 drawing's `source` field (see `sheet.md`). Schema: `octo-cli schema docs.attachments.presign`.
+
+### External image URLs (including SVG)
+
+The image-node instructions below are for rich-text documents. For PPT images,
+audio and video, use the PPT-specific shared-ingest instructions in `ppt.md`:
+the same endpoint returns native media references on a compatible backend.
+
+Never persist an arbitrary external URL as an image node's only `src`. Current
+Octo clients render images only from trusted storage hosts, so a node such as
+`{"type":"image","attrs":{"src":"https://third-party.example/image.svg"}}`
+can be stored but renders as **Image unavailable**.
+
+Re-host a public HTTP(S) image under the target document first. The ingest
+endpoint is not yet a generated `docs attachments` subcommand, so call it
+through the generic API passthrough:
+
+```bash
+octo-cli api POST /v1/bot/docs/<docId>/attachments/ingest \
+  --no-retry --data '{"urls":["https://source.example/diagram.svg"]}'
+```
+
+Ingestion is not idempotent across requests: replaying a POST can create duplicate
+attachments. Keep successful receipts, retry only failed entries and reconcile an
+uncertain timeout before retrying; do not automatically repeat the whole batch.
+
+Read the new document-scoped `attachId` from `data.mappings`; treat an entry in
+`data.notIngested` as a failed image import and keep it as a normal hyperlink or
+text instead of writing a broken image node. The backend fetches the source with
+SSRF protections, validates that the bytes are an allowed image, and stores the
+successful result in Octo object storage.
+
+After either upload or ingest succeeds, write the image node using its durable
+`attachId`. Omit `src` (or set it to `null`): the client resolves a fresh signed
+display URL from the attachment. Also provide a positive pixel `width`; current
+clients can collapse an agent-created image with `width: null` to `0x0`. Use the
+known display width when available, otherwise `300` is a safe compatibility
+default:
+
+```json
+{
+  "type": "image",
+  "attrs": {
+    "attachId": "att_xxx",
+    "width": 300,
+    "alt": "Diagram"
+  }
+}
+```
+
+The `attachId` must belong to the same target document; a foreign or unknown
+attachment is rejected with `422 attachment_not_found`.

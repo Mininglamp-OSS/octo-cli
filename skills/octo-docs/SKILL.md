@@ -1,14 +1,14 @@
 ---
 name: octo-docs
 version: 0.2.0
-description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and batch-edit spreadsheet cells (dims + images), read and batch-edit whiteboard scenes, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Load after octo-shared.
+description: Docs domain — create and govern documents, read and incrementally edit a doc's live body, read and edit spreadsheets including structural row/column edits, find & replace, cells, layout, shared filters, sorting, freeze panes, and validation/dropdowns, read and batch-edit whiteboard scenes, create and edit PPT presentations, members and sharing, inline comments, versions/snapshots, and attachment metadata as a bot. Bots cannot delete documents. Load after octo-shared.
 metadata:
   requires:
     bins: ["octo-cli"]
     skills: ["octo-shared"]
 ---
 
-# octo-docs — bot access to Octo documents, spreadsheets & whiteboards
+# octo-docs — bot access to Octo documents, spreadsheets, whiteboards & presentations
 
 This skill is **progressive**: this file covers the shared essentials (auth,
 document lifecycle) and routes you to a focused reference file for each surface.
@@ -17,29 +17,36 @@ reference files sit next to this file in the skill directory.
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
+For a named spreadsheet tab, use `docs sheet list <docId>` to discover IDs and
+names, then `docs sheet get <docId> --sheet-id <sheetId> --limit 1000`.
+See `sheet.md` for exact-name selection, scoped pagination and deployment checks.
+
 ## When to read which reference
 
 | Your task | Read |
 |---|---|
-| Read/edit a **spreadsheet** (`doc_type: sheet`): cells, formulas, styles, column widths / row heights (dims), floating **images**, paged reads, xlsx export | **`sheet.md`** |
+| Read/edit a **spreadsheet** (`doc_type: sheet`): conditional formatting, safe split/deduplication, structural row/column edits, find & replace, cells, formulas, styles, layout, floating **images**, freeze panes, shared filters, sorting, data validation/dropdowns, paged reads, xlsx export | **`sheet.md`** |
 | Read/edit a rich-text **document body** (`doc_type: doc`): incremental block ops | **`doc.md`** |
 | Read/edit a **whiteboard** (`doc_type: board`): scene elements/files, image export | **`board.md`** |
-| Continue from a searchable **HTML document** (`doc_type: html`): resolve its slug, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
-| Cross-cutting features — **comments** (doc range or sheet cell), **versions** (snapshot/restore), **members & sharing**, **attachments** (presign/upload) | **`common.md`** |
+| Create/edit a **PPT** (`doc_type: html_ppt`): slides, comments, versions and HTML export | **`ppt.md`** |
+| Continue from a searchable **HTML document** (`doc_type: html`): resolve its document reference, then use immutable versions/drafts/assets/comments | **`../octo-html/SKILL.md`** |
+| **Members & sharing**, **attachments** (presign/upload and external-image ingest); document/sheet/board **comments** and **versions** | **`common.md`** |
 
 > The first four split by `doc_type` (what kind of document you're handling);
-> `common.md` holds the features that apply across kinds. Read a reference with
+> `common.md` covers shared document management; PPT comments, versions and media
+> usage are described in `ppt.md`. Read a reference with
 > your file tool (it sits beside this SKILL.md, e.g. `sheet.md`), or reprint the
 > whole skill set anytime with `octo-cli skills octo-docs`.
 
 Pick by `doc_type`: a **doc** body → `doc.md`; a **sheet** → `sheet.md`; a
-**board** → `board.md`; an **html** result → the separate `octo-html` skill.
-Using the wrong surface returns `409 unsupported_doc_type`. HTML operations are
-addressed by `slug`, not `docId`: if a search hit does not include a slug, run
-`docs get <docId>` to resolve `octoDocSlug`, then use `html get <octoDocSlug>`
-(or another `html` command). Do not retry HTML through `docs content`,
+**board** → `board.md`; a **PPT** → `ppt.md`; an **html** result → the separate `octo-html` skill.
+Using the wrong surface returns `409 unsupported_doc_type`. For an HTML search
+result, run `docs get <docId>` and use its `octoDocSlug` value as the document reference
+with `html get <octoDocSlug>` (or another `html` command). Do not retry HTML through `docs content`,
 `docs sheet`, or `docs scene`.
 `docs get <docId>` reports the `doc_type`, your role, and `octoDocSlug` for HTML.
+That value is the canonical `doc_id` for new documents and the retained legacy
+slug for old documents; callers do not infer the distinction from mount state.
 
 ## Auth & space
 
@@ -54,11 +61,33 @@ addressed by `slug`, not `docId`: if a search hit does not include a slug, run
 
 ## Document lifecycle
 
+**Bots cannot delete documents, even as owner/admin or for cleanup of their own
+test documents.** Do not run `octo-cli docs delete <docId>`. Ask a human with
+document admin permission to delete the document in Octo.
+
+The docs-backend bot-deletion policy returns HTTP `403` / `bot_delete_forbidden`
+for both `DELETE /v1/bot/docs/:docId` and
+`DELETE /v1/bot/docs/octo-doc/:octoDocSlug`, including already-deleted retries.
+The CLI emits `error.type: permission` and keeps that error code. Stop on this
+denial: do not retry or treat it as successful cleanup. Identity comes from
+server-side authentication; changing `uid`, owner, Space, or the bot's role
+does not authorize deletion. Do not switch to `html rm`, a raw API call, another
+credential, or an older deployment to work around the policy.
+
+Bot creation and editing remain available under their existing permissions.
+Deleting a comment/version, sheet rows/columns, or individual scene elements is
+not whole-document deletion and retains its own permission checks.
+
 ```bash
 # Create an empty doc (caller becomes owner/admin). A new doc has NO body —
 # seed a `doc` with `docs content edit` (doc.md), a `sheet` with
-# `docs sheet edit` (sheet.md), a `board` with `docs scene edit` (board.md).
+# `docs sheet edit` (sheet.md), and a `board` with `docs scene edit` (board.md).
 octo-cli docs create [--title "Runbook"] [--folderId f_123] [--docType doc|sheet|board]
+
+# Create a presentation from a template (ppt.md).
+octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId signal --idempotency-key <unique-key>
+# Native gallery choices: signal, terra, orbital, picnic (requires the matching backend).
+# Read ppt.md for style selection and the create -> read -> edit -> verify workflow.
 
 # List docs you own or are a member of. Page-based (see the pagination note below).
 octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
@@ -79,7 +108,6 @@ octo-cli docs export <docId> --export-format pdf -o ./output.pdf
 # Other accepted matching pairs: md/.md, docx/.docx, xlsx/.xlsx, png/.png, svg/.svg
 
 octo-cli docs rename <docId> --title "New title"
-octo-cli docs delete <docId>                 # soft delete (admin)
 ```
 
 ## Pagination note
@@ -99,10 +127,12 @@ Pagination depends on the endpoint's response contract:
 
 `docs attachments upload` (binary helper), invites, access-requests, and
 link-card are out of scope here. Body editing is limited to `doc_type: doc`
-incremental block ops (`doc.md`), `doc_type: sheet` cell/dims/drawings batches
-(`sheet.md`), and `doc_type: board` scene batches (`board.md`). `doc_type: html`
-belongs to the separate `html` domain, is addressed by slug, and is published as
-immutable versions; it cannot be read or edited through these three body
+incremental block ops (`doc.md`), the spreadsheet batches documented in
+`sheet.md`, `doc_type: board` scene batches (`board.md`), and revision-checked
+PPT edits (`ppt.md`). `doc_type: html`
+belongs to the separate `html` domain, uses its returned document reference, and
+is published as
+immutable versions; it cannot be read or edited through these content
 surfaces. The document outline is not editable through the CLI.
 
 ## Schema lookup
@@ -112,5 +142,5 @@ Any operation's parameters + response schema come from the embedded registry:
 ```bash
 octo-cli schema docs.create
 octo-cli schema docs.search
-octo-cli schema docs.content.edit     # + docs.sheet.edit / docs.scene.edit / docs.comments.add / …
+octo-cli schema docs.content.edit     # + docs.sheet.edit / docs.sheet.replace / docs.sheet.rows.insert / docs.sheet.columns.delete / …
 ```

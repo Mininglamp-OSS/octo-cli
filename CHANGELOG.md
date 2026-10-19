@@ -26,6 +26,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normalized once before normal or task policy is applied. Explicit
   `--bot-id` / `--profile` selectors still win. The success envelope's
   `identity.source` names the alias that supplied the value.
+- **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
+  matching version in one JSON response. Bot updates read this pair, edit the
+  HTML, and publish with the existing `--version` set to the read version + 1.
+  On a version conflict, reread and reapply the edit before publishing again.
+  **Minimum rollout dependency:** the HTML backend will be deployed first;
+  release this CLI workflow and its skills only after octo-docs-html#34 is merged,
+  deployed and verified on every HTML-serving instance. If source returns a
+  route-level 404 while `html get` can read the same reference, report
+  an unavailable endpoint/deployment issue rather than a missing document.
+  Stop the update; do not create a replacement or fall back to versionless writes.
+- **Spreadsheet productivity CLI** — `docs sheet split` and `docs sheet
+  deduplicate` explicitly send `preview:true` by default; applying requires
+  `--preview=false`, with additional `--overwrite` consent for occupied split
+  destinations. Declared boolean body defaults fill missing fields without
+  overriding `--data`; explicit flags take precedence. Strict request schemas
+  reject non-boolean values (including `null`, strings and numbers) before HTTP;
+  malformed `preview` never silently suppresses the safety gate. Range and
+  delimiter bounds are checked locally. Sheet get/edit also support compact conditional
+  format rules and sparse `null` deletion. **Minimum rollout dependency:**
+  backend MR !147, then MR !166 and its deployment, before release/use of these
+  commands. An explicit missing-route 404 returns `SHEET_CLEANING_UNAVAILABLE`;
+  ambiguous unstructured 404s retain `NOT_FOUND` with deployment-check guidance.
+  Do not emulate cleaning with a whole-sheet rewrite. Safety
+  snapshot recovery through `docs versions restore` requires an admin.
+  **Existing-operation wire change:** omitted `docs sheet replace`
+  `caseSensitive` and `matchesTheWholeCell` now send explicit `false`, matching
+  the backend's existing absent-value defaults. `summary.create` declares
+  `include_archived:false` but remains disabled, so that declaration does not
+  change a callable command. Query and non-boolean body defaults remain
+  backend-owned. Resolved defaults stay internal rather than appearing as
+  `schema` output metadata until materialization is consistent across types.
+- **`octo-cli docs sheet rows insert|delete` and `docs sheet columns
+  insert|delete`** — structurally adds or removes rows and columns using
+  zero-based coordinates while the backend atomically relocates affected
+  resources and updates `rowCount` / `columnCount`. **Minimum rollout dependency:** release only after
+  `octo-docs-backend` MR !136 is merged and deployed. A route-level 404 without
+  `sheet_not_found` in a mixed-version environment means the backend is not
+  ready; do not emulate the structural operation with a whole-sheet rewrite.
+- **`octo-cli docs sheet replace`** — performs one server-side, optimistic-
+  concurrency-guarded find-and-replace over workbook values or formulas, with
+  optional worksheet/range, case, and whole-cell controls. **Minimum rollout
+  dependency:** release only after `octo-docs-backend` MR !132 is merged and
+  deployed; on a mixed-version environment where this route returns 404, fall
+  back to `docs sheet get` plus an explicit `docs sheet edit` batch.
+- **`octo-cli marketplace plugin` family (unified plugin surface)** — one command
+  family over the backend's unified `/plugins/*` API, replacing the retired
+  per-type `skill` / `mcp` / `marketplace expert` / `marketplace squad` surfaces
+  (44 legacy ops → 25). Resource kind is selected with `--plugin-type`
+  (`skill` / `connector` / `expert` / `expert_team`; the old `mcp` maps to
+  `connector`, `squad` to `expert_team`): `plugin list` / `get` / `version list`
+  / `skillmd` / `download` / `upsert` / `delete` / `install` / `import` /
+  `publish` / `delist`, plus the six-command `plugin review-request` workflow and
+  `plugin-category list` / `plugin-tag list`. The skill
+  upload→parse→import pipeline (`skill-upload`, `skill-parse-task`) and icon
+  presign helpers are retained. Client-side gates before any request is sent:
+  `plugin list` requires `--scene-code` and requires `--plugin-type` except for
+  the all-types `--mode mine` view; `plugin upsert` requires a full `plugin`
+  document (`plugin_name` / `plugin_type` /
+  `visibility` / `manifest_json` / `plugin_json`) and gates `plugin_type`,
+  `visibility` (`space` / `private`; the retired `public` is refused, matching
+  `plugin import`), the `sort` vocabulary, and relations' `relation_type`
+  (`expert_team_expert` / `expert_skill` / `expert_connector`);
+  `mode` accepts only `mine`. Write ops (`upsert` / `delete` / `install` /
+  `import`, plus the non-idempotent `skill-upload parse`) set
+  `x-octo-retry: never` so ambiguous gateway failures surface as
+  `RESULT_UNKNOWN` instead of auto-replaying a non-idempotent mutation.
+  Value-level rules remain backend-enforced.
+- **Marketplace publishing is an explicit, review-aware lifecycle.** `plugin
+  upsert` and skill `plugin import` save drafts and version snapshots. `plugin
+  publish` lists private content immediately, while Space-visible content opens
+  a review request and stays draft until a Space owner/admin approves it. The
+  `plugin review-request create|list|get|approve|reject|cancel` family exposes
+  frozen-submission review, and `plugin delist` takes published Space content
+  down without deleting it. Reads expose `listing_state`, `display_status`, and
+  `review_id` so callers can distinguish draft, pending, published, rejected,
+  and delisted states.
+- **`octo-cli marketplace plugin install`** — installs an `expert` / `expert_team`
+  plugin into a Loop workspace (`--workspace-id`, `--runtime-id`) through the
+  unified API. This exposes the install-to-Loop capability that the retired
+  per-type surface deliberately withheld; it is gated backend-side and
+  provisions through octo-fleet.
+- **`octo-cli loop` domain** — 116 registered commands generated from Fleet's
+  Public API contract across tasks, executions, experts, expert teams,
+  workspaces, runtimes, skills, autopilots, attachments, comments,
+  and labels. Loop uses explicit Workspace selectors, typed Autopilot dispatch
+  fields, task lifecycle status including `in_review`, and a daemon-oriented
+  task credential policy. The shared OpenAPI registry now resolves referenced
+  parameters, request bodies, responses, nullable unions, and composed schemas.
+- **`octo-cli drive` domain** (49 commands) — network drive over octo-drive:
+  spaces and members, folder/file tree and `browse`, full-text `search`, blob registration,
+  single-part and multipart upload plus signed download, online-document mounts,
+  share links, invites, and IM-attachment transfer. 43 leaves are generated from
+  the `drive.json` spec (46 operations); six are hand-written because they are not a
+  single request or take an argument shape the engine cannot express:
+  `upload file` (prepare → single PUT/confirm or multipart parts → complete,
+  with best-effort cancel/abort on incomplete failure), `download file` and
+  `share download` (signed URL → atomic local
+  write), `share create` (branches on blob vs mounted document),
+  `share blob-create` (positional file id), and `share access`. Ships with the
+  `octo-drive` Skill. There is deliberately no `drive org` subtree — the
+  product's member picker is a frontend filter over the space roster, not a
+  backend search.
+  - **Server-owned multipart scheduling.** `upload file` sends one prepare
+    request that always declares `X-Drive-Upload-Capabilities: multipart-v1`;
+    the server ignores it below the multipart threshold and otherwise returns a
+    complete multipart snapshot. `single`, missing, and unknown `upload_mode`
+    values keep the legacy path; unknown without `upload_url` is
+    `UPLOAD_MODE_CONFLICT`. A `multipart` response enters the scheduler directly.
+    Multipart streams parts with
+    `io.NewSectionReader`, respects `max_concurrent_parts`, groups presign
+    requests at 20 parts or fewer, retries individual parts, re-signs only a
+    rejected 403 part, reads each ETag, and writes progress to stderr. Completion
+    retries explicit HTTP 5xx responses a bounded number of times, sends a
+    connection interruption or timeout only once, and treats `RESULT_UNKNOWN` as
+    ambiguous by neither retrying nor aborting it. Incomplete sessions get a
+    detached five-second best-effort abort.
+  - **Dual identity, one command surface.** A `uk_*` user API key acts as the
+    real person and routes to `/v1/user/drive/*`; `bf_*` / `app_*` act as the bot
+    and route to `/v1/bot/drive/*`. The routing is spec metadata, not code, so the
+    command tree is identical either way. A bot must still be added as a member of
+    a shared space, exactly like a person.
+  - **Share hand-over is the `share_url` and nothing else.** `share access` /
+    `share download` take the whole link, parse it under strict same-origin rules,
+    and call the configured API with the token they extracted — the link's host is
+    never contacted. Both sides require a credential; there is no anonymous share
+    surface. A document link is never downloadable.
+  - **Lossless uint64 ids.** Drive file ids exceed both `float64`'s exact range
+    and Go's `int`, so they are decimal strings on the CLI surface (validated in
+    `[0, 2^64-1]`, sent as JSON integers, returned as decimal strings) and can be
+    piped verbatim from one command into the next.
+  - Presigned object-storage transfers run on a separate HTTP client that carries
+    no Octo credential and no space header.
+- **Generic spec extensions**, all opt-in with omit-means-unchanged semantics:
+  `x-octo-allowed-token-kinds` (local credential-kind gate →
+  `TOKEN_KIND_NOT_ALLOWED`, `validation`/exit 2, matching the existing
+  message-search gate), `x-octo-mount-by-token-kind` (per-kind server mount,
+  applied at the single path-assembly site in `cmd/service/run.go`),
+  `x-octo-response-fields` (rename/duplicate response keys, so a backend DTO's
+  ambiguous `id` can surface as `share_id` + `share_token`),
+  `x-octo-lossless-id-fields` (uint64 response ids as decimal strings), and
+  `x-octo-secret` (mask a value in `--verbose` / `--dry-run` without changing the
+  wire). No pre-existing domain declares any of them.
 - **`octo-cli docs search`** — permission-scoped full-text search across online
   documents, sheets, boards, and mounted HTML documents registered in docs-backend
   via `POST /v1/bot/docs/search`. Supports repeatable `--doc-type` filters, manual
@@ -73,8 +215,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `octo-html` skill and CLAUDE.md command-tree docs.
 - **`octo-cli docs share get|set`** — program the space-level share scope of a
   document. `docs share get <docId>` reads the current `{docId, shareScope,
-  shareRole}` (needs reader); `docs share set <docId> --scope
-  restricted|anyone_in_space [--role read|edit]` changes it (needs admin). The
+  shareRole, permissionEpoch}` (needs reader); `docs share set <docId> --scope
+  restricted|anyone_in_space --permissionEpoch <epoch> [--role read|edit]` changes it (needs admin). The
   scope enum is `restricted` / `anyone_in_space` and the role enum is `read` /
   `edit`; a valid `--role` is required with `--scope anyone_in_space` and is
   ignored (stored as `read`) with `--scope restricted`. This targets the
@@ -84,10 +226,212 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **PPT native media guidance** distinguishes direct binary uploads of authorized
+  local task assets from ingestion of existing public URLs. Signed URLs use stdin
+  and private response handling; native references are inserted with a fresh
+  revision. **Minimum rollout dependency:** use this media workflow only with a
+  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
+  document-owned media. Older image-only attachment responses are not compatible.
+  No new CLI command, publishing gate or size-limit change is introduced.
+
 - **Loop workspace flag terminology** — generated `--workspace-id` help and the
   bundled Loop skill now state that the value is a workspace UUID, not a slug
   or generic selector. The architecture guide records the separate Web slug,
   Public API UUID, and credential-bound task conventions.
+
+- **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
+  visible title with the machine name.** The CLI contract now correctly
+  describes `plugin_name` as the human-facing Marketplace name and `name` as
+  the stable `SKILL.md` machine name. The bundled create workflow supplies both
+  fields explicitly and checks existing ownership against `manifest_json.name`,
+  preventing newly imported cards from displaying a machine slug and avoiding
+  duplicate imports hidden by a search filter that does not cover machine
+  names. New imports are also rejected locally when `plugin_name` is missing or
+  blank, and a create must omit `plugin_id` entirely rather than pass it as
+  blank or `null`; updates may still omit `plugin_name` to preserve the existing
+  display name, but an explicitly supplied update value must be non-blank.
+- **BREAKING (docs): sharing updates require `permissionEpoch`.** Read the
+  current value with `docs share get`, then pass it unchanged to `docs share set`.
+  A stale epoch returns HTTP 409; re-read permissions and reconsider the intended
+  change instead of automatically retrying. Release only after the target backend
+  returns `permissionEpoch` from share reads and enforces it on writes.
+- **BREAKING (docs): PPT creation uses blank plus the new gallery templates.**
+  `docs create --templateId` accepts `blank`, `signal`, `terra`, `orbital` and
+  `picnic`. The CLI rejects the former `pitch`, `report` and `lesson` IDs with
+  `ENUM_NOT_ALLOWED` before HTTP, including inline JSON and JSON-file input.
+  This is the new-creation policy in [#174](https://github.com/Mininglamp-OSS/octo-cli/issues/174),
+  not a claim that already-deployed backends reject those IDs. Existing PPTs
+  remain readable/editable by docId; their data is not migrated or deleted.
+  **Minimum rollout dependency:** release only after
+  the backend player/data prerequisites, catalogue activation and frontend picker
+  in the [current rollout dependencies](docs/ppt-release-gate.md#current-rollout-dependencies)
+  are merged and deployed to the intended environment, with all five choices
+  verified. MR links and source refs are not deployed-state evidence. A backend with
+  only the old blank/pitch/report/lesson catalogue leaves only `blank` usable
+  if this CLI ships first: new gallery IDs fail server-side and old IDs fail
+  locally. Update Bot binaries and installed skill copies together after rollout.
+  GitHub Release/npm publishing uses the existing CI and packaging checks; it
+  does not require PPT-specific credentials or create acceptance documents.
+  This deliberately restores the pre-#173 publishing behavior without a main-only
+  dispatch-ref check or PPT-specific environment approval; operators choose the
+  workflow ref and release tag. Tag and CI-evidence checks remain in place.
+  Live deployment acceptance is an operator-run check when related services
+  change, not a mandatory step on every CLI release. See
+  [PPT deployment compatibility](docs/ppt-release-gate.md).
+  Enum errors include the deployment caveat for flags, inline JSON and files.
+- **`octo-cli docs members remove` now requires `--principal-space-id`** — Bot
+  membership deletion is an exact Space-qualified mutation. Requiring the
+  principal Space prevents an ambiguous uid from deleting the wrong row when
+  the same uid has memberships in multiple Spaces.
+- **BREAKING (marketplace): `plugin list` loses `--page-all`.** The retired
+  `skill.list` / `skill.mine.list` operations declared `x-octo-pagination` and
+  could be exhausted in one invocation. The unified `/plugins` endpoint is
+  offset-paged (`--page` / `--page-size`, default 20, max 100, out-of-range
+  rejected with 400 rather than clamped) and does not advertise the cursor
+  extension, so `--page-all` is not registered. Callers that relied on it must
+  walk `--page` until a short page. This matters most for the owned-name
+  duplicate check: `--q` is a substring match against `plugin_name` or
+  `manifest_json.description`, but never the machine identity in
+  `manifest_json.name`, so a single unpaged probe can report a false "not
+  found".
+- **BREAKING (marketplace): `plugin upsert` replaces the plugin row; it does not
+  patch it.** There is no metadata-only PATCH on the unified API. The backend
+  rebuilds the whole plugin from the submitted document, preserving only
+  `created_at`, the version history and the creator identity — an omitted
+  `category_id`, `publisher` or `icon` is accepted as empty and clears the
+  stored value, and an omitted `relations` key soft-deletes every live relation.
+  `plugin import` deliberately has the opposite semantics (omitted fields fall
+  back to the existing row). The spec field descriptions and the
+  `octo-marketplace` skill docs now state both, and prescribe read-modify-write
+  via `plugin get`. Additionally, `manifest_json` must agree with the outer
+  `plugin` fields (`plugin_name`, `plugin_type`, and `labels` == `tags` in the
+  same order); every disagreement returns one opaque
+  `400 VALIDATION_ERROR {"field":"body","reason":"invalid"}`.
+- **`octo-cli html` adopts canonical create and document references** — create
+  omits `slug`; the CLI generates `idempotency_key` once per invocation and
+  reuses it across transport retries (an explicit key remains supported). It returns `data.doc_id` plus
+  `data.slug == data.doc_id`, whether mounted or unmounted. Every later operation
+  uses `data.slug`; old documents retain their legacy slug as that reference.
+  Display names are metadata, not aliases, and same-name republish is unsupported.
+  Query/body wire keys remain `slug`; path argument help now says `doc-ref` without
+  changing request paths. Group, space, and thread mounts are all registered.
+  Republish requires the saved `slug` and omits `idempotency_key`. `html draft
+  create` provides the canonical no-reference draft flow (`POST /docs/draft`)
+  with an idempotency key. Unattended callers should supply their own stable
+  `--idempotency-key`: a generated key lives only for that invocation, so a
+  re-run after an ambiguous failure creates a second document. A failed create
+  reports the key it used in the error envelope so the outcome stays
+  recoverable.
+  **Minimum rollout dependency:** release only after the canonical-create changes
+  in octo-docs-backend#166 and octo-docs-html#33 are merged and deployed.
+- **Loop request validation now enforces its Public API constraints locally**,
+  including composition, closed-object semantics, minimum object sizes,
+  Unicode string lengths, and maximum array sizes. Existing service
+  domains retain their previous backend-enforced behavior.
+- **Unknown Loop Public API error codes use HTTP status taxonomy**, while
+  legacy services retain their historical `api_error` fallback. A server hint
+  remains presentation metadata and no longer changes the error type or exit
+  code by itself.
+- **The default gateway is now `https://im.deepminer.com.cn`** instead of the
+  previous localhost development endpoint. Set `OCTO_API_BASE_URL` explicitly
+  for test or self-hosted deployments.
+- **Gateway configuration is origin-only** — `OCTO_API_BASE_URL` and stored
+  profile URLs must contain only `http(s)://host[:port]`; service paths, query
+  strings, fragments, and credentials are rejected. Existing profiles with a
+  service-specific path must be updated with `octo-cli auth login` before use.
+- **A transfer may no longer connect to the local machine, on the first connection as
+  well as on a redirect hop.** The `https`-or-loopback-`http` rule is now decided on the
+  *resolved* address rather than on how the host is spelled, and the connection then goes
+  to the address that was checked, so a second lookup cannot answer differently in
+  between. Previously only redirect hops were judged and only by spelling, so a hostname
+  with an `A` record on `127.0.0.1` passed. Other internal ranges stay reachable — only
+  this machine does not. **Deployment consequence:** a remote `OCTO_API_BASE_URL` whose
+  object storage resolves to the caller's own machine will no longer transfer; point
+  `OCTO_API_BASE_URL` at loopback to restore the local setup. A configured HTTP(S) proxy
+  is still honoured, and a proxy on the local machine is not refused: it is not the
+  storage host. Where the proxy is also the only resolver, the target cannot be
+  classified locally and the transfer proceeds unclassified, reported under `--verbose`.
+- **A malformed command line no longer echoes the argument it could not parse.** pflag
+  and cobra quote the offending token in their own messages — `bad flag syntax: <x>`,
+  `unknown flag: --<x>`, `unknown shorthand flag: 'A' in -<x>`, `flag needs an argument:
+  <x>`, `invalid argument "<x>" for …`, `unknown command "<x>"` — and those went into the
+  structured error on stderr verbatim. Because base64url share and invite ids commonly
+  start with `-`, a missing verb or a mistyped flag name put an id there; `bad flag
+  syntax` additionally carries the whole token, so `---password=<value>` printed the
+  value. Rather than list the unsafe shapes, the rule is now default-deny: **any message
+  about flag parsing is reported by category unless it is on an explicit allowlist of
+  shapes that carry no caller value.** The allowlist is the ones carrying only counts or
+  flag names (`accepts N arg(s)`, `required flag(s) "x" not set`) plus `unknown
+  subcommand`, which lists this CLI's own subcommand names rather than the argument.
+- **`--dry-run` masks the token inside `share_url`.** `share access` and `share download`
+  masked the token in the request `path` and printed the same token verbatim in
+  `share_url` one field below. A dry-run description is meant to be safe to paste into a
+  ticket, so both are masked now; the `share_url` field is still present, with
+  `***REDACTED***` in place of the token.
+- **A numeric host a resolver would read as an address is refused in every base.** The
+  rule previously looked for "digits and dots", so `0x7f.0.0.1` and `0x7f000001` were
+  treated as ordinary names while the resolver read them as `127.0.0.1`. It now mirrors
+  what `inet_aton` does — decimal, `0`-prefixed octal, `0x`-prefixed hex, and fewer than
+  four labels — and refuses any such host that `net.ParseIP` does not accept. Names whose
+  labels are hex *letters* (`storage.de`) are unaffected.
+- **`OCTO_API_BASE_URL` with a path is now refused rather than silently trimmed.** Share
+  links were built from the scheme and host only, so a deployment served under a path
+  prefix produced links that looked correct and resolved to nothing.
+- **`--data null` and `--params null` are now rejected instead of being treated as an
+  absent value.** Both are valid JSON that decodes into a nil map. `--data null` — on any
+  generated service command and on `octo-cli api` — used to behave like "no body", and
+  with a promoted body flag it crashed (see Fixed); `--params null`, which is `octo-cli
+  api` only, behaved like "no query parameters". Both are now `VALIDATION_ERROR` / exit 2
+  with a message naming the shape. Every other non-object shape (`true`, a number, a
+  string, an array) was already rejected; these two were the gap. **This is a
+  user-visible behaviour change**: a script passing `null` to mean "nothing" must omit
+  the flag instead.
+- **A presigned URL whose host is not in canonical ASCII form is refused.** `net/http`
+  canonicalises a host with IDNA before dialling it while the resolver does not, so a
+  non-ASCII spelling was checked as one string and connected to as another — the
+  fullwidth spellings of `127.0.0.1` and `localhost` passed every rule and reached the
+  local machine. An internationalised storage host must be presented in its A-label
+  (`xn--…`) form, which is what DNS carries; the CLI does not perform the mapping itself,
+  because the checked string and the dialled string then could not be guaranteed equal.
+- **An unknown subcommand no longer echoes the word it did not recognise.** Every
+  service domain's parent command now reports
+  `unknown subcommand for "octo-cli drive share"; available: access, blob-create, create, download, list, revoke`
+  instead of `unknown subcommand "<word>" for "octo-cli drive share"`. The common way
+  to land there is an omitted verb rather than a mistyped one — `drive share <token>`
+  instead of `drive share revoke <token>` — which put a share token into an error the
+  caller never asked to see; listing the real subcommands is also more useful for an
+  actual typo. Exit-code classification is unchanged (still `validation`, exit 2).
+- **Spec `enum` values are now enforced locally, before the request.** Enums were
+  only rendered into `--help`; the value itself went to the backend unchecked, so
+  `drive im-transfer create --im-channel-type 9` was forwarded despite the spec
+  declaring `[1, 2, 5]`, and `-1` failed only as a backend decode error that
+  leaked an internal struct name. The generic engine now rejects an out-of-set
+  value with `ENUM_NOT_ALLOWED` (`validation`, exit 2, zero HTTP) and a hint
+  listing the accepted values. Applies to every domain, on request-body fields
+  (including nested and array-item enums, and values supplied through `--data`)
+  and on query parameters alike. Comparison is by canonical form, so a value is
+  accepted whether it arrives as an `int` flag, a `--data` JSON number, or a
+  `json.Number` uint64. Only flags the caller actually set are checked, so an
+  omitted optional enum field is untouched. Structural violations keep their
+  existing `VALIDATION_ERROR` envelope. A non-scalar (object / array / null)
+  against a scalar enum is rejected too, closing the last path by which a
+  malformed value reached the backend and came back as an internal decode error.
+  Because a spec enum narrower than the backend's real vocabulary would now
+  refuse a call that used to work, `drive.doc.mount`'s `source` enum was
+  corrected from `["user-mount"]` to `["user-mount", "docs-sync"]` (octo-drive's
+  `docref.allowedMountSources` accepts both), and a regression test pins the
+  drive enums against their backend allow-lists.
+- **A path parameter may now declare `x-octo-flag`** to add an optional flag
+  alternative to its positional slot. base64url ids legitimately start with `-`
+  (about one in 64), which cobra parses as a flag before the command runs, so
+  `drive share revoke -Ab3…` failed with "unknown shorthand flag" unless the
+  caller knew to write `-- -Ab3…`. `share_id`, `invite_id` and `invite_token` now
+  also accept `--share-id` / `--invite-id` / `--invite-token`; the `--` separator
+  still works, positional parsing is unchanged, and supplying both forms for one
+  slot is a validation error rather than a silent winner. Operations whose path
+  params declare no `x-octo-flag` keep `cobra.ExactArgs`. A flag-parse failure on
+  such a command now carries a hint naming both escapes. An empty flag value is
+  refused, so `--share-id "$UNSET"` cannot address the collection URL.
 - **Generated service commands now reject incomplete JSON bodies locally** —
   request-schema `required` fields and nested `minItems` constraints are
   validated after merging `--data` with promoted body flags, before any HTTP
@@ -99,6 +443,153 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   install an `octo-cli` binary, and all commands are invoked as
   `octo-cli <command>`. **Breaking:** scripts, aliases, and shell completions
   that call `octo` must switch to `octo-cli`.
+
+### Fixed
+- **An explicit JSON `null` no longer walks past the local `enum` and `uint64` gates.** The
+  body walker visited only non-nil children, so a property *present with value `null`* never
+  reached the enum or uint64 check and was forwarded upstream — while the same field with an
+  out-of-vocabulary or wrongly-typed value was correctly refused. Required fields were never
+  affected (a present `null` is reported as missing), so the exposure was the optional
+  constrained properties; a derived census over every embedded spec found **18** of them
+  across `drive`, `docs`, `html` and `mcp`. Both paths now refuse it, each in its own terms.
+  A `null` on a property with no enum and no `uint64` format is still forwarded — a backend
+  may accept it to clear an optional field.
+- **A presigned PUT answered `202`/`204` is no longer confirmed as a stored object.** The
+  upload accepted the whole 2xx family, so an async or no-content answer from object storage
+  returned success, the CLI went on to `confirm-upload` with the local byte count, and emitted
+  `ok:true` for a drive row pointing at an object that may never have been written. There is
+  no post-PUT verification anywhere in that path — no ETag comparison, no size echo, no HEAD —
+  so the status code is the only evidence the bytes landed, and only `200`/`201` is that
+  evidence. The other 2xx codes now fail as `UPLOAD_NOT_CONFIRMED`, kept distinct from the
+  `UPLOAD_FAILED` a storage *refusal* produces, and the pending row is still cancelled. The
+  download side's comment claiming the upload half "already refuses the same shape" was untrue
+  when written; it is true now and says so.
+- **`drive share create` no longer silently discards `--password` / `--password-file` /
+  `--expires-in-seconds` on a document.** The share body — password included — was built before
+  the node lookup and then dropped on the document branch, which issues no request at all, so
+  the command exited 0 with a `share_url` an operator could hand over believing it was
+  password-gated. It was not. A document link is an entrance into the docs permission system,
+  not a grant this command parameterises, so supplying any of those three flags is now refused
+  with `SHARE_FLAG_NOT_APPLICABLE` and no link is emitted. The check is on whether the caller
+  *set* the flag, so `--expires-in-seconds 0` — a deliberate "use the backend default" — is
+  caught too.
+- **The `octo-drive` skill and a validation hint prescribed a `-r` flag the CLI does not
+  implement.** `SKILL.md` used `-q '…' -r` fifteen times, across every step of all three
+  copy-paste workflows, and the uint64 hint pointed at the same idiom; only `--jq`/`-q` exists,
+  so each of those commands failed with exit 2. Removing `-r` alone would not have fixed them:
+  `--jq` prints a JSON value and ids are JSON strings, so a captured id arrives quoted and the
+  next command rejects it. The recipes now strip the quotes in the shell and say why. A new
+  test walks every `octo-cli` invocation in every embedded skill and asserts each flag it uses
+  exists in the command tree — the tripwire that keeps a recipe and the binary from drifting
+  apart. It also found a pre-existing error in the `octo-shared` skill, where the pagination
+  example used `--page-all` on a command that is not paginated.
+- **A compressed reply can no longer switch off the download completeness check.** The
+  transfer transport advertised `Accept-Encoding: gzip` by default, so a storage host that
+  compressed had its reply decompressed transparently and `Content-Length` reported as
+  unknown — which skipped the length comparison entirely and let a 1 KB response write
+  1 MB to the caller's `-o` path, reported as a complete download at an
+  attacker-chosen ratio. The reported `size` and `sha256` also described the expansion
+  rather than the stored object, and a blob another client stored compressed was written
+  out decompressed, so `download file` did not round-trip `upload file`. The transport now
+  refuses content encodings, and the transfer tests cover the compressed case in both
+  directions.
+- **A short declared secret no longer reaches stderr through a non-JSON error body.** The
+  text fallback in response redaction used the masker's prose boundary rule, which declines
+  a secret under 8 characters unless it is delimited — so one adjacent character published a
+  1–7 character password (an accepted input: `password` has no `minLength`) whenever a WAF or
+  reverse proxy answered with HTML. The fallback now asks the same disclosure question the
+  structured path asks and suppresses the whole body when the answer is yes; a body echoing
+  no secret is untouched, so a secret-free diagnostic stays readable.
+- **A declared secret is masked whatever JSON kind it arrives as.** Redaction masked only
+  string leaves, so a backend echoing a declared value as a number or boolean defeated it
+  with no mistake on the caller's part. Non-string scalars are now judged on their own JSON
+  spelling, which leaves unrelated numeric ids untouched. On the request side `octo-cli api`
+  instead **refuses** a non-string value at an `x-octo-secret` property: a type error cannot
+  disclose anything, and widening the masker over every number would mask ordinary ids out
+  of every diagnostic.
+- **A JSON prefix no longer truncates a backend diagnostic.** Response redaction decoded one
+  value without requiring EOF, so any body merely starting with a JSON token was rewritten to
+  just that token — `404 page not found`, which is what Go's own `http.NotFound` writes,
+  became the number `404`. Only a complete, valid JSON body takes the structural path now.
+- **A short declared secret no longer survives in an object-key position**, on either side.
+  Key masking used the bare masker, so a backend keying a per-id result map by
+  `<password>x` — or a caller merging such a key through `--data` — published it. Keys now
+  get the value rule in full, suppression included, and request-side key collisions collapse
+  in sorted order so a `--dry-run` description no longer varies between identical runs.
+- **`--params` array elements are JSON, not Go syntax.** An object, nested array or null
+  inside a `--params` array fell through to `fmt.Sprintf("%v", …)` and went on the wire as
+  `map[id:9007199254740993]`, `[1 2]` and `<nil>`, while the same value at top level was
+  correctly encoded. Both positions now share one renderer, and a number keeps the exact
+  digits the caller typed.
+- **A refused zero-byte download no longer blames storage.** The behaviour is unchanged —
+  an empty object and a transfer that delivered nothing cannot be told apart, and publishing
+  an empty file with the sha256 of nothing is what the guard prevents — but `blob create`
+  documents `size: 0` as a stated value, so such a blob can legitimately exist. The hint now
+  names the CLI limitation instead of telling the operator to report a bug they do not have.
+- **A share link is no longer printed when it fails to parse.** `url.Parse` returns an
+  error whose text quotes the whole input, and on `share access` / `share download` the
+  whole input is the link, so a malformed link put the share token into the error on
+  stderr. The inner cause is reported instead, which names what was wrong without
+  repeating it.
+- **`--overwrite=false` is honoured on filesystems without hard links.** Publication
+  refuses an existing destination by relying on `os.Link` failing atomically; when links
+  were unavailable the code fell through to `os.Rename`, which replaces its destination
+  unconditionally. The fallback now reserves the name with `O_CREATE|O_EXCL` first, so the
+  refusal no longer depends on which filesystem the download lands on.
+- **Response redaction no longer masks the envelope's own field names**, which a caller
+  whose secret happened to be an ordinary word like `code` or `message` could trigger,
+  destroying the machine-readable code. Redaction is also deterministic when two
+  secret-bearing keys mask to the same name.
+- **`--data null` with a promoted body flag crashed the CLI** with
+  `panic: assignment to entry in nil map`, on every service domain. JSON `null` decodes
+  into a nil map without error, and the promoted-flag merge then wrote into it. The same
+  unchecked-successful-decode is fixed in `docs import`, where a `null` response body
+  from the backend hit the same write.
+- **Documented that `drive blob create` now verifies the object.** octo-drive's
+  low-level register path used to take "this object already exists" on trust, so
+  `blob create --object-path does/not/exist.txt` returned a confirmed row that
+  browsed and shared fine and only 404'd on download. The backend now probes
+  storage and rejects an unknown key with `invalid_argument`, and rejects a
+  `--size` that conflicts with the stored object (`--size 0` for a non-empty
+  object included — 0 is a stated count, not an omission). Spec description,
+  design doc and skill say so, and all three now note that a register-path row
+  carries no persisted download URL — `share download` on one is `not_found`, so
+  `upload file` is the command for a shareable blob — and that an inconclusive
+  probe (storage unreachable) surfaces as a retryable 500 rather than
+  `invalid_argument`.
+- **Corrected the `drive` role contract in schema, docs and skill.** The shared
+  `Role` description claimed "super_admin and custom cannot be granted through
+  member add / invite create", which is wrong for `custom`: octo-drive accepts it
+  on `member add` / `member set-role` (it is the lowest rank, below
+  `preview_only`) and rejects it only on `invite create`. Grantability differs per
+  surface, so the schema, `docs/octo-cli-design.md` and the `octo-drive` skill now
+  carry an explicit per-surface matrix instead of one blanket sentence.
+  `super_admin` is never grantable — it is bound to the creator at space creation.
+- **Corrected `im_channel_type`'s documented consequence.** The schema, design doc
+  and skill all said a wrong value composes a different idempotency source key and
+  transfers the same attachment twice. octo-drive keys idempotency on (target
+  space, `type=blob`, object path), not on `source_key`; the channel type selects
+  the route the message is read through, and a wrong-but-accepted value resolves
+  the same attachment and replays the same row. The unsupported duplicate-transfer
+  claim is removed; the field stays required.
+- **uint64 precision in output and `--dry-run`.** The envelope re-parse and the
+  dry-run body echo both went through a plain `json.Unmarshal`, so any integer
+  above 2^53 was rounded to a `float64` before reaching stdout — a drive file id
+  would have been reported as a different number than the one actually sent. Both
+  now decode with `json.Decoder.UseNumber`. Affects every domain; `--jq`,
+  `--format table` and `--format csv` render the exact literal.
+- **octo-drive error codes are now mapped.** octo-drive replies with
+  `{"error":"<code>","message":"..."}` — the code is a bare string, not the nested
+  object the matters family uses, and the text is under `message` rather than
+  `msg` — so `ParseBackendError` matched neither existing layer and fell back to a
+  raw status dump. A third parse layer recognises that shape and maps the
+  lowercase codes (`permission_denied`, `password_required`, `wrong_password`,
+  `share_expired`, `not_found`, `conflict`, `invalid_argument`, `unauthorized`,
+  `auth_unavailable`, `internal`) to CLI taxonomy and hints. A lowercase code and
+  its uppercase counterpart classify identically — an agent branches on the CLI
+  taxonomy and exit code, never on which backend answered — so only the hint
+  differs. Free-text `error` values are not promoted to codes, and the uppercase
+  mapping plus every unknown-code fallback are unchanged.
 
 ## [0.5.0] — 2026-05-28
 

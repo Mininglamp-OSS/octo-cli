@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -69,12 +70,12 @@ func TestDo_LoopSelectsPublicAPIContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	if gotAccept != "application/vnd.octo+json" {
-		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
+	if gotAccept != loopAcceptMediaType {
+		t.Fatalf("Accept = %q, want %q", gotAccept, loopAcceptMediaType)
 	}
 }
 
-func TestDo_LoopOverridesGenericJSONAccept(t *testing.T) {
+func TestDo_LoopPreservesExplicitAccept(t *testing.T) {
 	t.Parallel()
 
 	var gotAccept string
@@ -89,7 +90,7 @@ func TestDo_LoopOverridesGenericJSONAccept(t *testing.T) {
 		Service: "loop",
 		Method:  http.MethodGet,
 		Path:    "/fleet/api/v1/workspaces",
-		Headers: map[string]string{"accept": "application/json"},
+		Headers: map[string]string{"Accept": "application/vnd.octo+json"},
 	})
 	if err != nil {
 		t.Fatalf("Do: %v", err)
@@ -203,104 +204,33 @@ func TestDo_BackendErrorParsed(t *testing.T) {
 	}
 }
 
-func TestDo_LoopUnstructuredNotFoundReportsUnsupportedAPI(t *testing.T) {
-	t.Parallel()
+func TestDo_SelectsBackendErrorProtocolByService(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+	}))
+	defer srv.Close()
 
-	cases := []struct {
-		name string
-		body string
+	for _, tc := range []struct {
+		service  string
+		wantType string
+		wantExit int
 	}{
-		{name: "empty", body: ""},
-		{name: "plain text", body: "404 page not found\n"},
-		{name: "HTML", body: "<html><body>Not Found</body></html>"},
-		{name: "gateway JSON", body: `{"message":"route not found"}`},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusNotFound)
-				_, _ = w.Write([]byte(tc.body))
-			}))
-			defer srv.Close()
-
+		{service: "loop", wantType: "validation", wantExit: 2},
+		{service: "thread", wantType: "api_error", wantExit: 1},
+	} {
+		t.Run(tc.service, func(t *testing.T) {
 			c := newTestClient(srv)
-			_, err := c.Do(context.Background(), &Request{
-				Service: "loop",
-				Method:  http.MethodGet,
-				Path:    "/fleet/api/v1/tasks/missing",
-			})
+			_, err := c.Do(context.Background(), &Request{Service: tc.service, Method: http.MethodGet, Path: "/error"})
 			ee := output.AsExitError(err)
 			if ee == nil {
-				t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+				t.Fatalf("Do error = %v, want ExitError", err)
 			}
-			if ee.Type != "api_error" || ee.Code != "LOOP_API_UNSUPPORTED" {
-				t.Fatalf("error = %+v, want api_error/LOOP_API_UNSUPPORTED", ee)
-			}
-			if ee.Message != "this Octo server version does not support Loop" {
-				t.Errorf("message = %q", ee.Message)
-			}
-			if !strings.Contains(ee.Hint, "/fleet/api/v1") {
-				t.Errorf("hint = %q, want Fleet API path", ee.Hint)
-			}
-			if len(ee.Detail) != 0 {
-				t.Errorf("detail = %s, want omitted gateway response", ee.Detail)
+			if ee.Type != tc.wantType || ee.ExitCode() != tc.wantExit || ee.Hint != "do better" {
+				t.Fatalf("error = %+v (exit %d), want type=%s exit=%d with server hint",
+					ee, ee.ExitCode(), tc.wantType, tc.wantExit)
 			}
 		})
-	}
-}
-
-func TestDo_LoopStructuredNotFoundPreservesBackendError(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"task not found","details":{}}}`))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), &Request{
-		Service: "loop",
-		Method:  http.MethodGet,
-		Path:    "/fleet/api/v1/tasks/missing",
-	})
-	ee := output.AsExitError(err)
-	if ee == nil {
-		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
-	}
-	if ee.Code != "NOT_FOUND" || ee.Message != "task not found" {
-		t.Fatalf("error = %+v, want backend NOT_FOUND preserved", ee)
-	}
-	if len(ee.Detail) == 0 {
-		t.Error("structured backend error detail must be preserved")
-	}
-}
-
-func TestDo_NonLoopUnstructuredNotFoundRemainsNotFound(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte("404 page not found\n"))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(srv)
-	_, err := c.Do(context.Background(), &Request{
-		Service: "docs",
-		Method:  http.MethodGet,
-		Path:    "/docs/missing",
-	})
-	ee := output.AsExitError(err)
-	if ee == nil {
-		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
-	}
-	if ee.Code != "NOT_FOUND" {
-		t.Fatalf("code = %q, want NOT_FOUND", ee.Code)
 	}
 }
 
@@ -350,6 +280,91 @@ func TestDo_NoRetryFlag(t *testing.T) {
 	if atomic.LoadInt32(&calls) != 1 {
 		t.Errorf("calls = %d, want 1 (NoRetry)", calls)
 	}
+}
+
+func TestDo_RequestDisableRetry(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"UPSTREAM_UNAVAILABLE","message":"x"}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/mail-side-effect",
+		DisableRetry: true,
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Errorf("calls = %d, want 1 (request-level DisableRetry)", got)
+	}
+}
+
+func TestMarkResultUnknown(t *testing.T) {
+	got := output.AsExitError(markResultUnknown(output.ErrNetwork("timeout", "retry")))
+	if got == nil {
+		t.Fatal("expected ExitError")
+	}
+	if got.Code != "RESULT_UNKNOWN" {
+		t.Fatalf("code = %q, want RESULT_UNKNOWN", got.Code)
+	}
+	if !strings.Contains(got.Hint, "do not retry automatically") {
+		t.Fatalf("hint = %q", got.Hint)
+	}
+
+	apiErr := output.ErrAPI("FORBIDDEN", "denied", "")
+	if markResultUnknown(apiErr) != apiErr {
+		t.Fatal("non-network error must remain unchanged")
+	}
+}
+
+func TestDo_AmbiguousGatewayFailureReturnsResultUnknown(t *testing.T) {
+	for _, status := range []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"code":"GATEWAY_FAILURE","message":"gateway failure"}}`))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Method:                         http.MethodPost,
+				Path:                           "/mail-side-effect",
+				DisableRetry:                   true,
+				UnknownOutcomeOnNetworkFailure: true,
+			})
+			got := output.AsExitError(err)
+			if got == nil || got.Code != "RESULT_UNKNOWN" {
+				t.Fatalf("error = %#v, want RESULT_UNKNOWN", got)
+			}
+		})
+	}
+
+	t.Run("rate limit remains definitive", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"slow down"}}`))
+		}))
+		defer srv.Close()
+
+		c := newTestClient(srv)
+		_, err := c.Do(context.Background(), &Request{
+			Method:                         http.MethodPost,
+			Path:                           "/mail-side-effect",
+			DisableRetry:                   true,
+			UnknownOutcomeOnNetworkFailure: true,
+		})
+		got := output.AsExitError(err)
+		if got == nil || got.Code == "RESULT_UNKNOWN" {
+			t.Fatalf("error = %#v, want definitive rate-limit error", got)
+		}
+	})
 }
 
 func TestDo_NoRetryOn400(t *testing.T) {
@@ -423,6 +438,79 @@ func TestDo_VerboseWritesToErrOut(t *testing.T) {
 	_, _ = c.Do(context.Background(), &Request{Method: "GET", Path: "/t"})
 	if !strings.Contains(errBuf.String(), "GET") {
 		t.Errorf("verbose trace missing: %q", errBuf.String())
+	}
+}
+
+func TestDo_RedactsWriteOnlyJSONFields(t *testing.T) {
+	var receivedBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		receivedBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var errBuf bytes.Buffer
+	c := newTestClient(srv)
+	c.options.DryRun = true
+	c.options.Verbose = true
+	c.options.ErrOut = &errBuf
+	body, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPut,
+		Path:   "/secret",
+		Body: map[string]any{
+			"signing_secret": "SUPERSECRET123456",
+			"label":          "safe",
+			"big":            json.Number("12345678901234567890"),
+			"nested":         map[string]any{"id": json.Number("9007199254740993")},
+		},
+		SensitiveJSONFields: []string{"signing_secret"},
+		Headers:             map[string]string{"authorization": "raw-secret"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if strings.Contains(string(body), "SUPERSECRET") || strings.Contains(string(body), "raw-secret") {
+		t.Fatalf("dry-run leaked a secret: %s", body)
+	}
+	if !strings.Contains(string(body), "[REDACTED]") || !strings.Contains(string(body), "***") {
+		t.Fatalf("dry-run did not redact fields and credential: %s", body)
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	var dryRun map[string]any
+	if err := dec.Decode(&dryRun); err != nil {
+		t.Fatalf("decode dry-run body: %v", err)
+	}
+	dryRunBody, ok := dryRun["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("dry-run body = %#v, want object", dryRun["body"])
+	}
+	if got := dryRunBody["big"]; got != json.Number("12345678901234567890") {
+		t.Fatalf("dry-run big number = %v, want lossless value", got)
+	}
+	nested, ok := dryRunBody["nested"].(map[string]any)
+	if !ok || nested["id"] != json.Number("9007199254740993") {
+		t.Fatalf("dry-run nested number = %#v, want lossless value", dryRunBody["nested"])
+	}
+
+	c.options.DryRun = false
+	errBuf.Reset()
+	_, err = c.Do(context.Background(), &Request{
+		Method:              http.MethodPut,
+		Path:                "/secret",
+		Body:                map[string]string{"signing_secret": "SUPERSECRET123456", "label": "safe"},
+		SensitiveJSONFields: []string{"signing_secret"},
+	})
+	if err != nil {
+		t.Fatalf("verbose Do: %v", err)
+	}
+	if strings.Contains(errBuf.String(), "SUPERSECRET") || !strings.Contains(errBuf.String(), "[REDACTED]") {
+		t.Fatalf("verbose output did not redact secret: %s", errBuf.String())
+	}
+	if !strings.Contains(receivedBody, "SUPERSECRET123456") {
+		t.Fatalf("redaction changed the wire body: %s", receivedBody)
 	}
 }
 
@@ -508,6 +596,54 @@ func TestDo_BinaryResponse_RedirectReturnsLocationEnvelope(t *testing.T) {
 	}
 	if n, _ := env["status"].(float64); int(n) != http.StatusFound {
 		t.Errorf("status = %v", env["status"])
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) {
+	const marker = "retry-log-response-secret-53223604"
+	signedLocation := "https://objects.example.test/object?" + marker + "&signature=%zz"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // make the retry loop exit immediately after its first diagnostic
+
+	var diagnostics bytes.Buffer
+	c := New(
+		&config.Config{APIBaseURL: "https://api.example.test"},
+		nil,
+		Options{Verbose: true, ErrOut: &diagnostics},
+	)
+	c.httpClient = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, &url.Error{
+				Op:  "Get",
+				URL: signedLocation,
+				Err: errors.New("failed to parse Location header"),
+			}
+		}),
+	}
+
+	_, err := c.Do(ctx, &Request{
+		Method:               http.MethodPost,
+		Path:                 "/v1/user/drive/files/42/upload/parts-presign",
+		ResponseSecretFields: []string{"parts[].url"},
+	})
+	if err == nil {
+		t.Fatal("expected the transport error to fail")
+	}
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("response secret reached the returned error: %v", err)
+	}
+	if !strings.Contains(diagnostics.String(), "retry #1") {
+		t.Fatalf("expected retry diagnostics to be exercised, got %q", diagnostics.String())
+	}
+	if strings.Contains(diagnostics.String(), marker) {
+		t.Fatalf("response secret reached retry diagnostics:\n%s", diagnostics.String())
 	}
 }
 
@@ -1012,5 +1148,237 @@ func TestTruncate(t *testing.T) {
 	got := truncate("1234567890abc", 5)
 	if !strings.Contains(got, "truncated") {
 		t.Errorf("truncate marker missing: %q", got)
+	}
+}
+
+// --- x-octo-secret redaction ---
+
+// A share token in the URL path and a share password in the body are
+// credential-equivalent. Both must go on the wire untouched but must never
+// appear in a --verbose trace or --dry-run description, which are the surfaces
+// most likely to end up in a log or a ticket.
+func TestSecretValues_RedactedInVerboseButSentOnTheWire(t *testing.T) {
+	const token = "share-token-abc"
+	const password = "hunter2"
+
+	var gotPath, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+
+	var trace bytes.Buffer
+	c := New(
+		&config.Config{APIBaseURL: srv.URL},
+		&credential.BotCredential{Token: "bf_secret_token"},
+		Options{Verbose: true, ErrOut: &trace},
+	)
+	if _, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/bot/drive/shares/" + token + "/download",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	}); err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+
+	// The wire is untouched: redaction is a logging concern only.
+	if !strings.Contains(gotPath, token) {
+		t.Errorf("request path lost the token: %q", gotPath)
+	}
+	if !strings.Contains(gotBody, password) {
+		t.Errorf("request body lost the password: %q", gotBody)
+	}
+
+	log := trace.String()
+	if strings.Contains(log, token) {
+		t.Errorf("verbose trace leaked the share token:\n%s", log)
+	}
+	if strings.Contains(log, password) {
+		t.Errorf("verbose trace leaked the share password:\n%s", log)
+	}
+	if !strings.Contains(log, "REDACTED") {
+		t.Errorf("verbose trace should show the masked values:\n%s", log)
+	}
+}
+
+func TestSecretValues_RedactedInDryRun(t *testing.T) {
+	const token = "share-token-abc"
+	const password = "hunter2"
+
+	c := New(
+		&config.Config{APIBaseURL: "https://octo.test"},
+		&credential.BotCredential{Token: "bf_secret_token"},
+		Options{DryRun: true, ErrOut: io.Discard},
+	)
+	body, err := c.Do(context.Background(), &Request{
+		Method:       http.MethodPost,
+		Path:         "/v1/bot/drive/shares/" + token + "/access",
+		Body:         map[string]any{"password": password},
+		SecretValues: []string{token, password},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	out := string(body)
+	if strings.Contains(out, token) || strings.Contains(out, password) {
+		t.Errorf("dry-run description leaked a secret:\n%s", out)
+	}
+	if !strings.Contains(out, "REDACTED") {
+		t.Errorf("dry-run description should show masked values:\n%s", out)
+	}
+	// The bot token itself stays masked by the existing MaskToken path.
+	if strings.Contains(out, "bf_secret_token") {
+		t.Errorf("dry-run description leaked the bot token:\n%s", out)
+	}
+}
+
+// A uint64 id above 2^53 must be echoed exactly in --dry-run. A plain unmarshal
+// would round it and make the dry run misreport the request.
+func TestDryRun_PreservesUint64Precision(t *testing.T) {
+	c := New(
+		&config.Config{APIBaseURL: "https://octo.test"},
+		&credential.BotCredential{Token: "bf_t"},
+		Options{DryRun: true, ErrOut: io.Discard},
+	)
+	body, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPost,
+		Path:   "/v1/bot/drive/folders",
+		Body:   map[string]any{"parent_id": json.Number("18446744073709551615")},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if !strings.Contains(string(body), "18446744073709551615") {
+		t.Errorf("dry-run body rounded the id:\n%s", body)
+	}
+}
+
+func TestDo_LoopOverridesGenericJSONAccept(t *testing.T) {
+	t.Parallel()
+
+	var gotAccept string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/workspaces",
+		Headers: map[string]string{"accept": "application/json"},
+	})
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
+	}
+}
+
+func TestDo_LoopUnstructuredNotFoundReportsUnsupportedAPI(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "empty", body: ""},
+		{name: "plain text", body: "404 page not found\n"},
+		{name: "HTML", body: "<html><body>Not Found</body></html>"},
+		{name: "gateway JSON", body: `{"message":"route not found"}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			c := newTestClient(srv)
+			_, err := c.Do(context.Background(), &Request{
+				Service: "loop",
+				Method:  http.MethodGet,
+				Path:    "/fleet/api/v1/tasks/missing",
+			})
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+			}
+			if ee.Type != "api_error" || ee.Code != "LOOP_API_UNSUPPORTED" {
+				t.Fatalf("error = %+v, want api_error/LOOP_API_UNSUPPORTED", ee)
+			}
+			if ee.Message != "this Octo server version does not support Loop" {
+				t.Errorf("message = %q", ee.Message)
+			}
+			if !strings.Contains(ee.Hint, "/fleet/api/v1") {
+				t.Errorf("hint = %q, want Fleet API path", ee.Hint)
+			}
+			if len(ee.Detail) != 0 {
+				t.Errorf("detail = %s, want omitted gateway response", ee.Detail)
+			}
+		})
+	}
+}
+
+func TestDo_LoopStructuredNotFoundPreservesBackendError(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"task not found","details":{}}}`))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "loop",
+		Method:  http.MethodGet,
+		Path:    "/fleet/api/v1/tasks/missing",
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+	}
+	if ee.Code != "NOT_FOUND" || ee.Message != "task not found" {
+		t.Fatalf("error = %+v, want backend NOT_FOUND preserved", ee)
+	}
+	if len(ee.Detail) == 0 {
+		t.Error("structured backend error detail must be preserved")
+	}
+}
+
+func TestDo_NonLoopUnstructuredNotFoundRemainsNotFound(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("404 page not found\n"))
+	}))
+	defer srv.Close()
+
+	c := newTestClient(srv)
+	_, err := c.Do(context.Background(), &Request{
+		Service: "docs",
+		Method:  http.MethodGet,
+		Path:    "/docs/missing",
+	})
+	ee := output.AsExitError(err)
+	if ee == nil {
+		t.Fatalf("error = %T %v, want *output.ExitError", err, err)
+	}
+	if ee.Code != "NOT_FOUND" {
+		t.Fatalf("code = %q, want NOT_FOUND", ee.Code)
 	}
 }

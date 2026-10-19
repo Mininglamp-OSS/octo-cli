@@ -245,3 +245,129 @@ func TestExtractRows_UncoercibleValueFallsThrough(t *testing.T) {
 		t.Error("scalar should not coerce to rows")
 	}
 }
+
+// renderCell has a json.Number branch whose whole purpose is to print a uint64
+// id's literal digits, but extractRows / coerceRows decoded with a plain
+// json.Unmarshal — so every number was already a float64 by the time renderCell
+// saw it, and the branch was unreachable. The result was that `--format json`
+// reported 9007199254740993 while `--format table` reported 9007199254740992 for
+// the same response: the tabular formats printed a different id than the backend
+// returned.
+//
+// These tests cover all three tabular formats at and beyond the float64 integer
+// limit, on the two envelope shapes extractRows handles (data-object and
+// data-array) and on a bare value.
+
+// losslessNumbers are values a float64 cannot represent exactly.
+var losslessNumbers = []struct {
+	name string
+	text string
+}{
+	{"2^53+1, the first unrepresentable integer", "9007199254740993"},
+	{"max uint64", "18446744073709551615"},
+	{"max uint64 minus one", "18446744073709551614"},
+	{"max int64", "9223372036854775807"},
+}
+
+func TestFormat_TabularFormatsKeepLargeIntegersExact(t *testing.T) {
+	for _, num := range losslessNumbers {
+		for _, format := range []string{FormatTable, FormatCSV, FormatNDJSON} {
+			t.Run(num.name+"/"+format, func(t *testing.T) {
+				// Build the value the way the factory does: decoded with UseNumber,
+				// so the formatter receives json.Number exactly as it would at
+				// runtime.
+				var envelope any
+				if err := decodeLossless([]byte(`{"ok":true,"data":{"id":`+num.text+`,"name":"x"}}`), &envelope); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				var buf bytes.Buffer
+				if err := Format(&buf, format, envelope); err != nil {
+					t.Fatalf("Format: %v", err)
+				}
+				if !strings.Contains(buf.String(), num.text) {
+					t.Errorf("%s output lost precision: want %s in\n%s", format, num.text, buf.String())
+				}
+			})
+		}
+	}
+}
+
+func TestFormat_TabularFormatsKeepLargeIntegersExactInEveryShape(t *testing.T) {
+	const id = "9007199254740993"
+	shapes := []struct {
+		name string
+		raw  string
+	}{
+		{"envelope with a data object", `{"ok":true,"data":{"id":` + id + `}}`},
+		{"envelope with a data array", `{"ok":true,"data":[{"id":` + id + `}]}`},
+		{"bare object", `{"id":` + id + `}`},
+		{"bare array", `[{"id":` + id + `}]`},
+		{"nested object in a cell", `{"ok":true,"data":{"meta":{"id":` + id + `}}}`},
+	}
+	for _, shape := range shapes {
+		for _, format := range []string{FormatTable, FormatCSV, FormatNDJSON} {
+			t.Run(shape.name+"/"+format, func(t *testing.T) {
+				var envelope any
+				if err := decodeLossless([]byte(shape.raw), &envelope); err != nil {
+					t.Fatalf("decode: %v", err)
+				}
+				var buf bytes.Buffer
+				if err := Format(&buf, format, envelope); err != nil {
+					t.Fatalf("Format: %v", err)
+				}
+				if !strings.Contains(buf.String(), id) {
+					t.Errorf("%s output lost precision: want %s in\n%s", format, id, buf.String())
+				}
+			})
+		}
+	}
+}
+
+// TestFormat_TabularFormatsAgreeWithJSON is the property that actually matters:
+// whatever id the JSON envelope reports, the tabular formats report the same one.
+func TestFormat_TabularFormatsAgreeWithJSON(t *testing.T) {
+	for _, num := range losslessNumbers {
+		t.Run(num.name, func(t *testing.T) {
+			var envelope any
+			if err := decodeLossless([]byte(`{"ok":true,"data":{"id":`+num.text+`}}`), &envelope); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			var jsonBuf bytes.Buffer
+			if err := Format(&jsonBuf, FormatJSON, envelope); err != nil {
+				t.Fatalf("Format json: %v", err)
+			}
+			if !strings.Contains(jsonBuf.String(), num.text) {
+				t.Fatalf("the json baseline itself lost precision:\n%s", jsonBuf.String())
+			}
+			for _, format := range []string{FormatTable, FormatCSV, FormatNDJSON} {
+				var buf bytes.Buffer
+				if err := Format(&buf, format, envelope); err != nil {
+					t.Fatalf("Format %s: %v", format, err)
+				}
+				if !strings.Contains(buf.String(), num.text) {
+					t.Errorf("%s disagrees with --format json about the id: want %s in\n%s",
+						format, num.text, buf.String())
+				}
+			}
+		})
+	}
+}
+
+// TestFormat_SmallAndFractionalNumbersUnchanged guards the blast radius: the
+// UseNumber switch must not alter how ordinary values render.
+func TestFormat_SmallAndFractionalNumbersUnchanged(t *testing.T) {
+	var envelope any
+	if err := decodeLossless([]byte(`{"ok":true,"data":{"n":42,"ratio":1.5,"zero":0,"neg":-7,"flag":true,"s":"x"}}`), &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := Format(&buf, FormatCSV, envelope); err != nil {
+		t.Fatalf("Format: %v", err)
+	}
+	got := buf.String()
+	for _, want := range []string{"42", "1.5", "0", "-7", "true", "x"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("csv output lost %q:\n%s", want, got)
+		}
+	}
+}

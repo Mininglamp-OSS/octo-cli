@@ -133,6 +133,38 @@ func TestCmd_SkillsShow(t *testing.T) {
 	}
 }
 
+// Agent Mail onboarding starts by asking the runtime to load the official
+// skill directly from the released binary. This command must remain available
+// before Bot or mailbox authorization is configured.
+func TestCmd_SkillsShowOctoMailWithoutAuth(t *testing.T) {
+	f := newTestFactoryWithReg()
+	f.SetConfig(&config.Config{Format: "json"})
+
+	out, _, err := execRoot(t, f, "skills", "octo-mail")
+	if err != nil {
+		t.Fatalf("skills octo-mail: %v", err)
+	}
+	var env map[string]any
+	if jerr := json.Unmarshal([]byte(out), &env); jerr != nil {
+		t.Fatalf("unmarshal: %v\n%s", jerr, out)
+	}
+	data, _ := env["data"].(map[string]any)
+	if data["name"] != "octo-mail" {
+		t.Errorf("name = %v", data["name"])
+	}
+	content, _ := data["content"].(string)
+	for _, want := range []string{
+		"Always inspect the authorization state first",
+		"octo-cli mail auth login",
+		"octo-cli mail auth status",
+		"octo-cli mail me",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("octo-mail content missing %q", want)
+		}
+	}
+}
+
 // A split skill (octo-docs) must reprint its whole set through `skills <name>`:
 // SKILL.md in `content` plus every progressive-disclosure reference under
 // `references`. This guards the bug where only SKILL.md was returned, dropping

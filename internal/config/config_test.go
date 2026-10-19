@@ -25,6 +25,7 @@ func TestValidate_RejectsServicePathAsBaseURL(t *testing.T) {
 	for _, raw := range []string{
 		"https://im-test.deepminer.com.cn/fleet",
 		"https://im-test.deepminer.com.cn/fleet/api/v1",
+		"https://im-test.deepminer.com.cn?",
 		"ws://im-test.deepminer.com.cn",
 	} {
 		c := &Config{APIBaseURL: raw, BotToken: "app_xxx"}
@@ -44,6 +45,7 @@ func TestValidate_CredentialMode(t *testing.T) {
 }
 
 func TestLoad_Defaults(t *testing.T) {
+	t.Setenv(EnvToken, "")
 	t.Setenv(EnvBotToken, "")
 	t.Setenv(EnvAPIBaseURL, "")
 	t.Setenv(EnvFormat, "")
@@ -61,6 +63,9 @@ func TestLoad_Defaults(t *testing.T) {
 
 func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvAPIBaseURL, "http://api.example")
+	// EnvToken outranks EnvBotToken, so it must be cleared for this case to
+	// exercise the EnvBotToken path rather than an exported real token.
+	t.Setenv(EnvToken, "")
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
@@ -147,4 +152,33 @@ func contains(haystack, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestLoad_TokenPrecedence(t *testing.T) {
+	cases := []struct {
+		name, octoToken, botToken, want string
+	}{
+		{"only the legacy variable", "", "bf_bot", "bf_bot"},
+		{"only the new variable", "uk_person", "", "uk_person"},
+		{"both set: the new one wins", "uk_person", "bf_bot", "uk_person"},
+		{"a blank new variable does not shadow", "   ", "bf_bot", "bf_bot"},
+		{"neither set", "", "", ""},
+		// Both variables are trimmed, symmetrically. An untrimmed OCTO_BOT_TOKEN
+		// holding only whitespace used to pass Validate here and then resolve to no
+		// credential in credential.EnvProvider, which trims both — an auth failure
+		// two layers away from its cause.
+		{"a whitespace-only legacy variable is no credential", "", "   ", ""},
+		{"a whitespace-only legacy variable with a tab", "", "\t\n", ""},
+		{"surrounding whitespace is stripped from the legacy variable", "", "  bf_bot\n", "bf_bot"},
+		{"surrounding whitespace is stripped from the new variable", "  uk_person\n", "", "uk_person"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(EnvToken, tc.octoToken)
+			t.Setenv(EnvBotToken, tc.botToken)
+			if got := Load().BotToken; got != tc.want {
+				t.Errorf("BotToken = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

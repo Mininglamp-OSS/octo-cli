@@ -38,6 +38,35 @@ are touched (the rest of the board is left as-is). On a key collision the elemen
 with the higher `version` (then smaller `versionNonce`) wins, and a delete is a
 soft-delete tombstone with a superseding version so it converges under CAS.
 
+## Board comment anchors
+
+```bash
+# Point anchor
+octo-cli docs comments add <docId> --body 'Check this area' --point 120,240
+
+# Single/multi-element anchor; repeat --element-id
+octo-cli docs comments add <docId> --body 'Review this group' \
+  --element-id box1 --element-id arrow2
+```
+
+Element anchors are resolved against the live scene. Bound text normalizes to
+its container; a single element anchors at the visual top-right corner and a
+multi-selection at the common visual-bounds centre. Board anchor flags cannot be
+combined with `--data`, and `--point` and `--element-id` are mutually exclusive.
+`--element-id` is repeatable and preserves commas inside each ID. Element-anchor
+dry runs still read the live scene. Use `--data` for replies and advanced anchors.
+
+## Portable `.excalidraw` export
+
+```bash
+octo-cli docs scene export <docId> --image-format excalidraw -o board.excalidraw
+```
+
+This writes a version-2 Excalidraw envelope from the live scene. Referenced image
+attachments are fetched through fresh signed URLs, size-bounded, and embedded as
+portable `dataURL` entries, so the output can be imported again with `docs import`.
+The destination is written atomically with mode `0600`.
+
 ## Excalidraw file import
 
 Import a standard `.excalidraw` JSON envelope (maximum 25 MiB) directly into an

@@ -1,7 +1,10 @@
 package registry
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -13,13 +16,30 @@ func TestNewLoadsAllServices(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := r.ListServices()
-	want := []string{"bot", "docs", "event", "file", "group", "html", "loop", "marketplace", "matter", "message", "summary", "thread"}
+	want := []string{"bot", "docs", "drive", "event", "file", "group", "html", "loop", "mail", "marketplace", "matter", "message", "summary", "thread"}
 	if len(got) != len(want) {
 		t.Fatalf("ListServices: got %d services, want %d (%v)", len(got), len(want), got)
 	}
 	for i, s := range want {
 		if got[i] != s {
 			t.Errorf("ListServices[%d]: got %q, want %q", i, got[i], s)
+		}
+	}
+}
+
+// OpenAPI forbids equivalent templated paths even when the parameter names
+// differ: all HTTP methods must share one path item.
+func TestAllSpecsHaveUniquePathTemplates(t *testing.T) {
+	r := MustNew()
+	parameter := regexp.MustCompile(`\{[^{}]+\}`)
+	for _, service := range r.ListServices() {
+		seen := make(map[string]string)
+		for path := range r.GetSpec(service)["paths"].(map[string]any) {
+			template := parameter.ReplaceAllString(path, "{}")
+			if previous, exists := seen[template]; exists {
+				t.Errorf("%s: equivalent OpenAPI paths: %s and %s", service, previous, path)
+			}
+			seen[template] = path
 		}
 	}
 }
@@ -33,8 +53,8 @@ func TestGetSpecReturnsNilForUnknown(t *testing.T) {
 
 func TestAllDomainOperationCounts(t *testing.T) {
 	// Caller-facing operation counts per service. Operations marked
-	// x-octo-cli-hidden remain in the embedded backend spec but are excluded
-	// here; marketplace skill.create is one such Web-only operation.
+	// x-octo-cli-hidden remain in an embedded backend spec but are excluded
+	// here; Loop workspace mutations are examples.
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
@@ -44,9 +64,11 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        32,
-		"html":        20,
+		"docs":        45,
+		"drive":       46,
+		"html":        22,
 		"marketplace": 25,
+		"mail":        18,
 		"summary":     4,
 		"loop":        116,
 	}
@@ -61,6 +83,71 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
+	r := MustNew()
+
+	prepare, ok := r.GetOperation("drive.upload.prepare")
+	if !ok || prepare.ResponseSchema == nil {
+		t.Fatal("drive.upload.prepare response schema not found")
+	}
+	var capabilityHeader *ParamInfo
+	for i := range prepare.Parameters {
+		if prepare.Parameters[i].Name == "X-Drive-Upload-Capabilities" {
+			capabilityHeader = &prepare.Parameters[i]
+			break
+		}
+	}
+	if capabilityHeader == nil {
+		t.Fatal("drive.upload.prepare is missing the X-Drive-Upload-Capabilities header")
+	}
+	if capabilityHeader.In != "header" || capabilityHeader.Required || capabilityHeader.FlagName != "upload-capabilities" {
+		t.Errorf("drive.upload.prepare capability header = %+v, want optional header exposed as --upload-capabilities", *capabilityHeader)
+	}
+	for _, field := range []string{"upload_mode", "upload_url"} {
+		if _, ok := prepare.ResponseSchema.Properties[field]; !ok {
+			t.Errorf("drive.upload.prepare response is missing %s", field)
+		}
+		if contains(prepare.ResponseSchema.Required, field) {
+			t.Errorf("drive.upload.prepare response %s must remain optional", field)
+		}
+	}
+
+	presign, ok := r.GetOperation("drive.upload.parts_presign")
+	if !ok || presign.RequestBody == nil {
+		t.Fatal("drive.upload.parts_presign request schema not found")
+	}
+	if want := []string{"upload_id", "part_numbers"}; !reflect.DeepEqual(presign.RequestBody.Required, want) {
+		t.Errorf("drive.upload.parts_presign required = %v, want %v", presign.RequestBody.Required, want)
+	}
+	partNumbers, ok := presign.RequestBody.Properties["part_numbers"]
+	if !ok {
+		t.Fatal("drive.upload.parts_presign is missing part_numbers")
+	}
+	if partNumbers.Type != "array" || partNumbers.MinItems != 1 || partNumbers.MaxItems != 20 {
+		t.Errorf("drive.upload.parts_presign part_numbers = type %q, minItems %d, maxItems %d; want array, 1, 20",
+			partNumbers.Type, partNumbers.MinItems, partNumbers.MaxItems)
+	}
+
+	complete, ok := r.GetOperation("drive.upload.complete")
+	if !ok || complete.RequestBody == nil {
+		t.Fatal("drive.upload.complete request schema not found")
+	}
+	parts, ok := complete.RequestBody.Properties["parts"]
+	if !ok || parts.Items == nil {
+		t.Fatal("drive.upload.complete is missing parts items")
+	}
+	partNumber, ok := parts.Items.Properties["part_number"]
+	if !ok || partNumber.Minimum == nil || partNumber.Maximum == nil {
+		t.Fatal("drive.upload.complete part_number is missing numeric bounds")
+	}
+	if *partNumber.Minimum != 1 || *partNumber.Maximum != 10000 {
+		t.Errorf("drive.upload.complete part_number bounds = %v..%v, want 1..10000", *partNumber.Minimum, *partNumber.Maximum)
+	}
+	if want := []string{"file.id", "file.parent_id"}; !reflect.DeepEqual(complete.LosslessIDFields, want) {
+		t.Errorf("drive.upload.complete lossless id fields = %v, want %v", complete.LosslessIDFields, want)
 	}
 }
 
@@ -221,6 +308,58 @@ func TestLoopTaskUpdateIncludesReviewStatus(t *testing.T) {
 	}
 }
 
+func TestConditionalQueryMetadataRejectsMalformedContracts(t *testing.T) {
+	base := func(extension any, peerSchema map[string]any) map[string]any {
+		return map[string]any{
+			"paths": map[string]any{
+				"/items": map[string]any{
+					"get": map[string]any{
+						"operationId": "item.list",
+						"parameters": []any{
+							map[string]any{"name": "kind", "in": "query", "schema": map[string]any{"type": "string"}, "x-octo-required-unless-query": extension},
+							map[string]any{"name": "mode", "in": "query", "schema": peerSchema},
+						},
+					},
+				},
+			},
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		doc  map[string]any
+	}{
+		{"extension is not an object", base("mode=mine", map[string]any{"type": "string"})},
+		{"missing peer", base(map[string]any{"name": "other", "value": "mine"}, map[string]any{"type": "string"})},
+		{"non-string peer", base(map[string]any{"name": "mode", "value": "1"}, map[string]any{"type": "integer"})},
+		{"missing string value", base(map[string]any{"name": "mode"}, map[string]any{"type": "string"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateConditionalQueryMetadata(tc.doc); err == nil {
+				t.Fatal("malformed conditional query metadata was accepted")
+			}
+		})
+	}
+}
+
+func TestMarketplaceConditionalQueryMetadata(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok {
+		t.Fatal("plugin.list not found")
+	}
+	for _, p := range op.Parameters {
+		if p.Name != "plugin_type" || p.In != "query" {
+			continue
+		}
+		want := &ConditionalQueryRequirement{Name: "mode", Value: "mine"}
+		if !reflect.DeepEqual(p.RequiredUnlessQuery, want) {
+			t.Fatalf("plugin_type conditional requirement = %#v, want %#v", p.RequiredUnlessQuery, want)
+		}
+		return
+	}
+	t.Fatal("plugin.list plugin_type query not found")
+}
+
 func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	r := MustNew()
 	create, ok := r.GetOperation("autopilot.create")
@@ -228,13 +367,17 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 		t.Fatal("autopilot.create typed request body not found")
 	}
 	for _, field := range []string{"title", "assignee_id", "dispatch_mode", "task_title_template"} {
-		if _, ok := create.RequestBody.Properties[field]; !ok {
-			t.Errorf("autopilot.create missing %s: %+v", field, create.RequestBody.Properties)
+		property, ok := create.RequestBody.Properties[field]
+		if !ok || property.Type != "string" {
+			t.Errorf("autopilot.create %s = %+v, want string", field, property)
 		}
 	}
 	dispatch := create.RequestBody.Properties["dispatch_mode"]
 	if !reflect.DeepEqual(dispatch.Enum, []any{"create_task", "direct_execution"}) {
 		t.Fatalf("dispatch_mode enum = %#v", dispatch.Enum)
+	}
+	if create.RequestBody.AdditionalProperties == nil || *create.RequestBody.AdditionalProperties {
+		t.Fatalf("autopilot.create additionalProperties = %v, want false", create.RequestBody.AdditionalProperties)
 	}
 	for _, legacy := range []string{"execution_mode", "issue_title_template"} {
 		if _, ok := create.RequestBody.Properties[legacy]; ok {
@@ -248,6 +391,9 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 	}
 	if _, ok := update.RequestBody.Properties["dispatch_mode"]; !ok {
 		t.Fatalf("autopilot.update request = %+v", update.RequestBody.Properties)
+	}
+	if update.RequestBody.MinProperties != 1 {
+		t.Fatalf("autopilot.update minProperties = %d, want 1", update.RequestBody.MinProperties)
 	}
 
 	trigger, ok := r.GetOperation("autopilot.trigger")
@@ -270,6 +416,51 @@ func TestLoopAutopilotUsesPublicTypedContract(t *testing.T) {
 		if _, ok := data.Properties[field]; !ok {
 			t.Errorf("autopilot.get data schema missing %s: %+v", field, data.Properties)
 		}
+	}
+}
+
+func TestLoopComposedRequestSchemas(t *testing.T) {
+	r := MustNew()
+	member, ok := r.GetOperation("expert_team.member.add")
+	if !ok || member.RequestBody == nil {
+		t.Fatal("expert_team.member.add request body not found")
+	}
+	for _, field := range []string{"member_type", "member_id", "role"} {
+		if _, ok := member.RequestBody.Properties[field]; !ok {
+			t.Errorf("composed member request missing %s: %+v", field, member.RequestBody)
+		}
+	}
+
+	secret, ok := r.GetOperation("autopilot.signing_secret.set")
+	if !ok || secret.RequestBody == nil {
+		t.Fatal("autopilot.signing_secret.set request body not found")
+	}
+	property := secret.RequestBody.Properties["signing_secret"]
+	if !property.WriteOnly || len(property.AnyOf) != 2 {
+		t.Fatalf("signing_secret schema = %+v, want writeOnly anyOf", property)
+	}
+
+	quickCreate, ok := r.GetOperation("task.quick_create")
+	if !ok || quickCreate.ResponseSchema == nil {
+		t.Fatal("task.quick_create referenced 202 response schema not resolved")
+	}
+}
+
+func TestLoopNestedReferencedRequestSchemasAreResolved(t *testing.T) {
+	r := MustNew()
+	trigger, ok := r.GetOperation("autopilot.trigger_config.create")
+	if !ok || trigger.RequestBody == nil {
+		t.Fatal("autopilot.trigger_config.create request body not found")
+	}
+	eventFilters := trigger.RequestBody.Properties["event_filters"]
+	if eventFilters.Items == nil || eventFilters.Items.Ref != "" {
+		t.Fatalf("event_filters item schema was not resolved: %+v", eventFilters.Items)
+	}
+	if eventFilters.Items.AdditionalProperties == nil || *eventFilters.Items.AdditionalProperties {
+		t.Fatalf("event_filters items must reject unknown fields: %+v", eventFilters.Items)
+	}
+	if !reflect.DeepEqual(eventFilters.Items.Required, []string{"event"}) {
+		t.Fatalf("event_filters item required fields = %#v", eventFilters.Items.Required)
 	}
 }
 
@@ -307,6 +498,25 @@ func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 		if !wantHeader && workspaceHeaders != 0 {
 			t.Errorf("%s: workspace headers = %d, want none", info.ID, workspaceHeaders)
 		}
+	}
+}
+
+func TestLoopOperationsDeclareRisk(t *testing.T) {
+	r := MustNew()
+	for _, info := range r.ListOperations("loop") {
+		if info.Risk == "" {
+			t.Errorf("%s does not declare x-octo-risk", info.ID)
+		}
+	}
+}
+
+func TestLoopSpecUsesSupportedBearerAuthentication(t *testing.T) {
+	raw, err := specsFS.ReadFile("specs/loop.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"octo_session"`)) {
+		t.Fatal("Loop CLI contract advertises unsupported octo_session authentication")
 	}
 }
 
@@ -384,6 +594,61 @@ func TestGetOperationMatterList_Pagination(t *testing.T) {
 	}
 }
 
+func TestHTMLMutationResponsesDeclareJSONObjects(t *testing.T) {
+	r := MustNew()
+	for _, id := range []string{
+		"html.rm", "html.draft.save", "html.unshare", "html.grant.add",
+		"html.grant.rm", "html.asset.rm", "html.comment.add", "html.reply",
+	} {
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Fatalf("%s not found", id)
+		}
+		if op.ResponseUnwrap != "data" {
+			t.Errorf("%s response unwrap = %q, want data", id, op.ResponseUnwrap)
+		}
+		if op.ResponseSchema == nil || op.ResponseSchema.Type != "object" {
+			t.Errorf("%s response schema = %#v, want JSON object", id, op.ResponseSchema)
+		}
+	}
+}
+
+// Required unwrap fields must have a type supported by the runtime guard.
+func TestRequiredResponseFieldsHaveSupportedTypes(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, op := range r.ListAllOperations() {
+		d, ok := r.GetOperation(op.ID)
+		if !ok || (len(d.UnwrapRequiredFields) == 0 && !d.StrictResponseSchema) {
+			continue
+		}
+		if d.ResponseSchema == nil {
+			t.Errorf("%s declares unwrap required fields but no success schema", op.ID)
+			continue
+		}
+		payload := ResponsePayloadSchema(d.ResponseSchema, d.ResponseUnwrap)
+		required := d.UnwrapRequiredFields
+		if d.StrictResponseSchema {
+			payload = d.ResponseSchema
+			required = payload.Required
+		}
+		for _, name := range required {
+			prop, ok := payload.Properties[name]
+			if !ok {
+				t.Errorf("%s: required response field %q is not declared under %q", op.ID, name, d.ResponseUnwrap)
+				continue
+			}
+			if !contains([]string{"string", "integer", "number", "object", "array", "boolean"}, prop.Type) {
+				t.Errorf("%s: required response field %q is type %q; the runtime guard does not support this type", op.ID, name, prop.Type)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no required response fields found; the guard this pins would be unreachable")
+	}
+}
+
 func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	r := MustNew()
 	op, ok := r.GetOperation("docs.search")
@@ -400,10 +665,159 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	if !ok || docType.Items == nil {
 		t.Fatal("docs.search docType item schema missing")
 	}
-	wantTypes := []any{"doc", "sheet", "board", "html"}
+	// html_ppt is a first-class document kind in octo-docs-backend's DOC_TYPES
+	// (src/db/docType.ts, "the SINGLE source of truth"), with its own
+	// /api/v1/ppt/** routes. It matters here because the CLI now enforces this
+	// enum locally: omitting a kind the backend accepts turns a working call into
+	// exit 2. cmd/service's requestSideVocabularies pins the same set with
+	// provenance.
+	wantTypes := []any{"doc", "sheet", "board", "html", "html_ppt"}
 	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
 		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}
+}
+
+func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.import")
+	if !ok || op.RequestBody == nil {
+		t.Fatal("plugin.import request body not found")
+	}
+	pluginName, ok := op.RequestBody.Properties["plugin_name"]
+	if !ok || !strings.Contains(strings.ToLower(pluginName.Description), "human-facing marketplace display name") {
+		t.Errorf("plugin_name description must identify the display name, got %q", pluginName.Description)
+	}
+	if !strings.Contains(pluginName.Description, "unless the user explicitly requested a rename") {
+		t.Errorf("plugin_name description must preserve the current display name on update, got %q", pluginName.Description)
+	}
+	importDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins/import", "post")
+	if !strings.Contains(importDescription, "Creating requires a non-empty plugin_name") {
+		t.Errorf("plugin.import description must document the create-time display-name requirement, got %q", importDescription)
+	}
+	if pluginName.MinLength != 1 {
+		t.Errorf("plugin_name min length = %d, want 1", pluginName.MinLength)
+	}
+	parseTask, ok := op.RequestBody.Properties["parse_task_id"]
+	if !ok || parseTask.MinLength != 1 {
+		t.Errorf("parse_task_id schema = %+v, want minLength 1", parseTask)
+	}
+	name, ok := op.RequestBody.Properties["name"]
+	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
+		t.Errorf("name description must identify the machine name, got %q", name.Description)
+	}
+	if !strings.Contains(name.Description, "derived from the uploaded package") {
+		t.Errorf("name description must document its create fallback, got %q", name.Description)
+	}
+	if len(op.BodyVariants) != 3 {
+		t.Fatalf("plugin.import body variants = %+v, want create, update-preserve, and update-rename", op.BodyVariants)
+	}
+	create, preserve, rename := op.BodyVariants[0], op.BodyVariants[1], op.BodyVariants[2]
+	if create.Name != "create" || !contains(create.Required, "plugin_name") || !contains(create.Forbidden, "plugin_id") {
+		t.Errorf("plugin.import create variant = %+v", create)
+	}
+	if contains(create.Required, "name") {
+		t.Errorf("plugin.import create variant unexpectedly requires name despite package-derived fallback: %+v", create)
+	}
+	if preserve.Name != "update-preserve-display-name" || !contains(preserve.Required, "plugin_id") || !contains(preserve.Forbidden, "plugin_name") {
+		t.Errorf("plugin.import update-preserve variant = %+v", preserve)
+	}
+	if rename.Name != "update-rename" || !contains(rename.Required, "plugin_id") || !contains(rename.Required, "plugin_name") {
+		t.Errorf("plugin.import update-rename variant = %+v", rename)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--plugin-name") {
+		t.Errorf("plugin.import body variant hint = %q, want --plugin-name guidance", op.BodyVariantsHint)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--parse-task-id") {
+		t.Errorf("plugin.import body variant hint = %q, want --parse-task-id guidance", op.BodyVariantsHint)
+	}
+}
+
+func TestBodyVariantsAlwaysDeclareActionableHint(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, summary := range r.ListAllOperations() {
+		op, ok := r.GetOperation(summary.ID)
+		if !ok || len(op.BodyVariants) == 0 {
+			continue
+		}
+		checked++
+		if strings.TrimSpace(op.BodyVariantsHint) == "" {
+			t.Errorf("%s declares body variants without x-octo-body-variants-hint", op.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no body-variant operations found")
+	}
+}
+
+func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("plugin.list response schema not found")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Type != "array" || data.Items == nil {
+		t.Fatalf("plugin.list data schema = %+v, want an item array", data)
+	}
+	manifest, ok := data.Items.Properties["manifest_json"]
+	if !ok || manifest.Type != "object" {
+		t.Fatalf("plugin.list item manifest_json schema = %+v", manifest)
+	}
+	if !contains(data.Items.Required, "manifest_json") {
+		t.Fatalf("plugin.list item required fields = %v, want manifest_json", data.Items.Required)
+	}
+	name, ok := manifest.Properties["name"]
+	if !ok || name.Type != "string" {
+		t.Fatalf("plugin.list manifest_json.name schema = %+v", name)
+	}
+	if !contains(manifest.Required, "name") {
+		t.Fatalf("plugin.list manifest_json required fields = %v, want name", manifest.Required)
+	}
+	displayStatus, ok := data.Items.Properties["display_status"]
+	if !ok || !reflect.DeepEqual(displayStatus.Enum, []any{"draft", "pending_review", "published", "rejected", "delisted"}) {
+		t.Fatalf("plugin.list display_status schema = %+v", displayStatus)
+	}
+	var qDescription, modeDescription string
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "q" {
+			qDescription = parameter.Description
+		}
+		if parameter.Name == "mode" {
+			modeDescription = parameter.Description
+		}
+	}
+	if !strings.Contains(qDescription, "manifest_json.description") || strings.Contains(qDescription, "description, tags") {
+		t.Errorf("plugin.list q description must match the backend display-name/description search, got %q", qDescription)
+	}
+	if !strings.Contains(modeDescription, "every listing state") {
+		t.Errorf("plugin.list mode description must document owned-state coverage, got %q", modeDescription)
+	}
+	listDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins", "get")
+	if !strings.Contains(listDescription, "legacy rows with a missing or hidden default placement") || !strings.Contains(listDescription, "even with mode=mine") {
+		t.Errorf("plugin.list description must disclose the legacy placement limitation, got %q", listDescription)
+	}
+}
+
+func rawOperationDescription(t *testing.T, r *Registry, service, path, method string) string {
+	t.Helper()
+	paths, ok := r.GetSpec(service)["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s spec paths missing", service)
+	}
+	pathItem, ok := paths[path].(map[string]any)
+	if !ok {
+		t.Fatalf("%s path %s missing", service, path)
+	}
+	operation, ok := pathItem[method].(map[string]any)
+	if !ok {
+		t.Fatalf("%s %s operation missing", method, path)
+	}
+	description, ok := operation["description"].(string)
+	if !ok {
+		t.Fatalf("%s %s description missing", method, path)
+	}
+	return description
 }
 
 func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
@@ -443,7 +857,7 @@ func TestServiceSpaceHeaderContract(t *testing.T) {
 	}{
 		{"message", "message.send", true},
 		{"matter", "matter.create", true},
-		{"marketplace", "skill.get", true},
+		{"marketplace", "plugin.get", true},
 		{"summary", "summary.list", false},
 		{"docs", "docs.create", false},
 		{"bot", "bot.register", false},
@@ -507,6 +921,254 @@ func TestHeaderParamWithFlagAlias(t *testing.T) {
 	}
 }
 
+// TestDocsSheetP0ResourceSchemas pins the Bot-visible contract for the P0
+// worksheet resources. The request schema teaches these keys while the generic
+// --data transport remains intentionally open; response schemas pin readback.
+func TestDocsSheetP0ResourceSchemas(t *testing.T) {
+	r := MustNew()
+	edit, ok := r.GetOperation("docs.sheet.edit")
+	if !ok || edit.RequestBody == nil {
+		t.Fatal("docs.sheet.edit request schema missing")
+	}
+	for _, field := range []string{"freeze", "filters", "dataValidations"} {
+		property, present := edit.RequestBody.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.sheet.edit request property %q = %#v, want object", field, property)
+		}
+	}
+	cells, present := edit.RequestBody.Properties["cells"]
+	if !present {
+		t.Fatal("docs.sheet.edit request schema missing cells")
+	}
+	for _, want := range []string{`"p":<rich-text object>?`, `"t":<number>?`, "v/f/s/p/t"} {
+		if !strings.Contains(cells.Description, want) {
+			t.Errorf("docs.sheet.edit cells description must document %q; got %q", want, cells.Description)
+		}
+	}
+	for _, field := range []string{"dims", "hyperlinks", "sheets"} {
+		property, present := edit.RequestBody.Properties[field]
+		if !present {
+			t.Errorf("docs.sheet.edit request schema missing %s", field)
+		}
+		if strings.Contains(property.Description, "only non-empty surface") || strings.Contains(property.Description, "combine with any other non-empty") {
+			t.Errorf("docs.sheet.edit %s description must leave the common non-empty rule at operation level: %q", field, property.Description)
+		}
+	}
+	dims := edit.RequestBody.Properties["dims"]
+	for _, want := range []string{
+		"`${logicalId}:c<idx>` / `${logicalId}:r<idx>`",
+		"bare `c<idx>` / `r<idx>` address the legacy default sheet",
+		"Bare and prefixed default-sheet keys are separate stored entries",
+		`{"c0":null,"default:c0":200}`,
+	} {
+		if !strings.Contains(dims.Description, want) {
+			t.Errorf("docs.sheet.edit dims description must document %q; got %q", want, dims.Description)
+		}
+	}
+	filters, present := edit.RequestBody.Properties["filters"]
+	if !present ||
+		!strings.Contains(filters.Description, `filterColumns?:[`) ||
+		!strings.Contains(filters.Description, `enabledColumns?:[`) ||
+		!strings.Contains(filters.Description, `"filters":{"filters":[<raw values>]}`) ||
+		!strings.Contains(filters.Description, "ref.startRow is the header row and stays visible") ||
+		!strings.Contains(filters.Description, "select exactly which columns show filter buttons") ||
+		!strings.Contains(filters.Description, "ref G:M plus enabledColumns:[6,12] enables only G and M, not H-L") ||
+		!strings.Contains(filters.Description, "every filterColumns colId must also appear in enabledColumns") ||
+		!strings.Contains(filters.Description, "Read sheetFilters first and resend the complete filter object") ||
+		!strings.Contains(filters.Description, "enabledColumns:[] is rejected with 422 sheet_cell_invalid") ||
+		!strings.Contains(filters.Description, "filter-button visibility only, not read or write access") ||
+		!strings.Contains(filters.Description, "legacy all-columns-in-ref behavior") ||
+		!strings.Contains(filters.Description, "filterColumns:[] keeps the range but omits filterColumns on readback") {
+		t.Errorf("docs.sheet.edit filters description must expose a buildable value-filter shape; got %#v", filters)
+	}
+	freeze := edit.RequestBody.Properties["freeze"]
+	if !strings.Contains(freeze.Description, "0 is accepted there but normalizes to -1 on readback") {
+		t.Errorf("docs.sheet.edit freeze description must document zero normalization; got %#v", freeze)
+	}
+	validations, present := edit.RequestBody.Properties["dataValidations"]
+	if !present {
+		t.Fatal("docs.sheet.edit request schema missing dataValidations")
+	}
+	for _, want := range []string{
+		"every validation family, including list, listMultiple, and checkbox",
+		"internal flat `${logicalId}!${uid}` Y.Map shape",
+		"uid unique within that sheet (1–128 characters, no `!` or control characters)",
+		"at least one non-empty ranges:[{startRow,startColumn,endRow,endColumn}] entry",
+		"formula2 as the same number of comma-separated colors",
+		"recommended rendering inputs, not additional server-required fields",
+		"listMultiple cell stores selected labels in v as a JSON-array string",
+		"list cell stores the label directly",
+		"Checkbox ranges must not overlap another checkbox rule",
+		"list and listMultiple overlaps are accepted by the backend",
+		"replaces that sheet's entire rule set",
+		"read sheetDataValidations first",
+		"resend every rule to keep",
+		"do not write if the deployed read surface omits any validation family",
+	} {
+		if !strings.Contains(validations.Description, want) {
+			t.Errorf("docs.sheet.edit dataValidations description must document %q; got %q", want, validations.Description)
+		}
+	}
+
+	get, ok := r.GetOperation("docs.sheet.get")
+	if !ok || get.ResponseSchema == nil {
+		t.Fatal("docs.sheet.get response schema missing")
+	}
+	for _, field := range []string{"sheetFreeze", "sheetFilters", "sheetDataValidations"} {
+		property, present := get.ResponseSchema.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.sheet.get response property %q = %#v, want object", field, property)
+		}
+	}
+	readFilters := get.ResponseSchema.Properties["sheetFilters"]
+	if !strings.Contains(readFilters.Description, `filterColumns?:[`) ||
+		!strings.Contains(readFilters.Description, `enabledColumns?:[`) ||
+		!strings.Contains(readFilters.Description, `"filters":{"filters":[<raw values>]}`) ||
+		!strings.Contains(readFilters.Description, "ref.startRow is the header row and stays visible") ||
+		!strings.Contains(readFilters.Description, "identifies the exact columns with visible filter buttons") ||
+		!strings.Contains(readFilters.Description, "ref G:M plus enabledColumns:[6,12] enables only G and M, not H-L") ||
+		!strings.Contains(readFilters.Description, "every filterColumns colId also appears in enabledColumns") ||
+		!strings.Contains(readFilters.Description, "filter-button visibility only, not read or write access") ||
+		!strings.Contains(readFilters.Description, "Omitted enabledColumns identifies a legacy snapshot") ||
+		!strings.Contains(readFilters.Description, "empty filterColumns array is omitted on readback") {
+		t.Errorf("docs.sheet.get sheetFilters description must expose a buildable value-filter shape; got %#v", readFilters)
+	}
+	readValidations := get.ResponseSchema.Properties["sheetDataValidations"]
+	for _, want := range []string{
+		"every returned validation family",
+		"including `list`, `listMultiple`, and `checkbox`",
+		"not the internal flat `${logicalId}!${uid}` Y.Map",
+	} {
+		if !strings.Contains(readValidations.Description, want) {
+			t.Errorf("docs.sheet.get sheetDataValidations description must document %q; got %#v", want, readValidations)
+		}
+	}
+	readCells, present := get.ResponseSchema.Properties["sheetCells"]
+	if !present || !strings.Contains(readCells.Description, "{v?,f?,s?,p?,t?}") {
+		t.Errorf("docs.sheet.get sheetCells description must document the full cell shape; got %#v", readCells)
+	}
+	readDims, present := get.ResponseSchema.Properties["sheetDims"]
+	if !present {
+		t.Fatal("docs.sheet.get response schema missing sheetDims")
+	}
+	for _, want := range []string{
+		"`${logicalId}:c<idx>` / `${logicalId}:r<idx>` target a specific tab",
+		"bare `c<idx>` / `r<idx>` address the legacy default sheet",
+		"Reads return keys exactly as stored",
+	} {
+		if !strings.Contains(readDims.Description, want) {
+			t.Errorf("docs.sheet.get sheetDims description must document %q; got %q", want, readDims.Description)
+		}
+	}
+
+	state, ok := r.GetOperation("docs.versions.state")
+	if !ok || state.ResponseSchema == nil {
+		t.Fatal("docs.versions.state response schema missing")
+	}
+	for _, field := range []string{"sheetFreeze", "sheetFilters", "sheetDataValidations"} {
+		property, present := state.ResponseSchema.Properties[field]
+		if !present || property.Type != "object" {
+			t.Errorf("docs.versions.state response property %q = %#v, want object", field, property)
+		}
+		if !strings.Contains(property.Description, "empty {} for a text document") {
+			t.Errorf("docs.versions.state response property %q must document text-doc emptiness; got %#v", field, property)
+		}
+	}
+	// The version-state handler still does not decode sheetHyperLinks or sheetMerges.
+	// sheetList is now returned so declared row/column counts survive restore and
+	// can be inspected through the CLI.
+	for _, field := range []string{"sheetHyperLinks", "sheetMerges"} {
+		if _, present := state.ResponseSchema.Properties[field]; present {
+			t.Errorf("docs.versions.state must not promise backend-absent field %q", field)
+		}
+	}
+
+	rawDocs, err := specsFS.ReadFile("specs/docs.json")
+	if err != nil {
+		t.Fatalf("read embedded docs spec: %v", err)
+	}
+	var rawSpec struct {
+		Paths map[string]struct {
+			Get struct {
+				Description string `json:"description"`
+				Responses   map[string]struct {
+					Content map[string]struct {
+						Schema struct {
+							Properties map[string]struct {
+								Type any `json:"type"`
+							} `json:"properties"`
+						} `json:"schema"`
+					} `json:"content"`
+				} `json:"responses"`
+			} `json:"get"`
+			Patch struct {
+				Description string `json:"description"`
+			} `json:"patch"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(rawDocs, &rawSpec); err != nil {
+		t.Fatalf("decode embedded docs spec: %v", err)
+	}
+	sheetPath, present := rawSpec.Paths["/v1/bot/docs/{docId}/sheet"]
+	if !present {
+		t.Fatal("sheet path missing from embedded docs spec")
+	}
+	nextCursorType := sheetPath.Get.Responses["200"].Content["application/json"].Schema.Properties["nextCursor"].Type
+	if !reflect.DeepEqual(nextCursorType, []any{"string", "null"}) {
+		t.Errorf("docs.sheet.get nextCursor type = %#v, want nullable string union", nextCursorType)
+	}
+	contractText := strings.Join([]string{
+		sheetPath.Get.Description,
+		sheetPath.Patch.Description,
+		validations.Description,
+		readValidations.Description,
+	}, "\n")
+	for _, superseded := range []string{
+		`sheetDataValidations: { "logicalId!uid":`,
+		`Only type:"checkbox" is accepted`,
+		"only checkbox rules are supported",
+	} {
+		if strings.Contains(contractText, superseded) {
+			t.Errorf("embedded docs spec retains superseded validation contract %q", superseded)
+		}
+	}
+	for _, operation := range []struct {
+		name        string
+		description string
+	}{
+		{name: "docs.sheet.get", description: sheetPath.Get.Description},
+		{name: "docs.sheet.edit", description: sheetPath.Patch.Description},
+	} {
+		for _, want := range []string{
+			"raw coordinate rewrite",
+			"reorder the complete selected row block",
+			"use null for destinations that become empty",
+			"does not re-anchor relative formula references",
+			"Any state keyed by or containing coordinates stays at its old coordinates",
+			"row dims",
+			"data-validation ranges",
+			"cell-comment anchors",
+			"freeze panes and filter ranges/columns also remain fixed",
+			"`sheetDims` is one workbook-level map whose keys may be sheet-qualified",
+			"`${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab",
+			"bare `c<idx>` / `r<idx>` addresses the legacy default sheet",
+			"reads return keys exactly as stored",
+			"evaluate `sheetFilters` criteria",
+			"leaves hidden row coordinates unchanged",
+		} {
+			if !strings.Contains(operation.description, want) {
+				t.Errorf("%s description must document %q; got %q", operation.name, want, operation.description)
+			}
+		}
+		if strings.Contains(operation.description, "clear the filter first") {
+			t.Errorf("%s description must not claim clearing a filter preserves the visible subset", operation.name)
+		}
+	}
+	if !strings.Contains(sheetPath.Patch.Description, "Any one surface may be the only non-empty batch member") {
+		t.Errorf("docs.sheet.edit description must allow any standalone non-empty surface; got %q", sheetPath.Patch.Description)
+	}
+}
+
 // TestQueryParamFlagAliasAvoidsGlobalCollision pins the docs.scene.export fix:
 // its `format` query param carries x-octo-flag "image-format" so the generated
 // CLI flag is --image-format (which does not shadow the global persistent
@@ -558,6 +1220,88 @@ func TestBodyPropertyFlagAlias(t *testing.T) {
 		}
 		if p.FlagName != wantFlag {
 			t.Errorf("%s flag alias = %q, want %q (from x-octo-flag)", prop, p.FlagName, wantFlag)
+		}
+	}
+}
+
+func TestDocsSheetSchemas(t *testing.T) {
+	r := MustNew()
+
+	edit, ok := r.GetOperation("docs.sheet.edit")
+	if !ok || edit.RequestBody == nil {
+		t.Fatal("docs.sheet.edit request body not found")
+	}
+	if validation, ok := edit.RequestBody.Properties["dataValidations"]; !ok || validation.Type != "object" {
+		t.Fatalf("docs.sheet.edit dataValidations = %+v, want object property", validation)
+	}
+	if sheets, ok := edit.RequestBody.Properties["sheets"]; !ok || sheets.Type != "object" ||
+		!strings.Contains(sheets.Description, "rowCount") || !strings.Contains(sheets.Description, "columnCount") ||
+		!strings.Contains(sheets.Description, "200 rows by 20 columns (A-T)") ||
+		!strings.Contains(sheets.Description, "1000 by 100") ||
+		!strings.Contains(sheets.Description, "name and order are required") ||
+		!strings.Contains(sheets.Description, "omitting either count preserves that dimension") {
+		t.Fatalf("docs.sheet.edit sheets = %+v, want rowCount/columnCount-aware object property", sheets)
+	}
+	if cells := edit.RequestBody.Properties["cells"]; !strings.Contains(cells.Description, "capped at 10000 rows and 100 columns") ||
+		!strings.Contains(cells.Description, "422 sheet_cell_invalid") {
+		t.Errorf("docs.sheet.edit cells must document growth limits and rejection; got %+v", cells)
+	}
+
+	structuralEdits := []struct {
+		operationID string
+		path        string
+		anchor      string
+		flag        string
+	}{
+		{"docs.sheet.rows.insert", "/v1/bot/docs/{docId}/sheet/rows/insert", "afterRow", "after-row"},
+		{"docs.sheet.rows.delete", "/v1/bot/docs/{docId}/sheet/rows/delete", "startRow", "start-row"},
+		{"docs.sheet.columns.insert", "/v1/bot/docs/{docId}/sheet/columns/insert", "afterColumn", "after-column"},
+		{"docs.sheet.columns.delete", "/v1/bot/docs/{docId}/sheet/columns/delete", "startColumn", "start-column"},
+	}
+	for _, tc := range structuralEdits {
+		op, ok := r.GetOperation(tc.operationID)
+		if !ok || op.RequestBody == nil {
+			t.Fatalf("%s request body not found", tc.operationID)
+		}
+		if op.Method != "POST" || op.Path != tc.path {
+			t.Fatalf("%s route = %s %s", tc.operationID, op.Method, op.Path)
+		}
+		for property, flag := range map[string]string{
+			"logicalId": "logical-id",
+			tc.anchor:   tc.flag,
+			"count":     "count",
+		} {
+			got, present := op.RequestBody.Properties[property]
+			if !present || got.FlagName != flag {
+				t.Errorf("%s %s = %+v, want --%s", tc.operationID, property, got, flag)
+			}
+		}
+		for _, required := range []string{"logicalId", tc.anchor, "count"} {
+			if !contains(op.RequestBody.Required, required) {
+				t.Errorf("%s missing required body field %s", tc.operationID, required)
+			}
+		}
+	}
+
+	for _, operationID := range []string{"docs.sheet.get", "docs.versions.state"} {
+		op, ok := r.GetOperation(operationID)
+		if !ok || op.ResponseSchema == nil {
+			t.Fatalf("%s response schema not found", operationID)
+		}
+		if validation, ok := op.ResponseSchema.Properties["sheetDataValidations"]; !ok || validation.Type != "object" {
+			t.Errorf("%s sheetDataValidations = %+v, want object property", operationID, validation)
+		}
+		if sheets, ok := op.ResponseSchema.Properties["sheetList"]; !ok || sheets.Type != "object" ||
+			!strings.Contains(sheets.Description, "rowCount") || !strings.Contains(sheets.Description, "columnCount") {
+			t.Errorf("%s sheetList = %+v, want rowCount/columnCount-aware object property", operationID, sheets)
+		} else if operationID == "docs.sheet.get" &&
+			(!strings.Contains(sheets.Description, "stores explicit counts") ||
+				!strings.Contains(sheets.Description, "20 columns (A-T)") ||
+				!strings.Contains(sheets.Description, "100-column")) {
+			t.Errorf("%s sheetList = %+v, want new and legacy column-count defaults", operationID, sheets)
+		} else if operationID == "docs.versions.state" &&
+			!strings.Contains(sheets.Description, "an empty sheetList does not mean sheetDataValidations should be filtered out") {
+			t.Errorf("%s sheetList must preserve legacy validation rules when the registry is empty", operationID)
 		}
 	}
 }
@@ -685,8 +1429,8 @@ func TestWorkspaceListResolvesTypedCollection(t *testing.T) {
 	if !ok || data.Items == nil {
 		t.Fatalf("workspace.list data schema = %+v", data)
 	}
-	if data.Items.Ref != "#/components/schemas/Workspace" {
-		t.Fatalf("workspace item schema ref = %q, want Workspace", data.Items.Ref)
+	if data.Items.Ref != "" || data.Items.Properties["workspace_id"].Type != "string" {
+		t.Fatalf("workspace item schema was not resolved: %+v", data.Items)
 	}
 	if _, ok := op.ResponseSchema.Properties["pagination"]; !ok {
 		t.Fatalf("workspace.list response schema = %+v, want pagination", op.ResponseSchema.Properties)
@@ -773,4 +1517,159 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestDocsStrictSchemaAppliesOnlyToExplicitOperations(t *testing.T) {
+	r := MustNew()
+	want := map[string]bool{
+		"docs.ppt.edit":             true,
+		"docs.share.set":            true,
+		"docs.sheet.rows.insert":    true,
+		"docs.sheet.rows.delete":    true,
+		"docs.sheet.columns.insert": true,
+		"docs.sheet.columns.delete": true,
+		"docs.sheet.split":          true,
+		"docs.sheet.deduplicate":    true,
+	}
+	for id := range want {
+		if _, ok := r.GetOperation(id); !ok {
+			t.Errorf("missing strict operation %s", id)
+		}
+	}
+	for _, info := range r.ListOperations("docs") {
+		op, ok := r.GetOperation(info.ID)
+		if !ok || op.StrictRequestSchema != want[info.ID] {
+			t.Errorf("%s strict body validation metadata is misleading", info.ID)
+		}
+	}
+}
+
+// OpenAPI 3.1 uses JSON Schema unions; nullable:true is a 3.0 keyword and
+// does not let schema consumers accept the live anchor or terminal cursor.
+func TestPptNullableIntegersUseOpenAPI31Types(t *testing.T) {
+	r := MustNew()
+	spec := r.GetSpec("docs")
+	if version, _ := spec["openapi"].(string); !strings.HasPrefix(version, "3.1.") {
+		t.Fatalf("recheck null semantics for dialect %v", spec["openapi"])
+	}
+	for _, tc := range []struct {
+		operation string
+		path      []string
+	}{
+		{"docs.comments.add", []string{"paths", "/v1/bot/docs/{docId}/comments", "post", "requestBody", "content", "application/json", "schema", "properties", "anchor", "properties", "versionSeq"}},
+		{"docs.comments.replies", []string{"paths", "/v1/bot/docs/{docId}/comments/{id}/replies", "get", "responses", "200", "content", "application/json", "schema", "properties", "nextCursor"}},
+	} {
+		node := spec
+		for _, name := range tc.path {
+			var ok bool
+			node, ok = node[name].(map[string]any)
+			if !ok {
+				t.Fatalf("%s missing schema node %q", tc.operation, name)
+			}
+		}
+		if !reflect.DeepEqual(node["type"], []any{"integer", "null"}) {
+			t.Errorf("%s must admit integer and null using OpenAPI 3.1 type union, got %v", tc.operation, node["type"])
+		}
+		op, _ := r.GetOperation(tc.operation)
+		prop := op.ResponseSchema
+		if tc.operation == "docs.comments.add" {
+			anchor := op.RequestBody.Properties["anchor"]
+			value := anchor.Properties["versionSeq"]
+			prop = &value
+		} else {
+			value := prop.Properties["nextCursor"]
+			prop = &value
+		}
+		if prop.Type != "integer" {
+			t.Errorf("%s lost integer type in CLI metadata: %q", tc.operation, prop.Type)
+		}
+	}
+}
+
+func TestPptVersionRevisionBounds(t *testing.T) {
+	for _, id := range []string{"docs.versions.create", "docs.versions.restore"} {
+		op, _ := MustNew().GetOperation(id)
+		revision := op.RequestBody.Properties["baseRevision"]
+		if revision.Maximum == nil || *revision.Maximum != 9007199254740991 {
+			t.Errorf("%s does not document safe revision bound", id)
+		}
+	}
+}
+
+func TestVersionStateSchemaIncludesPptDeck(t *testing.T) {
+	op, ok := MustNew().GetOperation("docs.versions.state")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("version state schema missing")
+	}
+	kinds := op.ResponseSchema.Properties["kind"].Enum
+	if !reflect.DeepEqual(kinds, []any{"document", "board", "ppt"}) {
+		t.Fatalf("snapshot kinds = %#v", kinds)
+	}
+	for field, typ := range map[string]string{"deck": "object", "schemaVersion": "integer", "docVersionSeq": "integer"} {
+		if op.ResponseSchema.Properties[field].Type != typ {
+			t.Errorf("%s must have type %s", field, typ)
+		}
+	}
+}
+
+func TestPptCommentIdempotencyKeyMatchesBackend(t *testing.T) {
+	raw, err := specsFS.ReadFile("specs/docs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	params := spec["paths"].(map[string]any)["/v1/bot/docs/{docId}/comments"].(map[string]any)["post"].(map[string]any)["parameters"].([]any)
+	for _, value := range params {
+		param := value.(map[string]any)
+		if param["name"] != "Idempotency-Key" {
+			continue
+		}
+		schema := param["schema"].(map[string]any)
+		if schema["minLength"] != float64(1) || schema["maxLength"] != float64(128) || schema["pattern"] != `^[\x21-\x7e]+$` {
+			t.Fatalf("PPT comment key contract = %#v", schema)
+		}
+		return
+	}
+	t.Fatal("comment idempotency key schema missing")
+}
+
+func TestHTMLSourceAndPublishVersionContract(t *testing.T) {
+	r := MustNew()
+	source, ok := r.GetOperation("html.source")
+	if !ok {
+		t.Fatal("missing html.source")
+	}
+	if source.Method != "GET" || source.Path != "/docs-html/v1/docs/{doc_id}/source" || source.ResponseUnwrap != "data" || source.Risk != "read" {
+		t.Fatalf("source descriptor = %+v", source)
+	}
+	if !reflect.DeepEqual(source.UnwrapRequiredFields, []string{"slug", "version", "html"}) {
+		t.Fatalf("source required = %v", source.UnwrapRequiredFields)
+	}
+	for field, kind := range map[string]string{"slug": "string", "version": "integer", "html": "string"} {
+		if source.ResponseSchema.Properties[field].Type != kind {
+			t.Fatalf("source %s is not %s", field, kind)
+		}
+	}
+	if len(source.Parameters) != 2 || source.Parameters[1].Name != "version" || source.Parameters[1].In != "query" || source.Parameters[1].Required {
+		t.Fatalf("source parameters = %+v", source.Parameters)
+	}
+	publish, _ := r.GetOperation("html.publish")
+	if publish.RequestBody.Properties["version"].Type != "integer" {
+		t.Fatal("publish must retain existing integer version")
+	}
+	description := publish.RequestBody.Properties["version"].Description
+	for _, want := range []string{"source version read before editing plus one", "latest+1", "428 version_required", "409 version_conflict"} {
+		if !strings.Contains(description, want) {
+			t.Errorf("publish version description is missing %q", want)
+		}
+	}
+	if strings.Contains(description, "omit to auto-increment") || strings.Contains(description, "optional explicit version") {
+		t.Fatal("publish version restored the superseded auto-increment contract")
+	}
+	if _, ok := publish.RequestBody.Properties["base_version"]; ok {
+		t.Fatal("publish introduced a second concurrency parameter")
+	}
 }

@@ -13,6 +13,7 @@ import (
 func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
 	t.Setenv(config.EnvToken, "")
 	t.Setenv("OCTO_BOT_TOKEN", "app_xxx")
+	t.Setenv("OCTO_BOT_ID", "robot-1")
 	t.Setenv("OCTO_SPACE_ID", "space-1")
 
 	cred, err := NewEnvProvider().Resolve()
@@ -28,8 +29,51 @@ func TestEnvProvider_ResolvesFromEnv(t *testing.T) {
 	if cred.SpaceID != "space-1" {
 		t.Errorf("SpaceID = %q", cred.SpaceID)
 	}
+	if cred.RobotID != "robot-1" {
+		t.Errorf("RobotID = %q", cred.RobotID)
+	}
+	if cred.BotKind != "app_bot" {
+		t.Errorf("BotKind = %q", cred.BotKind)
+	}
 	if cred.Source != "env:OCTO_BOT_TOKEN" {
 		t.Errorf("Source = %q", cred.Source)
+	}
+}
+
+// OCTO_TOKEN is the high-priority slot: when both are set it wins, and the
+// credential's Source names the variable actually used so the envelope's
+// identity.source cannot mislead.
+func TestEnvProvider_TokenVarPrecedence(t *testing.T) {
+	t.Setenv("OCTO_TOKEN", "uk_person")
+	t.Setenv("OCTO_BOT_TOKEN", "bf_bot")
+
+	cred, err := NewEnvProvider().Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if cred.Token != "uk_person" {
+		t.Errorf("Token = %q, want the OCTO_TOKEN value", cred.Token)
+	}
+	if cred.Source != "env:OCTO_TOKEN" {
+		t.Errorf("Source = %q, want env:OCTO_TOKEN", cred.Source)
+	}
+}
+
+// An empty OCTO_TOKEN must not shadow a configured OCTO_BOT_TOKEN — an exported
+// but blank variable is common in CI shells.
+func TestEnvProvider_EmptyPreferredFallsBack(t *testing.T) {
+	t.Setenv("OCTO_TOKEN", "   ")
+	t.Setenv("OCTO_BOT_TOKEN", "bf_bot")
+
+	cred, err := NewEnvProvider().Resolve()
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if cred.Token != "bf_bot" {
+		t.Errorf("Token = %q, want the OCTO_BOT_TOKEN value", cred.Token)
+	}
+	if cred.Source != "env:OCTO_BOT_TOKEN" {
+		t.Errorf("Source = %q, want env:OCTO_BOT_TOKEN", cred.Source)
 	}
 }
 
@@ -49,6 +93,7 @@ func TestEnvProvider_NoTokenReturnsNil(t *testing.T) {
 func TestEnvProvider_TrimsWhitespace(t *testing.T) {
 	t.Setenv(config.EnvToken, "")
 	t.Setenv("OCTO_BOT_TOKEN", "  app_xxx  ")
+	t.Setenv("OCTO_BOT_ID", "  robot-1  ")
 
 	cred, err := NewEnvProvider().Resolve()
 	if err != nil {
@@ -56,6 +101,9 @@ func TestEnvProvider_TrimsWhitespace(t *testing.T) {
 	}
 	if cred.Token != "app_xxx" {
 		t.Errorf("Token should be trimmed, got %q", cred.Token)
+	}
+	if cred.RobotID != "robot-1" {
+		t.Errorf("RobotID should be trimmed, got %q", cred.RobotID)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -72,6 +73,7 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		wantType string
 	}{
 		{"UNAUTHORIZED", "auth_error"},
+		{"AUTH_REQUIRED", "auth_error"},
 		{"AUTH_UNAVAILABLE", "network"},
 		{"VALIDATION_ERROR", "validation"},
 		{"MATTER_NOT_FOUND", "api_error"},
@@ -81,6 +83,9 @@ func TestParseBackendError_MattersCodes(t *testing.T) {
 		{"BOT_WORKSPACE_MEMBERSHIP_REQUIRED", "permission"},
 		{"SPACE_FORBIDDEN", "permission"},
 		{"DUPLICATE_ASSIGNEE", "validation"},
+		{"DUPLICATE", "validation"},
+		{"UNSUPPORTED_MEDIA_TYPE", "validation"},
+		{"CLIENT_VERSION_TOO_OLD", "config"},
 		{"RATE_LIMITED", "rate_limited"},
 		{"UPSTREAM_UNAVAILABLE", "network"},
 		{"INTERNAL_ERROR", "api_error"},
@@ -118,6 +123,31 @@ func TestParseBackendErrorWorkspaceBotMembershipHint(t *testing.T) {
 	}
 }
 
+func TestParseBackendErrorBotDeleteForbidden(t *testing.T) {
+	for _, body := range []string{
+		`{"error":"bot_delete_forbidden"}`,
+		`{"error":{"code":"bot_delete_forbidden","message":"Bot deletion is forbidden","hint":"retry as admin"}}`,
+	} {
+		for _, parseError := range []func(int, []byte) *ExitError{ParseBackendError, ParsePublicAPIError} {
+			err := parseError(http.StatusForbidden, []byte(body))
+			if err.Code != "bot_delete_forbidden" || err.Type != "permission" || err.HTTPStatus != http.StatusForbidden {
+				t.Fatalf("error = %+v", err)
+			}
+			if err.ExitCode() != 1 || err.OutcomeUnknown() {
+				t.Fatalf("denial must be a definite failure: %+v", err)
+			}
+			for _, instruction := range []string{"even as owner/admin", "do not retry", "human"} {
+				if !strings.Contains(err.Hint, instruction) {
+					t.Errorf("hint %q must explain %q", err.Hint, instruction)
+				}
+			}
+			if string(err.Detail) != body {
+				t.Errorf("detail = %s, want %s", err.Detail, body)
+			}
+		}
+	}
+}
+
 func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 	body := []byte(`{"error":{"code":"SOMETHING_NEW","message":"nope"}}`)
 	ee := ParseBackendError(418, body)
@@ -125,13 +155,38 @@ func TestParseBackendError_MattersUnknownCode(t *testing.T) {
 		t.Errorf("Code = %q", ee.Code)
 	}
 	if ee.Type != "api_error" {
-		t.Errorf("unknown codes should fall back to api_error, got %q", ee.Type)
+		t.Errorf("unknown legacy codes should preserve the api_error fallback, got %q", ee.Type)
 	}
 	if ee.Hint != "" {
 		t.Errorf("unknown codes should have no hint, got %q", ee.Hint)
 	}
 	if ee.Message != "nope" {
 		t.Errorf("Message = %q", ee.Message)
+	}
+}
+
+func TestParseBackendError_PreservesServerHintForUnknownCode(t *testing.T) {
+	body := []byte(`{"error":{"code":"NEW_AUTH_CODE","message":"nope","hint":"refresh the task credential"}}`)
+	ee := ParsePublicAPIError(http.StatusUnauthorized, body)
+	if ee.Type != "auth_error" || ee.Hint != "refresh the task credential" {
+		t.Fatalf("error = %+v, want status taxonomy and server hint", ee)
+	}
+}
+
+func TestParseBackendError_HintDoesNotChangeLegacyTaxonomy(t *testing.T) {
+	withoutHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing"}}`))
+	withHint := ParseBackendError(http.StatusBadRequest,
+		[]byte(`{"error":{"code":"BRAND_NEW_CODE","message":"bad thing","hint":"do better"}}`))
+
+	if withoutHint.Type != "api_error" || withHint.Type != withoutHint.Type {
+		t.Fatalf("legacy taxonomy changed with hint: without=%+v with=%+v", withoutHint, withHint)
+	}
+	if withoutHint.ExitCode() != withHint.ExitCode() {
+		t.Fatalf("legacy exit code changed with hint: without=%d with=%d", withoutHint.ExitCode(), withHint.ExitCode())
+	}
+	if withHint.Hint != "do better" {
+		t.Fatalf("server hint was not preserved: %+v", withHint)
 	}
 }
 
@@ -242,6 +297,25 @@ func TestParseBackendError_DetailRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseBackendError_DocsSheetRepairDetailAndHint(t *testing.T) {
+	body := []byte(`{"error":"sheet_too_large","baseVersion":"sv-1","repairDataValidationKey":"default!c","hint":"delete the returned checkbox validation key with PATCH, then retry the write"}`)
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, body)
+
+	if ee.Type != "validation" || ee.Code != "sheet_too_large" {
+		t.Fatalf("error = %+v", ee)
+	}
+	if ee.Hint != "delete the returned checkbox validation key with PATCH, then retry the write" {
+		t.Fatalf("hint = %q", ee.Hint)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(ee.Detail, &detail); err != nil {
+		t.Fatalf("Detail not valid JSON: %v", err)
+	}
+	if detail["baseVersion"] != "sv-1" || detail["repairDataValidationKey"] != "default!c" {
+		t.Fatalf("repair fields missing from detail: %v", detail)
+	}
+}
+
 func TestExitError_ExitCodes(t *testing.T) {
 	cases := []struct {
 		typ  string
@@ -289,4 +363,192 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- octo-drive error envelope ---
+
+// octo-drive returns `{"error":"<code>","message":"..."}` — the code is a bare
+// string, not a nested object, and the human text is under "message" rather than
+// "msg". These tests pin that shape and the lowercase code mapping, and confirm
+// the two older envelope families still classify exactly as before.
+
+func TestParseBackendError_DriveLowercaseCodes(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   int
+		body     string
+		wantType string
+		wantCode string
+		wantExit int
+	}{
+		{"permission_denied", 403, `{"error":"permission_denied","message":"drive: permission denied"}`, "permission", "permission_denied", 1},
+		{"password_required", 403, `{"error":"password_required","message":"drive: password required"}`, "permission", "password_required", 1},
+		{"wrong_password", 403, `{"error":"wrong_password","message":"drive: wrong password"}`, "permission", "wrong_password", 1},
+		{"share_expired", 403, `{"error":"share_expired","message":"drive: share expired"}`, "permission", "share_expired", 1},
+		{"not_found", 404, `{"error":"not_found","message":"drive: not found"}`, "api_error", "not_found", 1},
+		{"conflict", 409, `{"error":"conflict","message":"drive: conflict"}`, "validation", "conflict", 2},
+		{"invalid_argument", 400, `{"error":"invalid_argument","message":"drive: invalid argument"}`, "validation", "invalid_argument", 2},
+		{"file_too_large", 413, `{"error":"file_too_large","message":"file exceeds limit","details":{"max_size_kb":1024,"size":2048}}`, "validation", "file_too_large", 2},
+		{"upload_mode_conflict", 409, `{"error":"upload_mode_conflict","message":"mode mismatch"}`, "validation", "upload_mode_conflict", 2},
+		{"client_capability_required", 409, `{"error":"client_capability_required","message":"capability missing"}`, "validation", "client_capability_required", 2},
+		{"object_size_mismatch", 409, `{"error":"object_size_mismatch","message":"size mismatch","details":{"actual_size":2048,"declared_size":1024}}`, "validation", "object_size_mismatch", 2},
+		{"upload_session_not_active", 409, `{"error":"upload_session_not_active","message":"session completed"}`, "validation", "upload_session_not_active", 2},
+		{"upload_policy_unavailable", 503, `{"error":"upload_policy_unavailable","message":"policy unavailable"}`, "api_error", "upload_policy_unavailable", 1},
+		{"too_many_upload_sessions", 429, `{"error":"too_many_upload_sessions","message":"session limit"}`, "rate_limited", "too_many_upload_sessions", 1},
+		{"unauthorized", 401, `{"error":"unauthorized","message":"missing token"}`, "auth_error", "unauthorized", 3},
+		{"auth_unavailable", 500, `{"error":"auth_unavailable","message":"upstream down"}`, "network", "auth_unavailable", 1},
+		{"internal", 500, `{"error":"internal","message":"boom"}`, "api_error", "internal", 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ee := ParseBackendError(tc.status, []byte(tc.body))
+			if ee.Type != tc.wantType {
+				t.Errorf("type: got %q, want %q", ee.Type, tc.wantType)
+			}
+			if ee.Code != tc.wantCode {
+				t.Errorf("code: got %q, want %q", ee.Code, tc.wantCode)
+			}
+			if ee.ExitCode() != tc.wantExit {
+				t.Errorf("exit: got %d, want %d", ee.ExitCode(), tc.wantExit)
+			}
+			if ee.Message == "" {
+				t.Error("message must carry the backend text")
+			}
+			if ee.Hint == "" {
+				t.Error("a mapped drive code must carry an actionable hint")
+			}
+		})
+	}
+}
+
+// Both code conventions must work at once: the uppercase matters codes are
+// untouched by the lowercase additions.
+func TestParseBackendError_BothCodeCasesWork(t *testing.T) {
+	upper := ParseBackendError(403, []byte(`{"error":{"code":"SPACE_FORBIDDEN","message":"nope"}}`))
+	if upper.Type != "permission" || upper.Code != "SPACE_FORBIDDEN" {
+		t.Errorf("uppercase mapping regressed: %+v", upper)
+	}
+	lower := ParseBackendError(403, []byte(`{"error":"permission_denied","message":"nope"}`))
+	if lower.Type != "permission" || lower.Code != "permission_denied" {
+		t.Errorf("lowercase mapping: %+v", lower)
+	}
+}
+
+// An agent branches on Type and the exit code, not on which backend answered.
+// So a lowercase drive code and its uppercase counterpart must classify
+// identically — only the hint may differ, to name the domain's own remedy.
+func TestParseBackendError_CrossFamilyTaxonomyIsIdentical(t *testing.T) {
+	pairs := []struct {
+		lower, upper string
+		status       int
+		wantType     string
+		wantExit     int
+	}{
+		{"conflict", "CONFLICT", 409, "validation", 2},
+		{"invalid_argument", "VALIDATION_ERROR", 400, "validation", 2},
+		{"not_found", "NOT_FOUND", 404, "api_error", 1},
+		{"unauthorized", "UNAUTHORIZED", 401, "auth_error", 3},
+		{"permission_denied", "FORBIDDEN", 403, "permission", 1},
+		{"internal", "INTERNAL_ERROR", 500, "api_error", 1},
+		{"auth_unavailable", "AUTH_UNAVAILABLE", 500, "network", 1},
+	}
+	for _, p := range pairs {
+		t.Run(p.lower+"/"+p.upper, func(t *testing.T) {
+			lower := ParseBackendError(p.status, []byte(`{"error":"`+p.lower+`","message":"m"}`))
+			upper := ParseBackendError(p.status, []byte(`{"error":{"code":"`+p.upper+`","message":"m"}}`))
+
+			if lower.Type != p.wantType || upper.Type != p.wantType {
+				t.Errorf("type: lower=%q upper=%q, want both %q", lower.Type, upper.Type, p.wantType)
+			}
+			if lower.ExitCode() != p.wantExit || upper.ExitCode() != p.wantExit {
+				t.Errorf("exit: lower=%d upper=%d, want both %d", lower.ExitCode(), upper.ExitCode(), p.wantExit)
+			}
+			// The code itself stays verbatim so the backend's own value is still
+			// available to a caller that wants it.
+			if lower.Code != p.lower || upper.Code != p.upper {
+				t.Errorf("code: lower=%q upper=%q, want the literals back", lower.Code, upper.Code)
+			}
+		})
+	}
+}
+
+// The parity above is a property of the table, not just of the pairs spelled out
+// in the test: every lowercase drive code whose uppercase counterpart exists must
+// agree on Type. This catches a future addition that only edits one side.
+func TestBackendErrorMapping_CaseCounterpartsAgreeOnType(t *testing.T) {
+	for code, entry := range backendErrorMapping {
+		if code != strings.ToLower(code) {
+			continue // only walk the lowercase drive codes
+		}
+		counterpart, ok := backendErrorMapping[strings.ToUpper(code)]
+		if !ok {
+			continue // no counterpart to agree with
+		}
+		if entry.Type != counterpart.Type {
+			t.Errorf("%s is %q but %s is %q; a caller must not have to know which backend answered",
+				code, entry.Type, strings.ToUpper(code), counterpart.Type)
+		}
+	}
+}
+
+// file_too_large shares a Type and exit code with the generic 413 fallback, so
+// parsing that status alone cannot prove the drive-specific mapping still
+// exists. Pin the explicit entry and its actionable hint directly.
+func TestBackendErrorMapping_FileTooLargeIsExplicit(t *testing.T) {
+	entry, ok := backendErrorMapping["file_too_large"]
+	if !ok {
+		t.Fatal("file_too_large must have an explicit drive error mapping")
+	}
+	if entry.Type != "validation" {
+		t.Errorf("file_too_large type = %q, want validation", entry.Type)
+	}
+	for _, want := range []string{"max_size_kb", "size"} {
+		if !contains(entry.Hint, want) {
+			t.Errorf("file_too_large hint = %q, want it to mention %q", entry.Hint, want)
+		}
+	}
+}
+
+// An unmapped code keeps the historical fallback for its envelope family: the
+// matters family stays api_error with no hint, and a drive-shaped body falls
+// back to status inference — which is what those bodies already got before the
+// drive layer existed.
+func TestParseBackendError_UnknownCodeFallbackUnchanged(t *testing.T) {
+	matters := ParseBackendError(403, []byte(`{"error":{"code":"BRAND_NEW_CODE","message":"m"}}`))
+	if matters.Type != "api_error" || matters.Code != "BRAND_NEW_CODE" || matters.Hint != "" {
+		t.Errorf("matters fallback changed: %+v", matters)
+	}
+	drive := ParseBackendError(409, []byte(`{"error":"brand_new_code","message":"m"}`))
+	if drive.Type != typeFromStatus(409) || drive.Code != "brand_new_code" {
+		t.Errorf("drive fallback: got %s/%s, want %s from the status", drive.Type, drive.Code, typeFromStatus(409))
+	}
+}
+
+// A free-text `error` value is prose, not a code. octo-drive's space middleware
+// emits several; promoting them to ExitError.Code would produce garbage codes,
+// so they must fall through to the raw status fallback.
+func TestParseBackendError_FreeTextErrorIsNotACode(t *testing.T) {
+	for _, body := range []string{
+		`{"error":"missing X-Space-Id"}`,
+		`{"error":"not a member of the requested space"}`,
+		`{"error":"invalid token"}`,
+		`{"error":"space lookup upstream error"}`,
+	} {
+		ee := ParseBackendError(400, []byte(body))
+		if ee.Code != codeFromStatus(400) {
+			t.Errorf("%s: code %q, want the status-derived %q", body, ee.Code, codeFromStatus(400))
+		}
+	}
+}
+
+// The dmworkim {msg,status} family must still be recognised — it has no "error"
+// key, so the drive layer never sees it.
+func TestParseBackendError_DmworkimEnvelopeUnaffected(t *testing.T) {
+	ee := ParseBackendError(400, []byte(`{"msg":"bad request","status":400}`))
+	if ee.Message != "bad request" {
+		t.Errorf("message: got %q", ee.Message)
+	}
+	if ee.Code != codeFromStatus(400) {
+		t.Errorf("code: got %q", ee.Code)
+	}
 }

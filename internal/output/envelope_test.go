@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 )
@@ -65,10 +66,29 @@ func TestWriteSuccess_FlattensPagination(t *testing.T) {
 	}
 }
 
+func TestWriteSuccess_PreservesResourceEnvelopeByDefault(t *testing.T) {
+	raw := json.RawMessage(`{"data":{"id":"marketplace-1"}}`)
+	var buf bytes.Buffer
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+		t.Fatalf("WriteSuccess: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	data, ok := got["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data is %T, want original envelope", got["data"])
+	}
+	if _, nested := data["data"]; !nested {
+		t.Fatalf("non-Loop resource envelope changed: %#v", data)
+	}
+}
+
 func TestWriteSuccess_FlattensResourceEnvelope(t *testing.T) {
 	raw := json.RawMessage(`{"data":{"project_id":"project-1","title":"test"}}`)
 	var buf bytes.Buffer
-	if err := WriteSuccess(&buf, raw, EnvelopeMeta{}); err != nil {
+	if err := WriteSuccess(&buf, raw, EnvelopeMeta{UnwrapResource: true}); err != nil {
 		t.Fatalf("WriteSuccess: %v", err)
 	}
 	var got map[string]any
@@ -181,6 +201,72 @@ func TestWriteError_ExitError(t *testing.T) {
 	}
 	if errObj["hint"] != "pass --title" {
 		t.Errorf("hint = %v", errObj["hint"])
+	}
+}
+
+func TestWriteError_DocsTooManyDataValidations(t *testing.T) {
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, []byte(`{"error":"too_many_data_validations"}`))
+	var buf bytes.Buffer
+	if err := WriteError(&buf, ee); err != nil {
+		t.Fatalf("WriteError: %v", err)
+	}
+
+	var got struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type    string          `json:"type"`
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Hint    string          `json:"hint"`
+			Detail  json.RawMessage `json:"detail"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.OK || got.Error.Type != "validation" || got.Error.Code != "too_many_data_validations" {
+		t.Fatalf("envelope = %s", buf.String())
+	}
+	if got.Error.Message != "too_many_data_validations" {
+		t.Fatalf("message = %q", got.Error.Message)
+	}
+	const wantHint = "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"
+	if got.Error.Hint != wantHint {
+		t.Fatalf("hint = %q, want %q", got.Error.Hint, wantHint)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal(got.Error.Detail, &detail); err != nil {
+		t.Fatalf("detail is not valid JSON: %v", err)
+	}
+	if detail["error"] != "too_many_data_validations" {
+		t.Fatalf("detail = %s", got.Error.Detail)
+	}
+}
+
+func TestWriteError_DocsTooManySheetResources(t *testing.T) {
+	ee := ParseBackendError(http.StatusRequestEntityTooLarge, []byte(`{"error":"too_many_sheet_resources"}`))
+	var buf bytes.Buffer
+	if err := WriteError(&buf, ee); err != nil {
+		t.Fatalf("WriteError: %v", err)
+	}
+
+	var got struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type string `json:"type"`
+			Code string `json:"code"`
+			Hint string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.OK || got.Error.Type != "validation" || got.Error.Code != "too_many_sheet_resources" {
+		t.Fatalf("envelope = %s", buf.String())
+	}
+	const wantHint = "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"
+	if got.Error.Hint != wantHint {
+		t.Fatalf("hint = %q, want %q", got.Error.Hint, wantHint)
 	}
 }
 

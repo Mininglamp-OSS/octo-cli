@@ -2,6 +2,7 @@ package cmdutil
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
@@ -43,8 +44,24 @@ func NewTestFactory() *TestFactory {
 	f.ClientFunc = func() (*client.Client, error) {
 		return nil, stringError("test factory: client not set (call SetClient first)")
 	}
+	f.MailCredentialFunc = func(context.Context) (*credential.MailCredential, error) {
+		return nil, stringError("test factory: mail credential not set")
+	}
+	f.MailClientFunc = func(context.Context) (*client.Client, error) {
+		return nil, stringError("test factory: mail client not set (call SetMailClient first)")
+	}
 
 	return &TestFactory{Factory: f, In: in, Out: out, ErrOut: errOut}
+}
+
+// SetMailClient injects the Agent Mail client for tests.
+func (t *TestFactory) SetMailClient(c *client.Client) {
+	t.MailClientFunc = func(context.Context) (*client.Client, error) { return c, nil }
+}
+
+// SetMailCredential replaces the Agent Mail credential hook.
+func (t *TestFactory) SetMailCredential(c *credential.MailCredential) {
+	t.MailCredentialFunc = func(context.Context) (*credential.MailCredential, error) { return c, nil }
 }
 
 // SetClient injects a client (usually backed by httptest.Server) for tests.

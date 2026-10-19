@@ -8,6 +8,14 @@ npm install -g @mininglamp-oss/octo-cli
 octo-cli --help
 ```
 
+Agent-facing Skill documentation is embedded in the same signed binary. A
+runtime can load the official Agent Mail guide without downloading a separate
+Skill package:
+
+```bash
+octo-cli skills octo-mail
+```
+
 This package is a thin Node wrapper around the prebuilt Go binary. The matching
 platform binary is shipped inside an npm optional dependency such as
 `@mininglamp-oss/octo-cli-darwin-arm64`; the `octo-cli` command resolves that

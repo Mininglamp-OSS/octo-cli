@@ -254,6 +254,17 @@ before invoking.
 | `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo-cli schema <op>`" |
 | `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo-cli matters list`" |
 | `NOT_FOUND` | 404 | `api_error` | "resource not found" |
+| `SHEET_CLEANING_UNAVAILABLE` (CLI-inferred from an explicit missing cleaning route) | 404 | `api_error` | "check the same document with sheet get, then backend deployment/routing; never emulate cleaning with a whole-sheet rewrite" |
+| `cleaning_overwrite_required` | 409 | `validation` | "inspect preview; only after approval apply the same version with overwrite consent" |
+| `cleaning_filtered_sheet` | 422 | `validation` | "do not remove another user's shared filter automatically" |
+| `cleaning_complex_sheet` | 422 | `validation` | "use a plain worksheet; rich-text, drawings, links, validations and comments are not flattened" |
+| `cleaning_formula_unsupported` | 422 | `validation` | "choose plain values rather than formula sources" |
+| `cleaning_merged_range` | 422 | `validation` | "choose an unmerged range" |
+| `cleaning_delimiter_not_found` | 422 | `validation` | "inspect stored values, not displayed number formatting" |
+| `cleaning_single_column_required` | 422 | `validation` | "select one source column" |
+| `cleaning_range_out_of_bounds` | 422 | `validation` | "read sheetList and stay within worksheet dimensions" |
+| `cleaning_invalid_delimiter` | 422 | `validation` | "use a literal delimiter of 1-16 characters" |
+| `sheet_conditional_format_unsupported` | 409 | `validation` | "preserve conditional-format rules; never delete them automatically to bypass structural refusal" |
 | `ASSIGNEE_NOT_FOUND` | 404 | `api_error` | "assignee not in space or invalid UID" |
 | `FORBIDDEN` | 403 | `permission` | "bot lacks permission; check space membership" |
 | `BOT_WORKSPACE_MEMBERSHIP_REQUIRED` | 403 | `permission` | "ask a Workspace owner or admin to add this Bot in Workspace Members" |
@@ -264,7 +275,7 @@ before invoking.
 | `INTERNAL_ERROR` | 500 | `api_error` | "internal server error; retry or report" |
 | `PAYLOAD_TOO_LARGE` | 413 | `validation` | "request body exceeds 1MB limit" |
 
-### 4.4 Pagination Envelope Flattening
+### 4.4 Public API Envelope Flattening
 
 Backend paginated responses use: `{"data": [...], "pagination": {"has_more": true, "next_cursor": "xxx"}}`
 
@@ -277,11 +288,18 @@ Naive wrapping produces `data.data` nesting. CLI flattens:
 // --page-all: all pages merged, no _pagination (engine exhausted all pages)
 {"ok": true, "data": [/* all items */]}
 
-// Non-paginated response: pass through as-is
+// Non-paginated Loop resource: unwrap the Public API data object
 {"ok": true, "data": { ... }}
+
+// Non-Loop resource: preserve the backend envelope inside CLI data
+{"ok": true, "data": {"data": { ... }}}
 ```
 
-Detection: backend response is object with `data` (array) + `pagination` (object) keys → flatten. Otherwise pass through. `_pagination` uses underscore prefix consistent with `_rate_limit` and `_notice`.
+Detection: paginated responses shaped as `data` (array) + `pagination`
+(object) are flattened for every service. A non-paginated `{"data": {...}}`
+resource envelope is flattened only for the Loop/Fleet Public API; other
+services retain their existing response shape. `_pagination` uses an underscore
+prefix consistent with `_rate_limit` and `_notice`.
 
 ### 4.5 Rate Limit Metadata
 
@@ -317,6 +335,10 @@ Current v0.x outputs raw server JSON. Break immediately — only internal Agent 
 | `x-octo-positional` | Body fields → positional args | `["content"]` |
 | `x-octo-space-header` | Inject X-Space-Id | `true` (default for all service commands) |
 | `x-octo-status-values` | Valid status enum for domain | `["open","done","archived"]` |
+| `x-octo-strict-request-schema` | Opt a service or individual operation into extended request validation; used by Marketplace and selected PPT, sheet and sharing operations (Loop also enables strict validation) | `true` |
+| `x-octo-enum-hint` | Append schema-specific guidance to `ENUM_NOT_ALLOWED`; inherited through `allOf`, with the outer/first nonempty hint taking precedence | `"Deploy the matching backend catalogue first."` |
+| `x-octo-body-variants` | Declare allowed conditional body shapes with required and forbidden fields | `[{"name":"create","required":["title"],"forbidden":["id"]}]` |
+| `x-octo-body-variants-hint` | Provide actionable guidance when no body variant matches | `"create without id, or update with a non-empty id"` |
 
 **Response schemas required** — Agent needs field names for --jq and decision-making.
 

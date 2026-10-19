@@ -5,10 +5,12 @@ package cmdutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
@@ -34,9 +36,9 @@ type GlobalOptions struct {
 	PageAll bool
 	PageMax int
 
-	// Profile selects a stored credential by friendly name; BotID selects (and
-	// asserts) it by robot id. BotID falls back to OCTO_BOT_ID when the flag is
-	// empty. Both feed the credential chain's FileProvider.
+	// Profile and BotID are explicit stored-profile selectors. When BotID is
+	// empty, OCTO_BOT_ID may instead label an environment credential if the
+	// profile store is empty.
 	Profile string
 	BotID   string
 }
@@ -48,10 +50,12 @@ type Factory struct {
 	IOStreams *IOStreams
 	Globals   *GlobalOptions
 
-	ConfigFunc     func() (*config.Config, error)
-	CredentialFunc func() (*credential.BotCredential, error)
-	ClientFunc     func() (*client.Client, error)
-	RegistryFunc   func() *registry.Registry
+	ConfigFunc         func() (*config.Config, error)
+	CredentialFunc     func() (*credential.BotCredential, error)
+	ClientFunc         func() (*client.Client, error)
+	MailCredentialFunc func(context.Context) (*credential.MailCredential, error)
+	MailClientFunc     func(context.Context) (*client.Client, error)
+	RegistryFunc       func() *registry.Registry
 
 	// ErrorEmitted is set to true after EmitError writes an envelope to
 	// stderr. The top-level main func checks this to avoid double-emitting
@@ -59,11 +63,17 @@ type Factory struct {
 	ErrorEmitted bool
 
 	// Cached resolutions.
-	config *config.Config
-	cred   *credential.BotCredential
-	cli    *client.Client
-	reg    *registry.Registry
-	store  *authstore.Store
+	config   *config.Config
+	cred     *credential.BotCredential
+	cli      *client.Client
+	mailCred *credential.MailCredential
+	mailCLI  *client.Client
+	// botIdentityVerified records that the active Bot id is trusted: either it
+	// was obtained from the authoritative registration endpoint or recovered
+	// from an exact local Mail binding for the active Bot-token fingerprint.
+	botIdentityVerified bool
+	reg                 *registry.Registry
+	store               *authstore.Store
 }
 
 // NewDefaultFactory wires the production providers: config from env, cred from
@@ -122,6 +132,8 @@ func NewDefaultFactory() *Factory {
 		return cli, nil
 	}
 
+	configureMailProviders(f)
+
 	f.RegistryFunc = func() *registry.Registry {
 		if f.reg != nil {
 			return f.reg
@@ -134,11 +146,84 @@ func NewDefaultFactory() *Factory {
 	return f
 }
 
+func configureMailProviders(f *Factory) {
+	f.MailCredentialFunc = func(ctx context.Context) (*credential.MailCredential, error) {
+		if f.mailCred != nil {
+			return f.mailCred, nil
+		}
+		// Mail credentials are stored under RobotID + SpaceID + fingerprints of
+		// the API origin and Bot token that completed authorization. Exact lookup
+		// therefore releases no mailbox credential after an origin or token swap
+		// and needs no live Bot registration call on each command (including
+		// --dry-run).
+		bot, err := f.CredentialFunc()
+		if err != nil {
+			return nil, err
+		}
+		cfg, err := f.ConfigFunc()
+		if err != nil {
+			return nil, err
+		}
+		store, err := f.AuthStore()
+		if err != nil {
+			return nil, err
+		}
+		token, binding, err := storedMailCredential(store, bot, cfg.APIBaseURL)
+		if err != nil {
+			if errors.Is(err, authstore.ErrMailCredentialNotFound) {
+				return nil, output.ErrValidation(
+					"Agent Mail is not connected for the active Bot",
+					"complete Agent Mail authorization for the current Bot",
+				)
+			}
+			if errors.Is(err, authstore.ErrMailCredentialAmbiguous) {
+				return nil, output.ErrValidation(
+					"multiple Agent Mail connections match the active Bot",
+					"pass --space <space_id> to select one",
+				)
+			}
+			return nil, err
+		}
+		bot.RobotID = binding.RobotID
+		bot.SpaceID = binding.SpaceID
+		f.cred = bot
+		f.botIdentityVerified = true
+		f.mailCred = &credential.MailCredential{
+			Token: token, BotID: bot.RobotID, BotProfile: bot.Profile,
+			Source: "bot:" + binding.RobotID + "/" + binding.SpaceID,
+		}
+		return f.mailCred, nil
+	}
+
+	f.MailClientFunc = func(ctx context.Context) (*client.Client, error) {
+		if f.mailCLI != nil {
+			return f.mailCLI, nil
+		}
+		cfg, err := f.ConfigFunc()
+		if err != nil {
+			return nil, err
+		}
+		cred, err := f.MailCredentialFunc(ctx)
+		if err != nil {
+			return nil, err
+		}
+		cli := client.NewMail(cfg, cred, client.Options{
+			Verbose: f.Globals.Verbose,
+			DryRun:  f.Globals.DryRun,
+			NoRetry: f.Globals.NoRetry,
+			Timeout: f.Globals.Timeout,
+			ErrOut:  f.IOStreams.ErrOut,
+		})
+		f.mailCLI = cli
+		return cli, nil
+	}
+}
+
 // buildConfig loads the env config and reflects the resolved credential into it
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
 // profile-based use and config show reports the active token. Only the "no
 // credential found" case is swallowed (so cfg.Validate reports the familiar
-// environment-token hint for the zero-config case); structured resolution errors
+// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
 // (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
 // surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
@@ -160,14 +245,15 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 		if cred.SpaceID != "" {
 			cfg.SpaceID = cred.SpaceID
 		}
-		f.overlayProfileBaseURL(cfg, cred.Profile)
+		if err := f.overlayProfileBaseURL(cfg, cred.Profile); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
 
-// buildCredential gives explicit CLI profile selectors first priority, then a
-// normalized environment credential, then an OCTO_BOT_ID-selected or sole
-// stored profile. Environment aliases are resolved only by EnvProvider.
+// buildCredential selects explicit profiles first, then normalized environment
+// credentials, then implicit stored profiles. Mail uses the same resolved identity.
 func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)))
 	if mode == config.CredentialModeTask {
@@ -208,14 +294,49 @@ func (f *Factory) finalizeCredential(cred *credential.BotCredential) *credential
 	if f.Globals.Space != "" {
 		cred.SpaceID = f.Globals.Space
 	}
+	if cred.BotKind == "" {
+		cred.BotKind = credential.TokenKind(cred.Token)
+	}
 	return cred
 }
 
+func storedMailCredential(store *authstore.Store, bot *credential.BotCredential, apiOrigin string) (string, authstore.MailBinding, error) {
+	if bot == nil {
+		return "", authstore.MailBinding{}, errors.New("Bot credential is required") //nolint:staticcheck // Bot is the product's canonical identity term.
+	}
+	return store.FindMailCredential(
+		strings.TrimSpace(bot.RobotID),
+		strings.TrimSpace(bot.SpaceID),
+		bot.Token,
+		apiOrigin,
+	)
+}
+
+// MailBindingKeyForBot derives the local credential-store key without
+// persisting the Bot token itself. Mail authorization and Mail request paths
+// share this helper so Space, origin, and token binding cannot drift between
+// them.
+func MailBindingKeyForBot(bot *credential.BotCredential, apiOrigin string) (string, error) {
+	if bot == nil || strings.TrimSpace(bot.RobotID) == "" {
+		return "", output.ErrValidation(
+			"Agent Mail requires a resolved Bot id",
+			"use a stored profile or set OCTO_BOT_ID for the runtime Bot",
+		)
+	}
+	if strings.TrimSpace(bot.SpaceID) == "" {
+		return "", output.ErrValidation(
+			"Agent Mail requires a Space",
+			"pass --space <space_id> or set OCTO_SPACE_ID",
+		)
+	}
+	return authstore.MailBindingKey(bot.RobotID, bot.SpaceID, bot.Token, apiOrigin)
+}
+
 // buildTaskCredential is deliberately separate from the normal provider
-// chain. A daemon-launched task must use exactly the claim credential injected
-// through OCTO_TOKEN (or its compatible OCTO_BOT_TOKEN alias); local profiles
-// and identity selectors must never replace it. Fleet verifies that the opaque
-// bearer is really an agent_task credential and enforces its bindings/actions.
+// chain when OCTO_CREDENTIAL_MODE=task is present. The daemon is responsible
+// for preserving that marker and isolating OCTO_CONFIG_DIR for task processes;
+// the CLI cannot make a caller-controlled environment tamper-proof. Fleet
+// verifies the opaque bearer and enforces its bindings/actions.
 func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
@@ -253,21 +374,26 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 
 // overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
 // but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
-func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) {
+func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) error {
 	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
-		return
+		return nil
 	}
 	store, err := f.AuthStore()
 	if err != nil {
-		return
+		return err
 	}
 	profiles, err := store.LoadProfiles()
 	if err != nil {
-		return
+		return err
 	}
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
-		cfg.APIBaseURL = m.APIBaseURL
+		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
+		if err != nil {
+			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+		}
+		cfg.APIBaseURL = normalized
 	}
+	return nil
 }
 
 // Config returns the resolved config (cached).
@@ -278,6 +404,132 @@ func (f *Factory) Credential() (*credential.BotCredential, error) { return f.Cre
 
 // Client returns the resolved HTTP client (cached).
 func (f *Factory) Client() (*client.Client, error) { return f.ClientFunc() }
+
+// MailCredential returns the account-scoped Agent Mail credential.
+func (f *Factory) MailCredential(ctx context.Context) (*credential.MailCredential, error) {
+	if f.MailCredentialFunc == nil {
+		return nil, output.ErrValidation(
+			"Agent Mail credential provider is not configured",
+			"complete Agent Mail authorization for the current Bot",
+		)
+	}
+	return f.MailCredentialFunc(ctx)
+}
+
+// ClientForCredential returns the transport selected by an operation's
+// credential boundary. Mail uses a Bot-bound mailbox credential; every
+// other operation uses the active Bot credential.
+func (f *Factory) ClientForCredential(ctx context.Context, kind string) (*client.Client, error) {
+	if kind == "mail" {
+		if f.MailClientFunc == nil {
+			return nil, output.ErrValidation(
+				"Agent Mail client is not configured",
+				"complete Agent Mail authorization for the current Bot",
+			)
+		}
+		return f.MailClientFunc(ctx)
+	}
+	return f.Client()
+}
+
+// ResolveBotIdentity returns the active Bot credential with a stable RobotID.
+// Existing profiles already carry that id; token-only runtimes always resolve
+// it from the standard Bot registration endpoint. An OCTO_BOT_ID supplied next
+// to an environment token is only a claim until that endpoint confirms it.
+func (f *Factory) ResolveBotIdentity(ctx context.Context) (*credential.BotCredential, error) {
+	return f.resolveBotIdentity(ctx, false)
+}
+
+// VerifyBotIdentity resolves the authoritative Bot id even when the active
+// profile already claims one. Device authorization uses this stricter path so
+// a stale or incorrect profile can never bind a mailbox to another Bot.
+func (f *Factory) VerifyBotIdentity(ctx context.Context) (*credential.BotCredential, error) {
+	return f.resolveBotIdentity(ctx, true)
+}
+
+func (f *Factory) resolveBotIdentity(ctx context.Context, verify bool) (*credential.BotCredential, error) {
+	bot, err := f.CredentialFunc()
+	if err != nil {
+		return nil, err
+	}
+	if f.botIdentityVerified {
+		return bot, nil
+	}
+	// A stored profile is the local identity selector used by ordinary
+	// commands. A bare environment RobotID is different: it is caller input and
+	// must not select a stored mailbox credential until OCTO confirms that the
+	// active token owns it.
+	if strings.TrimSpace(bot.RobotID) != "" && bot.Profile != "" && !verify {
+		return bot, nil
+	}
+	if f.Globals != nil && f.Globals.DryRun {
+		return nil, output.ErrValidation(
+			"Bot identity verification is not executed during --dry-run",
+			"provide a stored profile or OCTO_BOT_ID to preview the Mail request locally",
+		)
+	}
+	cli, err := f.botIdentityClient()
+	if err != nil {
+		return nil, err
+	}
+	raw, err := cli.Do(ctx, &client.Request{
+		Method: http.MethodPost,
+		Path:   "/v1/bot/register",
+		Body:   map[string]any{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	resolvedID, err := botIDFromResponse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if claimedID := strings.TrimSpace(bot.RobotID); claimedID != "" && claimedID != resolvedID {
+		return nil, output.ErrAuth(
+			fmt.Sprintf("the active Bot token belongs to %q, not %q", resolvedID, claimedID),
+			"select the credential that belongs to the current Bot",
+		)
+	}
+	bot.RobotID = resolvedID
+	f.cred = bot
+	f.botIdentityVerified = true
+	return bot, nil
+}
+
+func botIDFromResponse(raw []byte) (string, error) {
+	var response struct {
+		RobotID string `json:"robot_id"`
+		Data    *struct {
+			RobotID string `json:"robot_id"`
+		} `json:"data,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return "", output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO returned an invalid Bot identity response",
+			"retry the command",
+		)
+	}
+	resolvedID := strings.TrimSpace(response.RobotID)
+	if resolvedID == "" && response.Data != nil {
+		resolvedID = strings.TrimSpace(response.Data.RobotID)
+	}
+	if resolvedID == "" {
+		return "", output.ErrAPI(
+			"INVALID_BOT_IDENTITY_RESPONSE",
+			"OCTO did not return the current Bot id",
+			"check the Bot token and OCTO API endpoint",
+		)
+	}
+	return resolvedID, nil
+}
+
+// botIdentityClient uses the ordinary client options. resolveBotIdentity blocks
+// this path under --dry-run, so a preview never bypasses the global no-network
+// contract by constructing a second live client.
+func (f *Factory) botIdentityClient() (*client.Client, error) {
+	return f.ClientFunc()
+}
 
 // Registry returns the spec registry (cached). Tests may inject a stub by
 // replacing RegistryFunc.
@@ -328,7 +580,14 @@ func (f *Factory) identityValue() any {
 		id["profile"] = f.cred.Profile
 	}
 	if f.cred.RobotID != "" {
-		id["robot_id"] = f.cred.RobotID
+		// A RobotID from OCTO_BOT_ID is caller-supplied until an authoritative
+		// lookup confirms it. Keep the claim observable without presenting it as
+		// the authenticated identity.
+		if f.cred.Profile != "" || f.botIdentityVerified {
+			id["robot_id"] = f.cred.RobotID
+		} else {
+			id["robot_id_claimed"] = f.cred.RobotID
+		}
 	}
 	if f.cred.BotKind == "agent_task" {
 		id["credential_kind"] = "agent_task"
@@ -351,9 +610,16 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	if err := output.WriteSuccess(&envBuf, raw, meta); err != nil {
 		return err
 	}
-	// Re-parse into any so Format/ApplyJQ can work with it.
+	// Re-parse into any so Format/ApplyJQ can work with it. UseNumber keeps every
+	// integer at its exact decimal text: a plain unmarshal would turn a uint64 id
+	// above 2^53 into a rounded float64, silently corrupting it on the way to
+	// stdout even when the backend and the transport got it right. gojq handles
+	// json.Number for arithmetic, comparison and tostring, and the table/csv
+	// renderer prints it verbatim.
 	var envelope any
-	if err := json.Unmarshal(envBuf.Bytes(), &envelope); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(envBuf.Bytes()))
+	dec.UseNumber()
+	if err := dec.Decode(&envelope); err != nil {
 		return fmt.Errorf("re-parse envelope: %w", err)
 	}
 
@@ -393,6 +659,62 @@ func (f *Factory) EmitError(err error) error {
 //
 // Shared by the root command (for cobra-framework errors) and the Factory
 // (for EmitError callers) so both paths produce identical taxonomy.
+//
+// # Which messages may be echoed, and why
+//
+// This is the last funnel before stderr, and the stderr envelope is unconditional —
+// no --verbose gates it. Five separate rounds of review found a caller-supplied secret
+// arriving here through some formatting point, so the rule is written down rather than
+// re-derived each time: **a message reaches the envelope only if its text cannot
+// contain a value the caller typed.**
+//
+// The messages that arrive here, by origin:
+//
+//	origin                     format                                     embeds argv?
+//	---------------------------+-------------------------------------------+------------
+//	pflag failf (bad syntax)   bad flag syntax: %s                         YES (the whole token)
+//	pflag UnknownFlagError     unknown flag: --%s                          YES (the name IS argv)
+//	pflag UnknownFlagError     unknown shorthand flag: %q in -%s           YES (the whole run)
+//	pflag ValueRequiredError   flag needs an argument: [%q in -]%s         YES (same run)
+//	pflag InvalidArgumentError invalid argument %q for %q flag: %v         YES (the value)
+//	cobra unknown command      unknown command %q for %q                   YES (the token)
+//	this project's             unknown subcommand for %q; available: %s     no (our own words:
+//	rejectUnknownSubcommand                                                 the command path and
+//	                                                                        our subcommand names)
+//	cobra arg count            accepts %d arg(s), received %d              no (counts)
+//	cobra minimum args         requires at least %d arg(s), only received  no (counts)
+//	cobra required flags       required flag(s) %q not set                 no (flag names)
+//	this project's config/     "token is required", "…OCTO_TOKEN…"         no (our own text)
+//	credential packages
+//
+// Note the two "unknown …" rows are different strings from different producers and must
+// not be collapsed: cobra quotes the token it did not recognise, while this project's own
+// rejectUnknownSubcommand was rewritten in an earlier round precisely so that it names the
+// command path and lists the real subcommands instead of echoing the argument. Blanking
+// that one would throw away the fix rather than extend it.
+//
+// pflag has six failf call sites, and the list above matched five of them: `bad flag
+// syntax: %s`, whose argument is the entire argv token, was in no branch and printed in
+// full. So the rule is inverted rather than extended by one: **within the flag-parse
+// family, echoing requires an allowlist entry**, and everything else is reported by
+// category. The allowlist is checked first because "required flag(s) …" mentions flags
+// too. A seventh failf in a future pflag release is covered without being enumerated,
+// which is the whole point — enumerating the unsafe shapes is what missed one.
+//
+// The categories that embed argv are reported by name instead. That is a real loss of
+// detail — an operator no longer sees which flag was rejected — and it is accepted
+// because the alternative cannot be made safe here: this runs *before* collectSecrets,
+// so there is no list of declared secrets to mask against, and a base64url share or
+// invite token beginning with "-" is exactly what pflag reports as an unknown flag.
+// The hint carries the remedy, including the "-" case, so the caller is not left
+// guessing.
+//
+// The fallback keeps its text. Everything reaching it either comes from this project's
+// own code or is a cobra error not matched above; the standing contract for our own
+// code is that an error carrying a caller value must be constructed as an *ExitError
+// with the value already masked, which is checked at the sites that have a secret list.
+// If a future error type formats argv into an unclassified message, that contract is
+// where it has to be fixed — not by widening the guesses here.
 func WrapCLIError(err error) error {
 	if err == nil {
 		return nil
@@ -403,20 +725,53 @@ func WrapCLIError(err error) error {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
-	case strings.Contains(lower, "octo_bot_token"),
+	case strings.Contains(lower, "octo_token"),
+		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),
 		strings.Contains(lower, "token is required"):
-		return output.ErrAuth(msg, "set OCTO_BOT_TOKEN to an Octo or Loop bearer credential")
-	case strings.Contains(lower, "unknown flag"),
-		strings.Contains(lower, "unknown command"),
-		strings.Contains(lower, "unknown subcommand"),
-		strings.Contains(lower, "unknown shorthand"),
+		return output.ErrAuth(msg, "set OCTO_TOKEN (or OCTO_BOT_TOKEN) to an app_*, bf_*, uk_*, or octo_loop_* token")
+	// --- allowlist first: shapes proven to carry no caller value keep their text ---
+	//
+	// Order matters. These are checked before the family catch-all below, because
+	// "required flag(s) …" also mentions flags and would otherwise be blinded along
+	// with everything else.
+	case strings.Contains(lower, "unknown subcommand"),
 		strings.Contains(lower, "required flag"),
-		strings.Contains(lower, "invalid argument"),
 		strings.Contains(lower, "accepts "),
 		strings.Contains(lower, "requires at "),
 		strings.Contains(lower, "arg(s)"):
 		return output.ErrValidation(msg, "run `octo-cli <command> --help` to see valid flags and args")
+
+	// --- then the categories reported by name, for a useful remedy ---
+	case strings.Contains(lower, "unknown flag"),
+		strings.Contains(lower, "unknown shorthand"):
+		return output.ErrValidation("a flag in the command line was not recognised",
+			"run `octo-cli <command> --help` for the valid flags. If this is an id that starts "+
+				"with \"-\" (base64url ids do), pass it as its named flag or after a \"--\" separator")
+	case strings.Contains(lower, "flag needs an argument"):
+		return output.ErrValidation("a flag was given without its value",
+			"run `octo-cli <command> --help` for the valid flags and their arguments")
+	case strings.Contains(lower, "invalid argument"):
+		return output.ErrValidation("a flag value was rejected by its type",
+			"run `octo-cli <command> --help` to see the expected type for each flag")
+	case strings.Contains(lower, "bad flag syntax"):
+		return output.ErrValidation("a flag in the command line is malformed",
+			"a flag is --name or --name=value (or -n); check for a stray dash or a missing name")
+	case strings.Contains(lower, "unknown command"):
+		return output.ErrValidation("that is not a known command",
+			"run `octo-cli --help`, or `octo-cli <domain> --help`, for the available commands")
+
+	// --- and the family catch-all: anything else about flags is not echoed ---
+	//
+	// This is what makes the rule default-deny rather than a list of known-bad shapes.
+	// The previous version enumerated the formats that embed argv and blinded those,
+	// which matched five of pflag's six failf sites and missed "bad flag syntax: %s" —
+	// the one whose argument is the entire argv token. A sixth strings.Contains would
+	// have repeated the same mistake at a different index; this covers the seventh
+	// failf a future pflag release adds without anyone having to notice it.
+	case strings.Contains(lower, "flag"), strings.Contains(lower, "shorthand"):
+		return output.ErrValidation("the command line could not be parsed",
+			"run `octo-cli <command> --help` for the valid flags and args")
 	}
 	return output.ErrWithHint("config", "CLI_ERROR", msg, "")
 }

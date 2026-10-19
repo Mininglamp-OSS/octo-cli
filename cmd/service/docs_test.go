@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,7 +39,8 @@ func TestDocs_TreeShape(t *testing.T) {
 
 	groups := map[string][]string{
 		"content":     {"get", "edit"},
-		"sheet":       {"get", "edit"},
+		"sheet":       {"get", "edit", "replace", "split", "deduplicate"},
+		"ppt":         {"get", "edit", "export"},
 		"scene":       {"get", "edit", "export"},
 		"members":     {"list", "set", "remove"},
 		"share":       {"get", "set"},
@@ -69,38 +71,51 @@ func TestDocs_RegistryShape(t *testing.T) {
 
 	type want struct{ method, path string }
 	cases := map[string]want{
-		"docs.create":              {"POST", "/v1/bot/docs"},
-		"docs.list":                {"GET", "/v1/bot/docs"},
-		"docs.search":              {"POST", "/v1/bot/docs/search"},
-		"docs.get":                 {"GET", "/v1/bot/docs/{docId}"},
-		"docs.rename":              {"PATCH", "/v1/bot/docs/{docId}"},
-		"docs.delete":              {"DELETE", "/v1/bot/docs/{docId}"},
-		"docs.content.get":         {"GET", "/v1/bot/docs/{docId}/content"},
-		"docs.content.edit":        {"PATCH", "/v1/bot/docs/{docId}/content"},
-		"docs.sheet.get":           {"GET", "/v1/bot/docs/{docId}/sheet"},
-		"docs.sheet.edit":          {"PATCH", "/v1/bot/docs/{docId}/sheet"},
-		"docs.scene.get":           {"GET", "/v1/bot/docs/{docId}/scene"},
-		"docs.scene.edit":          {"PATCH", "/v1/bot/docs/{docId}/scene"},
-		"docs.members.list":        {"GET", "/v1/bot/docs/{docId}/members"},
-		"docs.members.set":         {"PUT", "/v1/bot/docs/{docId}/members"},
-		"docs.members.remove":      {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
-		"docs.share.get":           {"GET", "/v1/bot/docs/{docId}/share"},
-		"docs.share.set":           {"PUT", "/v1/bot/docs/{docId}/share"},
-		"docs.forward-grant":       {"POST", "/v1/bot/docs/{docId}/forward-grant"},
-		"docs.comments.list":       {"GET", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.add":        {"POST", "/v1/bot/docs/{docId}/comments"},
-		"docs.comments.edit":       {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.comments.delete":     {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},
-		"docs.versions.list":       {"GET", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.create":     {"POST", "/v1/bot/docs/{docId}/versions"},
-		"docs.versions.state":      {"GET", "/v1/bot/docs/{docId}/versions/{versionId}/state"},
-		"docs.versions.rename":     {"PATCH", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.delete":     {"DELETE", "/v1/bot/docs/{docId}/versions/{versionId}"},
-		"docs.versions.restore":    {"POST", "/v1/bot/docs/{docId}/versions/{versionId}/restore"},
-		"docs.attachments.presign": {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
-		"docs.attachments.get":     {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
-		"docs.attachments.resolve": {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
-		"docs.scene.export":        {"GET", "/v1/bot/docs/{docId}/export"},
+		"docs.sheet.split":          {"POST", "/v1/bot/docs/{docId}/sheet/split"},
+		"docs.sheet.deduplicate":    {"POST", "/v1/bot/docs/{docId}/sheet/deduplicate"},
+		"docs.create":               {"POST", "/v1/bot/docs"},
+		"docs.list":                 {"GET", "/v1/bot/docs"},
+		"docs.search":               {"POST", "/v1/bot/docs/search"},
+		"docs.get":                  {"GET", "/v1/bot/docs/{docId}"},
+		"docs.rename":               {"PATCH", "/v1/bot/docs/{docId}"},
+		"docs.delete":               {"DELETE", "/v1/bot/docs/{docId}"},
+		"docs.content.get":          {"GET", "/v1/bot/docs/{docId}/content"},
+		"docs.content.edit":         {"PATCH", "/v1/bot/docs/{docId}/content"},
+		"docs.sheet.get":            {"GET", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.edit":           {"PATCH", "/v1/bot/docs/{docId}/sheet"},
+		"docs.sheet.replace":        {"POST", "/v1/bot/docs/{docId}/sheet/replace"},
+		"docs.sheet.rows.insert":    {"POST", "/v1/bot/docs/{docId}/sheet/rows/insert"},
+		"docs.sheet.rows.delete":    {"POST", "/v1/bot/docs/{docId}/sheet/rows/delete"},
+		"docs.sheet.columns.insert": {"POST", "/v1/bot/docs/{docId}/sheet/columns/insert"},
+		"docs.sheet.columns.delete": {"POST", "/v1/bot/docs/{docId}/sheet/columns/delete"},
+		"docs.ppt.export":           {"GET", "/v1/bot/docs/{docId}/ppt/export"},
+		"docs.ppt.get":              {"GET", "/v1/bot/docs/{docId}/ppt"},
+		"docs.ppt.edit":             {"PATCH", "/v1/bot/docs/{docId}/ppt"},
+		"docs.scene.get":            {"GET", "/v1/bot/docs/{docId}/scene"},
+		"docs.scene.edit":           {"PATCH", "/v1/bot/docs/{docId}/scene"},
+		"docs.members.list":         {"GET", "/v1/bot/docs/{docId}/members"},
+		"docs.members.set":          {"PUT", "/v1/bot/docs/{docId}/members"},
+		"docs.members.remove":       {"DELETE", "/v1/bot/docs/{docId}/members/{uid}"},
+		"docs.share.get":            {"GET", "/v1/bot/docs/{docId}/share"},
+		"docs.share.set":            {"PUT", "/v1/bot/docs/{docId}/share"},
+		"docs.forward-grant":        {"POST", "/v1/bot/docs/{docId}/forward-grant"},
+		"docs.comments.get":         {"GET", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.comments.replies":     {"GET", "/v1/bot/docs/{docId}/comments/{id}/replies"},
+		"docs.comments.list":        {"GET", "/v1/bot/docs/{docId}/comments"},
+		"docs.sheet.list":           {"GET", "/v1/bot/docs/{docId}/sheets"},
+		"docs.comments.add":         {"POST", "/v1/bot/docs/{docId}/comments"},
+		"docs.comments.edit":        {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.comments.delete":      {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},
+		"docs.versions.list":        {"GET", "/v1/bot/docs/{docId}/versions"},
+		"docs.versions.create":      {"POST", "/v1/bot/docs/{docId}/versions"},
+		"docs.versions.state":       {"GET", "/v1/bot/docs/{docId}/versions/{versionId}/state"},
+		"docs.versions.rename":      {"PATCH", "/v1/bot/docs/{docId}/versions/{versionId}"},
+		"docs.versions.delete":      {"DELETE", "/v1/bot/docs/{docId}/versions/{versionId}"},
+		"docs.versions.restore":     {"POST", "/v1/bot/docs/{docId}/versions/{versionId}/restore"},
+		"docs.attachments.presign":  {"POST", "/v1/bot/docs/{docId}/attachments/presign"},
+		"docs.attachments.get":      {"GET", "/v1/bot/docs/{docId}/attachments/{attachId}"},
+		"docs.attachments.resolve":  {"POST", "/v1/bot/docs/{docId}/attachments/resolve"},
+		"docs.scene.export":         {"GET", "/v1/bot/docs/{docId}/export"},
 	}
 
 	got := reg.ListOperations("docs")
@@ -122,6 +137,86 @@ func TestDocs_RegistryShape(t *testing.T) {
 			t.Errorf("%s: first segment must be the service; got %q", id, segs[0])
 		}
 	}
+
+	list, ok := reg.GetOperation("docs.members.list")
+	if !ok || list.ResponseSchema == nil {
+		t.Fatal("docs.members.list response schema missing")
+	}
+	items, ok := list.ResponseSchema.Properties["items"]
+	if !ok || items.Items == nil {
+		t.Fatalf("docs.members.list items schema = %#v, want array item schema", items)
+	}
+	principalSpaceID, ok := items.Items.Properties["principalSpaceId"]
+	if !ok || principalSpaceID.Type != "string" {
+		t.Fatalf("docs.members.list item principalSpaceId = %#v, want string", principalSpaceID)
+	}
+}
+
+func TestDocsMembersSet_PrincipalSpaceIDIsOptionalBodyField(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		wantSpace string
+	}{
+		{name: "defaults to authenticated Bot Space", args: []string{"docs", "members", "set", "doc-1", "--uid", "user-1", "--role", "writer"}},
+		{name: "sends explicit principal Space", args: []string{"docs", "members", "set", "doc-1", "--uid", "user-1", "--role", "writer", "--principal-space-id", "space-2"}, wantSpace: "space-2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			got, present := body["principalSpaceId"]
+			if tc.wantSpace == "" {
+				if present {
+					t.Fatalf("omitted --principal-space-id must leave Bot Space resolution to the backend: %v", body)
+				}
+				return
+			}
+			if got != tc.wantSpace {
+				t.Fatalf("principalSpaceId = %v, want %q", got, tc.wantSpace)
+			}
+		})
+	}
+}
+
+func TestDocsMembersRemove_RequiresAndSendsPrincipalSpaceID(t *testing.T) {
+	t.Run("requires principal Space", func(t *testing.T) {
+		requests := 0
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			requests++
+		})
+		root.SetArgs([]string{"docs", "members", "remove", "doc-1", "user-1"})
+		if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "required flag") {
+			t.Fatalf("missing --principal-space-id error = %v, want required flag error", err)
+		}
+		if requests != 0 {
+			t.Fatalf("missing required flag sent %d requests, want 0", requests)
+		}
+	})
+
+	t.Run("sends exact principal Space", func(t *testing.T) {
+		var gotQuery url.Values
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotQuery = r.URL.Query()
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		})
+		root.SetArgs([]string{"docs", "members", "remove", "doc-1", "user-1", "--principal-space-id", "space-2"})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if got := gotQuery.Get("principalSpaceId"); got != "space-2" {
+			t.Fatalf("principalSpaceId query = %q, want space-2", got)
+		}
+	})
 }
 
 // TestDocsSceneExport_ImageFormatFlagNoGlobalShadow pins the fix for the
@@ -543,18 +638,22 @@ func TestDocsMembersSet_PutUpsertBody(t *testing.T) {
 
 // TestDocsMembersRemove_TwoPathArgs checks both positional args land in the path.
 func TestDocsMembersRemove_TwoPathArgs(t *testing.T) {
-	var gotMethod, gotPath string
+	var gotMethod, gotPath, gotSpace string
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath = r.Method, r.URL.Path
+		gotSpace = r.URL.Query().Get("principalSpaceId")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	})
-	root.SetArgs([]string{"docs", "members", "remove", "d1", "u9"})
+	root.SetArgs([]string{"docs", "members", "remove", "d1", "u9", "--principal-space-id", "s1"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if gotMethod != "DELETE" || gotPath != "/v1/bot/docs/d1/members/u9" {
 		t.Errorf("got %s %s, want DELETE /v1/bot/docs/d1/members/u9", gotMethod, gotPath)
+	}
+	if gotSpace != "s1" {
+		t.Errorf("principalSpaceId = %q, want s1", gotSpace)
 	}
 }
 
@@ -583,7 +682,7 @@ func TestDocsShareGet_ReadPath(t *testing.T) {
 }
 
 // TestDocsShareSet_RestrictedBody checks --scope restricted maps to a PUT on
-// /share with the byte-exact {shareScope} wire key and no shareRole (a
+// /share with exactly {shareScope, permissionEpoch} and no shareRole (a
 // restricted doc ignores the role; the backend normalizes it to read).
 func TestDocsShareSet_RestrictedBody(t *testing.T) {
 	var gotMethod, gotPath string
@@ -594,7 +693,7 @@ func TestDocsShareSet_RestrictedBody(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"restricted","shareRole":"read"}`))
 	})
-	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "restricted"})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "restricted", "--permissionEpoch", "3"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -619,7 +718,7 @@ func TestDocsShareSet_AnyoneEditBody(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","shareScope":"anyone_in_space","shareRole":"edit"}`))
 	})
-	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "anyone_in_space", "--role", "edit"})
+	root.SetArgs([]string{"docs", "share", "set", "d1", "--scope", "anyone_in_space", "--role", "edit", "--permissionEpoch", "3"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -932,13 +1031,13 @@ func TestDocsContentEdit_RequiresBaseVersion(t *testing.T) {
 // TestDocsSheetGet_WholeSheet checks docs.sheet.get hits
 // GET /v1/bot/docs/{docId}/sheet (reader), sends no body and no pagination
 // query when neither flag is set, and surfaces {sheetCells, sheetDims,
-// baseVersion} through the success envelope.
+// sheetDataValidations, baseVersion} through the success envelope.
 func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	var gotMethod, gotPath, gotQuery string
 	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{"default!0:0":{"v":"A1"}},"sheetDims":{"c0":120},"baseVersion":"BV_ABC=="}`))
+		_, _ = w.Write([]byte(`{"docId":"d1","sheetCells":{"default!0:0":{"v":"A1"}},"sheetDims":{"c0":120},"sheetDataValidations":{"default":[{"uid":"checkbox-a1","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":0,"startColumn":0,"endRow":0,"endColumn":0}]}]},"baseVersion":"BV_ABC=="}`))
 	})
 	root.SetArgs([]string{"docs", "sheet", "get", "d1"})
 	if err := root.Execute(); err != nil {
@@ -954,7 +1053,8 @@ func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	var env struct {
 		OK   bool `json:"ok"`
 		Data struct {
-			BaseVersion string `json:"baseVersion"`
+			BaseVersion          string                      `json:"baseVersion"`
+			SheetDataValidations map[string][]map[string]any `json:"sheetDataValidations"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
@@ -962,6 +1062,9 @@ func TestDocsSheetGet_WholeSheet(t *testing.T) {
 	}
 	if !env.OK || env.Data.BaseVersion != "BV_ABC==" {
 		t.Errorf("expected baseVersion BV_ABC== in envelope, got %+v", env)
+	}
+	if rules := env.Data.SheetDataValidations["default"]; len(rules) != 1 || rules[0]["uid"] != "checkbox-a1" {
+		t.Errorf("sheetDataValidations.default = %v, want checkbox-a1", rules)
 	}
 }
 
@@ -988,7 +1091,7 @@ func TestDocsSheetGet_Paginated(t *testing.T) {
 }
 
 // TestDocsSheetEdit_SendsCellsBatchAndIfMatch checks docs.sheet.edit hits
-// PATCH /v1/bot/docs/{docId}/sheet, carries the cells batch (via --data) as a
+// PATCH /v1/bot/docs/{docId}/sheet, carries cell and checkbox batches (via --data) as a
 // JSON object in the body, and sends the base-version token as the If-Match
 // header (the --base-version flag wired to If-Match, not a body/query field).
 func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
@@ -1001,7 +1104,7 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"docId":"d1","bytes":64,"baseVersion":"BV_NEXT==","newDocVersionSeq":4}`))
 	})
-	cells := `{"cells":{"default!0:0":{"v":"hi"},"default!1:0":null}}`
+	cells := `{"cells":{"default!0:0":{"v":0},"default!1:0":null,"default!2:0":{"v":"hi"}},"dataValidations":{"default":[{"uid":"checkbox-a1","type":"checkbox","formula1":"1","formula2":"0","ranges":[{"startRow":0,"startColumn":0,"endRow":0,"endColumn":0}]}]}}`
 	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--base-version", "BV_ABC==", "--data", cells})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
@@ -1013,19 +1116,524 @@ func TestDocsSheetEdit_SendsCellsBatchAndIfMatch(t *testing.T) {
 		t.Errorf("If-Match = %q, want BV_ABC== (base version must reach the wire as the If-Match header)", gotIfMatch)
 	}
 	cellsMap, ok := gotBody["cells"].(map[string]any)
-	if !ok || len(cellsMap) != 2 {
-		t.Fatalf("cells = %v, want a 2-entry object", gotBody["cells"])
+	if !ok || len(cellsMap) != 3 {
+		t.Fatalf("cells = %v, want a 3-entry object", gotBody["cells"])
 	}
 	set0, ok := cellsMap["default!0:0"].(map[string]any)
-	if !ok || set0["v"] != "hi" {
-		t.Errorf("cells[default!0:0] = %v, want {v:hi}", cellsMap["default!0:0"])
+	if !ok || set0["v"] != float64(0) {
+		t.Errorf("cells[default!0:0] = %v, want {v:0}", cellsMap["default!0:0"])
 	}
 	if v, present := cellsMap["default!1:0"]; !present || v != nil {
 		t.Errorf("cells[default!1:0] = %v, want an explicit null (delete)", cellsMap["default!1:0"])
 	}
+	set2, ok := cellsMap["default!2:0"].(map[string]any)
+	if !ok || set2["v"] != "hi" {
+		t.Errorf("cells[default!2:0] = %v, want {v:hi}", cellsMap["default!2:0"])
+	}
+	validations, ok := gotBody["dataValidations"].(map[string]any)
+	if !ok {
+		t.Fatalf("dataValidations = %v, want an object", gotBody["dataValidations"])
+	}
+	rules, ok := validations["default"].([]any)
+	if !ok || len(rules) != 1 {
+		t.Fatalf("dataValidations.default = %v, want one checkbox rule", validations["default"])
+	}
+	rule, ok := rules[0].(map[string]any)
+	if !ok {
+		t.Fatalf("checkbox rule = %v, want an object", rules[0])
+	}
+	if rule["type"] != "checkbox" || rule["uid"] != "checkbox-a1" || rule["formula1"] != "1" || rule["formula2"] != "0" {
+		t.Errorf("checkbox rule = %v, want checkbox-a1 with numeric-string formulas", rule)
+	}
+	ranges, ok := rule["ranges"].([]any)
+	if !ok || len(ranges) != 1 {
+		t.Fatalf("checkbox ranges = %v, want one range", rule["ranges"])
+	}
+	range0, ok := ranges[0].(map[string]any)
+	if !ok || range0["startRow"] != float64(0) || range0["startColumn"] != float64(0) || range0["endRow"] != float64(0) || range0["endColumn"] != float64(0) {
+		t.Errorf("checkbox range = %v, want A1 coordinates", ranges[0])
+	}
 	// The base version travels in the header, not the JSON body.
 	if _, present := gotBody["baseVersion"]; present {
 		t.Errorf("baseVersion must not be duplicated into the JSON body; got %v", gotBody["baseVersion"])
+	}
+}
+
+// TestDocsSheetReplace_SendsAtomicRequestAndIfMatch checks that the generated
+// replace command delegates matching and mutation to the backend instead of
+// downloading and rewriting the workbook inside the thin CLI.
+func TestDocsSheetReplace_SendsAtomicRequestAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","matchedCells":2,"replacedCells":2,"replacements":3,"baseVersion":"NEXT"}`))
+	})
+	payload := `{"findString":"old","replaceString":"new","findBy":"value","caseSensitive":true,"matchesTheWholeCell":false,"logicalId":"default","range":{"startRow":1,"startColumn":2,"endRow":3,"endColumn":4}}`
+	root.SetArgs([]string{"docs", "sheet", "replace", "d1", "--base-version", "BV_ABC==", "--data", payload})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/docs/d1/sheet/replace" {
+		t.Fatalf("got %s %s, want POST /v1/bot/docs/d1/sheet/replace", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Fatalf("If-Match = %q, want BV_ABC==", gotIfMatch)
+	}
+	if gotBody["findString"] != "old" || gotBody["replaceString"] != "new" || gotBody["findBy"] != "value" {
+		t.Fatalf("find/replace body = %#v", gotBody)
+	}
+	if gotBody["caseSensitive"] != true || gotBody["matchesTheWholeCell"] != false || gotBody["logicalId"] != "default" {
+		t.Fatalf("replace options = %#v", gotBody)
+	}
+	rangeBody, ok := gotBody["range"].(map[string]any)
+	if !ok || rangeBody["startRow"] != float64(1) || rangeBody["startColumn"] != float64(2) || rangeBody["endRow"] != float64(3) || rangeBody["endColumn"] != float64(4) {
+		t.Fatalf("range = %#v, want inclusive 0-based C2:E4", gotBody["range"])
+	}
+	if _, present := gotBody["baseVersion"]; present {
+		t.Fatalf("baseVersion must only be sent as If-Match; body = %#v", gotBody)
+	}
+}
+
+func TestDocsSheetReplace_RequiresBaseVersion(t *testing.T) {
+	called := false
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})
+	root.SetArgs([]string{"docs", "sheet", "replace", "d1", "--data", `{"findString":"old","replaceString":"new"}`})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "required flag") {
+		t.Fatalf("missing --base-version error = %v, want required flag error", err)
+	}
+	if called {
+		t.Fatal("server must not be called when --base-version is missing")
+	}
+}
+
+func TestDocsSheetReplace_UsesKebabCaseFlags(t *testing.T) {
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","matchedCells":1,"replacedCells":1,"replacements":1,"baseVersion":"NEXT"}`))
+	})
+	root.SetArgs([]string{
+		"docs", "sheet", "replace", "d1", "--base-version", "BV",
+		"--find-string", "Old", "--replace-string", "New", "--find-by", "value",
+		"--case-sensitive", "--matches-the-whole-cell", "--logical-id", "default",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	expect := map[string]any{
+		"findString": "Old", "replaceString": "New", "findBy": "value",
+		"caseSensitive": true, "matchesTheWholeCell": true, "logicalId": "default",
+	}
+	if !reflect.DeepEqual(gotBody, expect) {
+		t.Fatalf("body = %#v, want %#v", gotBody, expect)
+	}
+}
+
+func TestDocsSheetReplace_AllowsEmptyReplacement(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "data",
+			args: []string{"--data", `{"findString":"old","replaceString":""}`},
+		},
+		{
+			name: "promoted flag",
+			args: []string{"--find-string", "old", "--replace-string", ""},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotBody map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"docId":"d1","matchedCells":1,"replacedCells":1,"replacements":1,"baseVersion":"NEXT"}`))
+			})
+			args := []string{"docs", "sheet", "replace", "d1", "--base-version", "BV"}
+			root.SetArgs(append(args, tc.args...))
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if value, present := gotBody["replaceString"]; !present || value != "" {
+				t.Fatalf("replaceString = %#v (present %t), want explicit empty string", value, present)
+			}
+		})
+	}
+}
+
+func TestDocsSheetReplace_ValidatesRequiredBodyAndFindBy(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{name: "replaceString is required", data: `{"findString":"old"}`, want: "replaceString"},
+		{name: "findBy enum", data: `{"findString":"old","replaceString":"new","findBy":"style"}`, want: "ENUM_NOT_ALLOWED"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			})
+			root.SetArgs([]string{"docs", "sheet", "replace", "d1", "--base-version", "BV", "--data", tc.data})
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want text %q", err, tc.want)
+			}
+			if called {
+				t.Fatal("invalid replacement request must not reach the server")
+			}
+		})
+	}
+}
+
+func TestDocsSheetRowsInsert_SendsFlagsAsGuardedStructuralRequest(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docId":"d1","logicalId":"default","afterRow":9,"insertedRows":5,"rowCount":205,"bytes":512,"baseVersion":"NEXT","newDocVersionSeq":8}`))
+	})
+	root.SetArgs([]string{
+		"docs", "sheet", "rows", "insert", "d1",
+		"--base-version", "BV_ABC==", "--logical-id", "default", "--after-row", "9", "--count", "5",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/docs/d1/sheet/rows/insert" {
+		t.Fatalf("got %s %s, want POST /v1/bot/docs/d1/sheet/rows/insert", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_ABC==" {
+		t.Fatalf("If-Match = %q, want BV_ABC==", gotIfMatch)
+	}
+	want := map[string]any{"logicalId": "default", "afterRow": float64(9), "count": float64(5)}
+	if !reflect.DeepEqual(gotBody, want) {
+		t.Fatalf("body = %#v, want %#v", gotBody, want)
+	}
+}
+
+func TestDocsSheetRowsInsert_PreservesZeroAnchor(t *testing.T) {
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"baseVersion":"NEXT"}`))
+	})
+	root.SetArgs([]string{
+		"docs", "sheet", "rows", "insert", "d1",
+		"--base-version", "BV", "--logical-id", "default", "--after-row", "0", "--count", "1",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	want := map[string]any{"logicalId": "default", "afterRow": float64(0), "count": float64(1)}
+	if !reflect.DeepEqual(gotBody, want) {
+		t.Fatalf("body = %#v, want %#v", gotBody, want)
+	}
+}
+
+func TestDocsSheetRowsInsert_ValidatesRequiredFlagsAndBoundsLocally(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "missing base version", args: []string{"--logical-id", "default", "--after-row", "9", "--count", "5"}, want: "required flag"},
+		{name: "missing logical id", args: []string{"--base-version", "BV", "--after-row", "9", "--count", "5"}, want: "logicalId"},
+		{name: "negative row", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "-1", "--count", "5"}, want: "afterRow is outside its allowed numeric range"},
+		{name: "zero count", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "9", "--count", "0"}, want: "count is outside its allowed numeric range"},
+		{name: "count over limit", args: []string{"--base-version", "BV", "--logical-id", "default", "--after-row", "9", "--count", "10000"}, want: "count is outside its allowed numeric range"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+			root.SetArgs(append([]string{"docs", "sheet", "rows", "insert", "d1"}, tc.args...))
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want text %q", err, tc.want)
+			}
+			if called {
+				t.Fatal("invalid row insertion must not reach the server")
+			}
+		})
+	}
+}
+
+func TestDocsSheetOtherStructuralEdits_SendGuardedRequests(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  []string
+		wantPath string
+		wantBody map[string]any
+	}{
+		{
+			name:     "delete rows",
+			command:  []string{"rows", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-row", "4", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/rows/delete",
+			wantBody: map[string]any{"logicalId": "default", "startRow": float64(4), "count": float64(2)},
+		},
+		{
+			name:     "insert columns",
+			command:  []string{"columns", "insert", "d1", "--base-version", "BV", "--logical-id", "default", "--after-column", "3", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/columns/insert",
+			wantBody: map[string]any{"logicalId": "default", "afterColumn": float64(3), "count": float64(2)},
+		},
+		{
+			name:     "delete columns",
+			command:  []string{"columns", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-column", "3", "--count", "2"},
+			wantPath: "/v1/bot/docs/d1/sheet/columns/delete",
+			wantBody: map[string]any{"logicalId": "default", "startColumn": float64(3), "count": float64(2)},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotIfMatch string
+			var gotBody map[string]any
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.Path
+				gotIfMatch = r.Header.Get("If-Match")
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"baseVersion":"NEXT"}`))
+			})
+			root.SetArgs(append([]string{"docs", "sheet"}, tc.command...))
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if gotMethod != http.MethodPost || gotPath != tc.wantPath {
+				t.Fatalf("got %s %s, want POST %s", gotMethod, gotPath, tc.wantPath)
+			}
+			if gotIfMatch != "BV" {
+				t.Fatalf("If-Match = %q, want BV", gotIfMatch)
+			}
+			if !reflect.DeepEqual(gotBody, tc.wantBody) {
+				t.Fatalf("body = %#v, want %#v", gotBody, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestDocsSheetOtherStructuralEdits_ValidateBoundsLocally(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "negative row delete start",
+			args: []string{"rows", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--start-row", "-1", "--count", "1"},
+			want: "startRow is outside its allowed numeric range",
+		},
+		{
+			name: "column insert over limit",
+			args: []string{"columns", "insert", "d1", "--base-version", "BV", "--logical-id", "default", "--after-column", "3", "--count", "100"},
+			want: "count is outside its allowed numeric range",
+		},
+		{
+			name: "column delete missing start",
+			args: []string{"columns", "delete", "d1", "--base-version", "BV", "--logical-id", "default", "--count", "1"},
+			want: "missing required field(s): startColumn",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) { called = true })
+			root.SetArgs(append([]string{"docs", "sheet"}, tc.args...))
+			err := root.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want text %q", err, tc.want)
+			}
+			if called {
+				t.Fatal("invalid structural edit must not reach the server")
+			}
+		})
+	}
+}
+
+// TestDocsSheetEdit_SendsP0ResourcesAndIfMatch pins the generic --data transport:
+// freeze, filter and single/multi dropdown payloads reach one PATCH with the
+// optimistic-concurrency header. Schema key presence is tested by the registry
+// loader test; this request schema intentionally remains an open object.
+func TestDocsSheetEdit_SendsP0ResourcesAndIfMatch(t *testing.T) {
+	var gotMethod, gotPath, gotIfMatch string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		gotIfMatch = r.Header.Get("If-Match")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"docId":"d1","bytes":512,"baseVersion":"BV_NEXT==","newDocVersionSeq":5}`))
+	})
+	payload := `{
+		"freeze":{
+			"default":{"startRow":1,"startColumn":1,"xSplit":1,"ySplit":1},
+			"rowOnly":{"startRow":1,"startColumn":-1,"xSplit":0,"ySplit":1},
+			"columnOnly":{"startRow":-1,"startColumn":1,"xSplit":1,"ySplit":0}
+		},
+		"filters":{"default":{"ref":{"startRow":0,"startColumn":6,"endRow":20,"endColumn":12},"filterColumns":[{"colId":6,"filters":{"filters":["待处理"]}}],"enabledColumns":[6,12]}},
+		"dataValidations":{"default":[
+			{"uid":"single","type":"list","formula1":"[\"待处理\",\"已完成\"]","formula2":"#E4F4FE,#EFFBD0","showDropDown":true,"renderMode":2,"ranges":[{"startRow":1,"startColumn":0,"endRow":20,"endColumn":0}]},
+			{"uid":"multiple","type":"listMultiple","formula1":"[\"待处理\",\"已完成\"]","formula2":"#E4F4FE,#EFFBD0","showDropDown":true,"renderMode":2,"ranges":[{"startRow":1,"startColumn":1,"endRow":20,"endColumn":1}]}
+		]}
+	}`
+	root.SetArgs([]string{"docs", "sheet", "edit", "d1", "--base-version", "BV_P0==", "--data", payload})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotMethod != http.MethodPatch || gotPath != "/v1/bot/docs/d1/sheet" {
+		t.Fatalf("got %s %s, want PATCH /v1/bot/docs/d1/sheet", gotMethod, gotPath)
+	}
+	if gotIfMatch != "BV_P0==" {
+		t.Fatalf("If-Match = %q, want BV_P0==", gotIfMatch)
+	}
+	freeze, ok := gotBody["freeze"].(map[string]any)
+	if !ok {
+		t.Fatalf("freeze = %#v, want object", gotBody["freeze"])
+	}
+	wantFreeze := map[string]map[string]float64{
+		"default":    {"startRow": 1, "startColumn": 1, "xSplit": 1, "ySplit": 1},
+		"rowOnly":    {"startRow": 1, "startColumn": -1, "xSplit": 0, "ySplit": 1},
+		"columnOnly": {"startRow": -1, "startColumn": 1, "xSplit": 1, "ySplit": 0},
+	}
+	for logicalID, wantFields := range wantFreeze {
+		gotConfig, ok := freeze[logicalID].(map[string]any)
+		if !ok {
+			t.Errorf("freeze.%s = %#v, want object", logicalID, freeze[logicalID])
+			continue
+		}
+		for field, want := range wantFields {
+			if got := gotConfig[field]; got != want {
+				t.Errorf("freeze.%s.%s = %#v, want %v", logicalID, field, got, want)
+			}
+		}
+	}
+	filters, ok := gotBody["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters = %#v, want default filter", gotBody["filters"])
+	}
+	filterDefault, ok := filters["default"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default = %#v, want object", filters["default"])
+	}
+	filterRef, ok := filterDefault["ref"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.ref = %#v, want object", filterDefault["ref"])
+	}
+	for field, want := range map[string]float64{
+		"startRow": 0, "startColumn": 6, "endRow": 20, "endColumn": 12,
+	} {
+		if got := filterRef[field]; got != want {
+			t.Errorf("filters.default.ref.%s = %#v, want %v", field, got, want)
+		}
+	}
+	filterColumns, ok := filterDefault["filterColumns"].([]any)
+	if !ok || len(filterColumns) != 1 {
+		t.Fatalf("filters.default.filterColumns = %#v, want one-element array", filterDefault["filterColumns"])
+	}
+	filterColumn, ok := filterColumns[0].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.filterColumns[0] = %#v, want object", filterColumns[0])
+	}
+	if got := filterColumn["colId"]; got != float64(6) {
+		t.Errorf("filters.default.filterColumns[0].colId = %#v, want 6", got)
+	}
+	filterCriteria, ok := filterColumn["filters"].(map[string]any)
+	if !ok {
+		t.Fatalf("filters.default.filterColumns[0].filters = %#v, want object", filterColumn["filters"])
+	}
+	if got, want := filterCriteria["filters"], []any{"待处理"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filters.default.filterColumns[0].filters.filters = %#v, want %#v", got, want)
+	}
+	if got, want := filterDefault["enabledColumns"], []any{float64(6), float64(12)}; !reflect.DeepEqual(got, want) {
+		t.Errorf("filters.default.enabledColumns = %#v, want %#v", got, want)
+	}
+	validations, ok := gotBody["dataValidations"].(map[string]any)
+	if !ok {
+		t.Fatalf("dataValidations = %#v, want object", gotBody["dataValidations"])
+	}
+	rules, ok := validations["default"].([]any)
+	if !ok || len(rules) != 2 {
+		t.Fatalf("dataValidations.default = %#v, want two rules", validations["default"])
+	}
+	wantRules := []struct {
+		uid         string
+		typeName    string
+		startColumn float64
+	}{
+		{uid: "single", typeName: "list", startColumn: 0},
+		{uid: "multiple", typeName: "listMultiple", startColumn: 1},
+	}
+	for i, wantRule := range wantRules {
+		rule, ok := rules[i].(map[string]any)
+		if !ok {
+			t.Errorf("dataValidations.default[%d] = %#v, want object", i, rules[i])
+			continue
+		}
+		for field, want := range map[string]any{
+			"uid":          wantRule.uid,
+			"type":         wantRule.typeName,
+			"formula1":     `["待处理","已完成"]`,
+			"formula2":     "#E4F4FE,#EFFBD0",
+			"showDropDown": true,
+			"renderMode":   float64(2),
+		} {
+			if got := rule[field]; !reflect.DeepEqual(got, want) {
+				t.Errorf("dataValidations.default[%d].%s = %#v, want %#v", i, field, got, want)
+			}
+		}
+		ranges, ok := rule["ranges"].([]any)
+		if !ok || len(ranges) != 1 {
+			t.Errorf("dataValidations.default[%d].ranges = %#v, want one-element array", i, rule["ranges"])
+			continue
+		}
+		gotRange, ok := ranges[0].(map[string]any)
+		if !ok {
+			t.Errorf("dataValidations.default[%d].ranges[0] = %#v, want object", i, ranges[0])
+			continue
+		}
+		wantRange := map[string]any{
+			"startRow": float64(1), "startColumn": wantRule.startColumn,
+			"endRow": float64(20), "endColumn": wantRule.startColumn,
+		}
+		if !reflect.DeepEqual(gotRange, wantRange) {
+			t.Errorf("dataValidations.default[%d].ranges[0] = %#v, want %#v", i, gotRange, wantRange)
+		}
+	}
+	if _, present := gotBody["baseVersion"]; present {
+		t.Errorf("baseVersion must stay in If-Match, got body value %#v", gotBody["baseVersion"])
 	}
 }
 

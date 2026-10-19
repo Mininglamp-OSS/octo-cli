@@ -34,7 +34,21 @@ func ApplyJQ(v any, expr string) ([]any, error) {
 			break
 		}
 		if e, ok := r.(error); ok {
-			return nil, fmt.Errorf("jq: %w", e)
+			// gojq's runtime errors quote the value they choked on, and that value is
+			// *response data* — which on a share command is the share token itself. So
+			// `--jq '.data.share_token|tonumber'` printed the token on stderr while
+			// stdout stayed empty: a caller narrowing their output with --jq got the
+			// secret instead. Nothing here has a secret list to mask against (this runs
+			// in the output layer, below the client), so the value is not repeated.
+			//
+			// This is also why it must be an *ExitError: as a plain error it fell to
+			// WrapCLIError's generic fallback, which both echoed the text and filed it
+			// as a config error rather than a validation one.
+			_ = e
+			return nil, ErrWithHint("validation", "JQ_RUNTIME_ERROR",
+				"the --jq program failed while evaluating the response",
+				"check the filter against the unfiltered output first; the value it failed on is "+
+					"not repeated here because response data can itself be a secret")
 		}
 		results = append(results, r)
 	}

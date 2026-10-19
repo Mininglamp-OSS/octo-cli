@@ -22,6 +22,10 @@ type FileProvider struct {
 	Store           *authstore.Store
 	ExplicitProfile string
 	ExplicitBotID   string
+	// AllowEmptyStoreBotIDFallback is set only for an OCTO_BOT_ID that
+	// accompanies an environment credential. An explicit --bot-id remains a
+	// fail-closed stored-profile selector.
+	AllowEmptyStoreBotIDFallback bool
 }
 
 // NewFileProvider builds a FileProvider for the given selectors.
@@ -36,6 +40,20 @@ func (p *FileProvider) Name() string { return "profile" }
 func (p *FileProvider) Resolve() (*BotCredential, error) {
 	if p.Store == nil {
 		return nil, nil
+	}
+	// A runtime-provided OCTO_BOT_ID identifies its environment credential as
+	// well as selecting a stored profile. With an empty store and no explicit
+	// profile there is nothing for the file provider to select, so allow the
+	// chain to resolve OCTO_BOT_TOKEN. A non-empty store still fails closed when
+	// the Bot id does not match a profile.
+	if p.AllowEmptyStoreBotIDFallback && p.ExplicitProfile == "" && p.ExplicitBotID != "" {
+		count, err := p.Store.Count()
+		if err != nil {
+			return nil, err
+		}
+		if count == 0 {
+			return nil, nil
+		}
 	}
 	name, meta, status, err := p.Store.ActiveProfile(p.ExplicitProfile, p.ExplicitBotID)
 	if err != nil {

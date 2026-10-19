@@ -191,8 +191,12 @@ func runDocsImport(cmd *cobra.Command, f *cmdutil.Factory, docID, filePath, mode
 		_ = f.EmitError(err) //nolint:errcheck // the original error remains authoritative if rendering it also fails
 		return err
 	}
+	// applied == nil covers a `null` body, which Unmarshal accepts without error and
+	// which used to leave the write below assigning into a nil map. It takes the same
+	// branch as an unparseable body: hand the backend's own reply through rather than
+	// invent a shape for it.
 	var applied map[string]any
-	if err := json.Unmarshal(parsedRaw, &applied); err != nil {
+	if err := json.Unmarshal(parsedRaw, &applied); err != nil || applied == nil {
 		return f.EmitSuccess(parsedRaw)
 	}
 	applied["format"] = format.name

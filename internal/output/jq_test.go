@@ -2,6 +2,7 @@ package output
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -136,5 +137,33 @@ func TestNormalizeForJQ_MapFastPath(t *testing.T) {
 	}
 	if m, ok := out.(map[string]any); !ok || m["a"] != 1 {
 		t.Errorf("got %v", out)
+	}
+}
+
+// TestApplyJQ_ARuntimeErrorDoesNotEchoTheValue is round-14's --jq item, and the irony is
+// the point: a caller reaches for --jq to narrow what gets printed, and a filter that fails
+// at runtime printed the value it choked on — which is response data, and on a share
+// command that is the share token. stdout stayed empty while stderr carried the secret.
+//
+// gojq's message quotes the offending value and nothing in the output layer has a secret
+// list to mask against, so the value is not repeated at all.
+func TestApplyJQ_ARuntimeErrorDoesNotEchoTheValue(t *testing.T) {
+	const token = "SHARETOKEN0123456789"
+	body := []byte(`{"data":{"share_token":"` + token + `"}}`)
+
+	_, err := ApplyJQ(body, ".data.share_token|tonumber")
+	if err == nil {
+		t.Fatal("converting a non-numeric string with tonumber must fail")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Errorf("the jq runtime error echoed the response value: %v", err)
+	}
+	ee := AsExitError(err)
+	if ee == nil {
+		t.Fatalf("the error must be structured, or WrapCLIError files it as a config error "+
+			"and prints its text: %v", err)
+	}
+	if ee.Type != "validation" {
+		t.Errorf("Type = %q, want validation", ee.Type)
 	}
 }

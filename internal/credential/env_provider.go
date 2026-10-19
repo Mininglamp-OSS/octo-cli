@@ -43,6 +43,8 @@ func (e *EnvProvider) Resolve() (*BotCredential, error) {
 	return &BotCredential{
 		Token:   resolved.Token,
 		SpaceID: strings.TrimSpace(os.Getenv(spaceVar)),
+		RobotID: strings.TrimSpace(os.Getenv(config.EnvBotID)),
+		BotKind: TokenKind(resolved.Token),
 		Source:  resolved.Source,
 	}, nil
 }

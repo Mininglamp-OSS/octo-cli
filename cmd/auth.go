@@ -31,9 +31,71 @@ func newAuthCmd(f *cmdutil.Factory) *cobra.Command {
 	cmd.AddCommand(
 		newAuthLoginCmd(f),
 		newAuthStatusCmd(f),
+		newAuthUpdateCmd(f),
 		newAuthLogoutCmd(f),
 		newAuthListCmd(f),
 	)
+	return cmd
+}
+
+func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
+	var apiBaseURL string
+
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update non-secret settings for a stored bot profile",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if strings.TrimSpace(apiBaseURL) == "" {
+				return failErr(f, output.ErrValidation(
+					"--api-base-url is required",
+					"pass the public OCTO API origin for this Bot profile",
+				))
+			}
+			normalized, err := config.NormalizeAPIBaseURL(apiBaseURL)
+			if err != nil {
+				return failErr(f, output.ErrValidation(
+					err.Error(),
+					"pass only the Octo gateway base URL, without a service path",
+				))
+			}
+			apiBaseURL = normalized
+
+			store, err := f.AuthStore()
+			if err != nil {
+				return failErr(f, err)
+			}
+			name, meta, status, err := store.ActiveProfile(f.Globals.Profile, selectorBotID(f))
+			if err != nil {
+				return failErr(f, err)
+			}
+			switch status {
+			case authstore.StatusFound:
+				if err := store.UpdateProfileAPIBaseURL(name, apiBaseURL); err != nil {
+					return failErr(f, err)
+				}
+				result := map[string]any{
+					"profile": name, "api_base_url": apiBaseURL,
+				}
+				putIfSet(result, "robot_id", meta.RobotID)
+				return emitJSON(f, result)
+			case authstore.StatusAmbiguous:
+				return failErr(f, output.ErrValidation(
+					"multiple profiles configured; specify which Bot to update",
+					"pass --bot-id <robot_id> or --profile <name>",
+				))
+			case authstore.StatusMissing:
+				return failErr(f, output.ErrAuth(
+					"no matching profile", "check `octo-cli auth list`",
+				))
+			default:
+				return failErr(f, output.ErrValidation(
+					"no stored profiles", "run `octo-cli auth login` first",
+				))
+			}
+		},
+	}
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set OCTO API base URL for this profile")
 	return cmd
 }
 

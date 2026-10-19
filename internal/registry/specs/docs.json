@@ -9,11 +9,180 @@
   "x-octo-base-url": "OCTO_API_BASE_URL",
   "x-octo-space-header": false,
   "paths": {
+    "/v1/bot/docs/{docId}/ppt/export": {
+      "get": {
+        "operationId": "docs.ppt.export",
+        "summary": "Save the live PPT as a self-contained HTML presentation (reader or higher)",
+        "description": "Pass --output slides.html to save the actual file bytes. Without --output, only response metadata is printed. HTML is an offline player, not editable PPTX or PDF. On a compatible backend, document-owned ppt-media: attachments are embedded into the export without changing the saved deck. Arbitrary external URLs are not fetched and collaboration credentials are not included. Missing, unauthorized or oversized media causes export failure.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "x-octo-flag": "file-format",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "html"
+              ],
+              "default": "html"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Offline presentation file",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/ppt": {
+      "get": {
+        "operationId": "docs.ppt.get",
+        "summary": "Read the current PPT deck and its base revision",
+        "description": "Reader or higher. Returns authoritative Bento JSON and baseRevision. Use docs.ppt.edit, not the document/sheet/scene or draft endpoints, to edit an html_ppt document. The HTTP response uses a data envelope; the CLI unwraps it once. Shared Docs lifecycle endpoints return flat JSON.",
+        "x-octo-risk": "read",
+        "x-octo-response-unwrap": "data",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Live deck",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "deck": {
+                      "type": "object",
+                      "description": "Authoritative Bento deck. The current backend format contract is format=bento/slides and version=1 (BENTO_FORMAT_VERSION). Release probes reject unknown versions; a format upgrade requires a coordinated contract/probe update."
+                    },
+                    "baseRevision": {
+                      "type": "integer"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "description": "Advisory content digest; may be absent or empty. Use revision fields for concurrency control."
+                    }
+                  },
+                  "required": [
+                    "docId",
+                    "deck",
+                    "baseRevision"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "docs.ppt.edit",
+        "x-octo-strict-request-schema": true,
+        "summary": "Apply a PPT edit under a mandatory base revision",
+        "description": "Writer or higher; changing title requires admin. Send only {baseRevision,deck} from a fresh get. Preserve deck.docId, unknown fields inside deck, and stable slide/element IDs; do not copy the response's top-level docId or contentHash into the request. The backend compiles the JSON difference to normal collaboration operations. A 409 CONFLICT means reread and reapply the intended change, never blindly resubmit the stale deck. Members and permissions cannot be supplied in deck JSON. The HTTP response uses a data envelope; the CLI unwraps it once. Shared Docs lifecycle endpoints return flat JSON.",
+        "x-octo-risk": "write",
+        "x-octo-response-unwrap": "data",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "baseRevision",
+                  "deck"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "The baseRevision returned by the immediately preceding PPT get"
+                  },
+                  "deck": {
+                    "type": "object",
+                    "description": "The edited bento/slides JSON; preserve document identity and stable slide/element IDs. Text elements use html; code elements use content (never code), grammarName (js/ts/py), fontSize, align, valign and lineHeight. Read back the actual rendered fields."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durably committed edit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revision": {
+                      "type": "integer"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "description": "Advisory content digest; may be absent or empty. Use revision fields for concurrency control."
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revision",
+                    "changed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs": {
       "post": {
         "operationId": "docs.create",
-        "summary": "Create an (empty) document; the caller becomes owner/admin",
-        "description": "Create takes no body content — a new doc starts empty and its body is edited over the Yjs websocket, not REST.",
+        "summary": "Create a document, empty or initialized from a PPT template; the caller becomes owner/admin",
+        "description": "Create a document in the verified caller Space. Use docType=html_ppt, title, optional templateId (blank by default), and Idempotency-Key for PPT. Content initialization, metadata and member grants commit atomically.",
         "x-octo-risk": "write",
         "requestBody": {
           "required": false,
@@ -22,9 +191,30 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "title": { "type": "string", "description": "initial title (optional; defaults to empty)" },
-                  "folderId": { "type": "string", "description": "target folder id (optional; defaults to the space default folder)" },
-                  "docType": { "type": "string", "description": "document type (optional; defaults to 'doc')" }
+                  "title": {
+                    "type": "string",
+                    "description": "initial title (optional; defaults to empty)"
+                  },
+                  "folderId": {
+                    "type": "string",
+                    "description": "target folder id (optional; defaults to the space default folder)"
+                  },
+                  "docType": {
+                    "type": "string",
+                    "description": "document type (optional; defaults to 'doc')"
+                  },
+                  "templateId": {
+                    "type": "string",
+                    "x-octo-enum-hint": "The CLI retires pitch/report/lesson for new creation by product policy; existing presentations remain readable/editable. Deploy the matching backend catalogue before using signal/terra/orbital/picnic; until then only blank is compatible. A timed-out create with a retired template cannot be replayed through this CLI: reconcile with docs list / docs search first; do not automatically create with a new key. Run octo-cli skills octo-docs and read ppt.md for rollout prerequisites.",
+                    "description": "PPT template: blank (server default) or signal, terra, orbital, picnic. The four gallery choices require the matching backend catalogue to be deployed first. The CLI rejects pitch/report/lesson for new creation by product policy (octo-cli issue #174); this is not a claim that a deployed backend rejects them. Existing presentations can still be read and edited.",
+                    "enum": [
+                      "blank",
+                      "signal",
+                      "terra",
+                      "orbital",
+                      "picnic"
+                    ]
+                  }
                 }
               }
             }
@@ -37,21 +227,93 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "description": "Flat creation receipt, not wrapped in data. PPT-specific fields are optional on this shared endpoint. The example is a synthetic fixture of the backend PPT creation contract; see docs/ppt-release-gate.md for source provenance.",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "documentName": { "type": "string" },
-                    "title": { "type": "string" },
-                    "spaceId": { "type": "string" },
-                    "folderId": { "type": "string" },
-                    "ownerId": { "type": "string" },
-                    "role": { "type": "string" },
-                    "createdAt": { "type": "string" }
+                    "docId": {
+                      "type": "string",
+                      "description": "Server-generated document ID. New PPT IDs have the form d_ followed by 24 hexadecimal characters; existing document IDs remain opaque to callers."
+                    },
+                    "docType": {
+                      "type": "string",
+                      "description": "Document type; html_ppt for PPT creation."
+                    },
+                    "templateId": {
+                      "type": "string",
+                      "description": "PPT only: the selected template ID. Historical Idempotency-Key replay may return a retired ID; this response field is not constrained by the new-creation enum."
+                    },
+                    "draftRevision": {
+                      "type": "integer",
+                      "description": "PPT only: initial draft revision (0 on creation)."
+                    },
+                    "snapshotVersion": {
+                      "type": "integer",
+                      "description": "PPT only: initial snapshot version (0 on creation)."
+                    },
+                    "documentName": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "spaceId": {
+                      "type": "string"
+                    },
+                    "folderId": {
+                      "type": "string"
+                    },
+                    "ownerId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "editorUrl": {
+                      "type": "string",
+                      "description": "Editor URL; returned for html_ppt only."
+                    },
+                    "shareUrl": {
+                      "type": "string",
+                      "description": "Presentation URL subject to document access rules; returned for html_ppt only."
+                    }
+                  },
+                  "example": {
+                    "docId": "d_000000000000000000000001",
+                    "docType": "html_ppt",
+                    "templateId": "blank",
+                    "draftRevision": 0,
+                    "snapshotVersion": 0,
+                    "documentName": "octo:acceptance-space:f_default:ppt:d_000000000000000000000001",
+                    "title": "CLI contract probe",
+                    "spaceId": "acceptance-space",
+                    "folderId": "f_default",
+                    "ownerId": "release_probe_bot",
+                    "role": "admin",
+                    "createdAt": "2026-01-01T00:00:00.000Z",
+                    "editorUrl": "https://octo.example/d/d_000000000000000000000001",
+                    "shareUrl": "https://octo.example/d/d_000000000000000000000001"
                   }
                 }
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
+        ]
       },
       "get": {
         "operationId": "docs.list",
@@ -59,10 +321,46 @@
         "description": "Page-based listing scoped to the bot's server-resolved space. Response is {total, items}; there is no cursor, so --page-all does not apply — walk pages with --page/--pageSize.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "folderId", "in": "query", "schema": { "type": "string" }, "description": "filter to a single folder" },
-          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 }, "description": "1-based page number" },
-          { "name": "pageSize", "in": "query", "schema": { "type": "integer", "default": 20, "maximum": 100 }, "description": "items per page (1-100, default 20)" },
-          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["updatedAt:desc", "updatedAt:asc"], "default": "updatedAt:desc" }, "description": "sort order by last update" }
+          {
+            "name": "folderId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "filter to a single folder"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "1-based page number"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            },
+            "description": "items per page (1-100, default 20)"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "updatedAt:desc",
+                "updatedAt:asc"
+              ],
+              "default": "updatedAt:desc"
+            },
+            "description": "sort order by last update"
+          }
         ],
         "responses": {
           "200": {
@@ -72,18 +370,32 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "total": { "type": "integer" },
+                    "total": {
+                      "type": "integer"
+                    },
                     "items": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "docId": { "type": "string" },
-                          "title": { "type": "string" },
-                          "ownerId": { "type": "string" },
-                          "docType": { "type": "string" },
-                          "role": { "type": "string" },
-                          "updatedAt": { "type": "string" }
+                          "docId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "ownerId": {
+                            "type": "string"
+                          },
+                          "docType": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -131,7 +443,8 @@
                         "doc",
                         "sheet",
                         "board",
-                        "html"
+                        "html",
+                        "html_ppt"
                       ]
                     },
                     "x-octo-flag": "doc-type",
@@ -208,7 +521,14 @@
         "summary": "Fetch one document's metadata (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -218,17 +538,40 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "documentName": { "type": "string" },
-                    "title": { "type": "string" },
-                    "ownerId": { "type": "string" },
-                    "spaceId": { "type": "string" },
-                    "folderId": { "type": "string" },
-                    "docType": { "type": "string" },
-                    "octoDocSlug": { "type": "string", "description": "HTML document slug for use with octo-cli html commands" },
-                    "role": { "type": "string" },
-                    "createdAt": { "type": "string" },
-                    "updatedAt": { "type": "string" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "documentName": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "ownerId": {
+                      "type": "string"
+                    },
+                    "spaceId": {
+                      "type": "string"
+                    },
+                    "folderId": {
+                      "type": "string"
+                    },
+                    "docType": {
+                      "type": "string"
+                    },
+                    "octoDocSlug": {
+                      "type": "string",
+                      "description": "HTML document reference for octo-cli html commands: canonical doc_id for a newly created canonical document, or the retained legacy slug for an old document."
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
                   }
                 }
               }
@@ -241,7 +584,14 @@
         "summary": "Rename a document (needs admin)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -249,48 +599,118 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["title"],
+                "required": [
+                  "title"
+                ],
                 "properties": {
-                  "title": { "type": "string", "description": "new non-empty title" }
+                  "title": {
+                    "type": "string",
+                    "description": "new non-empty title"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Renamed" } }
+        "responses": {
+          "200": {
+            "description": "Renamed"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.delete",
-        "summary": "Soft-delete a document (needs admin)",
+        "summary": "Delete a document (forbidden for bots, including owner/admin)",
+        "description": "Bots must not invoke this operation, even for documents they created or own/administer. The docs-backend bot-deletion policy returns HTTP 403 bot_delete_forbidden, including already-deleted retries. Do not retry, change uid/owner/Space/credentials, or switch to HTML/raw API routes. Ask a human with document admin permission to delete it in Octo. Bot creation, editing, and separately permitted subresource operations are unchanged.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "403": {
+            "description": "Bot document deletion is forbidden, including owner/admin and already-deleted retries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "enum": ["bot_delete_forbidden"]
+                    }
+                  },
+                  "required": ["error"]
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/export": {
       "get": {
         "operationId": "docs.scene.export",
-        "summary": "Export a whiteboard's live scene as a PNG or SVG image (needs reader)",
-        "description": "Renders the LIVE Excalidraw scene of a doc_type 'board' to an image on the server: `--image-format png` (default) returns a PNG, `--image-format svg` returns an SVG. The body is binary, so pass --output/-o to save it to a file (e.g. `docs scene export <docId> --image-format png -o board.png`); without --output the command only reports the response status, content-type and size. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
+        "summary": "Export a whiteboard's live scene as PNG, SVG, or portable Excalidraw (needs reader)",
+        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o. For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
         "x-octo-risk": "read",
         "x-octo-risk-note": "read reflects the server-side effect: this is a GET that renders and returns the live scene as an image without mutating any doc state. The optional --output/-o writes to a local, user-chosen path (client side, analogous to curl -o) and does not change the API risk class.",
         "x-octo-binary-response": true,
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "format", "in": "query", "x-octo-flag": "image-format", "schema": { "type": "string", "enum": ["png", "svg"], "default": "png" }, "description": "image format (one of: png, svg); default png. Exposed as --image-format so it does not shadow the global --format output flag." }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "x-octo-flag": "image-format",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "png",
+                "svg",
+                "excalidraw"
+              ],
+              "default": "png"
+            },
+            "description": "image format (one of: png, svg, excalidraw); default png. Exposed as --image-format so it does not shadow the global --format output flag."
+          }
         ],
         "responses": {
           "200": {
             "description": "The rendered board image",
             "content": {
-              "image/png": { "schema": { "type": "string", "format": "binary" } },
-              "image/svg+xml": { "schema": { "type": "string", "format": "binary" } }
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
             }
           },
-          "400": { "description": "invalid_format" },
-          "409": { "description": "unsupported_doc_type / board_snapshot_invalid" }
+          "400": {
+            "description": "invalid_format"
+          },
+          "409": {
+            "description": "unsupported_doc_type / board_snapshot_invalid"
+          }
         }
       }
     },
@@ -301,7 +721,14 @@
         "description": "Reads the LIVE ProseMirror body of a doc_type 'doc' plus the base-version token that pins the read. Pass that token to `docs content edit` as --base-version so the optimistic-concurrency guard can prove the body did not change between read and write. board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -311,10 +738,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "doc": { "type": "object", "description": "the live body as ProseMirror document JSON" },
-                    "schemaVersion": { "type": "integer", "description": "ProseMirror schema version the body was decoded with" },
-                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs content edit --base-version`" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "doc": {
+                      "type": "object",
+                      "description": "the live body as ProseMirror document JSON"
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "description": "ProseMirror schema version the body was decoded with"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "opaque base64 base-version token; pass to `docs content edit --base-version`"
+                    }
                   }
                 }
               }
@@ -328,13 +766,22 @@
         "description": "Applies a batch of incremental block ops to a doc_type 'doc' body under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs content get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live body moved since that read. The ops batch is a structured array, so pass it as JSON through --data. Only doc_type 'doc' is accepted (board / whiteboard return 409 unsupported_doc_type). Gates: op count over the max → 413 too_many_ops, a single op's content too large → 413 op_content_too_large, block-path too deep → 400 path_too_deep, missing base version or malformed shape → 400 invalid_body, bad anchor / invalid ops → 422.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
             "x-octo-flag": "base-version",
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "base-version token from 'docs content get' (sent as the If-Match header for optimistic concurrency; required)"
           }
         ],
@@ -344,12 +791,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["ops"],
+                "required": [
+                  "ops"
+                ],
                 "properties": {
                   "ops": {
                     "type": "array",
                     "description": "ordered batch of incremental block edit ops. Each op is one of: insert {\"type\":\"insert\",\"at\":{\"path\":[i,...],\"position\":\"before|after|inside_start|inside_end\"},\"content\":[<ProseMirror block nodes>],\"expect\":{\"type\":\"<nodeType>\"}?}; replace {\"type\":\"replace\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"content\":[...],\"expect\":?}; delete {\"type\":\"delete\",\"range\":{\"from\":{\"path\":[...]},\"to\":{\"path\":[...]}},\"expect\":?}. `path` is child indices from the doc root; range endpoints must share a parent. Pass via --data.",
-                    "items": { "type": "object" }
+                    "items": {
+                      "type": "object"
+                    }
                   }
                 }
               }
@@ -364,10 +815,63 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "encoded size of the doc after the edit"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "new base-version token for the next edit"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "sequence of the auto safety snapshot taken before the edit"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheets": {
+      "get": {
+        "operationId": "docs.sheet.list",
+        "summary": "List worksheet IDs and names without downloading cells (needs reader)",
+        "description": "Returns the worksheet directory in tab order: sheetId (the persistent logicalId), name, order, rowCount and columnCount. Does not return cells or a baseVersion. Use this to discover a worksheet before docs sheet get --sheet-id or --sheet-name. An old workbook without sheetList exposes its implicit default / Sheet1 worksheet. Counts describe declared grid size, not populated cells. Requires the worksheet-directory backend; do not fall back to downloading the entire workbook when this endpoint is unavailable.",
+        "x-octo-risk": "read",
+        "x-octo-strict-response-schema": true,
+        "parameters": [
+          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Worksheet directory, without cell content",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["docId", "items"],
+                  "properties": {
                     "docId": { "type": "string" },
-                    "bytes": { "type": "integer", "description": "encoded size of the doc after the edit" },
-                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
-                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["sheetId", "name", "order", "rowCount", "columnCount"],
+                        "properties": {
+                          "sheetId": { "type": "string", "description": "Persistent worksheet logicalId; prefer this over a mutable display name for subsequent reads." },
+                          "name": { "type": "string" },
+                          "order": { "type": "number" },
+                          "rowCount": { "type": "integer" },
+                          "columnCount": { "type": "integer" }
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -379,8 +883,8 @@
     "/v1/bot/docs/{docId}/sheet": {
       "get": {
         "operationId": "docs.sheet.get",
-        "summary": "Read a spreadsheet's live cells + dims + base version (needs reader)",
-        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s}), its column-width / row-height overrides (sheetDims), its cell hyperlinks (sheetHyperLinks), its merged cell ranges (sheetMerges), its sheet tabs / pages (sheetList, logicalId -> {name,order}), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read of a grid over the 1MB cap returns 413 sheet_too_large; pass --limit (and follow nextCursor via --cursor) to read it in pages instead. In paged mode each page is bounded by both --limit and the byte cap, sheetDims, sheetHyperLinks, sheetMerges and sheetList are returned on the first page only, and the response carries hasMore + nextCursor. A --cursor whose snapshot moved returns 409 sheet_changed (restart from the first page); a bad --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit.",
+        "summary": "Read a spreadsheet's live cells, worksheet resources, and base version (needs reader)",
+        "description": "Reads the LIVE flat cell map of a doc_type 'sheet' (keys `sheetId!row:col`, values {v,f,s,p,t}), column-width / row-height overrides (sheetDims), hyperlinks (sheetHyperLinks), merged ranges (sheetMerges), sheet tabs (sheetList), freeze panes (sheetFreeze), shared filters (sheetFilters), data-validation/dropdown rules (sheetDataValidations), and the base-version token that pins the read. Pass that token to `docs sheet edit` as --base-version so the optimistic-concurrency guard can prove the sheet did not change between read and write. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Rows hidden by an active shared filter are still returned and a full rectangle rewrite includes them. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. doc / board / whiteboard bodies are a different Y.Doc shape and return 409 unsupported_doc_type here. A whole-sheet read over the 1 MB byte cap returns 413 sheet_too_large; pass --limit and follow nextCursor via --cursor. In paged mode every page is bounded by both --limit and the byte cap; sheetDims, sheetHyperLinks, sheetMerges, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, and sheetConditionalFormats are returned on the first page only. When checkbox metadata exceeds the size or inspection budget, 413 includes baseVersion and repairDataValidationKey in the CLI error detail; delete that exact internal key with a validation-only PATCH and retry until the read succeeds. A --cursor whose snapshot moved returns 409 sheet_changed; a malformed --cursor returns 400 invalid_cursor; a non-positive --limit returns 400 invalid_limit. Also returns sheetConditionalFormats for conditional-format rule management. Use docs sheet list to discover persistent worksheet IDs/names, then choose exactly one of --sheet-id or --sheet-name to read only that worksheet. The backend filters cells and associated metadata before pagination and byte limits. Scoped responses carry sheetId; compact cursors retain that scope on subsequent requests, including cursor-only continuation. Missing or ambiguous names never fall back to all worksheets. The original baseVersion write token is unchanged.",
         "x-octo-risk": "read",
         "parameters": [
           {
@@ -407,7 +911,21 @@
             "schema": {
               "type": "string"
             },
-            "description": "opaque nextCursor from the previous page; also opts into paged reads. A cursor whose snapshot moved returns 409 sheet_changed."
+            "description": "opaque nextCursor from the previous page; also opts into paged reads. New compact cursors bind the document and selected worksheet; cursor-only continuation preserves that scope. Repeating an equivalent selector is allowed, changing scope is rejected. A cursor whose snapshot moved returns 409 sheet_changed."
+          },
+          {
+            "name": "sheetId",
+            "in": "query",
+            "x-octo-flag": "sheet-id",
+            "schema": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "description": "read only this persistent worksheet logicalId, discovered via docs sheet list. Mutually exclusive with --sheet-name. Filters cells and associated metadata before pagination and byte limits. Omit both selectors for the whole workbook. Requires worksheet-scoped read backend support."
+          },
+          {
+            "name": "sheetName",
+            "in": "query",
+            "x-octo-flag": "sheet-name",
+            "schema": { "type": "string", "minLength": 1 },
+            "description": "read only the worksheet with this exact display name. Mutually exclusive with --sheet-id. Missing names return sheet_not_found; duplicates return ambiguous_sheet_name with candidate IDs. Never guesses or falls back to all worksheets."
           }
         ],
         "responses": {
@@ -421,13 +939,17 @@
                     "docId": {
                       "type": "string"
                     },
+                    "sheetId": {
+                      "type": "string",
+                      "description": "resolved logicalId on worksheet-scoped reads and their continuation pages; absent on whole-workbook reads"
+                    },
                     "sheetCells": {
                       "type": "object",
-                      "description": "flat cell map keyed `sheetId!row:col`; each value is {v?,f?,s?}. A page slice in paged mode."
+                      "description": "flat cell map keyed `sheetId!row:col`; each value is {v?,f?,s?,p?,t?}. Rows are 0-based and may be 0..9999; columns are 0-based and may be 0..99. A page slice in paged mode. Shrinking rowCount or columnCount retains cells beyond the visible boundary for undo/regrowth, so renderers and exporters should ignore rows >= the effective rowCount and columns >= the effective columnCount."
                     },
                     "sheetDims": {
                       "type": "object",
-                      "description": "column-width / row-height overrides keyed c<idx>/r<idx>. Returned on the first page only in paged mode."
+                      "description": "column-width / row-height overrides in one workbook-level map. Keys `${logicalId}:c<idx>` / `${logicalId}:r<idx>` target a specific tab; bare `c<idx>` / `r<idx>` address the legacy default sheet. Reads return keys exactly as stored. Returned on the first page only in paged mode."
                     },
                     "sheetHyperLinks": {
                       "type": "object",
@@ -439,7 +961,19 @@
                     },
                     "sheetList": {
                       "type": "object",
-                      "description": "sheet tabs / pages keyed by logicalId; each value is {name,order}. The first tab's logicalId is 'default'. Returned on the first page only in paged mode."
+                      "description": "sheet tabs / pages keyed by logicalId; each value is {name,order,rowCount?,columnCount?}. rowCount is 1..10000 and columnCount is 1..100. The current backend stores explicit counts when it creates a new sheet, defaulting to 200 rows by 20 columns (A-T); missing stored counts therefore identify a pre-existing legacy 1000-row by 100-column sheet. The first tab's logicalId is 'default'. Returned on the first page only in paged mode."
+                    },
+                    "sheetFreeze": {
+                      "type": "object",
+                      "description": "freeze panes keyed by logicalId; each value is {startRow,startColumn,xSplit,ySplit}. An unfrozen axis reads back with startRow/startColumn -1 even when the write used 0. Returned on the first page only in paged mode."
+                    },
+                    "sheetFilters": {
+                      "type": "object",
+                      "description": "shared auto-filter state keyed by logicalId; each value is {ref,filterColumns?:[{\"colId\":<absolute 0-based column>,\"filters\":{\"filters\":[<raw values>]}}],enabledColumns?:[<absolute 0-based column>]}. ref.startRow is the header row and stays visible; criteria apply to rows below it. enabledColumns is non-empty when present, contains only columns inside ref, and identifies the exact columns with visible filter buttons; every filterColumns colId also appears in enabledColumns. It is deduplicated and sorted on readback. For example, ref G:M plus enabledColumns:[6,12] enables only G and M, not H-L. This controls filter-button visibility only, not read or write access. Omitted enabledColumns identifies a legacy snapshot where every column in ref is enabled. An empty filterColumns array is omitted on readback. Returned on the first page only in paged mode."
+                    },
+                    "sheetDataValidations": {
+                      "type": "object",
+                      "description": "data-validation arrays keyed by logicalId; each array can contain every returned validation family, including `list`, `listMultiple`, and `checkbox`. This public shape is not the internal flat `${logicalId}!${uid}` Y.Map. Dropdown formula1 is the serialized option list and formula2 is the comma-separated option-color list. Returned on the first page only in paged mode."
                     },
                     "baseVersion": {
                       "type": "string",
@@ -450,8 +984,18 @@
                       "description": "paged mode: more cells remain after this page"
                     },
                     "nextCursor": {
-                      "type": "string",
+                      "type": [
+                        "string",
+                        "null"
+                      ],
                       "description": "paged mode: opaque cursor for the next page (null when hasMore is false); pass back via --cursor"
+                    },
+                    "sheetConditionalFormats": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object"
+                      },
+                      "description": "Compact conditional-format rules keyed by logicalId!cfId. Each value is {priority,rule:{cfId,stopIfTrue,ranges,rule}}; the inner rule uses Univer highlightCell, colorScale, dataBar or iconSet. Never expand a rule into per-cell styles. Requires the paired conditional-format API backend. Returned on the first page only in paged mode."
                     }
                   }
                 }
@@ -462,8 +1006,8 @@
       },
       "patch": {
         "operationId": "docs.sheet.edit",
-        "summary": "Apply a batch sheet edit — cells / dims / drawings / hyperlinks / merges / sheet tabs (needs writer)",
-        "description": "Applies a batch of cell, dimension, and/or drawing set/delete ops to a doc_type 'sheet' under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as the If-Match header); the server rejects with 412 base_version_stale if the live sheet moved since that read. The cells batch is a JSON object `{ \"sheetId!row:col\": {v,f,s} | null }` (a null value deletes the cell). The optional dims batch sets column widths / row heights: a JSON object `{ \"c<idx>\"|\"r<idx>\": <px> | null }` (e.g. `{\"c0\":200,\"r3\":40}`; a null value deletes that dim). The optional drawings batch inserts/removes floating images: a JSON object `{ \"sheetId!drawingId\": <ISheetImage> | null }` (image bytes ride inline as a base64 data URL in `source`; a math formula rides here too as a float-DOM drawing with `drawingType:8`, `componentKey:\"octo-math-formula\"`, and the LaTeX in `data.latex`). The optional hyperlinks batch sets cell links: a JSON object `{ \"sheetId!linkId\": {id,row,column,payload,display?} | null }` (payload is the URL — http/https/mailto or an internal #jump — and the link points at a cell by row/column; put the visible text in that cell's `v`). The optional merges batch merges cell ranges: a JSON object `{ \"logicalId:sr:sc:er:ec\": true | null }` (0-based startRow:startCol:endRow:endCol; e.g. `{\"default:0:0:1:2\":true}` merges the A1:C2 block; a null value un-merges that range). The optional sheets batch manages sheet TABS / pages: a JSON object `{ \"logicalId\": {\"name\":\"<tab name>\",\"order\":<n>} | null }` (set to create / rename / reorder a tab, or null to delete it; read the current tabs from `docs sheet get`'s sheetList — the first tab's logicalId is 'default'; to ADD a sheet, set a NEW logicalId here AND write that sheet's cells with keys `logicalId!row:col`). Provide `cells`, `dims`, `drawings`, `hyperlinks`, `merges`, or `sheets` via --data; at least one must be non-empty. Only doc_type 'sheet' is accepted (doc / board / whiteboard return 409 unsupported_doc_type). Gates: cell/dim/drawing count over the max → 413 too_many_cells, a single cell's payload too large → 413 cell_too_large, missing base version / malformed shape / all batches empty → 400 invalid_body, a cell/dim/drawing/merge/tab violating its contract or key shape → 422 sheet_cell_invalid.",
+        "summary": "Apply a batch sheet edit — cells, layout, filters, validation, and dropdowns (needs writer)",
+        "description": "Applies one atomic spreadsheet batch under a mandatory optimistic-concurrency guard. Pass the base-version token from `docs sheet get` via --base-version (sent as If-Match); stale writes return 412 base_version_stale. Existing surfaces are cells, dims, drawings, hyperlinks, merges, and sheets. P0 worksheet resources are: freeze `{logicalId:{startRow,startColumn,xSplit,ySplit}|null}`, filters `{logicalId:{ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[columns],enabledColumns?:[absoluteColumnIds]}|null}`, and dataValidations `{logicalId:[rules]|null}`. The public dataValidations and sheetDataValidations shapes are per-sheet arrays for every validation family, including list, listMultiple, and checkbox; do not send the internal flat `${logicalId}!${uid}` Y.Map shape except for the server-directed deletion-only repair described below. The server requires each rule uid to be unique within the sheet, 1–128 characters, free of `!` and control characters, plus at least one non-empty ranges entry. Checkbox ranges must not overlap another checkbox rule after the complete edit; list and listMultiple overlaps are accepted by the backend and should be sent only when intentional. For a working colored `list` or `listMultiple` dropdown, also send type, formula1 (JSON-serialized option labels), formula2 (the same number of comma-separated colors), showDropDown, and renderMode; omit operator. A listMultiple cell stores its selected labels as a JSON-array string, while a list cell stores the label directly. dataValidations is replace-style per logical sheet: read sheetDataValidations first and resend every rule to keep, but do not write if the deployed read surface omits any validation family on that sheet. null removes a freeze/filter/resource entry, and null or [] removes all validation rules for that sheet. An empty filterColumns array is omitted on readback. When enabledColumns is present it must be a non-empty list of absolute 0-based columns inside ref and select exactly which columns show filter buttons; every filterColumns colId must also appear in enabledColumns. A mismatch or enabledColumns:[] is rejected with 422 sheet_cell_invalid. The server deduplicates and sorts enabledColumns. For example, ref G:M with enabledColumns:[6,12] enables only G and M, not H-L. This controls filter-button visibility only, not read or write access; use protected ranges for access control. Filters are replace-style per logical sheet: read sheetFilters first and resend the complete filter object, including enabledColumns, when changing criteria. Omitting enabledColumns invokes legacy all-columns-in-ref behavior and silently widens the visible controls. An unfrozen freeze axis accepts startRow/startColumn 0 but normalizes it to -1. Sorting is a raw coordinate rewrite, not a spreadsheet-native sort: reorder the complete selected row block, carry each cell's complete {v,f,s,p,t} shape to its destination, and use null for destinations that become empty. The server stores `f` verbatim and does not re-anchor relative formula references; rewrite them for the destination or do not sort that range. Any state keyed by or containing coordinates stays at its old coordinates, including row dims, data-validation ranges, hyperlinks, merges, drawings, and cell-comment anchors; freeze panes and filter ranges/columns also remain fixed. Remap every affected resource for which you have an authoritative readable/writable surface, or do not sort the range. `sheetDims` is one workbook-level map whose keys may be sheet-qualified: `${logicalId}:c<idx>` / `${logicalId}:r<idx>` targets one tab, while bare `c<idx>` / `r<idx>` addresses the legacy default sheet; reads return keys exactly as stored. Bare and prefixed keys for the default sheet are separate entries; when migrating a legacy key, read sheetDims and clear the bare twin in the same batch, for example `{\"c0\":null,\"default:c0\":200}`. Rows hidden by an active shared filter still participate in a full rectangle rewrite. To sort only visible rows, evaluate `sheetFilters` criteria first and build a sparse permutation that leaves hidden row coordinates unchanged; clearing the filter does not preserve the visible subset. Any one surface may be the only non-empty batch member, but at least one surface must be non-empty. Only doc_type 'sheet' is accepted. Gates: validation-rule count over the max → 413 too_many_data_validations; cell/dim/drawing count over the max → 413 too_many_cells; worksheet-resource key count over the max → 413 too_many_sheet_resources; a single cell's payload too large → 413 cell_too_large; missing base version, malformed shape, or all batches empty → 400 invalid_body; a cell/dim/drawing/hyperlink/merge/tab/freeze/filter/data-validation violating its contract or key shape → 422 sheet_cell_invalid; writes intersecting a protected range → 403 protected_range. If 413 sheet_too_large includes baseVersion and repairDataValidationKey, submit only `{\"dataValidations\":{\"<repairDataValidationKey>\":null}}` with that base version, then retry. The backend accepts this flat-key form only when it deletes checkbox-shaped stored metadata and strictly reduces that metadata; do not invent a flat key. conditionalFormats is a sparse logicalId!cfId map of complete rule upserts or null deletions. Rules are removed with a deleted worksheet. Row/column structural edits on a sheet with conditional formatting are refused until rule relocation is supported.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -494,11 +1038,11 @@
                 "properties": {
                   "cells": {
                     "type": "object",
-                    "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?} to set the cell, or null to delete it. At least one of v/f/s must be present on a set. Pass via --data."
+                    "description": "batch of cell ops keyed by cell key `sheetId!row:col` (e.g. `default!0:0`). Rows are 0-based and may be 0..9999; columns are 0-based and may be 0..99. Each value is either {\"v\":<string|number|boolean|null>,\"f\":\"<formula>\"?,\"s\":<style object>?,\"p\":<rich-text object>?,\"t\":<number>?} to set the cell, or null to delete it. At least one of v/f/s/p/t must be present on a set. A non-null write at a row index >= rowCount or column index >= columnCount grows that sheet atomically, capped at 10000 rows and 100 columns; a write past either cap is rejected with 422 sheet_cell_invalid. Pass via --data."
                   },
                   "dims": {
                     "type": "object",
-                    "description": "batch of column-width / row-height ops keyed `c<idx>` (column) or `r<idx>` (row), e.g. `{\"c0\":200,\"r3\":40}`. Each value is a positive pixel number to set, or null to delete that dim. Optional; provide cells, dims, or drawings (at least one non-empty). Pass via --data."
+                    "description": "batch of column-width / row-height ops in one workbook-level map. Use `${logicalId}:c<idx>` / `${logicalId}:r<idx>` to target a specific tab; bare `c<idx>` / `r<idx>` address the legacy default sheet. Bare and prefixed default-sheet keys are separate stored entries: read sheetDims first and clear the bare twin while migrating, for example `{\"c0\":null,\"default:c0\":200}`. Each value is a positive pixel number to set, or null to delete that dim. Optional. Pass via --data."
                   },
                   "drawings": {
                     "type": "object",
@@ -506,7 +1050,7 @@
                   },
                   "hyperlinks": {
                     "type": "object",
-                    "description": "batch of cell-hyperlink ops keyed `${sheetId}!${linkId}` (e.g. `default!lnk1`). Each value is {id (== the key's linkId), row, column (0-based cell anchor), payload:\"<url>\" (http/https/mailto or an internal #jump), display?:\"<label>\"} to set, or null to delete. The link lives outside cell data and points at a cell by row/column; put the cell's visible text in that cell's `v`. Optional; provide cells, dims, drawings, or hyperlinks (at least one non-empty). Pass via --data."
+                    "description": "batch of cell-hyperlink ops keyed `${sheetId}!${linkId}` (e.g. `default!lnk1`). Each value is {id (== the key's linkId), row, column (0-based cell anchor), payload:\"<url>\" (http/https/mailto or an internal #jump), display?:\"<label>\"} to set, or null to delete. The link lives outside cell data and points at a cell by row/column; put the cell's visible text in that cell's `v`. Optional. Pass via --data."
                   },
                   "merges": {
                     "type": "object",
@@ -514,7 +1058,26 @@
                   },
                   "sheets": {
                     "type": "object",
-                    "description": "batch of sheet-TAB (page) ops keyed by logicalId. Value {name,order} to create / rename / reorder a tab, or null to delete it. Read the current tabs from `docs sheet get`'s sheetList (logicalId -> {name,order}); the first tab's logicalId is 'default'. To ADD a sheet: set a NEW logicalId here AND write that sheet's cells with keys `${logicalId}!row:col`. Optional; provide any of cells / dims / drawings / hyperlinks / merges / sheets (at least one non-empty). Pass via --data."
+                    "description": "batch of sheet-TAB (page) ops keyed by logicalId. Value {name,order,rowCount?,columnCount?} to create / rename / reorder / resize a tab, or null to delete it; name and order are required on every non-null entry, and deleting a tab also removes its validation rules. rowCount is an integer 1..10000 and columnCount is an integer 1..100. The backend stores explicit counts for new tabs, defaulting to 200 rows by 20 columns (A-T); pre-existing legacy tabs without stored counts remain 1000 by 100. On an existing tab, omitting either count preserves that dimension, but a resize payload must still resend name and order. Read the current tabs from `docs sheet get`'s sheetList; the first tab's logicalId is 'default'. To ADD a sheet: set a NEW logicalId here AND write that sheet's cells with keys `${logicalId}!row:col`. Optional. Pass via --data."
+                  },
+                  "freeze": {
+                    "type": "object",
+                    "description": "batch of freeze-pane configs keyed by logicalId. Value {startRow,startColumn,xSplit,ySplit}; startRow/startColumn are the first scrollable row/column and normally equal ySplit/xSplit when freezing the first N rows/columns. Use -1 for the start coordinate of an unfrozen axis; 0 is accepted there but normalizes to -1 on readback. null unfreezes that sheet. Optional. Pass via --data."
+                  },
+                  "filters": {
+                    "type": "object",
+                    "description": "batch of replace-style shared auto-filter snapshots keyed by logicalId. Value {ref:{startRow,startColumn,endRow,endColumn},filterColumns?:[{\"colId\":<absolute 0-based column>,\"filters\":{\"filters\":[<raw values>]}}],enabledColumns?:[<absolute 0-based column>]}. ref.startRow is the header row and stays visible; criteria apply to rows below it. colId is not an offset from ref.startColumn. Sending filterColumns:[] keeps the range but omits filterColumns on readback. When enabledColumns is present it must be non-empty, contain only columns inside ref, and select exactly which columns show filter buttons; every filterColumns colId must also appear in enabledColumns. A mismatch or enabledColumns:[] is rejected with 422 sheet_cell_invalid. The server deduplicates and sorts enabledColumns. For example, ref G:M plus enabledColumns:[6,12] enables only G and M, not H-L. This controls filter-button visibility only, not read or write access; use protected ranges for access control. Read sheetFilters first and resend the complete filter object, including enabledColumns, when changing criteria. Omitting enabledColumns invokes legacy all-columns-in-ref behavior and silently widens the visible controls. null removes the filter and all controls. Optional. Pass via --data."
+                  },
+                  "dataValidations": {
+                    "type": "object",
+                    "description": "replace-style data-validation arrays keyed by logicalId. This public REST shape covers every validation family, including list, listMultiple, and checkbox; do not use the internal flat `${logicalId}!${uid}` Y.Map shape except when the server returns repairDataValidationKey and explicitly requests one deletion-only repair. The server requires each rule to have a uid unique within that sheet (1–128 characters, no `!` or control characters) and at least one non-empty ranges:[{startRow,startColumn,endRow,endColumn}] entry. Checkbox ranges must not overlap another checkbox rule after the complete edit; list and listMultiple overlaps are accepted by the backend and should be sent only when intentional. It replaces that sheet's entire rule set, so read sheetDataValidations first and resend every rule to keep; do not write if the deployed read surface omits any validation family. Checkbox formula1/formula2 are optional distinct literal strings that default to \"1\"/\"0\", and the server normalizes allowBlank to true. For a working colored dropdown, use type 'list' or 'listMultiple', formula1 as a JSON string array of labels, formula2 as the same number of comma-separated colors, showDropDown:true, renderMode:2, and no operator. These dropdown fields are recommended rendering inputs, not additional server-required fields. A listMultiple cell stores selected labels in v as a JSON-array string; a list cell stores the label directly. The server strips operator from otherwise-valid list rules. null or [] removes all rules for the sheet. Optional. Pass via --data."
+                  },
+                  "conditionalFormats": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": ["object", "null"]
+                    },
+                    "description": "Compact conditional-format rules keyed by logicalId!cfId. Each value is {priority,rule:{cfId,stopIfTrue,ranges,rule}}; the inner rule uses Univer highlightCell, colorScale, dataBar or iconSet. Never expand a rule into per-cell styles. Requires the paired conditional-format API backend. Sparse upserts: send a complete value to create/update one rule, null to delete it; unrelated rules survive. Read a fresh baseVersion first. Maximum 1000 rules/1 MiB per workbook and 64 KiB per rule. Protected worksheets are checked server-side. Pass via --data."
                   }
                 }
               }
@@ -552,6 +1115,476 @@
         }
       }
     },
+    "/v1/bot/docs/{docId}/sheet/rows/insert": {
+      "post": {
+        "operationId": "docs.sheet.rows.insert",
+        "x-octo-strict-request-schema": true,
+        "summary": "Insert rows after an existing spreadsheet row (needs writer)",
+        "description": "Inserts count blank rows immediately after the zero-based afterRow in one logical worksheet. The server atomically shifts cells, row dimensions, hyperlinks, merged ranges, drawing anchors, freeze/filter ranges, data-validation ranges, live comment anchors, and protection ranges, then increments sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version; stale writes return 412 base_version_stale. afterRow is an absolute stored row index within the worksheet's current rowCount, not an ordinal among filter-visible rows. count must be 1..9999 and the resulting sheet cannot exceed 10000 rows. The operation refuses a workbook containing cell formulas with 409 sheet_formula_unsupported because the server cannot safely reproduce Univer formula-reference re-anchoring. Other failures include 403 protected_range, 404 sheet_not_found, 422 sheet_row_out_of_bounds or sheet_row_limit_exceeded, and the normal sheet/document size gates. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "afterRow",
+                  "count"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "afterRow": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999,
+                    "x-octo-flag": "after-row",
+                    "description": "zero-based existing row after which blank rows are inserted"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999,
+                    "x-octo-flag": "count",
+                    "description": "number of blank rows to insert; resulting rowCount must remain at most 10000"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted row count, resulting rowCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "afterRow": { "type": "integer" },
+                    "insertedRows": { "type": "integer" },
+                    "rowCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/rows/delete": {
+      "post": {
+        "operationId": "docs.sheet.rows.delete",
+        "x-octo-strict-request-schema": true,
+        "summary": "Delete spreadsheet rows (needs writer)",
+        "description": "Deletes count rows beginning at zero-based startRow in one logical worksheet. startRow is an absolute stored row index, not an ordinal among filter-visible rows. The server atomically removes resources anchored wholly inside the deleted rows, shifts later resources upward, shrinks intersecting ranges, and decrements sheetList.rowCount. Pass the baseVersion from docs sheet get through --base-version. At least one row must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_row_out_of_bounds. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "startRow", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "startRow": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9999,
+                    "x-octo-flag": "start-row",
+                    "description": "zero-based first row to delete"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999,
+                    "x-octo-flag": "count",
+                    "description": "number of contiguous rows to delete; at least one row must remain"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted row count, resulting rowCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "startRow": { "type": "integer" },
+                    "deletedRows": { "type": "integer" },
+                    "rowCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/columns/insert": {
+      "post": {
+        "operationId": "docs.sheet.columns.insert",
+        "x-octo-strict-request-schema": true,
+        "summary": "Insert columns after an existing spreadsheet column (needs writer)",
+        "description": "Inserts count blank columns immediately after zero-based afterColumn in one logical worksheet. The server atomically shifts column-bearing resources and increments sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. afterColumn is an absolute stored column index within the worksheet's current columnCount, not an ordinal among filter-visible columns. count must be 1..99 and the resulting sheet cannot exceed 100 columns. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds or sheet_column_limit_exceeded. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "afterColumn", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "afterColumn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99,
+                    "x-octo-flag": "after-column",
+                    "description": "zero-based existing column after which blank columns are inserted"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "x-octo-flag": "count",
+                    "description": "number of blank columns to insert; resulting columnCount must remain at most 100"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inserted column count, resulting columnCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "afterColumn": { "type": "integer" },
+                    "insertedColumns": { "type": "integer" },
+                    "columnCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/columns/delete": {
+      "post": {
+        "operationId": "docs.sheet.columns.delete",
+        "x-octo-strict-request-schema": true,
+        "summary": "Delete spreadsheet columns (needs writer)",
+        "description": "Deletes count columns beginning at zero-based startColumn in one logical worksheet. startColumn is an absolute stored column index, not an ordinal among filter-visible columns. The server atomically removes resources anchored wholly inside the deleted columns, shifts later resources left, shrinks intersecting ranges, and decrements sheetList.columnCount. Pass the baseVersion from docs sheet get through --base-version. At least one column must remain. Formula-bearing workbooks return 409 sheet_formula_unsupported; other failures include 403 protected_range, 404 sheet_not_found, and 422 sheet_column_out_of_bounds. A worksheet with conditional-format rules is rejected with 409 sheet_conditional_format_unsupported until server-side rule relocation is supported. Never delete the rules automatically to bypass this refusal. Remove the rules explicitly first, or use the frontend.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": { "type": "string" },
+            "description": "base-version token from docs sheet get (sent as If-Match; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["logicalId", "startColumn", "count"],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "logical worksheet id, normally default for the first tab"
+                  },
+                  "startColumn": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99,
+                    "x-octo-flag": "start-column",
+                    "description": "zero-based first column to delete"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "x-octo-flag": "count",
+                    "description": "number of contiguous columns to delete; at least one column must remain"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted column count, resulting columnCount, and fresh base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": { "type": "string" },
+                    "logicalId": { "type": "string" },
+                    "startColumn": { "type": "integer" },
+                    "deletedColumns": { "type": "integer" },
+                    "columnCount": { "type": "integer" },
+                    "bytes": { "type": "integer" },
+                    "baseVersion": { "type": "string" },
+                    "newDocVersionSeq": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/replace": {
+      "post": {
+        "operationId": "docs.sheet.replace",
+        "summary": "Find and replace spreadsheet values or formulas atomically (needs writer)",
+        "description": "Finds and replaces every match on the server in one optimistic-concurrency-guarded edit. Pass the baseVersion from `docs sheet get` through --base-version. Scope defaults to the whole workbook; pass logicalId for one worksheet, or logicalId plus an inclusive 0-based range for a selection. range without logicalId is rejected. findBy is `value` by default or `formula`; formula cells can match their cached display value in value mode but are changed only in formula mode. caseSensitive and matchesTheWholeCell default to false. The server trims findString like the spreadsheet UI, treats replacement text literally (including `$` sequences), preserves cell metadata, and reports matchedCells, replacedCells, and total replacements. An empty replaceString is allowed. A stale token returns 412 base_version_stale; protected cells return 403 protected_range; generated batches over the write limits return 413 too_many_cells or cell_too_large.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "findString",
+                  "replaceString"
+                ],
+                "properties": {
+                  "findString": {
+                    "type": "string",
+                    "x-octo-flag": "find-string",
+                    "description": "literal text to find; leading/trailing whitespace is trimmed and the result must be non-empty"
+                  },
+                  "replaceString": {
+                    "type": "string",
+                    "x-octo-flag": "replace-string",
+                    "description": "literal replacement text; may be empty"
+                  },
+                  "findBy": {
+                    "type": "string",
+                    "x-octo-flag": "find-by",
+                    "enum": [
+                      "value",
+                      "formula"
+                    ],
+                    "default": "value",
+                    "description": "search displayed/raw values or formula source text"
+                  },
+                  "caseSensitive": {
+                    "type": "boolean",
+                    "x-octo-flag": "case-sensitive",
+                    "default": false,
+                    "description": "match letter case exactly; defaults to false"
+                  },
+                  "matchesTheWholeCell": {
+                    "type": "boolean",
+                    "x-octo-flag": "matches-the-whole-cell",
+                    "default": false,
+                    "description": "require the complete stored value to match; rich-text streams include paragraph terminators and therefore do not match"
+                  },
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "optional worksheet logical id; omit for the whole workbook"
+                  },
+                  "range": {
+                    "type": "object",
+                    "description": "optional inclusive 0-based selection; requires logicalId",
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
+                    "properties": {
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replacement result and current/new base version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "matchedCells": {
+                      "type": "integer"
+                    },
+                    "replacedCells": {
+                      "type": "integer"
+                    },
+                    "replacements": {
+                      "type": "integer"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "present when the sheet changed"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "present when the sheet changed"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/bot/docs/{docId}/scene": {
       "get": {
         "operationId": "docs.scene.get",
@@ -559,7 +1592,14 @@
         "description": "Reads the LIVE Excalidraw scene of a doc_type 'board' — its `elements` in fractional-index (z-order), the `files` map of image/file refs, and the base-version token that pins the read. Pass that token to `docs scene edit` as --base-version so the optimistic-concurrency guard can prove the scene did not change between read and write. doc / sheet bodies are a different Y.Doc shape and return 409 unsupported_doc_type here; a live scene that decodes to a wrong-kind / corrupt blob returns 409 board_snapshot_invalid.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -569,11 +1609,32 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "elements": { "type": "array", "items": { "type": "object" }, "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node" },
-                    "files": { "type": "object", "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene" },
-                    "baseVersion": { "type": "string", "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`" },
-                    "schemaVersion": { "type": "integer", "description": "whiteboard schema version the scene was decoded with" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "elements": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      },
+                      "description": "the live Excalidraw elements in fractional-index (z-order); each element is a whiteboard-schema node"
+                    },
+                    "files": {
+                      "type": "object",
+                      "description": "map of fileId -> file ref (e.g. {attachId}) for images/files referenced by the scene"
+                    },
+                    "appState": {
+                      "type": "object",
+                      "description": "live Excalidraw application state, including portable board appearance fields"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "opaque base64 base-version token; pass to `docs scene edit --base-version`"
+                    },
+                    "schemaVersion": {
+                      "type": "integer",
+                      "description": "whiteboard schema version the scene was decoded with"
+                    }
                   }
                 }
               }
@@ -588,13 +1649,22 @@
         "x-octo-risk": "write",
         "x-octo-validate-elements-index": true,
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
           {
             "name": "If-Match",
             "in": "header",
             "required": true,
             "x-octo-flag": "base-version",
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "base-version token from 'docs scene get' (sent as the If-Match header for optimistic concurrency; required)"
           }
         ],
@@ -607,12 +1677,16 @@
                 "properties": {
                   "elements": {
                     "type": "array",
-                    "items": { "type": "object" },
+                    "items": {
+                      "type": "object"
+                    },
                     "description": "full Excalidraw elements to upsert; on a key collision the element with the higher `version` (then smaller `versionNonce`) wins the CAS. Each element MUST carry a valid fractional-index `index` (z-order key produced by the fractional-indexing / Excalidraw rules, e.g. `a0`); an index-less or malformed-index element is rejected locally before sending. Pass via --data."
                   },
                   "deletedElementIds": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "element ids to soft-delete; each becomes a tombstone with a superseding version so it converges under CAS. Pass via --data."
                   },
                   "files": {
@@ -632,10 +1706,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "bytes": { "type": "integer", "description": "encoded size of the scene after the edit" },
-                    "baseVersion": { "type": "string", "description": "new base-version token for the next edit" },
-                    "newDocVersionSeq": { "type": "integer", "description": "sequence of the auto safety snapshot taken before the edit" }
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "description": "encoded size of the scene after the edit"
+                    },
+                    "baseVersion": {
+                      "type": "string",
+                      "description": "new base-version token for the next edit"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer",
+                      "description": "sequence of the auto safety snapshot taken before the edit"
+                    }
                   }
                 }
               }
@@ -650,7 +1735,14 @@
         "summary": "List a document's members (needs admin)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -665,10 +1757,22 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "uid": { "type": "string" },
-                          "role": { "type": "string" },
-                          "source": { "type": "string" },
-                          "grantedBy": { "type": "string" }
+                          "uid": {
+                            "type": "string"
+                          },
+                          "principalSpaceId": {
+                            "type": "string",
+                            "description": "principal Space id that qualifies this membership"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "grantedBy": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -682,10 +1786,17 @@
       "put": {
         "operationId": "docs.members.set",
         "summary": "Add or change a member's role by uid (upsert; needs admin)",
-        "description": "PUT-upsert: adds the member if absent or changes the role if present. The target uid must be a real Octo user or the backend returns 404 user_not_found.",
+        "description": "Space-qualified PUT mutation for Bot callers. When principalSpaceId is omitted, the backend uses the authenticated Bot Space. That Space may also be supplied explicitly and supports add or role update. A foreign principalSpaceId performs no directory lookup and can only update an existing exact (docId, uid, principalSpaceId) membership; a missing exact row returns 404.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -693,38 +1804,98 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["uid", "role"],
+                "required": [
+                  "uid",
+                  "role"
+                ],
                 "properties": {
-                  "uid": { "type": "string", "description": "target user uid" },
-                  "role": { "type": "string", "enum": ["reader", "writer", "admin"], "description": "role to grant" }
+                  "uid": {
+                    "type": "string",
+                    "description": "uid in the Space-qualified membership key"
+                  },
+                  "principalSpaceId": {
+                    "type": "string",
+                    "x-octo-flag": "principal-space-id",
+                    "description": "principal Space id; for Bot calls, omission defaults to the authenticated Bot Space, an explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "description": "role to grant. Matches octo-docs-backend isMemberRole (src/permission/role.ts); commenter is a stored role ranked between reader and writer, so omitting it made the local enum gate reject a call the backend accepts"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Upserted" } }
+        "responses": {
+          "200": {
+            "description": "Upserted"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/members/{uid}": {
       "delete": {
         "operationId": "docs.members.remove",
-        "summary": "Remove a member (needs admin; the owner cannot be removed)",
+        "summary": "Remove a Space-qualified member (needs admin; the owner cannot be removed)",
+        "description": "Bot exact-delete mutation for the membership identified by (docId, uid, principalSpaceId). principalSpaceId is required because one uid can have distinct memberships in multiple Spaces.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "uid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principalSpaceId",
+            "in": "query",
+            "required": true,
+            "x-octo-flag": "principal-space-id",
+            "schema": {
+              "type": "string"
+            },
+            "description": "principal Space id of the membership to remove; required to disambiguate the same uid across Spaces"
+          }
         ],
-        "responses": { "200": { "description": "Removed" } }
+        "responses": {
+          "200": {
+            "description": "Removed"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/share": {
       "get": {
         "operationId": "docs.share.get",
         "summary": "Read a document's space-level share scope (needs reader)",
-        "description": "Returns the current share settings any viewer can see: {docId, shareScope, shareRole}. shareScope is 'restricted' (only owner/members) or 'anyone_in_space' (every member of the doc's space gets the share role). shareRole is meaningful only when shareScope is anyone_in_space; a restricted doc always reports shareRole 'read'.",
+        "description": "Returns the current share settings: {docId, shareScope, shareRole, permissionEpoch}. Pass this permissionEpoch to docs share set for optimistic concurrency. shareScope is 'restricted' (owner/members) or 'anyone_in_space' (Space access). A restricted doc reports shareRole 'read'.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -734,9 +1905,28 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
-                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                    "permissionEpoch": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Current permission version; supply to docs share set"
+                    },
+                    "docId": {
+                      "type": "string"
+                    },
+                    "shareScope": {
+                      "type": "string",
+                      "enum": [
+                        "restricted",
+                        "anyone_in_space"
+                      ]
+                    },
+                    "shareRole": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "edit"
+                      ]
+                    }
                   }
                 }
               }
@@ -747,10 +1937,18 @@
       "put": {
         "operationId": "docs.share.set",
         "summary": "Set a document's space-level share scope (needs admin)",
-        "description": "Change the share scope so either only owner/members can access (--scope restricted) or every member of the doc's space gets a share role (--scope anyone_in_space --role read|edit). Normalization matches the backend: with --scope anyone_in_space a valid --role is required (a missing/invalid role is 400 invalid_role); with --scope restricted the role is ignored and stored as read, so --role may be omitted. An unknown scope is 400 invalid_scope; a non-admin caller is 403; a missing/cross-space doc is 404; an archived doc is 409. Share only ever RAISES access (owner/members are never downgraded).",
+        "description": "Read docs share get first, then pass its permissionEpoch with --permissionEpoch when changing the scope. A stale permissionEpoch returns 409 share_settings_conflict: re-read the settings and re-evaluate the intended change; do not blindly retry with a newer epoch. Use --scope restricted for owner/members only, or --scope anyone_in_space --role read|edit for Space access. With restricted, role is ignored and stored as read. Unknown scope is 400 invalid_scope; missing/invalid role for anyone_in_space is 400 invalid_role; a non-admin caller is 403; a missing/cross-space doc is 404; an archived doc is 409. Direct member/owner access is never downgraded by sharing.",
+        "x-octo-strict-request-schema": true,
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -758,10 +1956,35 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["shareScope"],
+                "required": [
+                  "shareScope",
+                  "permissionEpoch"
+                ],
                 "properties": {
-                  "shareScope": { "type": "string", "x-octo-flag": "scope", "enum": ["restricted", "anyone_in_space"], "description": "share scope to set" },
-                  "shareRole": { "type": "string", "x-octo-flag": "role", "enum": ["read", "edit"], "description": "share role for anyone_in_space (required when scope=anyone_in_space; ignored and stored as read when scope=restricted)" }
+                  "permissionEpoch": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "Current permissionEpoch from docs share get; required optimistic concurrency token, not a PPT content revision"
+                  },
+                  "shareScope": {
+                    "type": "string",
+                    "x-octo-flag": "scope",
+                    "enum": [
+                      "restricted",
+                      "anyone_in_space"
+                    ],
+                    "description": "share scope to set"
+                  },
+                  "shareRole": {
+                    "type": "string",
+                    "x-octo-flag": "role",
+                    "enum": [
+                      "read",
+                      "edit"
+                    ],
+                    "description": "share role for anyone_in_space (required when scope=anyone_in_space; ignored and stored as read when scope=restricted)"
+                  }
                 }
               }
             }
@@ -775,18 +1998,45 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "docId": { "type": "string" },
-                    "shareScope": { "type": "string", "enum": ["restricted", "anyone_in_space"] },
-                    "shareRole": { "type": "string", "enum": ["read", "edit"] }
+                    "permissionEpoch": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Permission version after this update; re-read before the next change"
+                    },
+                    "docId": {
+                      "type": "string"
+                    },
+                    "shareScope": {
+                      "type": "string",
+                      "enum": [
+                        "restricted",
+                        "anyone_in_space"
+                      ]
+                    },
+                    "shareRole": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "edit"
+                      ]
+                    }
                   }
                 }
               }
             }
           },
-          "400": { "description": "invalid_scope / invalid_role" },
-          "403": { "description": "forbidden (not admin/owner)" },
-          "404": { "description": "not_found (missing or cross-space doc)" },
-          "409": { "description": "conflict (archived doc)" }
+          "400": {
+            "description": "invalid_scope / invalid_role"
+          },
+          "403": {
+            "description": "forbidden (not admin/owner)"
+          },
+          "404": {
+            "description": "not_found (missing or cross-space doc)"
+          },
+          "409": {
+            "description": "conflict (archived doc), or share_settings_conflict for a stale permissionEpoch with current share settings"
+          }
         }
       }
     },
@@ -797,7 +2047,14 @@
         "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader or writer is grantable here; admin is not forward-grantable.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -805,16 +2062,34 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["uid", "role"],
+                "required": [
+                  "uid",
+                  "role"
+                ],
                 "properties": {
-                  "uid": { "type": "string", "description": "target user uid" },
-                  "role": { "type": "string", "enum": ["reader", "writer"], "description": "role to grant (grant-only, never downgrades)" }
+                  "uid": {
+                    "type": "string",
+                    "description": "target user uid"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer"
+                    ],
+                    "description": "role to grant (grant-only, never downgrades). Matches octo-docs-backend isForwardGrantRole (src/permission/role.ts) = the member roles minus admin"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Grant result (final role + changed flag)" } }
+        "responses": {
+          "200": {
+            "description": "Grant result (final role + changed flag)"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/comments": {
@@ -824,10 +2099,40 @@
         "description": "Returns {items, nextCursor}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "includeResolved", "in": "query", "schema": { "type": "string" }, "description": "set to 1 to include resolved threads" },
-          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 100 }, "description": "page size (1-100, default 50)" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeResolved",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "set to 1 to include resolved threads"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "id cursor from a previous page's nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 100
+            },
+            "description": "page size (1-100, default 50)"
+          }
         ],
         "responses": {
           "200": {
@@ -837,8 +2142,15 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "nextCursor": { "type": "integer" }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -848,11 +2160,31 @@
       },
       "post": {
         "operationId": "docs.comments.add",
-        "summary": "Add a root comment (anchored) or a reply (needs reader)",
-        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor: either the opaque base64 Yjs positions anchorStart/anchorEnd (from a live editor selection), or anchorText — the selected text — which the backend resolves against the document. When anchorText matches more than one place the request fails with 422 ambiguous_anchor; narrow it with blockPath (the block's child-index path, e.g. 0,2) and/or occurrence (1-based match index). For a doc_type 'sheet' anchorText is rejected with 409 unsupported_doc_type (a sheet has no text fragment): anchor to a cell instead by passing the base64 of the cell key `${sheetId}!${row}:${col}` (row/col 0-based, e.g. base64 of `default!0:0`) as BOTH anchorStart and anchorEnd, with the A1 label in anchorText (display only).",
+        "summary": "Add an anchored root or reply (commenter or higher)",
+        "description": "A reply sets parentId and omits anchors. A root comment needs an anchor. For boards, `docs comments add` accepts --body plus exactly one of --point X,Y or repeatable --element-id; these board anchor flags are mutually exclusive with --data and the reply/rich-document anchor flags, and element-anchor dry runs still read the live scene. Other callers, replies, and advanced scenarios use --data with opaque base64 anchorStart/anchorEnd from a live editor selection, or anchorText for rich documents; ambiguous text anchors fail with 422 ambiguous_anchor and can be narrowed with blockPath/occurrence. For sheets, pass the base64 cell key as both anchors. PPT roots use anchor {kind,versionSeq,baseRevision?,slideId?,elementId?,elementIds?,x?,y?}; replies use parentId only. PPT writes require Idempotency-Key.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[\\x21-\\x7e]+$"
+            },
+            "description": "Required for PPT comments: 1–128 printable ASCII characters without spaces. Preserve the identical key and body on an uncertain retry. The CLI rejects an explicitly blank key; length and character bounds are backend-enforced."
+          }
         ],
         "requestBody": {
           "required": true,
@@ -860,21 +2192,102 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["body"],
+                "required": [
+                  "body"
+                ],
                 "properties": {
-                  "body": { "type": "string", "description": "comment text" },
-                  "parentId": { "type": "integer", "description": "thread root id to reply to (omit for a root comment)" },
-                  "anchorStart": { "type": "string", "description": "root only: base64-encoded Yjs start position (from a live editor selection)" },
-                  "anchorEnd": { "type": "string", "description": "root only: base64-encoded Yjs end position (from a live editor selection)" },
-                  "anchorText": { "type": "string", "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)" },
-                  "blockPath": { "type": "string", "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)" },
-                  "occurrence": { "type": "integer", "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates" }
+                  "body": {
+                    "type": "string",
+                    "description": "comment text"
+                  },
+                  "parentId": {
+                    "type": "integer",
+                    "description": "thread root id to reply to (omit for a root comment)"
+                  },
+                  "anchorStart": {
+                    "type": "string",
+                    "description": "root only: opaque base64 anchor start; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor"
+                  },
+                  "anchorEnd": {
+                    "type": "string",
+                    "description": "root only: opaque base64 anchor end; accepts a Yjs editor position, sheet cell key, or canonical versioned Board anchor"
+                  },
+                  "anchorText": {
+                    "type": "string",
+                    "description": "root only: the exact selected text; the backend resolves it to an anchor. Use instead of anchorStart/anchorEnd when you have no live editor positions (e.g. a bot)"
+                  },
+                  "blockPath": {
+                    "type": "string",
+                    "description": "root only: disambiguate anchorText by block, as a comma-separated child-index path from the doc root (e.g. 0,2)"
+                  },
+                  "occurrence": {
+                    "type": "integer",
+                    "description": "root only: disambiguate anchorText by picking the Nth match (1-based) among the remaining candidates"
+                  },
+                  "anchor": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "document",
+                          "slide",
+                          "element",
+                          "point"
+                        ]
+                      },
+                      "slideId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "versionSeq": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "description": "Explicit null for live; positive integer for fixed version"
+                      },
+                      "baseRevision": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "elementId": {
+                        "type": "string"
+                      },
+                      "elementIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "x": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "y": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "description": "PPT anchor contract. The CLI checks required fields and enums; coordinate bounds, identifiers, version/revision values and unknown fields are validated by the backend."
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created (returns the new comment id)" } }
+        "responses": {
+          "201": {
+            "description": "Created (returns the new comment id)"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/comments/{id}": {
@@ -884,8 +2297,22 @@
         "description": "Pass --body to edit your own comment's text, or --resolved to resolve/reopen a thread root. Provide exactly one.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -894,25 +2321,124 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "body": { "type": "string", "description": "new comment text (author only)" },
-                  "resolved": { "type": "boolean", "description": "resolve (true) or reopen (false) a thread root (writer only)" }
+                  "body": {
+                    "type": "string",
+                    "description": "new comment text (author only)"
+                  },
+                  "resolved": {
+                    "type": "boolean",
+                    "description": "resolve (true) or reopen (false) a thread root (writer only)"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Required for PPT comments. Use the revision returned by comments get; refresh after a conflict."
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Updated" } }
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.comments.delete",
         "summary": "Soft-delete your own comment, or hard-delete as admin",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "hard", "in": "query", "schema": { "type": "string" }, "description": "set to 1 for an admin hard delete (default is a soft delete by the author)" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "hard",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "set to 1 for an admin hard delete (default is a soft delete by the author)"
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "Required current row revision for PPT comments."
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
+      },
+      "get": {
+        "operationId": "docs.comments.get",
+        "summary": "Read a comment and its authoritative root anchor",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Comment and root records; replies inherit root.anchor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "comment",
+                    "root"
+                  ],
+                  "properties": {
+                    "comment": {
+                      "type": "object"
+                    },
+                    "root": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-strict-response-schema": true,
+        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
       }
     },
     "/v1/bot/docs/{docId}/versions": {
@@ -922,11 +2448,51 @@
         "description": "Returns {items, nextCursor, counts}; there is no {data, pagination} envelope, so --page-all does not apply — pass --cursor with the returned nextCursor to walk pages.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "cursor", "in": "query", "schema": { "type": "integer" }, "description": "id cursor from a previous page's nextCursor" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer" }, "description": "page size" },
-          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["manual", "auto", "all"] }, "description": "filter by snapshot kind" },
-          { "name": "includeAuto", "in": "query", "schema": { "type": "string" }, "description": "back-compat alias honoured only when kind is absent; set to 1 to include auto snapshots" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "id cursor from a previous page's nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "page size"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "manual",
+                "auto",
+                "all"
+              ]
+            },
+            "description": "filter by snapshot kind"
+          },
+          {
+            "name": "includeAuto",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "back-compat alias honoured only when kind is absent; set to 1 to include auto snapshots"
+          }
         ],
         "responses": {
           "200": {
@@ -936,9 +2502,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "nextCursor": { "type": "integer" },
-                    "counts": { "type": "object" }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "integer"
+                    },
+                    "counts": {
+                      "type": "object"
+                    }
                   }
                 }
               }
@@ -951,7 +2526,26 @@
         "summary": "Take a named snapshot of the live document (needs writer)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
         ],
         "requestBody": {
           "required": false,
@@ -960,40 +2554,113 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "label": { "type": "string", "description": "human label for the snapshot (optional)" }
+                  "label": {
+                    "type": "string",
+                    "description": "human label for the snapshot (optional)"
+                  },
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "PPT only: required revision from the immediately preceding docs ppt get. Integer type, range and freshness are validated by the PPT backend, including when supplied through --data.",
+                    "maximum": 9007199254740991
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created (returns docVersionSeq)" } }
+        "responses": {
+          "201": {
+            "description": "Created (returns docVersionSeq)"
+          }
+        },
+        "description": " For PPT use baseRevision and Idempotency-Key. Retry uncertain writes with the same body/key; normal editing auto-saves and HTML export reads the live deck."
       }
     },
     "/v1/bot/docs/{docId}/versions/{versionId}/state": {
       "get": {
         "operationId": "docs.versions.state",
         "summary": "Read a version's decoded content snapshot (read-only preview; needs reader)",
-        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON ({kind:'document', doc, sheetCells, sheetDims, schemaVersion, docVersionSeq}); a board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
+        "description": "Returns the version decoded to structured content, kind-selected by the doc's doc_type. A document/sheet decodes to ProseMirror JSON plus the spreadsheet maps exposed by this endpoint ({kind:'document', doc, sheetCells, sheetDims, sheetList, sheetFreeze, sheetFilters, sheetDataValidations, schemaVersion, docVersionSeq}); every sheet map is an empty {} for a text document. A board decodes to an Excalidraw scene ({kind:'board', scene, schemaVersion, docVersionSeq}). A PPT decodes to its immutable presentation deck ({kind:'ppt', deck, schemaVersion, docVersionSeq}). This is a read-only preview of a past snapshot, not the live document, and cannot be written.",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
         "responses": {
           "200": {
-            "description": "Decoded snapshot content (document/sheet or board scene, selected by kind)",
+            "description": "Decoded snapshot content (document/sheet, board scene or PPT deck, selected by kind)",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "kind": { "type": "string", "enum": ["document", "board"], "description": "which content line was decoded: 'document' (doc/sheet -> doc + sheet maps) or 'board' (whiteboard -> scene)" },
-                    "doc": { "type": "object", "description": "document/sheet only: the snapshot body as ProseMirror document JSON" },
-                    "sheetCells": { "type": "object", "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)" },
-                    "sheetDims": { "type": "object", "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)" },
-                    "scene": { "type": "object", "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})" },
-                    "schemaVersion": { "type": "integer" },
-                    "docVersionSeq": { "type": "integer" }
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "document",
+                        "board",
+                        "ppt"
+                      ],
+                      "description": "which content line was decoded: 'document' (doc/sheet -> doc + sheet maps), 'board' (whiteboard -> scene), or 'ppt' (html_ppt -> deck)"
+                    },
+                    "doc": {
+                      "type": "object",
+                      "description": "document/sheet only: the snapshot body as ProseMirror document JSON"
+                    },
+                    "sheetCells": {
+                      "type": "object",
+                      "description": "document/sheet only: flat cell map keyed `sheetId!row:col` (empty {} for a text document)"
+                    },
+                    "sheetDims": {
+                      "type": "object",
+                      "description": "document/sheet only: column-width / row-height overrides (empty {} for a text document)"
+                    },
+                    "sheetList": {
+                      "type": "object",
+                      "description": "document/sheet only: sheet tabs keyed by logicalId with {name,order,rowCount?,columnCount?}; rowCount is 1..10000 and columnCount is 1..100, with missing counts meaning a legacy 1000-row by 100-column tab. It is empty {} for a text document or a legacy single-sheet document; an empty sheetList does not mean sheetDataValidations should be filtered out"
+                    },
+                    "sheetFreeze": {
+                      "type": "object",
+                      "description": "document/sheet only: freeze panes keyed by logicalId (empty {} for a text document)"
+                    },
+                    "sheetFilters": {
+                      "type": "object",
+                      "description": "document/sheet only: shared filter range and criteria keyed by logicalId (empty {} for a text document)"
+                    },
+                    "sheetDataValidations": {
+                      "type": "object",
+                      "description": "document/sheet only: per-sheet arrays containing every data-validation family, including dropdowns and checkboxes (empty {} for a text document)"
+                    },
+                    "scene": {
+                      "type": "object",
+                      "description": "board only: the decoded Excalidraw scene ({elements in z-order, files})"
+                    },
+                    "schemaVersion": {
+                      "type": "integer"
+                    },
+                    "docVersionSeq": {
+                      "type": "integer"
+                    },
+                    "deck": {
+                      "type": "object",
+                      "description": "PPT only: the immutable presentation deck, including stable slide and element IDs"
+                    }
                   }
                 }
               }
@@ -1008,8 +2675,23 @@
         "summary": "Rename a saved version (needs writer)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1017,38 +2699,115 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["label"],
+                "required": [
+                  "label"
+                ],
                 "properties": {
-                  "label": { "type": "string", "description": "new non-empty label" }
+                  "label": {
+                    "type": "string",
+                    "description": "new non-empty label"
+                  }
                 }
               }
             }
           }
         },
-        "responses": { "200": { "description": "Renamed" } }
+        "responses": {
+          "200": {
+            "description": "Renamed"
+          }
+        }
       },
       "delete": {
         "operationId": "docs.versions.delete",
         "summary": "Delete a saved version (needs admin)",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          }
         ],
-        "responses": { "200": { "description": "Deleted" } }
+        "responses": {
+          "200": {
+            "description": "Deleted"
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/versions/{versionId}/restore": {
       "post": {
         "operationId": "docs.versions.restore",
         "summary": "Restore the document to a saved version (needs admin)",
-        "description": "Non-destructive forward reconcile of the target version into the live state. A safety snapshot of the pre-restore state is recorded first, so a restore is itself undoable.",
+        "description": "Non-destructive forward reconcile of the target version into the live state. A safety snapshot of the pre-restore state is recorded first, so a restore is itself undoable. For PPT use baseRevision and Idempotency-Key. Retry uncertain writes with the same body/key; normal editing auto-saves and HTML export reads the live deck.",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "versionId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field" }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "the version's docVersionSeq (the integer returned by `docs versions create` and shown as `docVersionSeq` in `docs versions list`); there is no separate id field"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "description": "Required for PPT creation, comments and version writes; preserve on an uncertain retry."
+          }
         ],
-        "responses": { "200": { "description": "Restored (returns restoredFrom + newDocVersionSeq)" } }
+        "responses": {
+          "200": {
+            "description": "Restored (returns restoredFrom + newDocVersionSeq)"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "baseRevision": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "PPT only: required revision from the immediately preceding docs ppt get. Integer type, range and freshness are validated by the PPT backend, including when supplied through --data.",
+                    "maximum": 9007199254740991
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/bot/docs/{docId}/attachments/presign": {
@@ -1058,7 +2817,14 @@
         "description": "Metadata-only. Returns a presigned PUT URL + headers; the CLI does not upload the bytes. After presign, PUT the file directly to uploadUrl with the returned headers (see the octo-docs skill).",
         "x-octo-risk": "write",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1066,11 +2832,24 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["fileName", "mime", "sizeBytes"],
+                "required": [
+                  "fileName",
+                  "mime",
+                  "sizeBytes"
+                ],
                 "properties": {
-                  "fileName": { "type": "string", "description": "original file name" },
-                  "mime": { "type": "string", "description": "MIME type (must pass the backend allow/deny list)" },
-                  "sizeBytes": { "type": "integer", "description": "file size in bytes (must be within the tier cap)" }
+                  "fileName": {
+                    "type": "string",
+                    "description": "original file name"
+                  },
+                  "mime": {
+                    "type": "string",
+                    "description": "MIME type (must pass the backend allow/deny list)"
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "description": "file size in bytes (must be within the tier cap)"
+                  }
                 }
               }
             }
@@ -1084,14 +2863,30 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "attachId": { "type": "string" },
-                    "objectKey": { "type": "string" },
-                    "bucket": { "type": "string" },
-                    "mime": { "type": "string" },
-                    "sizeBytes": { "type": "integer" },
-                    "uploadUrl": { "type": "string" },
-                    "headers": { "type": "object" },
-                    "expiresInSec": { "type": "integer" }
+                    "attachId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "bucket": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    },
+                    "uploadUrl": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object"
+                    },
+                    "expiresInSec": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -1106,8 +2901,22 @@
         "summary": "Get a freshly signed, time-limited download URL for one attachment (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "attachId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attachId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -1117,13 +2926,27 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "attachId": { "type": "string" },
-                    "objectKey": { "type": "string" },
-                    "mime": { "type": "string" },
-                    "sizeBytes": { "type": "integer" },
-                    "fileName": { "type": "string" },
-                    "url": { "type": "string" },
-                    "expiresInSec": { "type": "integer" }
+                    "attachId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "expiresInSec": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -1138,7 +2961,14 @@
         "summary": "Batch-resolve attachIds to freshly signed download URLs (needs reader)",
         "x-octo-risk": "read",
         "parameters": [
-          { "name": "docId", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
@@ -1146,11 +2976,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["attachIds"],
+                "required": [
+                  "attachIds"
+                ],
                 "properties": {
                   "attachIds": {
                     "type": "array",
-                    "items": { "type": "string" },
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "attachment ids to resolve (non-empty; capped by the backend batch limit)"
                   }
                 }
@@ -1166,14 +3000,430 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "items": { "type": "array", "items": { "type": "object" } },
-                    "notFound": { "type": "array", "items": { "type": "string" } }
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "notFound": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
             }
           }
         }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments/{id}/replies": {
+      "get": {
+        "operationId": "docs.comments.replies",
+        "summary": "Read a root's reply page (reader or higher)",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "itemsField": "items",
+          "cursorField": "nextCursor",
+          "inferHasMore": true,
+          "rejectCursorRepeats": true
+        },
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Up to 25 replies and nextCursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Positive comment ID for the next page; null ends the list. Zero is not a terminal marker."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-strict-response-schema": true,
+        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/split": {
+      "post": {
+        "x-octo-strict-request-schema": true,
+        "operationId": "docs.sheet.split",
+        "summary": "Preview or apply literal text-to-columns (needs writer)",
+        "description": "Defaults to server-side preview; --dry-run only prints the HTTP request and is not a data preview. Read a fresh baseVersion, preview, then apply with --preview=false and that same token. Both input and output are bounded to 20000 cells (or the lower deployed write limit). Active filters, source formulas, intersecting merges, drawings, hyperlinks, validations and comments are refused; protection and authorization are checked server-side. Apply is one atomic guarded sheet edit with an automatic safety snapshot. Preserves leading zeros, long numbers, empty fields and formula-looking text; writes strings with text number format @, while retaining destination styles. Overwriting nonempty destinations requires --overwrite.",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "range",
+                  "delimiter"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "Required logical worksheet ID from docs sheet get."
+                  },
+                  "range": {
+                    "type": "object",
+                    "description": "Zero-based source rectangle; split accepts exactly one column. Pass the structured range via --data.",
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
+                    "properties": {
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "preview": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Defaults to true: return planned cells and counts without writing. Explicitly pass --preview=false to apply with the same base-version."
+                  },
+                  "delimiter": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 16,
+                    "description": "Literal delimiter, not CSV quoting or displayed number formatting."
+                  },
+                  "overwrite": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Explicit consent to replace nonempty cells to the right; inspect the server preview first."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only preview or atomic application result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "boolean"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "range": {
+                      "type": "object",
+                      "description": "Zero-based affected rectangle of the planned or applied output.",
+                      "required": [
+                        "startRow",
+                        "startColumn",
+                        "endRow",
+                        "endColumn"
+                      ],
+                      "properties": {
+                        "startRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "startColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "rows": {
+                      "type": "integer"
+                    },
+                    "columns": {
+                      "type": "integer"
+                    },
+                    "removedRows": {
+                      "type": "integer"
+                    },
+                    "overwrittenCells": {
+                      "type": "integer"
+                    },
+                    "cells": {
+                      "type": "object",
+                      "description": "Planned replacement cells, returned in preview mode only, keyed by logicalId!row:column (zero-based). Values are complete cell objects, or null to clear the cell."
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "write"
+      }
+    },
+    "/v1/bot/docs/{docId}/sheet/deduplicate": {
+      "post": {
+        "x-octo-strict-request-schema": true,
+        "operationId": "docs.sheet.deduplicate",
+        "summary": "Preview or apply duplicate removal inside a selection (needs writer)",
+        "description": "Defaults to server-side preview; --dry-run only prints the HTTP request and is not a data preview. Read a fresh baseVersion, preview, then apply with --preview=false and that same token. Both input and output are bounded to 20000 cells (or the lower deployed write limit). Active filters, source formulas, intersecting merges, drawings, hyperlinks, validations and comments are refused; protection and authorization are checked server-side. Apply is one atomic guarded sheet edit with an automatic safety snapshot. Compares all selected columns, keeps the first record and blank rows, compacts only selected values and clears trailing contents. Does not delete whole rows; destination formatting stays fixed.",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "base-version",
+            "schema": {
+              "type": "string"
+            },
+            "description": "base-version token from 'docs sheet get' (sent as the If-Match header; required)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "logicalId",
+                  "range"
+                ],
+                "properties": {
+                  "logicalId": {
+                    "type": "string",
+                    "x-octo-flag": "logical-id",
+                    "description": "Required logical worksheet ID from docs sheet get."
+                  },
+                  "range": {
+                    "type": "object",
+                    "description": "Zero-based source rectangle spanning every column of each record to compact together. Deduplication compares all selected columns; unselected columns do not move. Pass the structured range via --data.",
+                    "required": [
+                      "startRow",
+                      "startColumn",
+                      "endRow",
+                      "endColumn"
+                    ],
+                    "properties": {
+                      "startRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "startColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endRow": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "endColumn": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  },
+                  "preview": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Defaults to true: return planned cells and counts without writing. Explicitly pass --preview=false to apply with the same base-version."
+                  },
+                  "header": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Keep the first selected row out of duplicate comparisons."
+                  },
+                  "caseSensitive": {
+                    "type": "boolean",
+                    "x-octo-flag": "case-sensitive",
+                    "default": false,
+                    "description": "Compare text case exactly; default is case-insensitive."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Read-only preview or atomic application result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "boolean"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "range": {
+                      "type": "object",
+                      "description": "Zero-based affected rectangle of the planned or applied output.",
+                      "required": [
+                        "startRow",
+                        "startColumn",
+                        "endRow",
+                        "endColumn"
+                      ],
+                      "properties": {
+                        "startRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "startColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endRow": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "endColumn": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "rows": {
+                      "type": "integer"
+                    },
+                    "columns": {
+                      "type": "integer"
+                    },
+                    "removedRows": {
+                      "type": "integer"
+                    },
+                    "overwrittenCells": {
+                      "type": "integer"
+                    },
+                    "cells": {
+                      "type": "object",
+                      "description": "Planned replacement cells, returned in preview mode only, keyed by logicalId!row:column (zero-based). Values are complete cell objects, or null to clear the cell."
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "write"
       }
     }
   }

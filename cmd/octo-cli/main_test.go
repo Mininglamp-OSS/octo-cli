@@ -8,6 +8,25 @@ import (
 	"testing"
 )
 
+// hermeticEnv returns the inherited environment with every OCTO_-prefixed
+// variable removed, followed by extra. Subprocess tests must not read the
+// developer's own credentials or output settings: the CLI resolves a token from
+// an ordered variable list (internal/credential/env_provider.go) and also reads
+// OCTO_CONFIG_DIR, OCTO_SPACE_ID and OCTO_FORMAT, so neutralising names one by
+// one silently drifts out of date whenever a variable is added. Sweeping the
+// prefix and re-adding only what a test needs keeps the list explicit.
+func hermeticEnv(extra ...string) []string {
+	inherited := os.Environ()
+	env := make([]string, 0, len(inherited)+len(extra))
+	for _, kv := range inherited {
+		if strings.HasPrefix(kv, "OCTO_") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, extra...)
+}
+
 // TestMain_VersionCommand builds the binary and runs `octo-cli version` as a
 // subprocess so the real main() path (including signal wiring, error
 // classification, and os.Exit) is exercised.
@@ -20,6 +39,7 @@ func TestMain_VersionCommand(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "version")
+	cmd.Env = hermeticEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("version: %v", err)
@@ -43,6 +63,7 @@ func TestMain_UnknownCommandExitCode(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "no-such-command")
+	cmd.Env = hermeticEnv()
 	// stderr carries the envelope for framework errors.
 	errOut, err := cmd.CombinedOutput()
 	if err == nil {
@@ -71,10 +92,10 @@ func TestMain_MissingTokenExitCode(t *testing.T) {
 	}
 
 	cmd := exec.Command(bin, "event", "list")
-	// Clear OCTO_BOT_TOKEN / OCTO_BOT_ID and point at an empty credential store
-	// so no profile resolves and Validate trips on the missing token.
-	cmd.Env = append(os.Environ(),
-		"OCTO_BOT_TOKEN=", "OCTO_BOT_ID=", "OCTO_CONFIG_DIR="+t.TempDir())
+	// Drop every OCTO_ token/selector variable and point at an empty credential
+	// store so no profile and no env token resolve, and Validate trips on the
+	// missing token instead of the command reaching the network.
+	cmd.Env = hermeticEnv("OCTO_CONFIG_DIR=" + t.TempDir())
 	errOut, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatal("expected non-zero exit")

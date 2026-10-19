@@ -15,6 +15,20 @@ type ExitError struct {
 	Message string          // human-readable message (English)
 	Hint    string          // suggested next action
 	Detail  json.RawMessage // original backend payload (optional)
+	// HTTPStatus is the response status this error was parsed from, or 0 when
+	// the error did not come from an HTTP response. It distinguishes a definite
+	// server-side refusal (4xx) from an outcome the caller cannot determine.
+	HTTPStatus int `json:"-"`
+}
+
+// OutcomeUnknown reports whether the request may have been applied despite the
+// error. A 4xx is a definite refusal; anything else — a transport failure, a
+// timeout, or a 5xx after the server may have committed — is ambiguous.
+func (e *ExitError) OutcomeUnknown() bool {
+	if e == nil {
+		return false
+	}
+	return e.HTTPStatus < 400 || e.HTTPStatus > 499
 }
 
 // Error satisfies the error interface. Prefer the envelope renderer over Error()
@@ -97,61 +111,151 @@ func ErrLoopAPIUnsupported() *ExitError {
 
 // --- backend error mapping ---
 
-// backendErrorMapping maps matters error codes to CLI taxonomy + hint. See
+// backendErrorMapping maps backend error codes to CLI taxonomy + hint. See
 // docs/architecture-design.md §4.3.
+//
+// Two code conventions coexist because two backend families do: the matters /
+// dmworkim family emits SCREAMING_SNAKE codes, octo-drive emits lowercase
+// snake_case ones. Both are looked up in this single table, and a code and its
+// cross-family counterpart carry the **same** Type — an agent must be able to
+// branch on the CLI taxonomy and exit code without first working out which
+// backend answered. Only the hint differs, so it can name the domain's own
+// remedy. Codes not present here fall back to status-based inference, unchanged.
 var backendErrorMapping = map[string]struct {
 	Type string
 	Hint string
 }{
-	"UNAUTHORIZED":                      {"auth_error", "check OCTO_BOT_TOKEN; bot may be unpublished"},
-	"AUTH_UNAVAILABLE":                  {"network", "auth service unreachable; retry later"},
-	"VALIDATION_ERROR":                  {"validation", "check params with `octo-cli schema <op>`"},
-	"MATTER_NOT_FOUND":                  {"api_error", "verify ID with `octo-cli matters list`"},
-	"NOT_FOUND":                         {"api_error", "resource not found"},
-	"ASSIGNEE_NOT_FOUND":                {"api_error", "assignee not in space or invalid UID"},
-	"FORBIDDEN":                         {"permission", "bot lacks permission; check space membership"},
-	"BOT_WORKSPACE_MEMBERSHIP_REQUIRED": {"permission", "ask a Workspace owner or admin to add this Bot in Workspace Members"},
-	"SPACE_FORBIDDEN":                   {"permission", "bot not a member of this space"},
-	"DUPLICATE_ASSIGNEE":                {"validation", "already assigned; check current assignees"},
-	"RATE_LIMITED":                      {"rate_limited", "server-side rate limit; retry after cooldown"},
-	"UPSTREAM_UNAVAILABLE":              {"network", "upstream dependency unavailable; retry later"},
-	"INTERNAL_ERROR":                    {"api_error", "internal server error; retry or report"},
-	"PAYLOAD_TOO_LARGE":                 {"validation", "request body exceeds 1MB limit"},
-	"CONFLICT":                          {"validation", "resource state conflicts; re-read and retry"},
-	"PRECONDITION_FAILED":               {"validation", "base version stale; re-read to get the current base version, then retry"},
-	"UNPROCESSABLE_ENTITY":              {"validation", "request understood but semantically invalid; check field shapes"},
+	"UNAUTHORIZED":                         {"auth_error", "check OCTO_TOKEN / OCTO_BOT_TOKEN; bot may be unpublished"},
+	"AUTH_REQUIRED":                        {"auth_error", "provide a valid Octo or Loop bearer credential"},
+	"AUTH_UNAVAILABLE":                     {"network", "auth service unreachable; retry later"},
+	"VALIDATION_ERROR":                     {"validation", "check params with `octo-cli schema <op>`"},
+	"MATTER_NOT_FOUND":                     {"api_error", "verify ID with `octo-cli matters list`"},
+	"NOT_FOUND":                            {"api_error", "resource not found"},
+	"ASSIGNEE_NOT_FOUND":                   {"api_error", "assignee not in space or invalid UID"},
+	"FORBIDDEN":                            {"permission", "bot lacks permission; check space membership"},
+	"BOT_WORKSPACE_MEMBERSHIP_REQUIRED":    {"permission", "ask a Workspace owner or admin to add this Bot in Workspace Members"},
+	"SPACE_FORBIDDEN":                      {"permission", "bot not a member of this space"},
+	"bot_delete_forbidden":                 {"permission", "bots cannot delete documents, even as owner/admin; do not retry or switch identities/routes; ask a human with document admin permission to delete it in Octo"},
+	"sheet_not_found":                      {"api_error", "run docs sheet list for current worksheet IDs and names; do not fall back to reading every worksheet"},
+	"ambiguous_sheet_name":                 {"validation", "inspect the candidate worksheet IDs and ask the user to disambiguate; retry with --sheet-id"},
+	"invalid_sheet_selector":               {"validation", "use exactly one nonempty --sheet-id or --sheet-name from docs sheet list"},
+	"cleaning_overwrite_required":          {"validation", "inspect the split preview and overwrittenCells; only after approval retry the same version with --preview=false --overwrite"},
+	"cleaning_filtered_sheet":              {"validation", "cleaning refuses active shared filters; copy the data as values to a plain worksheet instead of changing another user's filter"},
+	"cleaning_complex_sheet":               {"validation", "copy the data as values to a plain worksheet without drawings, links, validations or comments before cleaning"},
+	"cleaning_formula_unsupported":         {"validation", "source formulas are not supported; copy the data as values before cleaning"},
+	"cleaning_merged_range":                {"validation", "the output overlaps merged cells; choose an unmerged plain-data range"},
+	"cleaning_delimiter_not_found":         {"validation", "the literal delimiter is absent from stored values; number-format thousands separators are not delimiters"},
+	"cleaning_single_column_required":      {"validation", "split accepts exactly one source column; narrow the input range"},
+	"cleaning_range_out_of_bounds":         {"validation", "read sheetList and choose a source and destination inside the worksheet dimensions"},
+	"cleaning_invalid_delimiter":           {"validation", "use a nonempty literal delimiter of at most 16 characters; CSV quoting is not interpreted"},
+	"sheet_conditional_format_unsupported": {"validation", "structural edits cannot relocate conditional-format rules yet; preserve the rules and use a worksheet without them or wait for supported relocation; never delete rules automatically to bypass this refusal"},
+	"DUPLICATE_ASSIGNEE":                   {"validation", "already assigned; check current assignees"},
+	"DUPLICATE":                            {"validation", "the resource already exists; inspect the current resource before retrying"},
+	"UNSUPPORTED_MEDIA_TYPE":               {"validation", "use the content type declared by `octo-cli schema <op>`"},
+	"CLIENT_VERSION_TOO_OLD":               {"config", "upgrade octo-cli and retry"},
+	"RATE_LIMITED":                         {"rate_limited", "server-side rate limit; retry after cooldown"},
+	"UPSTREAM_UNAVAILABLE":                 {"network", "upstream dependency unavailable; retry later"},
+	"INTERNAL_ERROR":                       {"api_error", "internal server error; retry or report"},
+	"PAYLOAD_TOO_LARGE":                    {"validation", "request body exceeds 1MB limit"},
+	"CONFLICT":                             {"validation", "resource state conflicts; re-read and retry"},
+	"PRECONDITION_FAILED":                  {"validation", "base version stale; re-read to get the current base version, then retry"},
+	"UNPROCESSABLE_ENTITY":                 {"validation", "request understood but semantically invalid; check field shapes"},
+
+	// octo-drive lowercase codes (drive spec §7.2). Each shares its Type with
+	// the uppercase counterpart above: conflict/CONFLICT and
+	// invalid_argument/VALIDATION_ERROR are both validation (exit 2),
+	// not_found/NOT_FOUND both api_error, unauthorized/UNAUTHORIZED both
+	// auth_error (exit 3).
+	"unauthorized":               {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
+	"auth_unavailable":           {"network", "auth service unreachable; retry later"},
+	"permission_denied":          {"permission", "caller lacks the required drive space role"},
+	"password_required":          {"permission", "pass --password for this share"},
+	"wrong_password":             {"permission", "verify the share password"},
+	"share_expired":              {"permission", "request a new share"},
+	"not_found":                  {"api_error", "verify the id/token and that the space is accessible"},
+	"conflict":                   {"validation", "drive state conflicts; re-read and retry"},
+	"invalid_argument":           {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
+	"file_too_large":             {"validation", "compare max_size_kb with size, then choose a smaller file or a multipart-capable upload path"},
+	"upload_mode_conflict":       {"validation", "the server owns the upload mode; follow the response upload_mode and use the matching single or multipart flow"},
+	"client_capability_required": {"validation", "declare X-Drive-Upload-Capabilities: multipart-v1 for multipart uploads; small single-part uploads remain compatible without it"},
+	"object_size_mismatch":       {"validation", "compare actual_size with declared_size and restart the upload with the complete file"},
+	"upload_session_not_active":  {"validation", "read status: start a new session when aborted or treat confirmed as success; never retry the same upload_id"},
+	"upload_policy_unavailable":  {"api_error", "wait for retry_after_seconds, then retry with bounded backoff"},
+	"too_many_upload_sessions":   {"rate_limited", "finish or abort existing sessions until below limit, then retry"},
+	"too_many_data_validations":  {"validation", "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"},
+	"too_many_sheet_resources":   {"validation", "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"},
+	"internal":                   {"api_error", "internal server error; retry or report"},
 }
 
 // ParseBackendError converts an HTTP response body (and status) to an *ExitError.
-// It tries matters envelope first, then dmworkim {msg,status}, falling back to a
-// raw dump. The status code is used as a signal when the body is unparseable.
+// It tries the matters envelope first, then the octo-drive {error,message}
+// shape, then dmworkim {msg,status}, falling back to a raw dump. The status
+// code is used as a signal when the body is unparseable.
 func ParseBackendError(status int, body []byte) *ExitError {
+	return withStatus(parseBackendError(status, body, false), status)
+}
+
+// ParsePublicAPIError parses a Fleet Public API error envelope. Unlike the
+// legacy parser, unknown machine codes use the HTTP status as their taxonomy
+// fallback. The protocol is selected by the caller; a presentation-only field
+// such as hint must never change an agent's exit code.
+func ParsePublicAPIError(status int, body []byte) *ExitError {
+	return withStatus(parseBackendError(status, body, true), status)
+}
+
+// withStatus stamps the originating HTTP status so callers can tell a definite
+// refusal from an ambiguous outcome.
+func withStatus(err *ExitError, status int) *ExitError {
+	if err != nil {
+		err.HTTPStatus = status
+	}
+	return err
+}
+
+func parseBackendError(status int, body []byte, publicAPI bool) *ExitError {
 	// Layer 1: matters envelope {"error":{"code":"...","message":"...","details":{...}}}
 	var mEnv struct {
 		Error struct {
 			Code    string          `json:"code"`
 			Message string          `json:"message"`
 			Details json.RawMessage `json:"details"`
+			Hint    string          `json:"hint"`
 		} `json:"error"`
 	}
 	if len(body) > 0 && json.Unmarshal(body, &mEnv) == nil && mEnv.Error.Code != "" {
-		typ := "api_error"
-		hint := ""
-		if m, ok := backendErrorMapping[mEnv.Error.Code]; ok {
-			typ = m.Type
-			hint = m.Hint
+		// Preserve the historical api_error classification for unknown legacy
+		// codes. Public API callers explicitly opt into status-based fallback.
+		fallbackType := "api_error"
+		if publicAPI {
+			fallbackType = typeFromStatus(status)
 		}
-		e := &ExitError{
-			Type:    typ,
-			Code:    mEnv.Error.Code,
-			Message: mEnv.Error.Message,
-			Hint:    hint,
-			Detail:  json.RawMessage(body),
-		}
-		return e
+		return newBackendError(mEnv.Error.Code, mEnv.Error.Message, fallbackType, mEnv.Error.Hint, body)
 	}
 
-	// Layer 2: dmworkim {"msg":"...","status":400}
+	// Layer 2: octo-drive envelope {"error":"not_found","message":"..."} — the
+	// code is a bare string rather than a nested object, and the human text is
+	// under "message" (not "msg"). Only snake_case identifiers are treated as
+	// codes; free-text `error` values (octo-drive's space middleware emits
+	// "missing X-Space-Id", "invalid token", …) fall through to the raw
+	// fallback below, exactly as they did before this layer existed.
+	var dvEnv struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+		Hint    string `json:"hint"`
+	}
+	if len(body) > 0 && json.Unmarshal(body, &dvEnv) == nil && looksLikeErrorCode(dvEnv.Error) {
+		msg := dvEnv.Message
+		if msg == "" {
+			msg = dvEnv.Error
+		}
+		hint := dvEnv.Hint
+		if hint == "" {
+			hint = hintFromStatus(status)
+		}
+		return newBackendError(dvEnv.Error, msg, typeFromStatus(status), hint, body)
+	}
+
+	// Layer 3: dmworkim {"msg":"...","status":400}
 	var dEnv struct {
 		Msg    string `json:"msg"`
 		Status int    `json:"status"`
@@ -176,7 +280,84 @@ func ParseBackendError(status int, body []byte) *ExitError {
 		Code:    codeFromStatus(status),
 		Message: msg,
 		Hint:    hintFromStatus(status),
+		// The backend's payload is carried even here. This branch is reached for
+		// any shape the three envelope families do not match, and dropping the
+		// body left message — truncated at 2048 bytes — as the only copy of the
+		// backend's answer. Only valid JSON is attached: Detail is spliced into
+		// the envelope raw, so non-JSON text would make the envelope unparseable.
+		Detail: jsonDetail(body),
 	}
+}
+
+// jsonDetail returns body as a raw JSON detail payload, or nil when it is not
+// JSON and therefore cannot be embedded in the envelope.
+func jsonDetail(body []byte) json.RawMessage {
+	if len(body) == 0 || !json.Valid(body) {
+		return nil
+	}
+	return json.RawMessage(body)
+}
+
+// IsErrorCodeShaped reports whether s has the shape of a machine-readable error
+// code — lower-case alphanumerics and underscores.
+//
+// Shape alone is not evidence that a value *is* a code: a caller-supplied id can be
+// all lower-case too. Use IsKnownErrorCode when the question is whether a value may
+// be exempted from redaction.
+func IsErrorCodeShaped(s string) bool {
+	return looksLikeErrorCode(s)
+}
+
+// IsKnownErrorCode reports whether s is a code this CLI recognises — that is, one
+// present in the backend error mapping.
+//
+// This is the strong form of the question, and the one the transport's response
+// redaction asks. Membership in a closed, enumerated vocabulary is something a
+// caller-supplied id cannot acquire, which is what makes it safe to leave such a
+// value unmasked in the code position: the CLI prints these codes on every failure
+// of their kind, so nothing is disclosed by not masking one.
+func IsKnownErrorCode(s string) bool {
+	_, ok := backendErrorMapping[s]
+	return ok
+}
+
+// newBackendError builds the ExitError for a backend-supplied code. A code
+// present in backendErrorMapping supplies the taxonomy and hint; an unmapped
+// code keeps its literal code and takes the caller-supplied fallback taxonomy,
+// which differs per envelope family so no existing classification shifts.
+func newBackendError(code, message, fallbackType, fallbackHint string, body []byte) *ExitError {
+	typ, hint := fallbackType, fallbackHint
+	if m, ok := backendErrorMapping[code]; ok {
+		typ, hint = m.Type, m.Hint
+	}
+	return &ExitError{
+		Type:    typ,
+		Code:    code,
+		Message: message,
+		Hint:    hint,
+		Detail:  json.RawMessage(body),
+	}
+}
+
+// looksLikeErrorCode reports whether s is a lowercase snake_case identifier,
+// the shape octo-drive uses for machine-readable codes. Anything else (empty,
+// spaces, mixed case, punctuation) is human prose and must not be promoted to
+// an ExitError.Code.
+func looksLikeErrorCode(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= '0' && c <= '9':
+		case c == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func typeFromStatus(status int) string {

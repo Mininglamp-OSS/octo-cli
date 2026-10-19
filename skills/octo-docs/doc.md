@@ -64,8 +64,35 @@ board/whiteboard/sheet), `413 too_many_ops` / `413 op_content_too_large` /
 attachment that is not this doc's (`attachment_not_found`), or content the
 schema rejects (`schema_incompatible`).
 
-Inserting an image into the body references an uploaded attachment — see
-`common.md` (Attachments) for the presign → upload → reference flow.
+## Image nodes
+
+Do not write a third-party image URL as the image node's only `src`: the Octo
+client rejects off-whitelist asset hosts and displays **Image unavailable**.
+First upload local bytes or ingest a public HTTP(S) URL into the target document
+as described in `common.md` (Attachments), then use the returned document-scoped
+`attachId` in the body edit:
+
+```json
+{
+  "type": "insert",
+  "at": { "path": [], "position": "inside_end" },
+  "content": [
+    {
+      "type": "image",
+      "attrs": {
+        "attachId": "att_xxx",
+        "width": 300,
+        "alt": "Diagram"
+      }
+    }
+  ]
+}
+```
+
+The durable reference is `attachId`; omit `src` (or set it to `null`) so the
+client resolves a fresh signed display URL. Supply the real positive pixel width
+when known; otherwise use `300` as a compatibility default because current
+clients can lay out an agent-created image with `width: null` as `0x0`.
 
 ## Schema lookup
 

@@ -53,7 +53,101 @@ func New() (*Registry, error) {
 		}
 		r.specs[service] = doc
 	}
+	if err := checkDuplicateOperationIDs(r.specs); err != nil {
+		return nil, err
+	}
+	for service, doc := range r.specs {
+		if err := validateConditionalQueryMetadata(doc); err != nil {
+			return nil, fmt.Errorf("registry: service %s: %w", service, err)
+		}
+	}
 	return r, nil
+}
+
+// validateConditionalQueryMetadata makes the opt-in extension fail closed at
+// registry load rather than silently weakening a required-parameter guard.
+func validateConditionalQueryMetadata(doc map[string]any) error {
+	var validationErr error
+	walkOperations(doc, func(path, method string, op map[string]any) {
+		if validationErr == nil {
+			validationErr = validateOperationConditionalQueries(doc, path, method, op)
+		}
+	})
+	return validationErr
+}
+
+func validateOperationConditionalQueries(doc map[string]any, path, method string, op map[string]any) error {
+	params := operationParameters(doc, path, op)
+	queryTypes := make(map[string]string, len(params))
+	for i := range params {
+		if params[i].In == "query" {
+			queryTypes[params[i].Name] = params[i].Type
+		}
+	}
+	for _, raw := range rawOperationParameters(doc, path, op) {
+		pm, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		ext, declared := pm["x-octo-required-unless-query"]
+		if !declared {
+			continue
+		}
+		conditional, ok := ext.(map[string]any)
+		name, nameOK := conditional["name"].(string)
+		_, valueOK := conditional["value"].(string)
+		dependent, dependentOK := pm["name"].(string)
+		if !ok || !nameOK || strings.TrimSpace(name) == "" || !valueOK || !dependentOK || dependent == "" {
+			return fmt.Errorf("%s %s has malformed x-octo-required-unless-query", strings.ToUpper(method), path)
+		}
+		peerType, exists := queryTypes[name]
+		if !exists || peerType != "string" || name == dependent {
+			return fmt.Errorf("%s %s conditional query %q must name a distinct string query parameter", strings.ToUpper(method), path, name)
+		}
+	}
+	return nil
+}
+
+func rawOperationParameters(doc map[string]any, path string, op map[string]any) []any {
+	var result []any
+	if paths, ok := doc["paths"].(map[string]any); ok {
+		if item, ok := paths[path].(map[string]any); ok {
+			if params, ok := item["parameters"].([]any); ok {
+				result = append(result, params...)
+			}
+		}
+	}
+	if params, ok := op["parameters"].([]any); ok {
+		result = append(result, params...)
+	}
+	return result
+}
+
+func checkDuplicateOperationIDs(specs map[string]map[string]any) error {
+	owner := map[string]string{}
+	services := make([]string, 0, len(specs))
+	for s := range specs {
+		services = append(services, s)
+	}
+	sort.Strings(services)
+	for _, service := range services {
+		var dupErr error
+		walkOperations(specs[service], func(_, _ string, op map[string]any) {
+			id, _ := op["operationId"].(string)
+			if id == "" || dupErr != nil {
+				return
+			}
+			if prev, dup := owner[id]; dup {
+				dupErr = fmt.Errorf("registry: duplicate operationId %q (services %q and %q)", id, prev, service)
+				return
+			}
+			owner[id] = service
+		})
+		if dupErr != nil {
+			return dupErr
+		}
+	}
+	return nil
 }
 
 // MustNew is like New but panics on error — useful for package-level wiring
@@ -135,6 +229,13 @@ type OperationInfo struct {
 	Risk    string `json:"risk,omitempty"`
 }
 
+// ConditionalQueryRequirement describes x-octo-required-unless-query: the
+// parameter carrying it is required unless the named peer query equals Value.
+type ConditionalQueryRequirement struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 // ParamInfo describes a single parameter on a path or operation (one entry in
 // an OpenAPI `parameters` array). Covers path, query, and header parameters;
 // the `In` field records which. Type/Default/Enum come from the nested
@@ -144,45 +245,75 @@ type ParamInfo struct {
 	In          string      `json:"in"`
 	Required    bool        `json:"required,omitempty"`
 	Type        string      `json:"type,omitempty"`
+	Format      string      `json:"format,omitempty"`
 	Items       *SchemaInfo `json:"items,omitempty"`
 	Description string      `json:"description,omitempty"`
 	Default     any         `json:"default,omitempty"`
 	Enum        []any       `json:"enum,omitempty"`
-	// String constraints are exposed as schema metadata for callers; request
-	// validation remains the responsibility of the service backend.
+	// String constraints are exposed as schema metadata for callers; enforcing
+	// them remains the service backend's job. Enum is the exception: the CLI
+	// checks a query parameter's enum before sending (see buildQuery).
 	MinLength int    `json:"min_length,omitempty"`
 	MaxLength int    `json:"max_length,omitempty"`
 	Pattern   string `json:"pattern,omitempty"`
+	// RequiredUnlessQuery makes an otherwise optional query parameter required
+	// unless another query parameter equals the declared value. It is populated
+	// by x-octo-required-unless-query for contracts such as Marketplace's
+	// plugin_type, which is optional only when mode=mine.
+	RequiredUnlessQuery *ConditionalQueryRequirement `json:"required_unless_query,omitempty"`
+	// Secret records the x-octo-secret extension. A secret parameter's value is
+	// masked in --verbose traces and --dry-run output (share/invite tokens,
+	// share passwords) so a credential-equivalent value never lands in a log.
+	Secret bool `json:"secret,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag
 	// extension on the parameter. It lets a spec expose a header/query param
 	// whose wire name is awkward as a flag (e.g. the `If-Match` header) under a
 	// clean, first-class flag name (e.g. `base-version`) without a hard-coded
 	// carve-out in the engine. Empty when the spec does not set it, in which
 	// case the engine derives the flag from Name.
+	//
+	// On a `"in": "path"` parameter it means something slightly different: the
+	// param stays positional, and the flag becomes an OPTIONAL alternative way
+	// to supply it. That is the escape hatch for a value cobra cannot accept
+	// positionally at all — a base64url id starting with "-" is parsed as a flag
+	// before the command runs (see cmd/service.pathFlag).
 	FlagName string `json:"flag_name,omitempty"`
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
-// the schema command to describe a request/response body to an Agent. One
-// level of `$ref` into `components.schemas` is resolved eagerly; deeper refs
-// are surfaced as an unresolved `$ref` pointer so the output still contains
-// a useful reference.
+// the schema command and generic request validator. It resolves bounded local
+// references, nullable type unions, and composition constraints while leaving
+// an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
-	Type        string                `json:"type,omitempty"`
-	Required    []string              `json:"required,omitempty"`
-	Properties  map[string]SchemaInfo `json:"properties,omitempty"`
-	Items       *SchemaInfo           `json:"items,omitempty"`
-	Enum        []any                 `json:"enum,omitempty"`
-	Format      string                `json:"format,omitempty"`
-	Description string                `json:"description,omitempty"`
+	Type                 string                `json:"type,omitempty"`
+	Required             []string              `json:"required,omitempty"`
+	Properties           map[string]SchemaInfo `json:"properties,omitempty"`
+	AdditionalProperties *bool                 `json:"additional_properties,omitempty"`
+	Items                *SchemaInfo           `json:"items,omitempty"`
+	OneOf                []SchemaInfo          `json:"one_of,omitempty"`
+	AnyOf                []SchemaInfo          `json:"any_of,omitempty"`
+	Enum                 []any                 `json:"enum,omitempty"`
+	// EnumHint is an opt-in x-octo-enum-hint for request-body enum errors.
+	EnumHint    string `json:"enum_hint,omitempty"`
+	Const       any    `json:"const,omitempty"`
+	Default     any    `json:"-"`
+	Format      string `json:"format,omitempty"`
+	Description string `json:"description,omitempty"`
+	WriteOnly   bool   `json:"write_only,omitempty"`
 	// These constraints are surfaced for schema introspection. The generic CLI
-	// validator currently enforces required and MinItems only.
-	MinLength int    `json:"min_length,omitempty"`
-	MaxLength int    `json:"max_length,omitempty"`
-	MinItems  int    `json:"min_items,omitempty"`
-	MaxItems  int    `json:"max_items,omitempty"`
-	Pattern   string `json:"pattern,omitempty"`
-	Ref       string `json:"$ref,omitempty"`
+	// validator enforces Required, MinItems and Enum for every service. Loop and
+	// explicitly strict services additionally enforce closed-object and minimum-
+	// property constraints, MinLength, MaxLength and MaxItems. Pattern stays
+	// descriptive because stateful backend exceptions cannot be represented here.
+	Minimum       *float64 `json:"minimum,omitempty"`
+	Maximum       *float64 `json:"maximum,omitempty"`
+	MinLength     int      `json:"min_length,omitempty"`
+	MaxLength     int      `json:"max_length,omitempty"`
+	MinItems      int      `json:"min_items,omitempty"`
+	MaxItems      int      `json:"max_items,omitempty"`
+	MinProperties int      `json:"min_properties,omitempty"`
+	Pattern       string   `json:"pattern,omitempty"`
+	Ref           string   `json:"$ref,omitempty"`
 	// FlagName is the optional CLI flag override from the x-octo-flag extension
 	// on a request-body property, mirroring ParamInfo.FlagName for query/header
 	// params. It lets a promoted body field expose a clean flag name (e.g.
@@ -190,6 +321,10 @@ type SchemaInfo struct {
 	// so the CLI can honour a caller-facing flag without diverging from the
 	// byte-exact backend contract. Empty means "derive from the property name".
 	FlagName string `json:"flag_name,omitempty"`
+	// Secret records the x-octo-secret extension on a request-body property,
+	// mirroring ParamInfo.Secret. Its value is masked in --verbose traces and
+	// --dry-run output.
+	Secret bool `json:"secret,omitempty"`
 }
 
 // PaginationInfo captures the `x-octo-pagination` extension. It tells the
@@ -206,6 +341,13 @@ type PaginationInfo struct {
 	RejectCursorRepeats bool   `json:"reject_cursor_repeats,omitempty"`
 }
 
+// BodyVariant declares one valid conditional request-body shape.
+type BodyVariant struct {
+	Name      string   `json:"name,omitempty"`
+	Required  []string `json:"required,omitempty"`
+	Forbidden []string `json:"forbidden,omitempty"`
+}
+
 // OperationDetail is the expanded view of a single operation returned by
 // GetOperation. It embeds OperationInfo for identity/summary and adds every
 // piece of metadata the service engine needs to build a complete cobra
@@ -214,13 +356,26 @@ type PaginationInfo struct {
 // binary response).
 type OperationDetail struct {
 	OperationInfo
-	Parameters          []ParamInfo     `json:"parameters,omitempty"`
-	RequestBody         *SchemaInfo     `json:"request_body,omitempty"`
-	RequestBodyRequired bool            `json:"request_body_required,omitempty"`
-	ResponseSchema      *SchemaInfo     `json:"response_schema,omitempty"`
-	Pagination          *PaginationInfo `json:"pagination,omitempty"`
-	BaseURLEnv          string          `json:"base_url_env,omitempty"`
-	SpaceHeader         bool            `json:"space_header,omitempty"`
+	Parameters          []ParamInfo `json:"parameters,omitempty"`
+	RequestBody         *SchemaInfo `json:"request_body,omitempty"`
+	RequestBodyRequired bool        `json:"request_body_required,omitempty"`
+	ResponseSchema      *SchemaInfo `json:"response_schema,omitempty"`
+	// StrictRequestSchema opts a service or individual operation into the extended JSON Schema request
+	// checks (closed objects, lengths, patterns and size constraints) that Loop's
+	// Public API always uses. It lets another strongly typed API request the same
+	// local guarantees without changing historical domains.
+	StrictResponseSchema bool            `json:"strict_response_schema,omitempty"`
+	StrictRequestSchema  bool            `json:"strict_request_schema,omitempty"`
+	Pagination           *PaginationInfo `json:"pagination,omitempty"`
+	// BaseURLEnv is retained in schema output for compatibility with existing
+	// specs and tooling. Runtime routing is unified through OCTO_API_BASE_URL and
+	// intentionally does not select a different service URL from this metadata.
+	BaseURLEnv string `json:"base_url_env,omitempty"`
+	// Credential is the x-octo-credential boundary declared by the service.
+	// Empty means the active Bot credential; "mail" selects the mailbox token
+	// bound to the same Bot identity.
+	Credential  string `json:"credential,omitempty"`
+	SpaceHeader bool   `json:"space_header,omitempty"`
 	// SpaceHeaderSet records whether the spec declared x-octo-space-header at
 	// all. It lets the transport distinguish an explicit `false` (suppress the
 	// X-Space-Id header) from an omitted flag (keep the default behaviour of
@@ -240,6 +395,52 @@ type OperationDetail struct {
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	// RetryMode captures the optional x-octo-retry operation extension. Empty
+	// keeps the transport default; "never" disables automatic retries for the
+	// individual request. This is required for non-idempotent external side
+	// effects such as sending mail, where a lost response must be reported as an
+	// unknown result rather than risking a duplicate action.
+	RetryMode string `json:"retry_mode,omitempty"`
+	// AllowedTokenKinds captures x-octo-allowed-token-kinds (spec top level or
+	// per-operation override). When non-empty the CLI checks the active
+	// credential's kind against the list before sending, failing locally with
+	// TOKEN_KIND_NOT_ALLOWED (validation / exit 2) instead of relying on a
+	// backend 401. Empty means "no local gate" — the historical behaviour for
+	// every domain that does not declare it.
+	AllowedTokenKinds []string `json:"allowed_token_kinds,omitempty"`
+	// MountByTokenKind captures x-octo-mount-by-token-kind: a token-kind →
+	// server mount-prefix table. When non-empty, the operation's own path must
+	// begin with exactly one of the table's values (the mount the spec paths are
+	// written against); that prefix is swapped for the mount matching the active
+	// credential's kind. Empty leaves the spec path byte-identical.
+	MountByTokenKind map[string]string `json:"mount_by_token_kind,omitempty"`
+	// ResponseFieldAliases captures x-octo-response-fields: source key →
+	// target keys. The CLI renames (one target) or duplicates (several) the
+	// value in the response before emitting it, so a backend DTO with a bare
+	// `id` can surface as the unambiguous `share_id` + `share_token` an Agent
+	// needs. Paths use the same syntax as LosslessIDFields.
+	ResponseFieldAliases map[string][]string `json:"response_field_aliases,omitempty"`
+	// LosslessIDFields captures x-octo-lossless-id-fields: response paths whose
+	// uint64 ids are emitted as decimal strings so values above 2^53 survive an
+	// Agent's JSON parser. Applied after ResponseFieldAliases, so paths name
+	// post-alias keys.
+	LosslessIDFields []string `json:"lossless_id_fields,omitempty"`
+	// ResponseSecretFields lists response-schema paths marked x-octo-secret.
+	// The client uses these paths to collect actual secret values from a
+	// backend error body before parsing or rendering it.
+	ResponseSecretFields []string      `json:"response_secret_fields,omitempty"`
+	BodyVariants         []BodyVariant `json:"body_variants,omitempty"`
+	// BodyVariantsHint is the operation-specific recovery guidance returned
+	// when no declared request-body variant matches.
+	BodyVariantsHint string `json:"body_variants_hint,omitempty"`
+	// AutoIdempotencyKey names a request field generated once per command run when absent.
+	AutoIdempotencyKey string `json:"auto_idempotency_key,omitempty"`
+	// ResponseUnwrap selects a dot-separated field from successful JSON responses.
+	ResponseUnwrap string `json:"response_unwrap,omitempty"`
+	// UnwrapRequiredFields lists the properties the 2xx schema declares required
+	// under ResponseUnwrap. Non-empty means the unwrapped value must be an
+	// object, so a null or scalar cannot be reported as success.
+	UnwrapRequiredFields []string `json:"unwrap_required_fields,omitempty"`
 }
 
 // ListOperations returns every operation for a service, sorted by operationId.
@@ -346,14 +547,49 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 			Summary: stringOf(op["summary"]),
 			Risk:    stringOf(op["x-octo-risk"]),
 		},
-		BaseURLEnv:  stringOf(doc["x-octo-base-url"]),
-		SpaceHeader: boolOf(doc["x-octo-space-header"]),
+		BaseURLEnv:           stringOf(doc["x-octo-base-url"]),
+		Credential:           stringOf(doc["x-octo-credential"]),
+		SpaceHeader:          boolOf(doc["x-octo-space-header"]),
+		StrictResponseSchema: truthy(op["x-octo-strict-response-schema"]),
+		StrictRequestSchema:  truthy(doc["x-octo-strict-request-schema"]) || truthy(op["x-octo-strict-request-schema"]),
 	}
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
 
 	d.Multipart = boolOf(op["x-octo-multipart"])
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	d.RetryMode = stringOf(op["x-octo-retry"])
+	// Identity routing is declared at the spec top level (every operation in a
+	// domain shares one mount table) but an operation may narrow the allowed
+	// kinds. Both default to absent → no gate, no rewrite.
+	d.AllowedTokenKinds = stringSliceOf(doc["x-octo-allowed-token-kinds"])
+	if opKinds := stringSliceOf(op["x-octo-allowed-token-kinds"]); len(opKinds) > 0 {
+		d.AllowedTokenKinds = opKinds
+	}
+	d.MountByTokenKind = stringMapOf(doc["x-octo-mount-by-token-kind"])
+	d.ResponseFieldAliases = stringSliceMapOf(op["x-octo-response-fields"])
+	d.LosslessIDFields = stringSliceOf(op["x-octo-lossless-id-fields"])
+	unwrap, operationUnwrapSet := op["x-octo-response-unwrap"]
+	d.ResponseUnwrap = stringOf(unwrap)
+	if !operationUnwrapSet {
+		d.ResponseUnwrap = stringOf(doc["x-octo-response-unwrap"])
+	}
+	if d.ResponseUnwrap != "" {
+		d.UnwrapRequiredFields = unwrapRequiredFields(doc, op, d.ResponseUnwrap)
+	}
+	d.AutoIdempotencyKey = stringOf(op["x-octo-auto-idempotency-key"])
+	d.BodyVariantsHint = stringOf(op["x-octo-body-variants-hint"])
+	if variants, ok := op["x-octo-body-variants"].([]any); ok {
+		for _, raw := range variants {
+			variant, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			d.BodyVariants = append(d.BodyVariants, BodyVariant{
+				Name: stringOf(variant["name"]), Required: stringsOf(variant["required"]), Forbidden: stringsOf(variant["forbidden"]),
+			})
+		}
+	}
 	if d.BinaryResponse {
 		if resps, ok := op["responses"].(map[string]any); ok {
 			d.BinaryBody = hasSuccessBody(doc, resps)
@@ -365,6 +601,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 
 	if resps, ok := op["responses"].(map[string]any); ok {
 		d.ResponseSchema = firstSuccessSchema(doc, resps)
+		d.ResponseSecretFields = responseSecretFields(d.ResponseSchema)
 	}
 
 	if pag, ok := op["x-octo-pagination"].(map[string]any); ok {
@@ -380,6 +617,47 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	return d
+}
+
+func responseSecretFields(schema *SchemaInfo) []string {
+	if schema == nil {
+		return nil
+	}
+	var fields []string
+	collectResponseSecretFields(schema, "", &fields)
+	sort.Strings(fields)
+	return fields
+}
+
+func collectResponseSecretFields(schema *SchemaInfo, path string, fields *[]string) {
+	if schema == nil {
+		return
+	}
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		child := schema.Properties[name]
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+		if child.Secret {
+			*fields = append(*fields, childPath)
+		}
+		collectResponseSecretFields(&child, childPath, fields)
+	}
+	if schema.Items != nil {
+		collectResponseSecretFields(schema.Items, path+"[]", fields)
+	}
+	for i := range schema.OneOf {
+		collectResponseSecretFields(&schema.OneOf[i], path, fields)
+	}
+	for i := range schema.AnyOf {
+		collectResponseSecretFields(&schema.AnyOf[i], path, fields)
+	}
 }
 
 func operationParameters(doc map[string]any, pathStr string, op map[string]any) []ParamInfo {
@@ -415,9 +693,17 @@ func operationParameters(doc map[string]any, pathStr string, op map[string]any) 
 				Required:    boolOf(pm["required"]),
 				Description: stringOf(pm["description"]),
 				FlagName:    stringOf(pm["x-octo-flag"]),
+				Secret:      truthy(pm["x-octo-secret"]),
+			}
+			if conditional, ok := pm["x-octo-required-unless-query"].(map[string]any); ok {
+				name, value := stringOf(conditional["name"]), stringOf(conditional["value"])
+				if name != "" {
+					parameter.RequiredUnlessQuery = &ConditionalQueryRequirement{Name: name, Value: value}
+				}
 			}
 			if schema, ok := pm["schema"].(map[string]any); ok {
 				parameter.Type = stringOf(schema["type"])
+				parameter.Format = stringOf(schema["format"])
 				parameter.Default = schema["default"]
 				if items, ok := schema["items"].(map[string]any); ok {
 					resolved := resolveSchema(doc, items)
@@ -501,6 +787,41 @@ func extractJSONSchema(body map[string]any) map[string]any {
 // spec that shares its success response does not fail-closed and silently drop
 // -o. Only one hop is followed (OpenAPI response objects do not chain refs); an
 // unresolvable ref is treated as "no body".
+
+// unwrapRequiredFields reports the properties the operation's 2xx JSON schema
+// declares required for the value that survives unwrapping. The specs describe
+// the post-unwrap shape (required sits at the schema root, not under the unwrap
+// path), so the path is only descended when the schema actually models the
+// envelope. Callers use a non-empty result to refuse a null or scalar value.
+func unwrapRequiredFields(doc, op map[string]any, path string) []string {
+	resps, ok := op["responses"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	schema := ResponsePayloadSchema(firstSuccessSchema(doc, resps), path)
+	if schema == nil {
+		return nil
+	}
+	return append([]string(nil), schema.Required...)
+}
+
+// ResponsePayloadSchema descends only when the schema models the envelope.
+// A payload property matching the unwrap path is ambiguous; such a spec must
+// declare x-octo-response-unwrap-required explicitly. Current specs do not collide.
+func ResponsePayloadSchema(schema *SchemaInfo, path string) *SchemaInfo {
+	if schema == nil || path == "" {
+		return schema
+	}
+	for _, part := range strings.Split(path, ".") {
+		next, ok := schema.Properties[part]
+		if !ok {
+			break
+		}
+		schema = &next
+	}
+	return schema
+}
+
 func hasSuccessBody(doc, resps map[string]any) bool {
 	for code, r := range resps {
 		if !strings.HasPrefix(code, "2") {
@@ -571,6 +892,9 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 			continue
 		}
 		if rm, ok := r.(map[string]any); ok {
+			if ref := stringOf(rm["$ref"]); ref != "" {
+				rm = followResponseRef(doc, ref)
+			}
 			if s := extractJSONSchema(rm); s != nil {
 				resolved := resolveSchema(doc, s)
 				return &resolved
@@ -580,9 +904,10 @@ func firstSuccessSchema(doc, resps map[string]any) *SchemaInfo {
 	return nil
 }
 
-// resolveSchema performs a shallow walk of a schema node, following one level
-// of $ref into components.schemas. Deeper refs are left as `$ref` strings so
-// the schema command can still surface a useful pointer to the consumer.
+// resolveSchema performs a bounded walk of a schema node. The budget counts
+// followed references rather than ordinary property/item nesting, so deeply
+// nested acyclic schemas remain enforceable while recursive component models
+// still terminate with an unresolved `$ref`.
 func resolveSchema(doc, s map[string]any) SchemaInfo {
 	return resolveSchemaWithDepth(doc, s, 0)
 }
@@ -591,49 +916,252 @@ func resolveSchemaWithDepth(doc, s map[string]any, depth int) SchemaInfo {
 	if s == nil {
 		return SchemaInfo{}
 	}
-	if ref, ok := s["$ref"].(string); ok && ref != "" {
-		if depth < 3 {
-			if resolved := followRef(doc, ref); resolved != nil {
-				return resolveSchemaWithDepth(doc, resolved, depth+1)
-			}
-		}
-		return SchemaInfo{Ref: ref}
+	if resolved, ok := resolveSchemaReference(doc, s, depth); ok {
+		return resolved
 	}
 
-	info := SchemaInfo{
-		Type:        stringOf(s["type"]),
-		Format:      stringOf(s["format"]),
-		Description: stringOf(s["description"]),
-		FlagName:    stringOf(s["x-octo-flag"]),
-		MinLength:   intOf(s["minLength"]),
-		MaxLength:   intOf(s["maxLength"]),
-		MinItems:    intOf(s["minItems"]),
-		MaxItems:    intOf(s["maxItems"]),
-		Pattern:     stringOf(s["pattern"]),
+	info := schemaInfoFromNode(s)
+	mergeAllOfSchemas(&info, doc, s["allOf"], depth)
+	appendSchemaRequired(&info, s["required"])
+	appendSchemaProperties(&info, doc, s["properties"], depth)
+	appendSchemaItems(&info, doc, s["items"], depth)
+	info.OneOf = resolveSchemaAlternatives(doc, s["oneOf"], depth)
+	info.AnyOf = resolveSchemaAlternatives(doc, s["anyOf"], depth)
+	return info
+}
+
+func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, bool) {
+	ref, ok := schema["$ref"].(string)
+	if !ok || ref == "" {
+		return SchemaInfo{}, false
 	}
-	if req, ok := s["required"].([]any); ok {
-		for _, x := range req {
-			if name, ok := x.(string); ok {
-				info.Required = append(info.Required, name)
-			}
+	if depth < 3 {
+		if resolved := followRef(doc, ref); resolved != nil {
+			return resolveSchemaWithDepth(doc, resolved, depth+1), true
 		}
 	}
-	if enum, ok := s["enum"].([]any); ok {
+	return SchemaInfo{Ref: ref}, true
+}
+
+func schemaInfoFromNode(schema map[string]any) SchemaInfo {
+	info := SchemaInfo{
+		Type:          schemaType(schema["type"]),
+		Format:        stringOf(schema["format"]),
+		Description:   stringOf(schema["description"]),
+		EnumHint:      stringOf(schema["x-octo-enum-hint"]),
+		FlagName:      stringOf(schema["x-octo-flag"]),
+		Secret:        truthy(schema["x-octo-secret"]),
+		WriteOnly:     boolOf(schema["writeOnly"]),
+		Default:       schema["default"],
+		MinLength:     intOf(schema["minLength"]),
+		MaxLength:     intOf(schema["maxLength"]),
+		MinItems:      intOf(schema["minItems"]),
+		MaxItems:      intOf(schema["maxItems"]),
+		MinProperties: intOf(schema["minProperties"]),
+		Pattern:       stringOf(schema["pattern"]),
+	}
+	if bound, ok := schema["minimum"].(float64); ok {
+		info.Minimum = &bound
+	}
+	if bound, ok := schema["maximum"].(float64); ok {
+		info.Maximum = &bound
+	}
+	if allowed, ok := schema["additionalProperties"].(bool); ok {
+		info.AdditionalProperties = &allowed
+	}
+	// A schema-valued additionalProperties declaration describes allowed
+	// dynamic values. Treat it as open until the validator can retain that
+	// nested schema instead of incorrectly rejecting every dynamic key.
+	if value, ok := schema["const"]; ok {
+		info.Const = value
+	}
+	if enum, ok := schema["enum"].([]any); ok {
 		info.Enum = enum
 	}
-	if props, ok := s["properties"].(map[string]any); ok {
-		info.Properties = map[string]SchemaInfo{}
-		for name, v := range props {
-			if sub, ok := v.(map[string]any); ok {
-				info.Properties[name] = resolveSchemaWithDepth(doc, sub, depth+1)
-			}
+	return info
+}
+
+func mergeAllOfSchemas(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	allOf, ok := value.([]any)
+	if !ok {
+		return
+	}
+	for _, candidate := range allOf {
+		if sub, ok := candidate.(map[string]any); ok {
+			resolved := resolveSchemaWithDepth(doc, sub, depth)
+			mergeSchemaInfo(dst, &resolved)
 		}
 	}
-	if items, ok := s["items"].(map[string]any); ok {
-		sub := resolveSchemaWithDepth(doc, items, depth+1)
-		info.Items = &sub
+}
+
+func appendSchemaRequired(dst *SchemaInfo, value any) {
+	required, ok := value.([]any)
+	if !ok {
+		return
 	}
-	return info
+	for _, candidate := range required {
+		if name, ok := candidate.(string); ok {
+			dst.Required = appendUniqueStrings(dst.Required, name)
+		}
+	}
+}
+
+func appendSchemaProperties(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	properties, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	if dst.Properties == nil {
+		dst.Properties = map[string]SchemaInfo{}
+	}
+	for name, candidate := range properties {
+		if sub, ok := candidate.(map[string]any); ok {
+			dst.Properties[name] = resolveSchemaWithDepth(doc, sub, depth)
+		}
+	}
+}
+
+func appendSchemaItems(dst *SchemaInfo, doc map[string]any, value any, depth int) {
+	items, ok := value.(map[string]any)
+	if !ok {
+		return
+	}
+	resolved := resolveSchemaWithDepth(doc, items, depth)
+	dst.Items = &resolved
+}
+
+func schemaType(value any) string {
+	if single, ok := value.(string); ok {
+		return single
+	}
+	union, ok := value.([]any)
+	if !ok {
+		return ""
+	}
+	for _, candidate := range union {
+		if typ, ok := candidate.(string); ok && typ != "null" {
+			return typ
+		}
+	}
+	return ""
+}
+
+func resolveSchemaAlternatives(doc map[string]any, value any, depth int) []SchemaInfo {
+	alternatives, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	resolved := make([]SchemaInfo, 0, len(alternatives))
+	for _, candidate := range alternatives {
+		if sub, ok := candidate.(map[string]any); ok {
+			resolved = append(resolved, resolveSchemaWithDepth(doc, sub, depth))
+		}
+	}
+	return resolved
+}
+
+func mergeSchemaInfo(dst, src *SchemaInfo) {
+	mergeSchemaIdentity(dst, src)
+	mergeSchemaCollections(dst, src)
+	mergeSchemaConstraints(dst, src)
+}
+
+func mergeSchemaIdentity(dst, src *SchemaInfo) {
+	if dst.Type == "" {
+		dst.Type = src.Type
+	}
+	if dst.Format == "" {
+		dst.Format = src.Format
+	}
+	if dst.Description == "" {
+		dst.Description = src.Description
+	}
+	if dst.EnumHint == "" {
+		dst.EnumHint = src.EnumHint
+	}
+	if dst.FlagName == "" {
+		dst.FlagName = src.FlagName
+	}
+	dst.WriteOnly = dst.WriteOnly || src.WriteOnly
+	if dst.Const == nil {
+		dst.Const = src.Const
+	}
+	if dst.Default == nil {
+		dst.Default = src.Default
+	}
+}
+
+func mergeSchemaCollections(dst, src *SchemaInfo) {
+	dst.Required = appendUniqueStrings(dst.Required, src.Required...)
+	if len(src.Properties) > 0 {
+		if dst.Properties == nil {
+			dst.Properties = map[string]SchemaInfo{}
+		}
+		for name := range src.Properties {
+			dst.Properties[name] = src.Properties[name]
+		}
+	}
+	mergeAdditionalProperties(dst, src)
+	if dst.Items == nil {
+		dst.Items = src.Items
+	}
+	dst.OneOf = append(dst.OneOf, src.OneOf...)
+	dst.AnyOf = append(dst.AnyOf, src.AnyOf...)
+	if len(dst.Enum) == 0 {
+		dst.Enum = src.Enum
+	}
+}
+
+func mergeAdditionalProperties(dst, src *SchemaInfo) {
+	if src.AdditionalProperties == nil {
+		return
+	}
+	if dst.AdditionalProperties == nil || !*src.AdditionalProperties {
+		allowed := *src.AdditionalProperties
+		dst.AdditionalProperties = &allowed
+	}
+}
+
+func mergeSchemaConstraints(dst, src *SchemaInfo) {
+	if dst.MinLength == 0 {
+		dst.MinLength = src.MinLength
+	}
+	if src.Minimum != nil && (dst.Minimum == nil || *src.Minimum > *dst.Minimum) {
+		dst.Minimum = src.Minimum
+	}
+	if src.Maximum != nil && (dst.Maximum == nil || *src.Maximum < *dst.Maximum) {
+		dst.Maximum = src.Maximum
+	}
+	if dst.MaxLength == 0 {
+		dst.MaxLength = src.MaxLength
+	}
+	if dst.MinItems == 0 {
+		dst.MinItems = src.MinItems
+	}
+	if dst.MaxItems == 0 {
+		dst.MaxItems = src.MaxItems
+	}
+	if src.MinProperties > dst.MinProperties {
+		dst.MinProperties = src.MinProperties
+	}
+	if dst.Pattern == "" {
+		dst.Pattern = src.Pattern
+	}
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	for _, value := range dst {
+		seen[value] = struct{}{}
+	}
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		dst = append(dst, value)
+	}
+	return dst
 }
 
 func followRef(doc map[string]any, ref string) map[string]any {
@@ -674,6 +1202,84 @@ func boolOf(v any) bool {
 func intOf(v any) int {
 	n, _ := v.(float64)
 	return int(n)
+}
+
+// stringSliceOf reads a JSON array of strings, ignoring non-string entries.
+// A missing or wrongly-typed value yields nil, which every consumer treats as
+// "extension not declared".
+func stringSliceOf(v any) []string {
+	arr, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, x := range arr {
+		if s, ok := x.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stringMapOf reads a JSON object of string→string. Non-string values are
+// dropped rather than coerced, so a malformed table degrades to "not declared"
+// for that key instead of producing a bogus path.
+func stringMapOf(v any) map[string]string {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(obj))
+	for k, x := range obj {
+		if s, ok := x.(string); ok && s != "" {
+			out[k] = s
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stringSliceMapOf reads a JSON object of string→[]string. A scalar string
+// value is accepted as a one-element list so a simple rename can be written
+// without array syntax.
+func stringSliceMapOf(v any) map[string][]string {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string][]string, len(obj))
+	for k, x := range obj {
+		switch t := x.(type) {
+		case string:
+			if t != "" {
+				out[k] = []string{t}
+			}
+		case []any:
+			if targets := stringSliceOf(t); len(targets) > 0 {
+				out[k] = targets
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func stringsOf(v any) []string {
+	values, _ := v.([]any)
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text, ok := value.(string); ok {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 // truthy accepts a JSON value that may be a boolean `true` or the string

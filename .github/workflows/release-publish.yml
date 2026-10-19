@@ -4,7 +4,7 @@
 #
 # Job graph:
 #
-#   publish ── build ── release-upload: gh release upload ── publish-npm: npm packages
+#                    publish ── build ── release-upload ── publish-npm
 #                         │                                     │
 #                         └──────────── cleanup-dist-artifact ◀──┘
 #

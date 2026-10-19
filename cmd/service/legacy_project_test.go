@@ -20,8 +20,8 @@ func TestLegacyProjectCommandsRejectWithoutRequests(t *testing.T) {
 				t.Error("retired Project subtree remains in help/completion")
 			}
 			root.SetArgs(append([]string{"loop", "project"}, strings.Fields(command)...))
-			if err := root.Execute(); err == nil || !strings.Contains(err.Error(), `unknown subcommand "project"`) {
-				t.Errorf("error = %v, want unknown project subcommand", err)
+			if err := root.Execute(); err == nil || !strings.Contains(err.Error(), `unknown subcommand for "octo-cli loop"; available:`) {
+				t.Errorf("error = %v, want rejected legacy command with available subcommands", err)
 			}
 		})
 	}

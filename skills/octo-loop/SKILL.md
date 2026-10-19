@@ -29,14 +29,16 @@ Do not use it for chat unrelated to Loop, for pure local file work, or when
 
 ## Authentication
 
-Set `OCTO_TOKEN` (or its fully compatible legacy alias `OCTO_BOT_TOKEN`) to a
-credential Fleet accepts directly, such as an Octo Session credential, `bf_`,
-`uk_`, or `octo_loop_`. The CLI does not infer a
+Set `OCTO_TOKEN` (compatible alias `OCTO_BOT_TOKEN`) to a bearer credential Fleet accepts directly, such as
+`bf_`, `uk_`, or `octo_loop_`. The CLI does not infer a
 human, device, or execution principal from a token prefix. Fleet verifies the
 credential and constructs the principal.
 
-If a command fails with an auth error, check `octo-cli auth status` and let the
-user run `octo-cli auth login` — do not fabricate credentials. Never leak or
+Outside daemon task mode, if a command fails with an auth error, check
+`octo-cli auth status` and let the user run `octo-cli auth login`. In
+`OCTO_CREDENTIAL_MODE=task`, those profile diagnostics are unavailable: report
+the auth failure so the daemon can refresh or replace the injected credential.
+Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.
 
@@ -44,22 +46,15 @@ All Loop commands use the same gateway as every other domain. The embedded
 paths include the Fleet module namespace, so requests resolve under
 `$OCTO_API_BASE_URL/fleet/api/v1/*`.
 
-## Workspace UUID
+## Workspace selector
 
-The retired Fleet `loop project` and `loop project resource` commands are no
-longer available. Their IDs are not octo-server Project/Workspace IDs. Do not
-pass the retired `project_id` field in quick-create or autopilot request bodies;
-use `--workspace-id` for workspace scope. This removal does not introduce a new
-Server Project command or change the Workspace ID supplied to daemon tasks.
-
-Workspace-scoped Loop commands require the `--workspace-id <workspace-uuid>`
-flag, sent as the `X-Workspace-ID` header. The value must be the UUID returned
-by `workspace list`, not a workspace slug or name. There is no environment
-fallback — pass it explicitly. Discover available workspaces first:
+Workspace-scoped Loop commands require the `--workspace-id <uuid>` flag (sent as
+the `X-Workspace-ID` header). Use the Workspace UUID, not its Web slug. There is no environment fallback for it — pass it
+explicitly. Discover available workspaces first:
 
 ```bash
 octo-cli loop workspace list
-octo-cli loop workspace member list --workspace-id <workspace-uuid>
+octo-cli loop workspace member list <workspace-id> --workspace-id <workspace-id>
 ```
 
 ## Discover and execute operations
@@ -68,11 +63,11 @@ Output is JSON by default (`--format json`); parse JSON rather than scraping
 tables.
 
 ```bash
-octo-cli loop task list --workspace-id <workspace-uuid>
-octo-cli loop task get <task-id> --workspace-id <workspace-uuid>
-octo-cli loop expert list --workspace-id <workspace-uuid>
-octo-cli loop expert-team list --workspace-id <workspace-uuid>
-octo-cli loop execution message list <execution-id> --workspace-id <workspace-uuid>
+octo-cli loop task list --workspace-id <ws>
+octo-cli loop task get <task-id> --workspace-id <ws>
+octo-cli loop expert list --workspace-id <ws>
+octo-cli loop expert-team list --workspace-id <ws>
+octo-cli loop execution message list <execution-id> --workspace-id <ws>
 ```
 
 Inspect the current contract before constructing a write:
@@ -92,10 +87,10 @@ runtime paths are intentionally not part of this CLI surface.
 Read before you write.
 
 ```bash
-octo-cli loop task get <task-id> --workspace-id <workspace-uuid>
-octo-cli loop task comment list <task-id> --workspace-id <workspace-uuid>
-octo-cli loop task metadata list <task-id> --workspace-id <workspace-uuid>
-octo-cli loop task children-by-parent <task-id> --workspace-id <workspace-uuid>
+octo-cli loop task get <task-id> --workspace-id <ws>
+octo-cli loop task comment list <task-id> --workspace-id <ws>
+octo-cli loop task metadata list <task-id> --workspace-id <ws>
+octo-cli loop task children-by-parent --workspace-id <ws>
 ```
 
 Comment history is paginated with `--page` / `--page-size`.
@@ -127,7 +122,7 @@ trap 'rm -rf "$body_dir"' EXIT
 # ...write the comment body to "$body_dir/reply.md", preserving real newlines...
 printf '{"content": %s}' "$(jq -Rs . < "$body_dir/reply.md")" > "$body_dir/body.json"
 
-octo-cli loop task comment create <task-id> --workspace-id <workspace-uuid> --data @body.json
+octo-cli loop task comment create <task-id> --workspace-id <ws> --data "@$body_dir/body.json"
 ```
 
 Use `mktemp -d`, never a fixed path like `./reply.md` (it can clobber a user
@@ -141,7 +136,7 @@ flag with the same shell hazards, so prefer a JSON body from a file:
 printf '{"title": %s, "description": %s}' \
   "$(jq -Rs . <<< 'Fix login redirect')" \
   "$(jq -Rs . < "$body_dir/description.md")" > "$body_dir/task.json"
-octo-cli loop task create --workspace-id <workspace-uuid> --data @task.json
+octo-cli loop task create --workspace-id <ws> --data "@$body_dir/task.json"
 ```
 
 ### Metadata
@@ -153,7 +148,7 @@ is keyed by a metadata id:
 
 ```bash
 octo-cli schema task.metadata.set
-octo-cli loop task metadata list <task-id> --workspace-id <workspace-uuid>
+octo-cli loop task metadata list <task-id> --workspace-id <ws>
 ```
 
 ## Status and assignment side effects
@@ -161,8 +156,8 @@ octo-cli loop task metadata list <task-id> --workspace-id <workspace-uuid>
 Status and assignment are done through `task update`, not a dedicated command:
 
 ```bash
-octo-cli loop task update <task-id> --workspace-id <workspace-uuid> --status <status>
-octo-cli loop task update <task-id> --workspace-id <workspace-uuid> \
+octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
+octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <uuid> --assignee-type expert   # or expert_team, member
 ```
 
@@ -180,7 +175,7 @@ To create a task and dispatch it to an expert or expert-team in one call, use
 `quick-create` with a `prompt` and an assignee id:
 
 ```bash
-octo-cli loop task quick-create --workspace-id <workspace-uuid> \
+octo-cli loop task quick-create --workspace-id <ws> \
   --prompt "Investigate the login redirect bug" --expert-id <uuid>
 # or --expert-team-id <uuid>
 ```
@@ -189,9 +184,9 @@ Each dispatch produces an execution. Read run state and stop a runaway run
 rather than guessing:
 
 ```bash
-octo-cli loop task execution list <task-id> --workspace-id <workspace-uuid>
-octo-cli loop task execution cancel <task-id> <execution-id> --workspace-id <workspace-uuid>
-octo-cli loop task rerun <task-id> --workspace-id <workspace-uuid> --execution-id <execution-id>
+octo-cli loop task execution list <task-id> --workspace-id <ws>
+octo-cli loop task execution cancel <task-id> <execution-id> --workspace-id <ws>
+octo-cli loop task rerun <task-id> --workspace-id <ws> --execution-id <execution-id>
 ```
 
 Cancelling and rerunning are writes with side effects — confirm before running
@@ -205,9 +200,9 @@ mentioning a person is a notification only. Look up real ids before composing a
 mention:
 
 ```bash
-octo-cli loop expert list --workspace-id <workspace-uuid>
-octo-cli loop expert-team list --workspace-id <workspace-uuid>
-octo-cli loop workspace member list --workspace-id <workspace-uuid>
+octo-cli loop expert list --workspace-id <ws>
+octo-cli loop expert-team list --workspace-id <ws>
+octo-cli loop workspace member list <ws> --workspace-id <ws>
 ```
 
 Do not mention an expert or expert-team just to say thanks, confirm, or wrap up
