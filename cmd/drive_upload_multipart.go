@@ -692,6 +692,19 @@ func withMultipartAbort(
 
 	abortResult := "aborted"
 	abortService, abortSecrets, metadataErr := responseSecretMetadataForOperation(f, "drive.upload.abort")
+	if metadataErr == nil {
+		// Like complete, abort has no URL field in its own schema, but an error
+		// envelope from the backend can echo the presigned URL the operation is
+		// cleaning up. Treat abort as URL-bearing by borrowing the related
+		// presign metadata; an empty field list would disable the client's
+		// redirect and backend-error redaction.
+		_, presignSecrets, presignErr := responseSecretMetadataForOperation(f, "drive.upload.parts_presign")
+		if presignErr != nil {
+			metadataErr = presignErr
+		} else {
+			abortSecrets = appendUniqueStrings(abortSecrets, presignSecrets...)
+		}
+	}
 	if metadataErr != nil {
 		abortResult = "abort_failed: " + metadataErr.Error()
 	} else if _, abortErr := cli.Do(abortCtx, &client.Request{

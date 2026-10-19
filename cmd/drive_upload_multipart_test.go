@@ -697,6 +697,92 @@ func TestDriveUploadFile_CompleteErrorDoesNotLeakSignedURL(t *testing.T) {
 	}
 }
 
+func TestDriveUploadFile_AbortErrorDoesNotLeakSignedURL(t *testing.T) {
+	const marker = "ABORT_SIGNATURE_MUST_NOT_LEAK"
+	signedURL := "https://storage.example/upload?sig=" + marker
+	cases := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+		location    string
+	}{
+		{
+			name:        "error body",
+			status:      http.StatusBadRequest,
+			contentType: "application/json",
+			body: fmt.Sprintf(
+				`{"error":"invalid_argument","message":"abort rejected %s","details":{"url":%q}}`,
+				signedURL, signedURL,
+			),
+		},
+		{
+			name:     "valid redirect",
+			status:   http.StatusFound,
+			location: signedURL,
+		},
+		{
+			name:     "malformed redirect",
+			status:   http.StatusFound,
+			location: signedURL + "#%zz",
+		},
+	}
+
+	for _, tc := range cases {
+		for _, verbose := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/verbose=%t", tc.name, verbose), func(t *testing.T) {
+				src := writeMultipartTestFile(t, []byte("abcdefgh"))
+				var abortCalls atomic.Int32
+				var env *driveTestEnv
+				env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
+						w.WriteHeader(http.StatusCreated)
+						_, _ = w.Write([]byte(multipartPrepareBody("7", 8, 1, 1)))
+					case strings.HasSuffix(r.URL.Path, "/upload/parts-presign"):
+						_ = json.NewEncoder(w).Encode(map[string]any{
+							"parts": []map[string]any{{
+								"part_number": 1,
+								"url":         env.store.URL + "/part/1",
+								"expires_at":  time.Now().Add(time.Hour).Format(time.RFC3339),
+							}},
+						})
+					case strings.HasSuffix(r.URL.Path, "/upload/abort"):
+						abortCalls.Add(1)
+						if tc.contentType != "" {
+							w.Header().Set("Content-Type", tc.contentType)
+						}
+						if tc.location != "" {
+							w.Header().Set("Location", tc.location)
+						}
+						w.WriteHeader(tc.status)
+						_, _ = w.Write([]byte(tc.body))
+					default:
+						t.Errorf("unexpected API request %s %s", r.Method, r.URL.Path)
+					}
+				}, func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.WriteHeader(http.StatusBadRequest)
+				})
+				configureDriveResponseSecretTestClient(env, verbose)
+
+				args := []string{"drive", "upload", "file", src, "--space-id", "s1"}
+				if verbose {
+					args = append([]string{"--verbose"}, args...)
+				}
+				err := env.run(args...)
+				if err == nil {
+					t.Fatal("expected the multipart part upload and abort to fail")
+				}
+				assertNoResponseSecretVisible(t, env, err, marker)
+				if got := abortCalls.Load(); got != 1 {
+					t.Errorf("abort calls = %d, want 1", got)
+				}
+			})
+		}
+	}
+}
+
 func TestMultipartAbortRecoveryHintDoesNotInterpolateServerUploadID(t *testing.T) {
 	tests := []struct {
 		name     string
