@@ -85,6 +85,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
 		SecretValues:         collectSecrets(cobraCmd, rt, pathValues),
+		ResponseSecretFields: d.ResponseSecretFields,
 		SensitiveJSONFields:  writeOnlyBodyFields(d.RequestBody),
 		ResponseUnwrap:       d.ResponseUnwrap,
 		UnwrapRequiredFields: d.UnwrapRequiredFields,

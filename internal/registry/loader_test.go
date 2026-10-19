@@ -64,7 +64,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"bot":         6,
 		"event":       2,
 		"docs":        45,
-		"drive":       43,
+		"drive":       46,
 		"html":        22,
 		"marketplace": 25,
 		"mail":        18,
@@ -82,6 +82,71 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
+	r := MustNew()
+
+	prepare, ok := r.GetOperation("drive.upload.prepare")
+	if !ok || prepare.ResponseSchema == nil {
+		t.Fatal("drive.upload.prepare response schema not found")
+	}
+	var capabilityHeader *ParamInfo
+	for i := range prepare.Parameters {
+		if prepare.Parameters[i].Name == "X-Drive-Upload-Capabilities" {
+			capabilityHeader = &prepare.Parameters[i]
+			break
+		}
+	}
+	if capabilityHeader == nil {
+		t.Fatal("drive.upload.prepare is missing the X-Drive-Upload-Capabilities header")
+	}
+	if capabilityHeader.In != "header" || capabilityHeader.Required || capabilityHeader.FlagName != "upload-capabilities" {
+		t.Errorf("drive.upload.prepare capability header = %+v, want optional header exposed as --upload-capabilities", *capabilityHeader)
+	}
+	for _, field := range []string{"upload_mode", "upload_url"} {
+		if _, ok := prepare.ResponseSchema.Properties[field]; !ok {
+			t.Errorf("drive.upload.prepare response is missing %s", field)
+		}
+		if contains(prepare.ResponseSchema.Required, field) {
+			t.Errorf("drive.upload.prepare response %s must remain optional", field)
+		}
+	}
+
+	presign, ok := r.GetOperation("drive.upload.parts_presign")
+	if !ok || presign.RequestBody == nil {
+		t.Fatal("drive.upload.parts_presign request schema not found")
+	}
+	if want := []string{"upload_id", "part_numbers"}; !reflect.DeepEqual(presign.RequestBody.Required, want) {
+		t.Errorf("drive.upload.parts_presign required = %v, want %v", presign.RequestBody.Required, want)
+	}
+	partNumbers, ok := presign.RequestBody.Properties["part_numbers"]
+	if !ok {
+		t.Fatal("drive.upload.parts_presign is missing part_numbers")
+	}
+	if partNumbers.Type != "array" || partNumbers.MinItems != 1 || partNumbers.MaxItems != 20 {
+		t.Errorf("drive.upload.parts_presign part_numbers = type %q, minItems %d, maxItems %d; want array, 1, 20",
+			partNumbers.Type, partNumbers.MinItems, partNumbers.MaxItems)
+	}
+
+	complete, ok := r.GetOperation("drive.upload.complete")
+	if !ok || complete.RequestBody == nil {
+		t.Fatal("drive.upload.complete request schema not found")
+	}
+	parts, ok := complete.RequestBody.Properties["parts"]
+	if !ok || parts.Items == nil {
+		t.Fatal("drive.upload.complete is missing parts items")
+	}
+	partNumber, ok := parts.Items.Properties["part_number"]
+	if !ok || partNumber.Minimum == nil || partNumber.Maximum == nil {
+		t.Fatal("drive.upload.complete part_number is missing numeric bounds")
+	}
+	if *partNumber.Minimum != 1 || *partNumber.Maximum != 10000 {
+		t.Errorf("drive.upload.complete part_number bounds = %v..%v, want 1..10000", *partNumber.Minimum, *partNumber.Maximum)
+	}
+	if want := []string{"file.id", "file.parent_id"}; !reflect.DeepEqual(complete.LosslessIDFields, want) {
+		t.Errorf("drive.upload.complete lossless id fields = %v, want %v", complete.LosslessIDFields, want)
 	}
 }
 

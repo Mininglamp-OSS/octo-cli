@@ -424,8 +424,12 @@ type OperationDetail struct {
 	// uint64 ids are emitted as decimal strings so values above 2^53 survive an
 	// Agent's JSON parser. Applied after ResponseFieldAliases, so paths name
 	// post-alias keys.
-	LosslessIDFields []string      `json:"lossless_id_fields,omitempty"`
-	BodyVariants     []BodyVariant `json:"body_variants,omitempty"`
+	LosslessIDFields []string `json:"lossless_id_fields,omitempty"`
+	// ResponseSecretFields lists response-schema paths marked x-octo-secret.
+	// The client uses these paths to collect actual secret values from a
+	// backend error body before parsing or rendering it.
+	ResponseSecretFields []string      `json:"response_secret_fields,omitempty"`
+	BodyVariants         []BodyVariant `json:"body_variants,omitempty"`
 	// BodyVariantsHint is the operation-specific recovery guidance returned
 	// when no declared request-body variant matches.
 	BodyVariantsHint string `json:"body_variants_hint,omitempty"`
@@ -597,6 +601,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 
 	if resps, ok := op["responses"].(map[string]any); ok {
 		d.ResponseSchema = firstSuccessSchema(doc, resps)
+		d.ResponseSecretFields = responseSecretFields(d.ResponseSchema)
 	}
 
 	if pag, ok := op["x-octo-pagination"].(map[string]any); ok {
@@ -612,6 +617,47 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	return d
+}
+
+func responseSecretFields(schema *SchemaInfo) []string {
+	if schema == nil {
+		return nil
+	}
+	var fields []string
+	collectResponseSecretFields(schema, "", &fields)
+	sort.Strings(fields)
+	return fields
+}
+
+func collectResponseSecretFields(schema *SchemaInfo, path string, fields *[]string) {
+	if schema == nil {
+		return
+	}
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		child := schema.Properties[name]
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+		if child.Secret {
+			*fields = append(*fields, childPath)
+		}
+		collectResponseSecretFields(&child, childPath, fields)
+	}
+	if schema.Items != nil {
+		collectResponseSecretFields(schema.Items, path+"[]", fields)
+	}
+	for i := range schema.OneOf {
+		collectResponseSecretFields(&schema.OneOf[i], path, fields)
+	}
+	for i := range schema.AnyOf {
+		collectResponseSecretFields(&schema.AnyOf[i], path, fields)
+	}
 }
 
 func operationParameters(doc map[string]any, pathStr string, op map[string]any) []ParamInfo {

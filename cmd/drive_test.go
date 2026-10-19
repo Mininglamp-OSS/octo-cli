@@ -95,8 +95,8 @@ func (e *driveTestEnv) data(t *testing.T) map[string]any {
 
 // --- command tree ---
 
-// TestDrive_CommandCount pins the 45-command surface: 39 generated leaves plus
-// the six composites. A drift here means either a spec op was added without a
+// TestDrive_CommandCount pins the 49-command surface: 42 generated leaves plus
+// the seven composites. A drift here means either a spec op was added without a
 // decision or a composite stopped registering.
 func TestDrive_CommandCount(t *testing.T) {
 	tf := cmdutil.NewTestFactory()
@@ -114,7 +114,7 @@ func TestDrive_CommandCount(t *testing.T) {
 		"folder":      {"create", "list", "rename", "move", "delete"},
 		"file":        {"get", "move", "copy", "rename"},
 		"blob":        {"create", "get", "list", "delete"},
-		"upload":      {"file", "prepare", "confirm", "cancel"},
+		"upload":      {"file", "prepare", "confirm", "cancel", "parts-presign", "complete", "abort"},
 		"download":    {"file", "url"},
 		"doc":         {"mount", "unmount", "list", "candidates"},
 		"share":       {"create", "blob-create", "list", "revoke", "access", "download"},
@@ -138,8 +138,8 @@ func TestDrive_CommandCount(t *testing.T) {
 			}
 		}
 	}
-	if total != 46 {
-		t.Errorf("expected 46 drive commands, the table lists %d", total)
+	if total != 49 {
+		t.Errorf("expected 49 drive commands, the table lists %d", total)
 	}
 	// Nothing beyond the table: a stray leaf (e.g. a duplicate generated
 	// `share access`) would otherwise pass unnoticed.

@@ -388,6 +388,13 @@ func TestParseBackendError_DriveLowercaseCodes(t *testing.T) {
 		{"not_found", 404, `{"error":"not_found","message":"drive: not found"}`, "api_error", "not_found", 1},
 		{"conflict", 409, `{"error":"conflict","message":"drive: conflict"}`, "validation", "conflict", 2},
 		{"invalid_argument", 400, `{"error":"invalid_argument","message":"drive: invalid argument"}`, "validation", "invalid_argument", 2},
+		{"file_too_large", 413, `{"error":"file_too_large","message":"file exceeds limit","details":{"max_size_kb":1024,"size":2048}}`, "validation", "file_too_large", 2},
+		{"upload_mode_conflict", 409, `{"error":"upload_mode_conflict","message":"mode mismatch"}`, "validation", "upload_mode_conflict", 2},
+		{"client_capability_required", 409, `{"error":"client_capability_required","message":"capability missing"}`, "validation", "client_capability_required", 2},
+		{"object_size_mismatch", 409, `{"error":"object_size_mismatch","message":"size mismatch","details":{"actual_size":2048,"declared_size":1024}}`, "validation", "object_size_mismatch", 2},
+		{"upload_session_not_active", 409, `{"error":"upload_session_not_active","message":"session completed"}`, "validation", "upload_session_not_active", 2},
+		{"upload_policy_unavailable", 503, `{"error":"upload_policy_unavailable","message":"policy unavailable"}`, "api_error", "upload_policy_unavailable", 1},
+		{"too_many_upload_sessions", 429, `{"error":"too_many_upload_sessions","message":"session limit"}`, "rate_limited", "too_many_upload_sessions", 1},
 		{"unauthorized", 401, `{"error":"unauthorized","message":"missing token"}`, "auth_error", "unauthorized", 3},
 		{"auth_unavailable", 500, `{"error":"auth_unavailable","message":"upstream down"}`, "network", "auth_unavailable", 1},
 		{"internal", 500, `{"error":"internal","message":"boom"}`, "api_error", "internal", 1},
@@ -480,6 +487,24 @@ func TestBackendErrorMapping_CaseCounterpartsAgreeOnType(t *testing.T) {
 		if entry.Type != counterpart.Type {
 			t.Errorf("%s is %q but %s is %q; a caller must not have to know which backend answered",
 				code, entry.Type, strings.ToUpper(code), counterpart.Type)
+		}
+	}
+}
+
+// file_too_large shares a Type and exit code with the generic 413 fallback, so
+// parsing that status alone cannot prove the drive-specific mapping still
+// exists. Pin the explicit entry and its actionable hint directly.
+func TestBackendErrorMapping_FileTooLargeIsExplicit(t *testing.T) {
+	entry, ok := backendErrorMapping["file_too_large"]
+	if !ok {
+		t.Fatal("file_too_large must have an explicit drive error mapping")
+	}
+	if entry.Type != "validation" {
+		t.Errorf("file_too_large type = %q, want validation", entry.Type)
+	}
+	for _, want := range []string{"max_size_kb", "size"} {
+		if !contains(entry.Hint, want) {
+			t.Errorf("file_too_large hint = %q, want it to mention %q", entry.Hint, want)
 		}
 	}
 }
