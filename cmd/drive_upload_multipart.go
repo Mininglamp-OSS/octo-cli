@@ -292,7 +292,12 @@ func validatePresignedParts(
 				"report the backend response")
 		}
 		seen[item.PartNumber] = true
-		expiry, _ := time.Parse(time.RFC3339, item.ExpiresAt)
+		expiry, parseErr := time.Parse(time.RFC3339, item.ExpiresAt)
+		if parseErr != nil {
+			return nil, output.ErrWithHint("internal", "RESPONSE_DECODE",
+				fmt.Sprintf("parts-presign returned an invalid expires_at for part %d", item.PartNumber),
+				"report the backend response")
+		}
 		parts[i] = multipartPart{number: item.PartNumber, url: item.URL, expiresAt: expiry}
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i].number < parts[j].number })
@@ -508,7 +513,7 @@ func putMultipartPart(
 		}
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	_, copyErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 
 	switch {
 	case resp.StatusCode == http.StatusForbidden:
@@ -533,6 +538,12 @@ func putMultipartPart(
 			err: output.ErrWithHint("api_error", "UPLOAD_FAILED",
 				fmt.Sprintf("object storage returned status %d for part %d", resp.StatusCode, part.number),
 				"the part request was rejected; the incomplete multipart session will be aborted"),
+		}
+	}
+	if copyErr != nil {
+		return partPutResult{
+			retryable: true,
+			err:       transferNetworkError("part upload response", target, copyErr),
 		}
 	}
 

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -79,7 +80,7 @@ func multipartStoreHandler(
 		if wantEnd > len(payload) {
 			wantEnd = len(payload)
 		}
-		if string(body) != string(payload[wantStart:wantEnd]) {
+		if !bytes.Equal(body, payload[wantStart:wantEnd]) {
 			t.Errorf("part %d body = %q, want %q", number, body, payload[wantStart:wantEnd])
 		}
 
@@ -533,8 +534,7 @@ func TestDriveUploadFile_UnknownModeFallsBackToSingle(t *testing.T) {
 
 func TestDriveUploadFile_UnknownModeWithoutUploadURLIsModeConflict(t *testing.T) {
 	var prepareCalls, cancelCalls int
-	var env *driveTestEnv
-	env = newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/prepare-upload"):
 			prepareCalls++
@@ -568,6 +568,26 @@ func TestDriveUploadFile_UnknownModeWithoutUploadURLIsModeConflict(t *testing.T)
 	}
 	if cancelCalls != 1 {
 		t.Errorf("cancel calls = %d, want 1 for the pending row", cancelCalls)
+	}
+}
+
+func TestValidatePresignedPartsRejectsInvalidExpiry(t *testing.T) {
+	_, err := validatePresignedParts([]struct {
+		PartNumber uint64 `json:"part_number"`
+		URL        string `json:"url"`
+		ExpiresAt  string `json:"expires_at"`
+	}{
+		{PartNumber: 1, URL: "https://storage.example/part-1", ExpiresAt: "not-a-timestamp"},
+	}, []uint64{1})
+	if err == nil {
+		t.Fatal("expected invalid expires_at to fail validation")
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "RESPONSE_DECODE" {
+		t.Fatalf("code = %v, want RESPONSE_DECODE", err)
+	}
+	if !strings.Contains(ee.Message, "invalid expires_at for part 1") {
+		t.Errorf("message = %q, want invalid expires_at detail", ee.Message)
 	}
 }
 
