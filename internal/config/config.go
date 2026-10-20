@@ -22,7 +22,7 @@ const (
 	EnvTaskToken = "OCTO_TASK_TOKEN"
 	// EnvCredentialMode selects the credential resolution policy. The empty
 	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
-	// used by octo-daemon task processes.
+	// selected explicitly for an individual task-workflow CLI invocation.
 	EnvCredentialMode  = "OCTO_CREDENTIAL_MODE"
 	CredentialModeTask = "task"
 	EnvSpaceID         = "OCTO_SPACE_ID"
@@ -67,19 +67,29 @@ type ResolvedEnvToken struct {
 // by ResolveEnvToken so the auth gate and credential provider cannot drift.
 func Load() *Config {
 	token := ResolveEnvToken()
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode)))
+	spaceID := os.Getenv(EnvSpaceID)
+	if mode == CredentialModeTask {
+		spaceID = ""
+	}
 	return &Config{
 		APIBaseURL:     envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
 		BotToken:       token.Token,
-		CredentialMode: strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode))),
-		SpaceID:        os.Getenv(EnvSpaceID),
+		CredentialMode: mode,
+		SpaceID:        spaceID,
 		Format:         envOrDefault(EnvFormat, "json"),
 	}
 }
 
-// ResolveEnvToken normalizes the supported environment aliases once. Both
-// normal and task credential policies consume this result without branching on
-// the alias that supplied it.
+// ResolveEnvToken selects the explicit credential mode at the environment
+// boundary. Task mode never reads or falls back to ordinary token aliases.
 func ResolveEnvToken() ResolvedEnvToken {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(EnvCredentialMode)), CredentialModeTask) {
+		if v := strings.TrimSpace(os.Getenv(EnvTaskToken)); v != "" {
+			return ResolvedEnvToken{Token: v, Source: "env:" + EnvTaskToken}
+		}
+		return ResolvedEnvToken{}
+	}
 	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
 		return ResolvedEnvToken{Token: v, Source: "env:" + EnvToken}
 	}
@@ -97,6 +107,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported %s %q", EnvCredentialMode, c.CredentialMode)
 	}
 	if c.BotToken == "" {
+		if c.CredentialMode == CredentialModeTask {
+			return fmt.Errorf("%s is required in task mode", EnvTaskToken)
+		}
 		return fmt.Errorf("%s or %s is required (Octo or Loop bearer credential)", EnvToken, EnvBotToken)
 	}
 	if c.APIBaseURL != "" {

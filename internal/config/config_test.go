@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -69,7 +70,7 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
-	t.Setenv(EnvCredentialMode, CredentialModeTask)
+	t.Setenv(EnvCredentialMode, "")
 
 	cfg := Load()
 	if cfg.APIBaseURL != "http://api.example" {
@@ -78,7 +79,7 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	if cfg.BotToken != "app_xxx" {
 		t.Errorf("BotToken = %q", cfg.BotToken)
 	}
-	if cfg.CredentialMode != CredentialModeTask {
+	if cfg.CredentialMode != "" {
 		t.Errorf("CredentialMode = %q", cfg.CredentialMode)
 	}
 	if cfg.SpaceID != "space-1" {
@@ -180,5 +181,45 @@ func TestLoad_TokenPrecedence(t *testing.T) {
 				t.Errorf("BotToken = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoad_TaskCredentialIsolation(t *testing.T) {
+	for _, taskToken := range []string{" opaque-task-credential ", "", "   "} {
+		t.Run(taskToken, func(t *testing.T) {
+			t.Setenv(EnvCredentialMode, " TASK ")
+			t.Setenv(EnvTaskToken, taskToken)
+			t.Setenv(EnvToken, "bf_canonical")
+			t.Setenv(EnvBotToken, "bf_alias")
+			t.Setenv(EnvSpaceID, "native-space")
+			cfg := Load()
+			want := strings.TrimSpace(taskToken)
+			if cfg.BotToken != want || cfg.SpaceID != "" {
+				t.Fatalf("task config mixed native credentials: token=%q space=%q", cfg.BotToken, cfg.SpaceID)
+			}
+			resolved := ResolveEnvToken()
+			if resolved.Token != want {
+				t.Fatalf("resolved token = %q, want dedicated task token", resolved.Token)
+			}
+			if want == "" {
+				if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), EnvTaskToken) {
+					t.Fatalf("Validate = %v, want missing task-token guidance", err)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveEnvToken_NormalModeIgnoresTaskToken(t *testing.T) {
+	t.Setenv(EnvCredentialMode, "")
+	t.Setenv(EnvTaskToken, "task-credential")
+	t.Setenv(EnvToken, "")
+	t.Setenv(EnvBotToken, "bf_native")
+	if got := ResolveEnvToken(); got.Token != "bf_native" || got.Source != "env:"+EnvBotToken {
+		t.Fatalf("normal credential = %+v", got)
+	}
+	t.Setenv(EnvBotToken, "")
+	if got := ResolveEnvToken(); got.Token != "" {
+		t.Fatalf("normal mode consumed task credential: %+v", got)
 	}
 }

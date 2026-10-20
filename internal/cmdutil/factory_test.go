@@ -149,21 +149,21 @@ func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
 }
 
 func TestFactory_TaskCredentialMode(t *testing.T) {
-	t.Run("supports legacy alias without opening auth store", func(t *testing.T) {
+	t.Run("uses dedicated token without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"
 		if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv(authstore.EnvConfigDir, blockedStore)
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-		t.Setenv(config.EnvBotToken, "octo_loop_task")
+		t.Setenv(config.EnvTaskToken, "opaque-task-credential")
 
 		f := NewDefaultFactory()
 		cred, err := f.Credential()
 		if err != nil {
 			t.Fatalf("Credential: %v", err)
 		}
-		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" {
+		if cred.Token != "opaque-task-credential" || cred.BotKind != "agent_task" || cred.SpaceID != "" {
 			t.Fatalf("credential = %+v", cred)
 		}
 		identity, ok := f.identityValue().(map[string]any)
@@ -172,17 +172,14 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 		}
 	})
 
-	t.Run("prefers canonical alias", func(t *testing.T) {
+	t.Run("generic aliases cannot replace task credential", func(t *testing.T) {
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-		t.Setenv(config.EnvToken, "octo_loop_preferred")
-		t.Setenv(config.EnvBotToken, "octo_loop_legacy")
+		t.Setenv(config.EnvTaskToken, "")
+		t.Setenv(config.EnvToken, "octo_loop_legacy")
+		t.Setenv(config.EnvBotToken, "bf_native")
 		f := NewDefaultFactory()
-		cred, err := f.Credential()
-		if err != nil {
-			t.Fatalf("Credential: %v", err)
-		}
-		if cred.Token != "octo_loop_preferred" || cred.Source != "env:"+config.EnvToken {
-			t.Fatalf("credential = %+v", cred)
+		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {
+			t.Fatalf("Credential error = %v, want ErrNoCredential", err)
 		}
 	})
 
@@ -197,7 +194,7 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 	} {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
 			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-			t.Setenv(config.EnvBotToken, "octo_loop_task")
+			t.Setenv(config.EnvTaskToken, "opaque-task-credential")
 			f := NewDefaultFactory()
 			tc.setup(t, f)
 			if _, err := f.Credential(); err == nil {
@@ -207,6 +204,7 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 	}
 
 	t.Run("missing injected token fails closed", func(t *testing.T) {
+		t.Setenv(config.EnvTaskToken, "")
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
 		t.Setenv(config.EnvToken, "")
 		t.Setenv(config.EnvBotToken, "")
