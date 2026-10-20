@@ -144,7 +144,7 @@ for (const method of ["get", "remove"]) {
       const key = `${config.prefixes.test}/cli/npm/.publish-lock`;
       const original = f.store[method];
       f.store[method] = async (objectKey, ...rest) => {
-        if (objectKey === key) throw new Error("private signed-url secret");
+        if (objectKey === key) throw Object.assign(new Error("private signed-url secret"), {statusCode: 403});
         return original(objectKey, ...rest);
       };
       const originalPut = f.store.put;
@@ -160,6 +160,7 @@ for (const method of ["get", "remove"]) {
       assert.equal(warnings.length, 1);
       assert.ok(warnings[0].includes(key));
       assert.match(warnings[0], /inspect/i);
+      assert.match(warnings[0], /HTTP 403/);
       assert.doesNotMatch(warnings[0], /private|signed-url|secret/);
       assert.equal(f.objects.has(key), true);
     });

@@ -42,8 +42,12 @@ async function publishPackages({dir, config, execute = false, store, fetcher = f
       const current = await store.get(key);
       if (current?.equals(owner)) await store.remove(key);
       else if (current) warn(`Warning: COS publish lock changed ownership; left ${key} untouched. Inspect it before retrying.`);
-    } catch {
-      warn(`Warning: Could not release the COS publish lock. Inspect ${key} and remove it only after confirming no publisher is active.`);
+    } catch (error) {
+      // SDK messages may contain signed URLs or credentials. Only expose a
+      // validated HTTP status, not the raw message or arbitrary SDK fields.
+      const status = Number(error?.statusCode);
+      const detail = Number.isInteger(status) && status >= 100 && status <= 599 ? ` (HTTP ${status})` : "";
+      warn(`Warning: Could not release the COS publish lock${detail}. Inspect ${key} and remove it only after confirming no publisher is active.`);
     }
   }
 }

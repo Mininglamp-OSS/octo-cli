@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`auth status` credential selection** — reports the same credential source,
+  masked token, and effective API origin as ordinary requests, including when
+  environment credentials override stored profiles. Explicit selectors still
+  fail closed; unverified environment Bot IDs remain `robot_id_claimed`.
+- **COS publish lock diagnostics** — cleanup warnings include a safe HTTP
+  status without exposing SDK messages, signed URLs, or credentials. Cleanup
+  failures still preserve the original publication result.
+
+### Changed
+
+- **Loop task token isolation (breaking)** — task mode now consumes only
+  `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or
+  falls back to profiles. Pair daemon-launched tasks with daemon v1.2.1 or later,
+  and set `OCTO_CREDENTIAL_MODE=task` per Loop invocation. Ordinary commands
+  ignore the task token and continue using independent bot credentials.
+
 ### Removed
 
 - **Legacy Fleet Project commands** — removed `loop project`
@@ -23,7 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and
   `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias. Both accept every
   supported credential kind, override implicit stored profiles, and are
-  normalized once before normal or task policy is applied. Explicit
+  normalized once for ordinary credential resolution. Task mode uses only
+  the separate `OCTO_TASK_TOKEN`. Explicit
   `--bot-id` / `--profile` selectors still win. The success envelope's
   `identity.source` names the alias that supplied the value.
 - **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
