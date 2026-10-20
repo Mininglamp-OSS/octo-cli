@@ -38,6 +38,13 @@ Outside daemon task mode, if a command fails with an auth error, check
 `octo-cli auth status` and let the user run `octo-cli auth login`. In
 `OCTO_CREDENTIAL_MODE=task`, those profile diagnostics are unavailable: report
 the auth failure so the daemon can refresh or replace the injected credential.
+For task workflow and collaboration in a daemon execution, select task mode
+for each invocation: `OCTO_CREDENTIAL_MODE=task "$OCTO_CLI_PATH" loop ...`.
+Task mode reads only `OCTO_TASK_TOKEN`; missing task credentials never fall
+back to ordinary token aliases or host profiles. Independent business calls
+keep ordinary authentication. Do not export mode for the session or switch
+identity to retry an authentication failure. The standalone examples below
+use ordinary mode; follow the daemon's scoped examples during its workflow.
 Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.

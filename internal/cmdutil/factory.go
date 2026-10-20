@@ -222,8 +222,9 @@ func configureMailProviders(f *Factory) {
 // buildConfig loads the env config and reflects the resolved credential into it
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
 // profile-based use and config show reports the active token. Only the "no
-// credential found" case is swallowed (so cfg.Validate reports the familiar
-// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// credential found" case outside task mode is swallowed (so cfg.Validate
+// reports the familiar OCTO_BOT_TOKEN hint for the zero-config case); task-mode
+// resolution errors retain their task-specific guidance. Structured errors
 // (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
 // surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
@@ -233,7 +234,7 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	}
 	cred, err := f.CredentialFunc()
 	if err != nil {
-		if errors.Is(err, credential.ErrNoCredential) {
+		if errors.Is(err, credential.ErrNoCredential) && cfg.CredentialMode != config.CredentialModeTask {
 			return cfg, nil
 		}
 		return nil, err
@@ -332,11 +333,9 @@ func MailBindingKeyForBot(bot *credential.BotCredential, apiOrigin string) (stri
 	return authstore.MailBindingKey(bot.RobotID, bot.SpaceID, bot.Token, apiOrigin)
 }
 
-// buildTaskCredential is deliberately separate from the normal provider
-// chain when OCTO_CREDENTIAL_MODE=task is present. The daemon is responsible
-// for preserving that marker and isolating OCTO_CONFIG_DIR for task processes;
-// the CLI cannot make a caller-controlled environment tamper-proof. Fleet
-// verifies the opaque bearer and enforces its bindings/actions.
+// buildTaskCredential consumes only the dedicated credential for an explicitly
+// selected task invocation. The daemon provides its value; Fleet verifies the
+// opaque bearer and enforces its principal, bindings and actions.
 func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
@@ -345,18 +344,11 @@ func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
 	}
-	cred, err := credential.NewEnvProvider().Resolve()
-	if err != nil {
-		return nil, err
+	resolved := config.ResolveEnvToken()
+	if resolved.Token == "" {
+		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvTaskToken)
 	}
-	if cred == nil {
-		return nil, fmt.Errorf("%w: %s=task requires %s or %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
-	}
-	// Task credentials are server-bound; never forward a caller-selected Space
-	// context alongside them.
-	cred.SpaceID = ""
-	cred.BotKind = "agent_task"
-	return cred, nil
+	return &credential.BotCredential{Token: resolved.Token, Source: resolved.Source, BotKind: "agent_task"}, nil
 }
 
 // AuthStore lazily constructs and caches the credential store.
@@ -725,6 +717,8 @@ func WrapCLIError(err error) error {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
+	case strings.Contains(lower, "octo_task_token"):
+		return output.ErrAuth(msg, "the daemon must provide OCTO_TASK_TOKEN for this task invocation")
 	case strings.Contains(lower, "octo_token"),
 		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),

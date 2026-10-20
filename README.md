@@ -305,8 +305,8 @@ a real person with `--on-behalf-of <uid>` (OBO, requires an active grant).
 
 ### Token variables
 
-Explicit CLI profile selectors win first. Otherwise, environment credentials
-override implicit stored profiles; the two environment names have identical
+Outside task mode, explicit CLI profile selectors win first. Otherwise,
+environment credentials override implicit stored profiles; the two environment names have identical
 semantics and differ only in priority:
 
 | Priority | Source | Notes |
@@ -337,20 +337,47 @@ rejected.
 |---------------------|----------------------------------------------------------|
 | `OCTO_TOKEN`        | Canonical token variable (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); wins over `OCTO_BOT_TOKEN`. |
 | `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
-| `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
+| `OCTO_TASK_TOKEN`   | Dedicated daemon-issued task credential; read only when task mode is explicitly selected. |
+| `OCTO_CREDENTIAL_MODE` | Set to `task` for one task-workflow invocation; unset for ordinary authentication. |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select a stored profile by robot id when no environment credential is set. |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 
-Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
-isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
-the restricted CLI policy but is not a security boundary against a process that
-can rewrite its own environment. In task mode, the daemon injects
-`OCTO_TOKEN`; `OCTO_BOT_TOKEN` remains accepted for compatibility. Both must
-contain a Loop task credential. `auth` and `config` diagnostics are intentionally
-unavailable.
+The daemon provides `OCTO_TASK_TOKEN` to its task process without selecting a
+default credential mode or placing the task credential in `OCTO_TOKEN` /
+`OCTO_BOT_TOKEN`. The agent selects task mode for each task-workflow call:
+
+```bash
+# Task workflow and collaboration use the identity of this execution.
+OCTO_CREDENTIAL_MODE=task "$OCTO_CLI_PATH" loop task get <task-id> --workspace-id <workspace-id>
+
+# Independent business operations keep ordinary authentication.
+"$OCTO_CLI_PATH" docs list
+```
+
+Task mode reads **only `OCTO_TASK_TOKEN`**. A missing or blank task token fails
+without falling back to other environment variables or stored profiles.
+The CLI does not infer the authenticated principal from the token's prefix;
+Fleet verifies the bearer and enforces its bindings and actions. Ordinary mode
+ignores `OCTO_TASK_TOKEN` and preserves the existing credential precedence.
+
+Task mode retains its existing Loop command boundary and offline discovery
+commands. `auth`, `config`, `api`, native services, `--profile`, `--bot-id`,
+`OCTO_BOT_ID`, and `--space` remain unavailable in task mode. It discards native
+`OCTO_SPACE_ID`; workspace-scoped Loop calls use `--workspace-id`.
+
+The daemon's task prompts explain when to use each identity and include
+per-invocation task mode in workflow examples. Do not export mode for an entire
+session or switch identities to retry an authentication failure. Independent
+business calls use their ordinary, separately authorized credentials.
+On Windows, the generated PowerShell task examples restore the previous mode
+in `finally` after the invocation.
+
+Upgrade the CLI and daemon together: older task-token aliases are not accepted
+by the updated task mode. Credential mode is a selection policy, not a
+filesystem sandbox; host-file access remains a separate isolation concern.
 
 ## Output
 

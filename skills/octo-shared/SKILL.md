@@ -74,6 +74,13 @@ Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
 not expose profile diagnostics; use the `identity` echoed by each success
 envelope and report authentication failures to the daemon instead (see §3).
 
+For task workflow and collaboration in a daemon execution, select
+`OCTO_CREDENTIAL_MODE=task` for each CLI invocation. It reads only the injected
+`OCTO_TASK_TOKEN`; independent business operations use ordinary authentication.
+Do not export mode for the session or switch identity to retry an auth failure.
+Follow the daemon's scoped workflow examples. Outside task mode, the existing
+environment and profile credential rules remain unchanged.
+
 ## 2. Unified gateway configuration
 
 All Octo domains use one gateway. Override it only for test or self-hosted
