@@ -41,6 +41,10 @@ type GlobalOptions struct {
 	// profile store is empty.
 	Profile string
 	BotID   string
+
+	// CommandService is set by the root command before resolving credentials.
+	// Task mode uses it to separate Loop execution identity from native Octo calls.
+	CommandService string
 }
 
 // Factory is the DI container. All accessors are lazy + cached so a command
@@ -222,8 +226,9 @@ func configureMailProviders(f *Factory) {
 // buildConfig loads the env config and reflects the resolved credential into it
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
 // profile-based use and config show reports the active token. Only the "no
-// credential found" case is swallowed (so cfg.Validate reports the familiar
-// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// credential found" case outside task mode is swallowed (so cfg.Validate
+// reports the familiar OCTO_BOT_TOKEN hint for the zero-config case); task-mode
+// resolution errors retain their task-specific guidance. Structured errors
 // (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
 // surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
@@ -233,7 +238,7 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	}
 	cred, err := f.CredentialFunc()
 	if err != nil {
-		if errors.Is(err, credential.ErrNoCredential) {
+		if errors.Is(err, credential.ErrNoCredential) && cfg.CredentialMode != config.CredentialModeTask {
 			return cfg, nil
 		}
 		return nil, err
@@ -242,9 +247,7 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 		if cred.Token != "" {
 			cfg.BotToken = cred.Token
 		}
-		if cred.SpaceID != "" {
-			cfg.SpaceID = cred.SpaceID
-		}
+		cfg.SpaceID = cred.SpaceID
 		if err := f.overlayProfileBaseURL(cfg, cred.Profile); err != nil {
 			return nil, err
 		}
@@ -342,21 +345,54 @@ func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
 		return nil, fmt.Errorf("%s=task does not allow --profile, --bot-id, or %s", config.EnvCredentialMode, config.EnvBotID)
 	}
+	if f.Globals.CommandService != "" && f.Globals.CommandService != "loop" {
+		return f.buildTaskBotCredential()
+	}
 	if f.Globals.Space != "" {
 		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
 	}
-	cred, err := credential.NewEnvProvider().Resolve()
-	if err != nil {
-		return nil, err
+	token := strings.TrimSpace(os.Getenv(config.EnvTaskToken))
+	source := "env:" + config.EnvTaskToken
+	if token == "" {
+		// Compatibility with daemons that inject the task token through the
+		// generic aliases. A native Bot token must never replace task identity.
+		resolved := config.ResolveEnvToken()
+		token, source = resolved.Token, resolved.Source
 	}
-	if cred == nil {
-		return nil, fmt.Errorf("%w: %s=task requires %s or %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
+	if token == "" {
+		return nil, fmt.Errorf("%w: %s=task requires a task credential in %s (legacy: %s or %s)", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvTaskToken, config.EnvToken, config.EnvBotToken)
 	}
-	// Task credentials are server-bound; never forward a caller-selected Space
-	// context alongside them.
-	cred.SpaceID = ""
-	cred.BotKind = "agent_task"
-	return cred, nil
+	if !isTaskToken(token) {
+		return nil, fmt.Errorf("%s=task requires a Loop task credential; native Octo credentials cannot replace task identity", config.EnvCredentialMode)
+	}
+	// Prefix validation checks credential format only. Fleet verifies the
+	// principal and bindings. Never forward a caller-selected Space context.
+	return &credential.BotCredential{Token: token, Source: source, BotKind: "agent_task"}, nil
+}
+
+// buildTaskBotCredential resolves only explicitly provided native credentials.
+// It skips legacy task-token aliases and never opens the host profile store.
+func (f *Factory) buildTaskBotCredential() (*credential.BotCredential, error) {
+	for _, key := range []string{config.EnvToken, config.EnvBotToken} {
+		token := strings.TrimSpace(os.Getenv(key))
+		if token == "" || isTaskToken(token) {
+			continue
+		}
+		switch credential.TokenKind(token) {
+		case "app_bot", "user_bot", "user_key":
+			return f.finalizeCredential(&credential.BotCredential{
+				Token: token, Source: "env:" + key,
+				SpaceID: strings.TrimSpace(os.Getenv(config.EnvSpaceID)),
+			}), nil
+		default:
+			return nil, fmt.Errorf("%s=task requires a native Octo credential (app_*, bf_*, uk_*) for %s commands", config.EnvCredentialMode, f.Globals.CommandService)
+		}
+	}
+	return nil, fmt.Errorf("%s=task requires an explicit native Octo credential in %s or %s for %s commands; task credentials cannot be used", config.EnvCredentialMode, config.EnvToken, config.EnvBotToken, f.Globals.CommandService)
+}
+
+func isTaskToken(token string) bool {
+	return credential.TokenKind(token) == "loop_credential" || strings.HasPrefix(token, "mat_")
 }
 
 // AuthStore lazily constructs and caches the credential store.

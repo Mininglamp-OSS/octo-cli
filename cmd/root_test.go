@@ -2,6 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -175,19 +179,112 @@ func persistentFlagNames(root *cobra.Command) map[string]bool {
 	return names
 }
 
-func TestNewRootCmd_TaskModeAllowsOnlyLoopOnlineCommands(t *testing.T) {
-	t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-	t.Setenv(config.EnvBotToken, "octo_loop_task")
-
-	f := newTestFactoryWithReg()
-	f.SetConfig(&config.Config{APIBaseURL: "http://localhost", BotToken: "octo_loop_task", CredentialMode: config.CredentialModeTask})
-	root := NewRootCmd(f.Factory)
-	root.SetArgs([]string{"group", "list"})
-	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "only allows Loop commands") {
-		t.Fatalf("group list error = %v, want task-mode rejection", err)
+func TestNewRootCmd_TaskModeRoutesCredentialsByCommand(t *testing.T) {
+	cases := []struct {
+		name, taskToken, token, botToken, wantToken, wantSpace string
+		args                                                   []string
+	}{
+		{"dedicated task token wins for Loop", "octo_loop_task", "bf_override", "bf_bot", "octo_loop_task", "", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
+		{"native token wins for groups", "octo_loop_task", "bf_override", "bf_bot", "bf_override", "", []string{"group", "list"}},
+		{"legacy daemon task token does not shadow Bot", "", "octo_loop_legacy", "bf_bot", "bf_bot", "", []string{"group", "list"}},
+		{"new daemon compatibility alias does not shadow Bot", "octo_loop_task", "octo_loop_task", "bf_bot", "bf_bot", "", []string{"group", "list"}},
+		{"native space override", "octo_loop_task", "", "bf_bot", "bf_bot", "explicit-space", []string{"message", "send", "--space", "explicit-space", "--data", `{"channel_id":"c1","channel_type":1,"payload":{"type":1,"content":"hi"}}`}},
+		{"dedicated task token works without generic aliases", "octo_loop_task", "", "", "octo_loop_task", "", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
+		{"Bot can access documents", "octo_loop_task", "octo_loop_task", "bf_bot", "bf_bot", "", []string{"docs", "list"}},
+		{"Bot can access drive", "octo_loop_task", "octo_loop_task", "bf_bot", "bf_bot", "", []string{"drive", "space", "list"}},
+		{"user key keeps the drive user mount", "octo_loop_task", "uk_user", "bf_bot", "uk_user", "", []string{"drive", "space", "list"}},
+		{"legacy mat token does not shadow Bot", "", "mat_legacy_task", "bf_bot", "bf_bot", "", []string{"group", "list"}},
+		{"legacy task alias remains supported", "", "", "octo_loop_legacy", "octo_loop_legacy", "", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+			t.Setenv(config.EnvTaskToken, tc.taskToken)
+			t.Setenv(config.EnvToken, tc.token)
+			t.Setenv(config.EnvBotToken, tc.botToken)
+			t.Setenv(config.EnvSpaceID, "bot-space")
+			t.Setenv(config.EnvBotID, "")
+			// Credential routing must not consult a host profile store.
+			blockedStore := t.TempDir() + "/not-a-directory"
+			if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("OCTO_CONFIG_DIR", blockedStore)
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if tc.token == "uk_user" && r.URL.Path != "/v1/user/drive/spaces" {
+					t.Errorf("user-key request path = %q", r.URL.Path)
+				}
+				if got := r.Header.Get("Authorization"); got != "Bearer "+tc.wantToken {
+					t.Errorf("Authorization = %q, want selected credential", got)
+				}
+				if got := r.Header.Get("X-Space-ID"); got != tc.wantSpace {
+					t.Errorf("X-Space-ID = %q, want %q", got, tc.wantSpace)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"data":[]}`)
+			}))
+			defer server.Close()
+			t.Setenv(config.EnvAPIBaseURL, server.URL)
+			f := cmdutil.NewDefaultFactory()
+			f.IOStreams.Out = io.Discard
+			f.IOStreams.ErrOut = io.Discard
+			root := NewRootCmd(f)
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("request count = %d, want 1", calls)
+			}
+		})
+	}
+}
 
-	root = NewRootCmd(f.Factory)
+func TestNewRootCmd_TaskModeFailsClosed(t *testing.T) {
+	cases := []struct {
+		name, taskToken, token, botToken, wantError string
+		args                                        []string
+	}{
+		{"task token cannot access Bot API", "octo_loop_task", "octo_loop_task", "", "native Octo credential", []string{"group", "list"}},
+		{"Bot cannot replace task identity", "", "bf_bot", "", "task credential", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
+		{"dedicated Bot cannot be relabeled as task", "bf_bot", "", "", "task credential", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
+		{"mail stays isolated from host bindings", "octo_loop_task", "", "bf_bot", "unavailable in task mode", []string{"mail", "auth", "status"}},
+		{"Bot id selectors remain blocked", "octo_loop_task", "", "bf_bot", "--bot-id", []string{"group", "list", "--bot-id", "host"}},
+		{"no task credential fails locally", "", "", "", "task credential", []string{"loop", "task", "list", "--workspace-id", "workspace-test"}},
+		{"no Bot credential fails locally", "octo_loop_task", "", "", "native Octo credential", []string{"docs", "list"}},
+		{"profiles remain blocked", "octo_loop_task", "", "bf_bot", "--profile", []string{"group", "list", "--profile", "host"}},
+		{"Loop space override remains blocked", "octo_loop_task", "", "", "--space", []string{"loop", "task", "list", "--workspace-id", "workspace-test", "--space", "other"}},
+		{"auth remains blocked", "octo_loop_task", "", "bf_bot", "unavailable in task mode", []string{"auth", "status"}},
+		{"config remains blocked", "octo_loop_task", "", "bf_bot", "unavailable in task mode", []string{"config", "show"}},
+		{"passthrough remains blocked", "octo_loop_task", "", "bf_bot", "unavailable in task mode", []string{"api", "GET", "/fleet/api/v1/tasks"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+			t.Setenv(config.EnvTaskToken, tc.taskToken)
+			t.Setenv(config.EnvToken, tc.token)
+			t.Setenv(config.EnvBotToken, tc.botToken)
+			t.Setenv(config.EnvBotID, "")
+			t.Setenv("OCTO_CONFIG_DIR", t.TempDir())
+			t.Setenv(config.EnvAPIBaseURL, "http://127.0.0.1:1")
+			f := cmdutil.NewDefaultFactory()
+			f.IOStreams.Out = io.Discard
+			f.IOStreams.ErrOut = io.Discard
+			root := NewRootCmd(f)
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Execute error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestNewRootCmd_TaskModeAllowsOfflineDiscovery(t *testing.T) {
+	t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+	f := newTestFactoryWithReg()
+	root := NewRootCmd(f.Factory)
 	root.SetArgs([]string{"schema", "task.get"})
 	if err := root.Execute(); err != nil {
 		t.Fatalf("offline schema should remain available: %v", err)

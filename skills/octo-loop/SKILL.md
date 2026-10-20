@@ -38,6 +38,11 @@ Outside daemon task mode, if a command fails with an auth error, check
 `octo-cli auth status` and let the user run `octo-cli auth login`. In
 `OCTO_CREDENTIAL_MODE=task`, those profile diagnostics are unavailable: report
 the auth failure so the daemon can refresh or replace the injected credential.
+Loop commands prefer the daemon's dedicated `OCTO_TASK_TOKEN`; the generic
+aliases are accepted only for legacy task credentials when it is absent.
+An explicit native Bot token used by `message`, `docs`, or `drive` does not
+override the dedicated task credential. Do not replace task identity with a
+Bot token or unset task mode to access a host profile.
 Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.

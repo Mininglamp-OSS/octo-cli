@@ -305,8 +305,8 @@ a real person with `--on-behalf-of <uid>` (OBO, requires an active grant).
 
 ### Token variables
 
-Explicit CLI profile selectors win first. Otherwise, environment credentials
-override implicit stored profiles; the two environment names have identical
+Outside task mode, explicit CLI profile selectors win first. Otherwise,
+environment credentials override implicit stored profiles; the two environment names have identical
 semantics and differ only in priority:
 
 | Priority | Source | Notes |
@@ -337,6 +337,7 @@ rejected.
 |---------------------|----------------------------------------------------------|
 | `OCTO_TOKEN`        | Canonical token variable (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); wins over `OCTO_BOT_TOKEN`. |
 | `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
+| `OCTO_TASK_TOKEN`   | Daemon-issued Loop task credential; used only by `loop` commands in task mode. |
 | `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select a stored profile by robot id when no environment credential is set. |
@@ -344,13 +345,41 @@ rejected.
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 
-Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
-isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
-the restricted CLI policy but is not a security boundary against a process that
-can rewrite its own environment. In task mode, the daemon injects
-`OCTO_TOKEN`; `OCTO_BOT_TOKEN` remains accepted for compatibility. Both must
-contain a Loop task credential. `auth` and `config` diagnostics are intentionally
-unavailable.
+Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task`. Credentials are selected
+by command domain, without reading stored CLI profiles:
+
+| Command | Credential in task mode |
+|---|---|
+| `loop ...` | `OCTO_TASK_TOKEN`; older daemons may use `OCTO_TOKEN` or `OCTO_BOT_TOKEN` for a Loop task credential. A native Bot token cannot replace task identity. |
+| `message`, `group`, `docs`, `drive`, and other native services | An explicit `app_*`, `bf_*`, or `uk_*` credential from `OCTO_TOKEN`, then `OCTO_BOT_TOKEN`. Legacy task-valued aliases are skipped; the task token is never forwarded. Backend and operation-specific capability checks still apply. |
+| `auth`, `config`, `api`, `mail` | Unavailable. Mail requires locally stored mailbox bindings. |
+| Offline discovery and helpers | Available without credentials. |
+
+For example, a daemon task can keep its injected task credential while using a
+separately provided Bot credential:
+
+```bash
+# OCTO_TASK_TOKEN and OCTO_CREDENTIAL_MODE are supplied by the daemon.
+# The daemon may also retain OCTO_TOKEN=task credential for older CLI versions.
+export OCTO_BOT_TOKEN="$BOT_TOKEN"
+octo-cli loop task list --workspace-id <workspace-id>  # task identity
+octo-cli docs list                                   # Bot identity
+octo-cli drive space list                            # Bot identity
+```
+
+`--profile`, `--bot-id`, and `OCTO_BOT_ID` remain prohibited in task mode.
+`--space` / `OCTO_SPACE_ID` apply to native calls; Loop commands reject `--space`
+and discard `OCTO_SPACE_ID`, using their explicit `--workspace-id` instead.
+The success envelope identifies the selected credential source without exposing
+its value.
+
+The updated daemon injects `OCTO_TASK_TOKEN` plus the legacy `OCTO_TOKEN` for
+older CLIs, clears inherited host credentials, and permits explicit
+`OCTO_BOT_TOKEN` / `OCTO_SPACE_ID` in an expert's `custom_env`. Upgrade the CLI
+first to enable native calls; older CLI versions retain the Loop-only policy.
+An isolated `OCTO_CONFIG_DIR` containing no host profiles is still recommended.
+The mode flag selects CLI policy; a process that can rewrite its environment
+or read host files still requires a separate filesystem isolation boundary.
 
 ## Output
 

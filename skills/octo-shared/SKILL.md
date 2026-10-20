@@ -74,6 +74,15 @@ Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
 not expose profile diagnostics; use the `identity` echoed by each success
 envelope and report authentication failures to the daemon instead (see §3).
 
+In task mode, `loop` commands use the injected `OCTO_TASK_TOKEN` (with legacy
+task-token aliases accepted for older daemons). Native services such as
+`message`, `docs`, and `drive` require a separately provided `app_*`, `bf_*`, or
+`uk_*` credential in `OCTO_TOKEN` or `OCTO_BOT_TOKEN`; task-valued aliases are
+skipped for those services. Never unset task mode or select a host profile to
+work around a missing credential. `auth`, `config`, `api`, and `mail` remain
+unavailable. `--space` is supported for native calls, while Loop uses
+`--workspace-id` and discards native Space context.
+
 ## 2. Unified gateway configuration
 
 All Octo domains use one gateway. Override it only for test or self-hosted

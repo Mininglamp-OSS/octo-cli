@@ -17,6 +17,9 @@ const (
 	// credential kind and takes precedence over the compatible EnvBotToken alias.
 	EnvToken    = "OCTO_TOKEN"
 	EnvBotToken = "OCTO_BOT_TOKEN"
+	// EnvTaskToken carries the daemon-issued Loop task credential separately
+	// from native Octo credentials. It is consumed only by task-mode Loop commands.
+	EnvTaskToken = "OCTO_TASK_TOKEN"
 	// EnvCredentialMode selects the credential resolution policy. The empty
 	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
 	// used by octo-daemon task processes.
