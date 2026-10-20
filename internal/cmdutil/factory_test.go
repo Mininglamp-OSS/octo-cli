@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -148,22 +149,21 @@ func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
 }
 
 func TestFactory_TaskCredentialMode(t *testing.T) {
-	t.Run("uses only injected token without opening auth store", func(t *testing.T) {
+	t.Run("uses dedicated token without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"
 		if err := os.WriteFile(blockedStore, []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		t.Setenv(authstore.EnvConfigDir, blockedStore)
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-		t.Setenv(config.EnvBotToken, "octo_loop_task")
+		t.Setenv(config.EnvTaskToken, "opaque-task-credential")
 
 		f := NewDefaultFactory()
 		cred, err := f.Credential()
 		if err != nil {
 			t.Fatalf("Credential: %v", err)
 		}
-		if cred.Token != "octo_loop_task" || cred.BotKind != "agent_task" || cred.SpaceID != "" ||
-			cred.Source != "env:"+config.EnvBotToken {
+		if cred.Token != "opaque-task-credential" || cred.BotKind != "agent_task" || cred.SpaceID != "" {
 			t.Fatalf("credential = %+v", cred)
 		}
 		identity, ok := f.identityValue().(map[string]any)
@@ -172,22 +172,14 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects generic token override", func(t *testing.T) {
+	t.Run("generic aliases cannot replace task credential", func(t *testing.T) {
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-		t.Setenv(config.EnvToken, "bf_human")
-		t.Setenv(config.EnvBotToken, "octo_loop_task")
+		t.Setenv(config.EnvTaskToken, "")
+		t.Setenv(config.EnvToken, "octo_loop_legacy")
+		t.Setenv(config.EnvBotToken, "bf_native")
 		f := NewDefaultFactory()
-		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), config.EnvToken) {
-			t.Fatalf("Credential error = %v, want %s rejection", err, config.EnvToken)
-		}
-	})
-
-	t.Run("rejects non-loop bot token", func(t *testing.T) {
-		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-		t.Setenv(config.EnvBotToken, "bf_human")
-		f := NewDefaultFactory()
-		if _, err := f.Credential(); err == nil || !strings.Contains(err.Error(), "Loop task credential") {
-			t.Fatalf("Credential error = %v, want Loop credential rejection", err)
+		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {
+			t.Fatalf("Credential error = %v, want ErrNoCredential", err)
 		}
 	})
 
@@ -202,7 +194,7 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 	} {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
 			t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
-			t.Setenv(config.EnvBotToken, "octo_loop_task")
+			t.Setenv(config.EnvTaskToken, "opaque-task-credential")
 			f := NewDefaultFactory()
 			tc.setup(t, f)
 			if _, err := f.Credential(); err == nil {
@@ -212,7 +204,9 @@ func TestFactory_TaskCredentialMode(t *testing.T) {
 	}
 
 	t.Run("missing injected token fails closed", func(t *testing.T) {
+		t.Setenv(config.EnvTaskToken, "")
 		t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+		t.Setenv(config.EnvToken, "")
 		t.Setenv(config.EnvBotToken, "")
 		f := NewDefaultFactory()
 		if _, err := f.Credential(); !errors.Is(err, credential.ErrNoCredential) {
@@ -958,5 +952,69 @@ func TestFactory_MailCredentialRequiresSpaceWhenTokenHasMultipleBindings(t *test
 	}
 	if cred.Token != "omb_b" || cred.BotID != "runtime-bot" {
 		t.Fatalf("MailCredential with --space = %+v", cred)
+	}
+}
+
+func TestFactory_EnvironmentCredentialOverridesImplicitProfiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		variable   string
+		token      string
+		profileNum int
+	}{
+		{name: "preferred alias over sole profile", variable: config.EnvToken, token: "app_preferred", profileNum: 1},
+		{name: "legacy alias over sole profile", variable: config.EnvBotToken, token: "app_legacy_env", profileNum: 1},
+		{name: "preferred alias bypasses profile ambiguity", variable: config.EnvToken, token: "app_preferred", profileNum: 2},
+		{name: "legacy alias bypasses profile ambiguity", variable: config.EnvBotToken, token: "app_legacy_env", profileNum: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(config.EnvToken, "")
+			t.Setenv(config.EnvBotToken, "")
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tt.profileNum; i++ {
+				name := fmt.Sprintf("profile-%d", i)
+				if err := store.SaveProfile(name, &authstore.ProfileMeta{RobotID: "bot-" + name}, "app_"+name); err != nil {
+					t.Fatalf("SaveProfile(%s): %v", name, err)
+				}
+			}
+			t.Setenv(tt.variable, tt.token)
+
+			cred, err := NewDefaultFactory().Credential()
+			if err != nil {
+				t.Fatalf("Credential: %v", err)
+			}
+			if cred.Token != tt.token || cred.Profile != "" || cred.Source != "env:"+tt.variable {
+				t.Fatalf("credential = %+v", cred)
+			}
+		})
+	}
+}
+
+func TestFactory_ExplicitProfileOverridesEnvironmentCredential(t *testing.T) {
+	t.Setenv(config.EnvToken, "app_environment")
+	t.Setenv(config.EnvBotToken, "app_legacy_environment")
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("selected", &authstore.ProfileMeta{RobotID: "bot-selected"}, "app_profile"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "selected"
+	cred, err := f.Credential()
+	if err != nil {
+		t.Fatalf("Credential: %v", err)
+	}
+	if cred.Token != "app_profile" || cred.Profile != "selected" || cred.Source != "profile:selected" {
+		t.Fatalf("credential = %+v", cred)
 	}
 }

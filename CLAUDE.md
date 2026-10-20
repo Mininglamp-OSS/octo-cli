@@ -20,12 +20,12 @@
 ## Identity Model
 
 - The CLI is **bot-only** — no interactive user login. Credentials include `app_*` (App Bot), `bf_*` (User Bot), `uk_*` (**user API key**), and short-lived `octo_loop_*` Loop task credentials. A user key carries a real person's identity and is used for `message search` and the whole `drive` domain (both route to `/v1/user/*` rather than `/v1/bot/*`); `credential.TokenKind` reports the latter two as `user_key` and `loop_credential` respectively.
-- **Credential resolution** (see `internal/credential`, `internal/authstore`): a token comes from a stored encrypted profile or, as a fallback, an env var — `OCTO_TOKEN` first, then `OCTO_BOT_TOKEN`. The credential's `Source` records which variable was used, so the envelope's `identity.source` cannot mislead. Stored profiles live in `~/.octo-cli` (override `OCTO_CONFIG_DIR`): metadata in plaintext `config.json`, tokens in AES-256-GCM `credentials.enc`. Manage them with `octo-cli auth`.
+- **Credential resolution** (see `internal/config`, `internal/credential`, `internal/authstore`): explicit `--bot-id` / `--profile` selectors win first, then `OCTO_TOKEN`, then its compatible `OCTO_BOT_TOKEN` alias, then an implicit stored profile. Both aliases are normalized once, accept the same credential kinds, and report the selected variable in `identity.source`. Profiles live under `~/.octo-cli` (override `OCTO_CONFIG_DIR`); metadata is plaintext and tokens use AES-256-GCM encryption.
 - **Per-domain token gate and mount routing**: a spec may declare which token kinds it accepts and which server mount each kind uses. `drive` accepts all three and routes `uk_*` to `/v1/user/drive/*`, bots to `/v1/bot/drive/*`. An incompatible kind fails locally with `TOKEN_KIND_NOT_ALLOWED` (`validation`, exit 2 — switch credentials, don't re-auth), implemented once in `cmd/service/identity.go` and reused by the hand-written drive composites via `service.MountForOperation`. Generated leaves and composites alike resolve identity **before** `--dry-run` or any local success return, so a refused credential can never have a request described for it or a document link resolved under it.
 - **Lossless uint64 ids**: `drive` file ids are backend uint64s. Inputs are decimal-string flags validated in `[0, 2^64-1]` and sent as JSON integers; responses are emitted as decimal strings. Go's `int` cannot hold the upper half of the range and a `float64` would round above 2^53, so neither is used on this path. The rule holds for *every* output format, not just `json`: the row extraction behind `--format table|csv|ndjson` decodes with `UseNumber` too, so a large integer a spec did not declare as a lossless field still prints the digits the backend sent rather than a rounded float.
-- **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: selector > sole/implicit profile > `OCTO_BOT_TOKEN`. An explicit `--bot-id` always selects a stored profile and fails closed when none exists; `OCTO_BOT_ID` may instead label an environment token when the profile store is empty. The success envelope reports that unverified environment value as `identity.robot_id_claimed`; `identity.robot_id` is reserved for a stored or verified binding.
+- **Selecting a credential at runtime**: `--bot-id <robot_id>` (env `OCTO_BOT_ID`) is the agent's primary selector — robot ids are self-known; `--profile <name>` selects by friendly name. With exactly one profile, selection is implicit; with **two or more, a selector is required** (ambiguity is a hard error, never a silent guess). Precedence: explicit selector > `OCTO_TOKEN` > `OCTO_BOT_TOKEN` > `OCTO_BOT_ID`-selected or sole implicit profile. An explicit `--bot-id` always selects a stored profile and fails closed when none exists; `OCTO_BOT_ID` may label an environment token; that token takes precedence over implicit stored profiles. The success envelope reports that unverified environment value as `identity.robot_id_claimed`; `identity.robot_id` is reserved for a stored or verified binding.
 - **Isolation boundary = OS user**: the encryption key is machine-derived, so the store resists off-machine leakage (commit/backup/sync) but not a same-user process. Isolate mutually-distrusting bots with separate OS users or `OCTO_CONFIG_DIR` values.
-- **Daemon task isolation**: `OCTO_CREDENTIAL_MODE=task` selects the restricted Loop-only policy but cannot protect against a process rewriting its own environment. Daemon task processes must receive an isolated `OCTO_CONFIG_DIR` with no host profiles and the short-lived `OCTO_BOT_TOKEN`.
+- **Daemon task isolation**: the daemon supplies the short-lived credential only in `OCTO_TASK_TOKEN`. Set `OCTO_CREDENTIAL_MODE=task` per Loop task CLI invocation, not globally for every command in the agent process. Task mode reads only `OCTO_TASK_TOKEN`, never the ordinary aliases or stored profiles, and rejects identity and Space selectors; Fleet remains authoritative for the credential bindings. Ordinary commands ignore `OCTO_TASK_TOKEN` and resolve their own bot credentials. Task processes still need an isolated `OCTO_CONFIG_DIR` with no host profiles: mode selection cannot protect against a process rewriting its own environment.
 - Each Bot has an **owner**; operations are attributed to the Bot identity. For LLM-backed paths (`matter extract`) the bot acts on behalf of its owner — pass `owner_uid` as `creator_uid`.
 - **Search subjects** (`message search` family): a `bf_` token searches as the bot, or as a real person with `--on-behalf-of <uid>` (OBO — requires an active grant); a `uk_` token searches as the real person it belongs to. An `app_` token cannot search — the CLI rejects it locally (`validation`, in `internal/client/search_route.go`) before any request, distinct from a server-side `FORBIDDEN`.
 - `OCTO_SPACE_ID` (or `--space`) supplies space context for platform-scoped bots. Space-scoped bots resolve their space server-side.
@@ -42,7 +42,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 335 embedded operations)
+## Command Structure (12 active domains, 339 embedded operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
@@ -124,7 +124,7 @@ octo-cli mail      me
 
 octo-cli auth      login | status | update | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
-octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...]
+octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...] [--workspace-id <uuid>]
 octo-cli config show
 octo-cli completion bash|zsh|fish|powershell
 octo-cli version
@@ -140,9 +140,10 @@ The hand-written drive leaves (`cmd/drive*.go`) are the exception to "everything
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_TOKEN`        | Token (`app_*`, `bf_*`, or `uk_*`). Preferred env slot; wins over `OCTO_BOT_TOKEN`. |
-| `OCTO_BOT_TOKEN`    | Octo or Loop credential (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); used when `OCTO_TOKEN` is unset. |
-| `OCTO_CREDENTIAL_MODE` | Set to `task` only for an isolated daemon-launched Loop task process. |
+| `OCTO_TOKEN`        | Canonical environment credential (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); wins over `OCTO_BOT_TOKEN`. |
+| `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
+| `OCTO_TASK_TOKEN`   | Dedicated short-lived Loop task credential; ignored by ordinary commands. |
+| `OCTO_CREDENTIAL_MODE` | Set to `task` per Loop task CLI invocation; reads only `OCTO_TASK_TOKEN`. |
 | `OCTO_BOT_ID`       | Robot id selecting a stored profile (env form of `--bot-id`). Selector, not a secret. |
 | `OCTO_CONFIG_DIR`   | Override the credential dir (default `~/.octo-cli`).     |
 | `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |

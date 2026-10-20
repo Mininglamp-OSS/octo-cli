@@ -190,6 +190,31 @@ Service commands resolve URLs as `OCTO_API_BASE_URL + operation path`.
 Module namespaces such as `/market/api`, `/docs-html`, and `/fleet/api` live
 in the embedded OpenAPI paths.
 
+### 3.3 Workspace Context Convention
+
+Fleet accepts more than one workspace selector at its Web compatibility
+boundary, but authorization and business logic always operate on the resolved
+workspace UUID. Each client surface must use one explicit convention:
+
+| Caller | Workspace input | Rationale |
+|--------|-----------------|-----------|
+| Octo Web human session | `X-Workspace-Slug: <slug>` | Matches the selected workspace and human-readable deep links; Fleet resolves it to a UUID. |
+| CLI and Public API automation | `X-Workspace-ID: <uuid>` | Stable, unambiguous OpenAPI contract that matches resource IDs and credential bindings. |
+| `/v1/workspaces/{id}` resources | UUID path parameter | The resource path is the authoritative workspace selector. |
+| Credential-bound task execution | Server-verified binding | Fleet replaces or ignores client workspace selection so a task cannot widen its scope. |
+
+The `--workspace-id` flag on `octo-cli` commands therefore accepts a workspace
+UUID only. It must never place a slug or display name in `X-Workspace-ID`.
+Callers obtain the UUID from `octo-cli loop workspace list` and pass it
+explicitly; there is no environment fallback.
+
+Clients should not send both `X-Workspace-Slug` and `X-Workspace-ID`. Fleet's
+Web resolver gives slug precedence, so mismatched values are ambiguous and can
+select or reject a different workspace than the caller intended. If slug
+support is added to the CLI later, it must be a separately named
+`--workspace-slug` flag, mutually exclusive with `--workspace-id`, and first be
+declared as part of the Public API specification.
+
 ---
 
 ## 4. Output Protocol
@@ -224,7 +249,7 @@ before invoking.
 
 | Backend Code | HTTP | CLI Type | CLI Hint |
 |-------------|------|----------|----------|
-| `UNAUTHORIZED` | 401 | `auth_error` | "check OCTO_BOT_TOKEN; bot may be unpublished" |
+| `UNAUTHORIZED` | 401 | `auth_error` | "check OCTO_TOKEN / OCTO_BOT_TOKEN; bot may be unpublished" |
 | `AUTH_UNAVAILABLE` | 503 | `network` | "auth service unreachable; retry later" |
 | `VALIDATION_ERROR` | 400 | `validation` | "check params with `octo-cli schema <op>`" |
 | `MATTER_NOT_FOUND` | 404 | `api_error` | "verify ID with `octo-cli matters list`" |
@@ -401,13 +426,13 @@ injected automatically when x-octo-space-header is set.
 type BotCredential struct {
     Token    string  // app_xxxx (App Bot token)
     SpaceID  string  // resolved from bot registration or --space flag
-    Source   string  // "env:OCTO_BOT_TOKEN" / "config:prod"
+    Source   string  // "env:OCTO_TOKEN" / "env:OCTO_BOT_TOKEN" / "config:prod"
 }
 ```
 
 ### 7.2 Provider Chain
 
-Phase 1: `Environment (OCTO_BOT_TOKEN) → Error`
+Phase 1: `Environment (OCTO_TOKEN → OCTO_BOT_TOKEN) → Error`
 Phase 4a: `Environment → Config File → Error`
 Future: `Environment → Config → Sidecar → Error`
 
@@ -468,8 +493,11 @@ Discovered from backend code, relevant to CLI alias design and Skill documentati
 Passthrough for API calls not in specs:
 ```bash
 octo-cli api GET /api/v1/matters --params '{"status":"open"}'
+octo-cli api GET /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
-Uses credential provider, outputs envelope, supports universal flags. No spec consultation, no flag auto-gen, no --page-all.
+Uses credential provider, outputs envelope, supports universal flags, and can
+explicitly send workspace context as `X-Workspace-ID` with `--workspace-id`.
+No spec consultation, no flag auto-gen, no --page-all.
 
 ---
 

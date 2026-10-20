@@ -33,7 +33,7 @@ const (
 	defaultBaseDelay    = 500 * time.Millisecond
 	defaultMaxDelay     = 10 * time.Second
 	defaultTimeout      = 30 * time.Second
-	loopAcceptMediaType = "application/json"
+	loopAcceptMediaType = "application/vnd.octo+json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -888,11 +888,11 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		contentType = "application/json"
 	}
 
-	if req.Service == "loop" && headerValue(req.Headers, "Accept") == "" {
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
-		req.Headers["Accept"] = loopAcceptMediaType
+	if req.Service == "loop" {
+		copyReq := *req
+		copyReq.Headers = cloneHeaders(req.Headers)
+		setHeader(copyReq.Headers, "Accept", loopAcceptMediaType)
+		req = &copyReq
 	}
 
 	if c.options.DryRun {
@@ -904,15 +904,6 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return nil, markResultUnknown(err)
 	}
 	return result, err
-}
-
-func headerValue(headers map[string]string, name string) string {
-	for key, value := range headers {
-		if strings.EqualFold(key, name) {
-			return value
-		}
-	}
-	return ""
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
@@ -1089,6 +1080,10 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
+	if loopAPIUnsupported(req.Service, resp.StatusCode, respBody) {
+		return nil, output.ErrLoopAPIUnsupported()
+	}
+
 	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, req.ResponseSecretFields)
 	parseError := output.ParseBackendError
 	if req.Service == "loop" {
@@ -1484,4 +1479,34 @@ func parseRetryAfter(h string) time.Duration {
 		}
 	}
 	return 0
+}
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	cloned := make(map[string]string, len(headers)+1)
+	for key, value := range headers {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func setHeader(headers map[string]string, name, value string) {
+	for key := range headers {
+		if strings.EqualFold(key, name) {
+			delete(headers, key)
+		}
+	}
+	headers[name] = value
+}
+
+func loopAPIUnsupported(service string, status int, body []byte) bool {
+	if service != "loop" || status != http.StatusNotFound {
+		return false
+	}
+
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
 }

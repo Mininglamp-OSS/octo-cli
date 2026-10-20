@@ -196,11 +196,40 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show the single active bot identity (whoami); use `auth list` to enumerate",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Report the same credential an ordinary request would use. In
+			// particular, environment credentials must bypass the local store.
+			cred, resolveErr := f.Credential()
+			if resolveErr == nil {
+				cfg, err := f.Config()
+				if err != nil {
+					return failErr(f, err)
+				}
+				active := map[string]any{
+					"bot_token": credential.MaskToken(cred.Token),
+					"source":    cred.Source,
+				}
+				putIfSet(active, "profile", cred.Profile)
+				if cred.Profile != "" {
+					putIfSet(active, "robot_id", cred.RobotID)
+				} else {
+					putIfSet(active, "robot_id_claimed", cred.RobotID)
+				}
+				putIfSet(active, "bot_kind", cred.BotKind)
+				putIfSet(active, "api_base_url", cfg.APIBaseURL)
+				putIfSet(active, "space_id", cfg.SpaceID)
+				return emitJSON(f, map[string]any{"active": active})
+			}
+			// Preserve informational output for an empty or ambiguous store,
+			// but never hide invalid selectors, configuration, or I/O errors.
+			ee := output.AsExitError(resolveErr)
+			if !errors.Is(resolveErr, credential.ErrNoCredential) && (ee == nil || ee.Type != "validation") {
+				return failErr(f, resolveErr)
+			}
 			store, err := f.AuthStore()
 			if err != nil {
 				return failErr(f, err)
 			}
-			name, meta, status, err := store.ActiveProfile(f.Globals.Profile, selectorBotID(f))
+			_, _, status, err := store.ActiveProfile(f.Globals.Profile, selectorBotID(f))
 			if err != nil {
 				return failErr(f, err)
 			}
@@ -208,21 +237,6 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 			// It never enumerates profiles (that is `auth list`): the active
 			// identity, or null with a pointer when nothing is selected.
 			switch status {
-			case authstore.StatusFound:
-				token, terr := store.GetToken(name)
-				if terr != nil {
-					return failErr(f, terr)
-				}
-				active := map[string]any{
-					"profile":   name,
-					"bot_token": credential.MaskToken(token),
-					"source":    "profile:" + name,
-				}
-				putIfSet(active, "robot_id", meta.RobotID)
-				putIfSet(active, "bot_kind", meta.BotKind)
-				putIfSet(active, "api_base_url", meta.APIBaseURL)
-				putIfSet(active, "space_id", meta.SpaceID)
-				return emitJSON(f, map[string]any{"active": active})
 			case authstore.StatusAmbiguous:
 				count, _ := store.Count() //nolint:errcheck // advisory count for the hint only
 				return emitJSON(f, map[string]any{
@@ -230,16 +244,15 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 					"profile_count": count,
 					"hint":          "no bot selected; pass --bot-id <id> or --profile <name> (or set OCTO_BOT_ID), or run `octo-cli auth list`",
 				})
-			case authstore.StatusMissing:
-				return failErr(f, output.ErrAuth(
-					"no matching profile", "check `octo-cli auth list`"))
-			default: // none
+			case authstore.StatusNone:
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": 0,
-					"env_token_set": os.Getenv(config.EnvBotToken) != "",
+					"env_token_set": config.ResolveEnvToken().Token != "",
 					"hint":          "no stored profiles; run `octo-cli auth login`",
 				})
+			default:
+				return failErr(f, resolveErr)
 			}
 		},
 	}

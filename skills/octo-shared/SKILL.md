@@ -45,15 +45,19 @@ octo-cli --profile myname matter list              # or by the friendly profile 
 
 With exactly one stored profile, the selector is optional. With **two or more, you must pass `--bot-id` or `--profile`** — omitting it is a hard error (the CLI never guesses which identity to use).
 
-**Env token (fallback).** When no profile is stored, the raw token is read from `OCTO_BOT_TOKEN`:
+**Environment credential.** Outside an explicit `--bot-id` / `--profile`
+selection, an environment credential overrides stored profiles. `OCTO_TOKEN`
+is canonical; `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias:
 
 ```bash
-export OCTO_BOT_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
-export OCTO_BOT_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
-export OCTO_BOT_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
+export OCTO_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
+export OCTO_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
+export OCTO_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
 ```
 
-> `OCTO_BOT_ID` is a selector (a robot id), not a secret; `OCTO_BOT_TOKEN` is the secret. If `OCTO_BOT_ID` names no stored profile the command fails — it never falls back to silently using `OCTO_BOT_TOKEN` under that id.
+> `OCTO_BOT_ID` is not a secret. Without an environment credential it selects a
+> stored profile; an environment credential takes precedence over that implicit
+> selector.
 
 Token prefix determines capability — the CLI does NOT enforce this locally (the backend rejects unsupported operations with `FORBIDDEN`), with **one exception**: an `app_*` token running `message search` is rejected locally with a `validation` error before any request.
 
@@ -69,6 +73,13 @@ Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
 `octo-cli config show`) to confirm the active identity. Daemon task mode does
 not expose profile diagnostics; use the `identity` echoed by each success
 envelope and report authentication failures to the daemon instead (see §3).
+
+For task workflow and collaboration in a daemon execution, select
+`OCTO_CREDENTIAL_MODE=task` for each CLI invocation. It reads only the injected
+`OCTO_TASK_TOKEN`; independent business operations use ordinary authentication.
+Do not export mode for the session or switch identity to retry an auth failure.
+Follow the daemon's scoped workflow examples. Outside task mode, the existing
+environment and profile credential rules remain unchanged.
 
 ## 2. Unified gateway configuration
 
@@ -100,7 +111,7 @@ Every successful invocation prints a single JSON object to stdout:
 }
 ```
 
-`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is **always an object**: a stored profile fills in `profile` / `robot_id` / `source: "profile:<name>"`; a raw `OCTO_BOT_TOKEN` yields `{ "type": "bot", "bot_kind": ..., "source": "env:OCTO_BOT_TOKEN" }` (no `profile`/`robot_id`); a command that resolves no credential (e.g. `version`) yields the minimal `{ "type": "bot" }`.
+`identity` echoes the bot the command actually ran as — check it to catch acting as the wrong identity. It is **always an object**: a stored profile fills in `profile` / `robot_id` / `source: "profile:<name>"`; a raw environment credential reports the alias that supplied it (`source: "env:OCTO_TOKEN"` or `source: "env:OCTO_BOT_TOKEN"`) and has no verified `profile`/`robot_id`; a command that resolves no credential (e.g. `version`) yields the minimal `{ "type": "bot" }`.
 
 Every failure prints an error envelope to **stderr** and exits non-zero:
 
@@ -224,7 +235,11 @@ When an operation isn't auto-registered yet or you need low-level control:
 ```bash
 octo-cli api GET  /api/v1/messages --params '{"chat_id":"chat-1"}'
 octo-cli api POST /api/v1/messages --data @body.json
+octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
+
+For a workspace-scoped passthrough endpoint, pass `--workspace-id` explicitly;
+the CLI sends it as `X-Workspace-ID` and does not infer a workspace.
 
 ## 8. Domain skills
 

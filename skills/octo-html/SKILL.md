@@ -62,7 +62,7 @@ as described below.
 ## Auth & space
 
 - Authenticate with a stored bot profile (`--profile` / `--bot-id`) or
-  `OCTO_BOT_TOKEN`; confirm the selected identity with `octo-cli config show`.
+  `OCTO_TOKEN` (compatible alias `OCTO_BOT_TOKEN`); confirm the selected identity with `octo-cli config show`.
 - Do not pass `--space`. octo-doc resolves identity and space server-side.
 - Write operations require author/write capability. Reads need at least reader
   capability; backend failures are normalized into the CLI's

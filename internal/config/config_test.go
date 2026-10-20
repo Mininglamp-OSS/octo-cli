@@ -1,13 +1,14 @@
 package config
 
 import (
+	"strings"
 	"testing"
 )
 
 func TestValidate_MissingToken(t *testing.T) {
 	c := &Config{APIBaseURL: "http://localhost", BotToken: ""}
 	if err := c.Validate(); err == nil {
-		t.Error("expected error for missing OCTO_BOT_TOKEN")
+		t.Error("expected error for missing environment credential")
 	}
 }
 
@@ -69,7 +70,7 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	t.Setenv(EnvBotToken, "app_xxx")
 	t.Setenv(EnvSpaceID, "space-1")
 	t.Setenv(EnvFormat, "table")
-	t.Setenv(EnvCredentialMode, CredentialModeTask)
+	t.Setenv(EnvCredentialMode, "")
 
 	cfg := Load()
 	if cfg.APIBaseURL != "http://api.example" {
@@ -78,7 +79,7 @@ func TestLoad_ReadsAllEnvVars(t *testing.T) {
 	if cfg.BotToken != "app_xxx" {
 		t.Errorf("BotToken = %q", cfg.BotToken)
 	}
-	if cfg.CredentialMode != CredentialModeTask {
+	if cfg.CredentialMode != "" {
 		t.Errorf("CredentialMode = %q", cfg.CredentialMode)
 	}
 	if cfg.SpaceID != "space-1" {
@@ -99,9 +100,61 @@ func TestServiceURL_Unified(t *testing.T) {
 	}
 }
 
-// OCTO_TOKEN is the high-priority token slot: it wins over OCTO_BOT_TOKEN, so a
-// real-person user API key can be supplied for one command without disturbing an
-// existing bot setup. An existing setup that never sets it is unaffected.
+// OCTO_TOKEN is the canonical high-priority alias. Both aliases accept the same
+// credential kinds; only their precedence and reported source differ.
+func TestResolveEnvTokenPrecedence(t *testing.T) {
+	cases := []struct {
+		name, octoToken, botToken, want, wantSource string
+	}{
+		{"only the legacy variable", "", "bf_bot", "bf_bot", "env:" + EnvBotToken},
+		{"only the canonical variable", "uk_person", "", "uk_person", "env:" + EnvToken},
+		{"both set: canonical wins", "uk_person", "bf_bot", "uk_person", "env:" + EnvToken},
+		{"a blank canonical variable does not shadow", "   ", "bf_bot", "bf_bot", "env:" + EnvBotToken},
+		{"neither set", "", "", "", ""},
+		// Both variables are trimmed, symmetrically. An untrimmed OCTO_BOT_TOKEN
+		// holding only whitespace used to pass Validate here and then resolve to no
+		// credential in credential.EnvProvider, which trims both — an auth failure
+		// two layers away from its cause.
+		{"a whitespace-only legacy variable is no credential", "", "   ", "", ""},
+		{"a whitespace-only legacy variable with a tab", "", "\t\n", "", ""},
+		{"surrounding whitespace is stripped from the legacy variable", "", "  bf_bot\n", "bf_bot", "env:" + EnvBotToken},
+		{"surrounding whitespace is stripped from the canonical variable", "  uk_person\n", "", "uk_person", "env:" + EnvToken},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(EnvToken, tc.octoToken)
+			t.Setenv(EnvBotToken, tc.botToken)
+			got := ResolveEnvToken()
+			if got.Token != tc.want || got.Source != tc.wantSource {
+				t.Errorf("ResolveEnvToken() = %+v, want token %q source %q", got, tc.want, tc.wantSource)
+			}
+		})
+	}
+}
+
+// The auth gate's message must name both variables, or an operator who only set
+// OCTO_TOKEN gets told to set a variable they already decided against.
+func TestValidate_MessageNamesBothTokenVars(t *testing.T) {
+	err := (&Config{}).Validate()
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{EnvToken, EnvBotToken} {
+		if !contains(err.Error(), want) {
+			t.Errorf("Validate message %q should name %s", err.Error(), want)
+		}
+	}
+}
+
+func contains(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func TestLoad_TokenPrecedence(t *testing.T) {
 	cases := []struct {
 		name, octoToken, botToken, want string
@@ -131,25 +184,42 @@ func TestLoad_TokenPrecedence(t *testing.T) {
 	}
 }
 
-// The auth gate's message must name both variables, or an operator who only set
-// OCTO_TOKEN gets told to set a variable they already decided against.
-func TestValidate_MessageNamesBothTokenVars(t *testing.T) {
-	err := (&Config{}).Validate()
-	if err == nil {
-		t.Fatal("expected an error")
-	}
-	for _, want := range []string{EnvToken, EnvBotToken} {
-		if !contains(err.Error(), want) {
-			t.Errorf("Validate message %q should name %s", err.Error(), want)
-		}
+func TestLoad_TaskCredentialIsolation(t *testing.T) {
+	for _, taskToken := range []string{" opaque-task-credential ", "", "   "} {
+		t.Run(taskToken, func(t *testing.T) {
+			t.Setenv(EnvCredentialMode, " TASK ")
+			t.Setenv(EnvTaskToken, taskToken)
+			t.Setenv(EnvToken, "bf_canonical")
+			t.Setenv(EnvBotToken, "bf_alias")
+			t.Setenv(EnvSpaceID, "native-space")
+			cfg := Load()
+			want := strings.TrimSpace(taskToken)
+			if cfg.BotToken != want || cfg.SpaceID != "" {
+				t.Fatalf("task config mixed native credentials: token=%q space=%q", cfg.BotToken, cfg.SpaceID)
+			}
+			resolved := ResolveEnvToken()
+			if resolved.Token != want {
+				t.Fatalf("resolved token = %q, want dedicated task token", resolved.Token)
+			}
+			if want == "" {
+				if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), EnvTaskToken) {
+					t.Fatalf("Validate = %v, want missing task-token guidance", err)
+				}
+			}
+		})
 	}
 }
 
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
+func TestResolveEnvToken_NormalModeIgnoresTaskToken(t *testing.T) {
+	t.Setenv(EnvCredentialMode, "")
+	t.Setenv(EnvTaskToken, "task-credential")
+	t.Setenv(EnvToken, "")
+	t.Setenv(EnvBotToken, "bf_native")
+	if got := ResolveEnvToken(); got.Token != "bf_native" || got.Source != "env:"+EnvBotToken {
+		t.Fatalf("normal credential = %+v", got)
 	}
-	return false
+	t.Setenv(EnvBotToken, "")
+	if got := ResolveEnvToken(); got.Token != "" {
+		t.Fatalf("normal mode consumed task credential: %+v", got)
+	}
 }

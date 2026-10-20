@@ -16,7 +16,19 @@
 
 > The CLI recognizes the prefix for display only (`octo-cli config show` → `bot_kind`); it does **not** gate commands by bot kind, with two exceptions: an `app_*` token running `message search`, and a credential whose kind a domain's spec does not list in `x-octo-allowed-token-kinds` (`TOKEN_KIND_NOT_ALLOWED`). Both are local `validation` errors (exit 2) raised before the request. Otherwise an App Bot calling a User-Bot-only command sends the request and gets a server-side `FORBIDDEN`.
 
-> **Token source.** The token comes from a stored profile, else `OCTO_TOKEN`, else `OCTO_BOT_TOKEN`. `OCTO_TOKEN` is the preferred env slot and accepts any of the three kinds; `identity.source` in the success envelope names the variable actually used.
+> **Token source.** Explicit `--bot-id` / `--profile` selectors win first.
+> Otherwise the environment aliases (`OCTO_TOKEN`, then `OCTO_BOT_TOKEN`)
+> override an `OCTO_BOT_ID`-selected or sole implicit profile. Both aliases
+> accept every supported credential kind; `identity.source` names the alias
+> that supplied the value.
+
+> **Task credentials.** For a daemon-launched Loop task invocation, set
+> `OCTO_CREDENTIAL_MODE=task`; only the dedicated `OCTO_TASK_TOKEN` is read,
+> with no fallback to ordinary aliases or stored profiles. Ordinary commands
+> ignore `OCTO_TASK_TOKEN`. Keep mode selection per invocation so other
+> services can use their independent bot credentials. `auth status` follows
+> ordinary credential precedence and masks the selected token; an unverified
+> `OCTO_BOT_ID` is reported as `robot_id_claimed`, not `robot_id`.
 
 ---
 

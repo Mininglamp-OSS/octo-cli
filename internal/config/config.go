@@ -13,15 +13,16 @@ import (
 // Environment variable names. Centralised for testability and discoverability.
 const (
 	EnvAPIBaseURL = "OCTO_API_BASE_URL"
-	// EnvToken is the preferred token variable. It holds any of the three token
-	// kinds (app_*, bf_*, uk_*) and takes precedence over EnvBotToken, so a
-	// real-person user API key can be supplied without disturbing an existing
-	// OCTO_BOT_TOKEN setup.
+	// EnvToken is the canonical token variable. It accepts every supported
+	// credential kind and takes precedence over the compatible EnvBotToken alias.
 	EnvToken    = "OCTO_TOKEN"
 	EnvBotToken = "OCTO_BOT_TOKEN"
+	// EnvTaskToken carries the daemon-issued Loop task credential separately
+	// from native Octo credentials. It is consumed only by task-mode Loop commands.
+	EnvTaskToken = "OCTO_TASK_TOKEN"
 	// EnvCredentialMode selects the credential resolution policy. The empty
-	// value keeps the normal profile/bot flow; "task" selects the restricted
-	// credential policy used by correctly isolated octo-daemon task processes.
+	// value keeps the normal profile/bot flow; "task" is a fail-closed mode
+	// selected explicitly for an individual task-workflow CLI invocation.
 	EnvCredentialMode  = "OCTO_CREDENTIAL_MODE"
 	CredentialModeTask = "task"
 	EnvSpaceID         = "OCTO_SPACE_ID"
@@ -35,17 +36,16 @@ const (
 )
 
 // Config holds CLI configuration loaded from environment variables.
-// BotToken and SpaceID live here too (duplicated in credential.EnvProvider) so
-// callers wiring a client without a full provider chain still have access; the
-// credential provider remains the authoritative path for command execution.
+// BotToken and SpaceID live here so callers wiring a client without a full
+// provider chain still have access; the credential provider remains the
+// authoritative path for command execution.
 type Config struct {
 	// APIBaseURL is the unified base URL for all backend services.
 	// Set via OCTO_API_BASE_URL.
 	APIBaseURL string
-	// BotToken is the caller's token (OCTO_TOKEN, else OCTO_BOT_TOKEN).
+	// BotToken is the active Octo or Loop bearer credential.
 	BotToken string
-	// CredentialMode controls credential selection, not server authorization or
-	// process isolation. Daemon task processes must use an isolated config dir.
+	// CredentialMode controls credential selection, not server authorization.
 	// Fleet remains authoritative for the bearer credential's principal kind,
 	// bindings, and actions.
 	CredentialMode string
@@ -55,28 +55,48 @@ type Config struct {
 	Format string
 }
 
-// Load reads configuration from the environment. The token follows the same
-// precedence as credential.EnvProvider — OCTO_TOKEN wins over OCTO_BOT_TOKEN —
-// so the auth gate and `config show` agree with the resolved credential.
+// ResolvedEnvToken is the canonical credential value resolved at the process
+// environment boundary. Callers use Token and Source without knowing which
+// compatibility alias supplied it.
+type ResolvedEnvToken struct {
+	Token  string
+	Source string
+}
+
+// Load reads configuration from the environment. Token aliases are normalized
+// by ResolveEnvToken so the auth gate and credential provider cannot drift.
 func Load() *Config {
+	token := ResolveEnvToken()
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode)))
+	spaceID := os.Getenv(EnvSpaceID)
+	if mode == CredentialModeTask {
+		spaceID = ""
+	}
 	return &Config{
 		APIBaseURL:     envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
-		BotToken:       envToken(),
-		CredentialMode: strings.ToLower(strings.TrimSpace(os.Getenv(EnvCredentialMode))),
-		SpaceID:        os.Getenv(EnvSpaceID),
+		BotToken:       token.Token,
+		CredentialMode: mode,
+		SpaceID:        spaceID,
 		Format:         envOrDefault(EnvFormat, "json"),
 	}
 }
 
-// envToken returns the token from the highest-precedence variable that is set.
-// Both variables are trimmed, and symmetrically: an untrimmed OCTO_BOT_TOKEN
-// holding only whitespace would pass Validate here and then resolve to no
-// credential in credential.EnvProvider, which trims both.
-func envToken() string {
-	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
-		return v
+// ResolveEnvToken selects the explicit credential mode at the environment
+// boundary. Task mode never reads or falls back to ordinary token aliases.
+func ResolveEnvToken() ResolvedEnvToken {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(EnvCredentialMode)), CredentialModeTask) {
+		if v := strings.TrimSpace(os.Getenv(EnvTaskToken)); v != "" {
+			return ResolvedEnvToken{Token: v, Source: "env:" + EnvTaskToken}
+		}
+		return ResolvedEnvToken{}
 	}
-	return strings.TrimSpace(os.Getenv(EnvBotToken))
+	if v := strings.TrimSpace(os.Getenv(EnvToken)); v != "" {
+		return ResolvedEnvToken{Token: v, Source: "env:" + EnvToken}
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvBotToken)); v != "" {
+		return ResolvedEnvToken{Token: v, Source: "env:" + EnvBotToken}
+	}
+	return ResolvedEnvToken{}
 }
 
 // Validate checks required fields. Only the token is required at load time;
@@ -87,7 +107,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("unsupported %s %q", EnvCredentialMode, c.CredentialMode)
 	}
 	if c.BotToken == "" {
-		return fmt.Errorf("%s or %s is required (app_*, bf_*, uk_*, or octo_loop_* token)", EnvToken, EnvBotToken)
+		if c.CredentialMode == CredentialModeTask {
+			return fmt.Errorf("%s is required in task mode", EnvTaskToken)
+		}
+		return fmt.Errorf("%s or %s is required (Octo or Loop bearer credential)", EnvToken, EnvBotToken)
 	}
 	if c.APIBaseURL != "" {
 		baseURL, err := NormalizeAPIBaseURL(c.APIBaseURL)

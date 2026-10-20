@@ -20,7 +20,7 @@ Prove that the compiled CLI can use a real credential to:
 6. handle pagination, validation, not-found, conflict, rate-limit and retry
    responses consistently.
 
-Passing local Go tests or matching all 136 OpenAPI operation IDs is necessary but
+Passing local Go tests or matching all 126 OpenAPI operation IDs is necessary but
 does not satisfy this plan.
 
 ## 2. Safety and environment requirements
@@ -166,7 +166,7 @@ These cases must run before any mutation.
 | ID | Command | Assertion |
 |---|---|---|
 | LIVE-000 | `octo-cli version` | Expected test version |
-| LIVE-001 | `octo-cli schema --list loop` | 126 registered operations |
+| LIVE-001 | `octo-cli schema --list loop` | 116 registered operations |
 | LIVE-002 | `run_loop task list --page 1 --page-size 2` | Success envelope and pagination |
 | LIVE-003 | `run_loop expert list --page 1 --page-size 2` | Success envelope |
 | LIVE-004 | `run_loop expert-template list --page 1 --page-size 2` | Success envelope |

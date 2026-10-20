@@ -42,10 +42,6 @@
       "description": "Labels operations."
     },
     {
-      "name": "projects",
-      "description": "Projects operations."
-    },
-    {
       "name": "comments",
       "description": "Comments operations."
     },
@@ -3220,568 +3216,6 @@
         }
       ]
     },
-    "/fleet/api/v1/projects/_search": {
-      "get": {
-        "summary": "Search projects",
-        "description": "Search projects in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.search",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Page"
-          },
-          {
-            "$ref": "#/components/parameters/PageSize"
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "include_closed",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Collection"
-          }
-        },
-        "x-octo-risk": "read"
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
-    },
-    "/fleet/api/v1/projects": {
-      "get": {
-        "summary": "List projects",
-        "description": "List projects in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.list",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Page"
-          },
-          {
-            "$ref": "#/components/parameters/PageSize"
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "priority",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Collection"
-          }
-        },
-        "x-octo-risk": "read"
-      },
-      "post": {
-        "summary": "Create project",
-        "description": "Create project in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.create",
-        "parameters": [
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "priority",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "201": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "write"
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
-    },
-    "/fleet/api/v1/projects/{project_id}": {
-      "get": {
-        "summary": "Get project",
-        "description": "Get project in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "read"
-      },
-      "patch": {
-        "summary": "Update project",
-        "description": "Update project in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.update",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "write"
-      },
-      "delete": {
-        "summary": "Delete project",
-        "description": "Delete project in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.delete",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "high-risk-write"
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
-    },
-    "/fleet/api/v1/projects/{project_id}/resources": {
-      "get": {
-        "summary": "List project resources",
-        "description": "List project resources in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.resource.list",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "$ref": "#/components/parameters/Page"
-          },
-          {
-            "$ref": "#/components/parameters/PageSize"
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Collection"
-          }
-        },
-        "x-octo-risk": "read"
-      },
-      "post": {
-        "summary": "Create project resource",
-        "description": "Create project resource in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.resource.create",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "201": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "write"
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
-    },
-    "/fleet/api/v1/projects/{project_id}/resources/{project_resource_id}": {
-      "patch": {
-        "summary": "Update project resource",
-        "description": "Update project resource in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.resource.update",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "project_resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "write"
-      },
-      "delete": {
-        "summary": "Delete project resource",
-        "description": "Delete project resource in the authenticated workspace.",
-        "tags": [
-          "projects"
-        ],
-        "operationId": "project.resource.delete",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "project_resource_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "200": {
-            "$ref": "#/components/responses/Resource"
-          }
-        },
-        "x-octo-risk": "high-risk-write"
-      },
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/WorkspaceIDHeader"
-        }
-      ]
-    },
     "/fleet/api/v1/comments/{comment_id}": {
       "patch": {
         "summary": "Update comment",
@@ -6468,14 +5902,14 @@
         "x-octo-risk": "write"
       }
     },
-    "/fleet/api/v1/tasks/{task_id}/expert_team_evaluation": {
+    "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations": {
       "post": {
-        "summary": "Record expert team evaluation",
-        "description": "Record expert team evaluation in the authenticated workspace.",
+        "summary": "Evaluate a task as expert team leader",
+        "description": "Record the authenticated Expert Team Leader's evaluation outcome for the current Task execution.",
         "tags": [
           "tasks"
         ],
-        "operationId": "task.team_evaluation.record",
+        "operationId": "expert_team.evaluate",
         "parameters": [
           {
             "name": "task_id",
@@ -6492,7 +5926,24 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FlexibleRequest"
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "outcome"
+                ],
+                "properties": {
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "action",
+                      "no_action",
+                      "failed"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -6631,7 +6082,7 @@
         "name": "X-Workspace-ID",
         "in": "header",
         "required": true,
-        "description": "Workspace selector for workspace-scoped Loop requests.",
+        "description": "Workspace UUID for workspace-scoped Loop requests.",
         "x-octo-flag": "workspace-id",
         "schema": {
           "type": "string",
@@ -7519,10 +6970,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "project_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "parent_task_id": {
             "type": "string",
             "format": "uuid"
@@ -7866,13 +7313,6 @@
               "null"
             ]
           },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
           "assignee_type": {
             "type": "string",
             "enum": [
@@ -7910,13 +7350,6 @@
               "string",
               "null"
             ]
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
           },
           "assignee_type": {
             "type": "string",
@@ -7980,13 +7413,6 @@
               "string",
               "null"
             ]
-          },
-          "project_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
           },
           "assignee_type": {
             "type": "string",

@@ -135,7 +135,7 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	loop := findCmd(root, "loop")
 	for _, resource := range []string{
 		"attachment", "autopilot", "comment", "execution", "expert",
-		"expert-template", "expert-team", "label", "project", "runtime",
+		"expert-template", "expert-team", "label", "runtime",
 		"skill", "skill-file", "task", "workspace",
 	} {
 		if findCmd(loop, resource) == nil {
@@ -168,11 +168,12 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 }
 
 func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
-	var gotPath, gotAuth, gotSpace string
+	var gotPath, gotAuth, gotSpace, gotAccept string
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotSpace = r.Header.Get("X-Space-Id")
+		gotAccept = r.Header.Get("Accept")
 		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
 	}))
 	defer gateway.Close()
@@ -203,6 +204,96 @@ func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
 	}
 	if gotSpace != "" {
 		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
+	}
+}
+
+func TestLoopCommandReportsUnsupportedServerVersion(t *testing.T) {
+	t.Parallel()
+
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/tasks/task-1" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	})
+	root.SetArgs([]string{"loop", "task", "get", "task-1", "--workspace-id", "workspace-1"})
+
+	err := root.Execute()
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error = %T %v, want LOOP_API_UNSUPPORTED", err, err)
+	}
+
+	var envelope struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(tf.ErrOut.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode error envelope: %v\n%s", err, tf.ErrOut.String())
+	}
+	if envelope.OK {
+		t.Fatal("error envelope ok = true")
+	}
+	if envelope.Error.Type != "api_error" || envelope.Error.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error envelope = %+v", envelope.Error)
+	}
+	if envelope.Error.Message != "this Octo server version does not support Loop" {
+		t.Errorf("message = %q", envelope.Error.Message)
+	}
+	if !strings.Contains(envelope.Error.Hint, "/fleet/api/v1") {
+		t.Errorf("hint = %q, want Fleet API path", envelope.Error.Hint)
+	}
+}
+
+func TestLoopExpertTeamEvaluateCommandShape(t *testing.T) {
+	var gotMethod, gotPath, gotWorkspace string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"evaluation-1"}`))
+	})
+	loop := findCmd(root, "loop")
+	expertTeam := findCmd(loop, "expert-team")
+	if expertTeam == nil || findCmd(expertTeam, "evaluate") == nil {
+		t.Fatal("loop expert-team evaluate command not registered")
+	}
+	task := findCmd(loop, "task")
+	if task != nil && findCmd(task, "team-evaluation") != nil {
+		t.Fatal("legacy loop task team-evaluation hierarchy must not be generated")
+	}
+
+	root.SetArgs([]string{
+		"loop", "expert-team", "evaluate", "task-1",
+		"--workspace-id", "workspace-1",
+		"--outcome", "no_action",
+		"--reason", "nothing to dispatch",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop expert-team evaluate: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/fleet/api/v1/tasks/task-1/expert_team_evaluations" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotWorkspace != "workspace-1" {
+		t.Fatalf("X-Workspace-ID = %q", gotWorkspace)
+	}
+	if gotBody["outcome"] != "no_action" || gotBody["reason"] != "nothing to dispatch" {
+		t.Fatalf("request body = %#v", gotBody)
 	}
 }
 
@@ -279,6 +370,21 @@ func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
 	}
 	if requestCount != 0 {
 		t.Fatalf("request count = %d, want 0", requestCount)
+	}
+}
+
+func TestLoopWorkspaceIDFlagDocumentsUUID(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
+	taskList := findCmd(findCmd(findCmd(root, "loop"), "task"), "list")
+	if taskList == nil {
+		t.Fatal("loop task list command not registered")
+	}
+	flag := taskList.Flags().Lookup("workspace-id")
+	if flag == nil {
+		t.Fatal("loop task list --workspace-id flag not registered")
+	}
+	if flag.Usage != "Workspace UUID for workspace-scoped Loop requests." {
+		t.Errorf("--workspace-id usage = %q", flag.Usage)
 	}
 }
 
@@ -1411,7 +1517,6 @@ func TestValidateRequiredBodyFields_AllowsOptionalLoopNulls(t *testing.T) {
 	}
 	body := map[string]any{
 		"description":         nil,
-		"project_id":          nil,
 		"task_title_template": nil,
 	}
 	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {

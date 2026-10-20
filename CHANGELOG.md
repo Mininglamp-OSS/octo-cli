@@ -7,16 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`auth status` credential selection** — reports the same credential source,
+  masked token, and effective API origin as ordinary requests, including when
+  environment credentials override stored profiles. Explicit selectors still
+  fail closed; unverified environment Bot IDs remain `robot_id_claimed`.
+- **COS publish lock diagnostics** — cleanup warnings include a safe HTTP
+  status without exposing SDK messages, signed URLs, or credentials. Cleanup
+  failures still preserve the original publication result.
+
 ### Changed
-- **PPT native media guidance** distinguishes direct binary uploads of authorized
-  local task assets from ingestion of existing public URLs. Signed URLs use stdin
-  and private response handling; native references are inserted with a fresh
-  revision. **Minimum rollout dependency:** use this media workflow only with a
-  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
-  document-owned media. Older image-only attachment responses are not compatible.
-  No new CLI command, publishing gate or size-limit change is introduced.
+
+- **Loop task token isolation (breaking)** — task mode now consumes only
+  `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or
+  falls back to profiles. Pair daemon-launched tasks with daemon v1.2.1 or later,
+  and set `OCTO_CREDENTIAL_MODE=task` per Loop invocation. Ordinary commands
+  ignore the task token and continue using independent bot credentials.
+
+### Removed
+
+- **Legacy Fleet Project commands** — removed `loop project`
+  `list/search/get/create/update/delete` and `resource list/create/update/delete`
+  from the command tree, completion, and schema discovery. Removed retired
+  `project_id` fields from quick-create and autopilot request/response schemas,
+  including the quick-create `--project-id` flag. Existing scripts must stop
+  using these retired operations and fields. Workspace scope (`--workspace-id`)
+  is unchanged; no octo-server Project API or command alias is introduced.
 
 ### Added
+- **`octo-cli api --workspace-id`** — generic passthrough requests can now send
+  explicit workspace context through the `X-Workspace-ID` header.
+- **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and
+  `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias. Both accept every
+  supported credential kind, override implicit stored profiles, and are
+  normalized once for ordinary credential resolution. Task mode uses only
+  the separate `OCTO_TASK_TOKEN`. Explicit
+  `--bot-id` / `--profile` selectors still win. The success envelope's
+  `identity.source` names the alias that supplied the value.
 - **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
   matching version in one JSON response. Bot updates read this pair, edit the
   HTML, and publish with the existing `--version` set to the read version + 1.
@@ -98,9 +126,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unified API. This exposes the install-to-Loop capability that the retired
   per-type surface deliberately withheld; it is gated backend-side and
   provisions through octo-fleet.
-- **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
+- **`octo-cli loop` domain** — 116 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,
-  workspaces, runtimes, projects, skills, autopilots, attachments, comments,
+  workspaces, runtimes, skills, autopilots, attachments, comments,
   and labels. Loop uses explicit Workspace selectors, typed Autopilot dispatch
   fields, task lifecycle status including `in_review`, and a daemon-oriented
   task credential policy. The shared OpenAPI registry now resolves referenced
@@ -149,12 +177,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     piped verbatim from one command into the next.
   - Presigned object-storage transfers run on a separate HTTP client that carries
     no Octo credential and no space header.
-- **`OCTO_TOKEN`** — a preferred token variable accepting any of the three token
-  kinds (`app_*`, `bf_*`, `uk_*`). Resolution order is now stored profile →
-  `OCTO_TOKEN` → `OCTO_BOT_TOKEN`; `OCTO_BOT_TOKEN` keeps working exactly as
-  before, so a setup that never sets `OCTO_TOKEN` is unaffected. The success
-  envelope's `identity.source` names the variable actually used
-  (`env:OCTO_TOKEN` or `env:OCTO_BOT_TOKEN`).
 - **Generic spec extensions**, all opt-in with omit-means-unchanged semantics:
   `x-octo-allowed-token-kinds` (local credential-kind gate →
   `TOKEN_KIND_NOT_ALLOWED`, `validation`/exit 2, matching the existing
@@ -223,6 +245,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **PPT native media guidance** distinguishes direct binary uploads of authorized
+  local task assets from ingestion of existing public URLs. Signed URLs use stdin
+  and private response handling; native references are inserted with a fresh
+  revision. **Minimum rollout dependency:** use this media workflow only with a
+  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
+  document-owned media. Older image-only attachment responses are not compatible.
+  No new CLI command, publishing gate or size-limit change is introduced.
+
+- **Loop workspace flag terminology** — generated `--workspace-id` help and the
+  bundled Loop skill now state that the value is a workspace UUID, not a slug
+  or generic selector. The architecture guide records the separate Web slug,
+  Public API UUID, and credential-bound task conventions.
+
 - **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
   visible title with the machine name.** The CLI contract now correctly
   describes `plugin_name` as the human-facing Marketplace name and `name` as

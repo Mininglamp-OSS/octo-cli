@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -101,16 +100,15 @@ func maskToken(tok string) any {
 }
 
 // defaultTokenSource is the source tag used when no resolved credential is
-// available — the env var that would supply the token, following the same
-// OCTO_TOKEN → OCTO_BOT_TOKEN precedence as credential.EnvProvider.
+// available — ResolveEnvToken is the single source of alias precedence.
 func defaultTokenSource(tok string) string {
 	if tok == "" {
 		return ""
 	}
-	if os.Getenv(config.EnvToken) != "" {
-		return "env:" + config.EnvToken
+	if resolved := config.ResolveEnvToken(); resolved.Token != "" {
+		return resolved.Source
 	}
-	return "env:" + config.EnvBotToken
+	return ""
 }
 
 func botKind(tok string) any {

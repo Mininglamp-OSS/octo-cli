@@ -63,7 +63,7 @@ func TestAuth_LoginListStatusLogout(t *testing.T) {
 	}
 
 	// status (whoami) for the sole profile.
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status")
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -122,7 +122,7 @@ func TestAuth_UpdateAPIBaseURLPreservesCredentials(t *testing.T) {
 		t.Fatalf("mail token changed: %q, %v", mailToken, err)
 	}
 
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_demo")
 	if err != nil {
 		t.Fatalf("auth status: %v", err)
@@ -216,7 +216,7 @@ func TestAuth_ProfileNameDefaultsToBotID(t *testing.T) {
 	loginToken(t, "cli_demo", "app_demo_token")
 
 	// Selecting by --profile cli_demo (the defaulted name) resolves the same entry.
-	f := newTestFactoryWithReg()
+	f := newAuthTestFactory()
 	out, _, err := execRoot(t, f, "auth", "status", "--profile", "cli_demo")
 	if err != nil {
 		t.Fatalf("status by profile: %v", err)
@@ -233,7 +233,7 @@ func TestAuth_StatusAmbiguousIsInformational(t *testing.T) {
 
 	// status with no selector must NOT error — it's introspection. It reports
 	// active=null + a pointer, but never enumerates (that is `auth list`).
-	f := newTestFactoryWithReg()
+	f := newAuthTestFactory()
 	out, _, err := execRoot(t, f, "auth", "status")
 	if err != nil {
 		t.Fatalf("status should not error on ambiguity: %v", err)
@@ -250,7 +250,7 @@ func TestAuth_StatusAmbiguousIsInformational(t *testing.T) {
 	}
 
 	// status with --bot-id resolves to the one active bot.
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_b")
 	if err != nil {
 		t.Fatalf("status --bot-id: %v", err)

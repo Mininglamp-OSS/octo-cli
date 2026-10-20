@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -69,7 +70,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
-		"loop":        126,
+		"loop":        116,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -241,13 +242,12 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 	for _, id := range []string{
 		"workspace.list",
 		"label.create",
-		"project.resource.create",
 		"comment.reaction.add",
 		"attachment.upload",
 		"loop.skill.list",
 		"runtime.update_request.get",
 		"autopilot.delivery.replay",
-		"task.team_evaluation.record",
+		"expert_team.evaluate",
 	} {
 		op, ok := r.GetOperation(id)
 		if !ok {
@@ -257,6 +257,24 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 		if op.Service != "loop" || !strings.HasPrefix(op.Path, "/fleet/api/v1/") {
 			t.Errorf("%s: got service=%q path=%q", id, op.Service, op.Path)
 		}
+	}
+
+	evaluation, ok := r.GetOperation("expert_team.evaluate")
+	if !ok {
+		t.Fatal("expert_team.evaluate: not found")
+	}
+	if evaluation.Path != "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations" {
+		t.Fatalf("expert_team.evaluate path = %q", evaluation.Path)
+	}
+	if evaluation.RequestBody == nil {
+		t.Fatal("expert_team.evaluate request body missing")
+	}
+	outcome, ok := evaluation.RequestBody.Properties["outcome"]
+	if !ok || !slices.Equal(outcome.Enum, []any{"action", "no_action", "failed"}) {
+		t.Fatalf("expert_team.evaluate outcome schema = %+v", outcome)
+	}
+	if _, ok := evaluation.RequestBody.Properties["reason"]; !ok {
+		t.Fatalf("expert_team.evaluate reason schema missing: %+v", evaluation.RequestBody.Properties)
 	}
 
 	op, ok := r.GetOperation("label.list")
