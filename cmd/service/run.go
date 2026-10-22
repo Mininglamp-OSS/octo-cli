@@ -585,8 +585,10 @@ func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (map[string]str
 		}
 		// An explicitly blank replay key cannot identify an uncertain write.
 		// Omitted optional headers remain absent for legacy shared operations.
-		if strings.EqualFold(hf.apiName, "Idempotency-Key") && strings.TrimSpace(*hf.strVal) == "" {
-			return nil, output.ErrValidation("--"+flagName+" must not be blank", "supply a stable key and preserve it with the same body on retry")
+		if strings.EqualFold(hf.apiName, "Idempotency-Key") {
+			if err := ValidateIdempotencyKey("--"+flagName, *hf.strVal); err != nil {
+				return nil, err
+			}
 		}
 		if headers == nil {
 			headers = map[string]string{}

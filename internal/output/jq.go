@@ -16,7 +16,9 @@ type JQProgram struct {
 func CompileJQ(expr string) (*JQProgram, error) {
 	query, err := gojq.Parse(expr)
 	if err != nil {
-		return nil, fmt.Errorf("parse jq expression: %w", err)
+		return nil, ErrWithHint("config", "CLI_ERROR",
+			"jq expression could not be parsed",
+			"check the --jq expression's syntax")
 	}
 	code, err := gojq.Compile(query)
 	if err != nil {

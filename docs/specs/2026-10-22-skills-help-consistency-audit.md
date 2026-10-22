@@ -224,9 +224,12 @@ under SKILL-001.
 ### CLI-003 — Board comment branch discards an accepted idempotency key
 
 - **Disposition (2026-10-22): Resolved in source.**
-  `cmd/docs_board_comment.go` forwards the key in both request forms.
-  An actual local POST and dry-run header inspection passed; backend deduplication
-  semantics are unchanged and were not asserted.
+  `cmd/docs_board_comment.go` forwards valid keys in real and dry-run requests.
+  It reuses `service.ValidateIdempotencyKey` with generated operations and
+  rejects explicitly empty or whitespace-only keys before scene reads or writes.
+  Point/element and real/dry-run regressions passed with zero requests for blank
+  keys; valid and omitted keys remained usable in actual local CLI smoke.
+  Backend deduplication semantics are unchanged and were not asserted.
 - **Version/evidence:** Runtime on both baselines, including a local real HTTP
   request rather than only dry-run output.
 - **Observation:** `docs comments add audit-doc --body audit --point 1,2
@@ -475,27 +478,29 @@ under SKILL-001.
   malformed jq, invalid environment format and invalid explicit format.
   Existing invalid-output business-leaf tests still reject before HTTP.
 
-### CLI-016 — Raw jq compiler errors expose caller-provided identifiers
+### CLI-016 — Raw jq diagnostics expose caller-provided identifiers
 
 - **Disposition (2026-10-22): Resolved in source.**
-  `internal/output/jq.go` retains eager compilation and returns a static
-  config/CLI_ERROR with a safe hint on compile failure. It does not retain
-  compiler details or a wrapped compiler cause. Valid compiled programs,
-  parsing behavior and data-dependent runtime error handling are unchanged.
-- **Version/evidence:** direct primitive regressions and executable stderr
-  inspection of the uncommitted output preflight repair.
+  `internal/output/jq.go` retains eager parsing/compilation and returns static
+  config/CLI_ERROR diagnostics with safe hints for both failure stages.
+  Neither diagnostic retains caller identifiers, gojq details or wrapped causes.
+  Valid programs and data-dependent runtime error handling are unchanged.
+- **Version/evidence:** direct primitive regressions and source CLI stderr
+  inspection.
 - **Observation:** a fake sensitive marker supplied as an undefined jq function,
   variable or module appeared in the wrapped gojq compiler diagnostic. If a
   credential is accidentally supplied in one of those positions, the diagnostic
   copies it into stderr and any downstream error log/context.
-- **Impact:** preflight introduced a new input-disclosure path compared with
-  the existing sanitized iterator-error behavior.
-- **Verification:** direct CompileJQ tests failed for all three identifier
-  forms before the correction; a valid expression remained executable.
-  Actual CLI stderr then contained no marker and preserved config/CLI_ERROR.
-  A local receiver observed zero requests for invalid output controls, while
-  valid jq returned the expected value after one POST. The full test suite,
-  vet and build passed; focused regression tests cover both follow-up repairs.
+- **Review observation (2026-10-22):** malformed syntax with a sensitive-like
+  unexpected token also appeared in the raw gojq parser diagnostic.
+- **Impact:** raw parse or compile diagnostics can copy caller-provided sensitive
+  input into stderr and downstream logs, unlike sanitized runtime errors.
+- **Verification:** direct CompileJQ tests failed for the parser token and all
+  three compiler identifier forms before their corresponding corrections;
+  valid expressions remained executable. Actual CLI version and write-command
+  preflight emitted config/CLI_ERROR without the synthetic marker in stdout,
+  stderr or error fields. The local receiver observed zero requests, while a
+  valid jq filter returned the expected result.
 
 ## Skill-document findings
 
@@ -914,6 +919,12 @@ under SKILL-001.
   query reported `VALIDATION_ERROR`; `loop skill search --q` remained usable.
   Rendered help and schema expose the required operand and its HTTP mapping.
   The CI-pinned golangci-lint v2.12.2 full scan with Go 1.24.0 reported no issues.
+  `TestOctoLoopSkillReadExamplesExecute` also executes the actual embedded
+  search, leading-dash and two-parent examples through Bash argv parsing and
+  CLI request construction. Targeted example mutations failed for a flag-based
+  task query, an omitted end-of-options separator and missing parent selection.
+  The skill was restored byte-for-byte after each audit; coverage does not
+  depend on fixed prose assertions.
 
 ### LOOP-002 — Batch child-task command cannot identify any parent tasks
 

@@ -12,11 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Output preflight** — invalid effective output formats and jq parse/compile
   errors are rejected before requests or local mutations. Compiled jq programs
   are reused for output; help-only service parents, help and shell completion
-  retain their text output independently of output options. Jq compiler errors
-  use static diagnostics without caller-provided identifiers.
+  retain their text output independently of output options. Jq parse and compile
+  failures use static diagnostics without caller-provided identifiers.
 - **Local mutation dry-runs** — `auth login/update/logout` and `skills --install`
   reject `--dry-run` before reading credentials or changing local files.
-- **Document command consistency** — board comments forward `Idempotency-Key`;
+- **Document command consistency** — board comments forward `Idempotency-Key`
+  and reject explicitly blank keys before scene reads or writes;
   import/export refuse empty and dot-segment IDs; handwritten input errors use
   validation envelopes; missing export format has a required-option diagnosis.
   Document share creation refuses explicitly supplied blob-only permissions.

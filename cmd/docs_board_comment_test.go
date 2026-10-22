@@ -126,6 +126,107 @@ func TestDocsBoardCommentDryRunPostsCanonicalAnchor(t *testing.T) {
 	}
 }
 
+func TestDocsBoardCommentRejectsExplicitBlankIdempotencyKeyBeforeRequests(t *testing.T) {
+	scene := `{"elements":[{"id":"e","type":"rectangle","x":0,"y":0,"width":10,"height":10,"isDeleted":false}],"files":{},"baseVersion":"BV"}`
+	anchors := []struct {
+		name string
+		args []string
+	}{
+		{name: "point", args: []string{"--point", "1,2"}},
+		{name: "element", args: []string{"--element-id", "e"}},
+	}
+	modes := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "normal"},
+		{name: "dry-run", dryRun: true},
+	}
+	keys := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty"},
+		{name: "whitespace", value: "   "},
+	}
+
+	for _, anchor := range anchors {
+		for _, mode := range modes {
+			for _, key := range keys {
+				t.Run(anchor.name+"/"+mode.name+"/"+key.name, func(t *testing.T) {
+					_, capture := sceneTestFactory(t, func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						switch r.Method {
+						case http.MethodGet:
+							_, _ = w.Write([]byte(scene))
+						case http.MethodPost:
+							w.WriteHeader(http.StatusCreated)
+							_, _ = w.Write([]byte(`{"id":1}`))
+						default:
+							http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+						}
+					})
+					args := []string{"docs", "comments", "add", "d1", "--body", "review"}
+					args = append(args, anchor.args...)
+					args = append(args, "--idempotency-key="+key.value)
+					if mode.dryRun {
+						args = append([]string{"--dry-run"}, args...)
+					}
+
+					_, _, err := execRoot(t, capture.f, args...)
+					exit := output.AsExitError(err)
+					if exit == nil || exit.Type != "validation" || exit.Code != "VALIDATION_ERROR" {
+						t.Fatalf("explicit blank idempotency key error = %v, want VALIDATION_ERROR", err)
+					}
+					if capture.requests != 0 {
+						t.Fatalf("explicit blank idempotency key made %d HTTP requests, want 0", capture.requests)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDocsBoardCommentIdempotencyKeyControls(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		keyArg     string
+		wantKey    string
+		wantHeader bool
+	}{
+		{name: "valid key", keyArg: "--idempotency-key=stable", wantKey: "stable", wantHeader: true},
+		{name: "omitted key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, capture := sceneTestFactory(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("request method = %s, want POST", r.Method)
+				}
+				value, present := r.Header["Idempotency-Key"]
+				if present != tc.wantHeader {
+					t.Errorf("Idempotency-Key presence = %t, want %t", present, tc.wantHeader)
+				}
+				if tc.wantHeader && (len(value) != 1 || value[0] != tc.wantKey) {
+					t.Errorf("Idempotency-Key = %v, want %q", value, tc.wantKey)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			})
+			args := []string{"docs", "comments", "add", "d1", "--body", "review", "--point", "1,2"}
+			if tc.keyArg != "" {
+				args = append(args, tc.keyArg)
+			}
+			if _, _, err := execRoot(t, capture.f, args...); err != nil {
+				t.Fatalf("board comment failed: %v", err)
+			}
+			if capture.requests != 1 {
+				t.Fatalf("board comment made %d HTTP requests, want 1", capture.requests)
+			}
+		})
+	}
+}
+
 func TestDocsCommentsAddOwnsBoardFlagsWithoutAlias(t *testing.T) {
 	_, capture := sceneTestFactory(t, serveSceneTest(`{"elements":[],"files":{},"baseVersion":"BV"}`))
 	root := NewRootCmd(capture.f.Factory)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -71,6 +72,10 @@ func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string
 	if err := validateBoardCommentFlags(o); err != nil {
 		return err
 	}
+	headers, err := boardCommentHeaders(cmd)
+	if err != nil {
+		return err
+	}
 	var anchor map[string]any
 	var label string
 	if o.point != "" {
@@ -95,14 +100,6 @@ func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string
 		return err
 	}
 	body := map[string]any{"body": o.body, "anchorStart": encoded, "anchorEnd": encoded, "anchorText": label}
-	headers := map[string]string{}
-	if cmd.Flags().Changed("idempotency-key") {
-		key, err := cmd.Flags().GetString("idempotency-key")
-		if err != nil {
-			return err
-		}
-		headers["Idempotency-Key"] = key
-	}
 	if f.Globals != nil && f.Globals.DryRun {
 		data, err := json.Marshal(map[string]any{"dry_run": true, "method": http.MethodPost, "url": "/v1/bot/docs/" + docSegment + "/comments", "headers": headers, "body": body})
 		if err != nil {
@@ -119,6 +116,21 @@ func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string
 		return err
 	}
 	return f.EmitSuccess(result)
+}
+
+func boardCommentHeaders(cmd *cobra.Command) (map[string]string, error) {
+	headers := map[string]string{}
+	if cmd.Flags().Changed("idempotency-key") {
+		key, err := cmd.Flags().GetString("idempotency-key")
+		if err != nil {
+			return nil, err
+		}
+		if err := service.ValidateIdempotencyKey("--idempotency-key", key); err != nil {
+			return nil, err
+		}
+		headers["Idempotency-Key"] = key
+	}
+	return headers, nil
 }
 
 func validateBoardCommentFlags(o *boardCommentFlags) error {
