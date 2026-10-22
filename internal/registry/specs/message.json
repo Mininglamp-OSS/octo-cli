@@ -56,21 +56,39 @@
       "post": {
         "operationId": "message.edit",
         "summary": "Edit a previously-sent bot message",
-        "description": "Only the original sender bot may edit. App Bot: DM only.",
+        "description": "Only the original sender bot may edit. App Bot: DM only. Raw mode requires non-blank content_edit and omits template_ref. Registry mode requires template_ref, state, data, and positive card_seq, and omits content_edit entirely, including empty or null values. Supply the template_ref and data objects through --data. A positive message_seq must match message_id.",
         "x-octo-risk": "write",
+        "x-octo-body-variants-hint": "Use exactly one mode: raw requires non-blank content_edit and omits template_ref; Registry requires template_ref, state, data, and positive card_seq and omits content_edit entirely. Even empty or null content_edit conflicts with Registry mode.",
+        "x-octo-body-variants": [
+          {
+            "name": "raw",
+            "required": ["content_edit"],
+            "forbidden": ["template_ref"]
+          },
+          {
+            "name": "registry",
+            "required": ["template_ref", "state", "data", "card_seq"],
+            "forbidden": ["content_edit"]
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["message_id", "channel_id", "channel_type", "content_edit"],
+                "required": ["message_id", "channel_id", "channel_type"],
                 "properties": {
-                  "message_id": { "type": "string" },
-                  "message_seq": { "type": "integer" },
-                  "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer" },
-                  "content_edit": { "type": "string" }
+                  "message_id": { "type": "string", "description": "ID of the message to edit; pass its integer ID as a string." },
+                  "message_seq": { "type": "integer", "description": "Optional positive target sequence; backend checks it against message_id. Omitted or 0 resolves server-side." },
+                  "channel_id": { "type": "string", "description": "Channel containing the message." },
+                  "channel_type": { "type": "integer", "description": "Channel type: 1=DM, 2=group, 5=thread." },
+                  "content_edit": { "type": "string", "description": "Raw edit mode only: non-blank replacement payload encoded as a JSON string; omit entirely in Registry mode." },
+                  "template_ref": { "type": "object", "description": "Registry edit template reference; omit content_edit." },
+                  "state": { "type": "string", "description": "State input for Registry template rendering." },
+                  "data": { "type": "object", "description": "Data input for Registry template rendering." },
+                  "card_seq": { "type": "integer", "minimum": 1, "description": "Positive sequence for this Registry card update; the backend enforces sequence and revision rules." },
+                  "transient": { "type": "boolean", "description": "Mark the Registry-rendered update as a transient progress frame." }
                 }
               }
             }
@@ -95,10 +113,10 @@
                 "properties": {
                   "channel_id": { "type": "string" },
                   "channel_type": { "type": "integer" },
-                  "start_message_seq": { "type": "integer" },
-                  "end_message_seq": { "type": "integer" },
-                  "limit": { "type": "integer", "default": 50, "maximum": 200 },
-                  "pull_mode": { "type": "integer" }
+                  "start_message_seq": { "type": "integer", "description": "Beginning sequence for the requested history window." },
+                  "end_message_seq": { "type": "integer", "description": "Ending sequence for the requested history window." },
+                  "limit": { "type": "integer", "default": 50, "maximum": 200, "description": "Maximum messages to return; defaults to 50 and is capped at 200." },
+                  "pull_mode": { "type": "integer", "description": "Backend message-pull mode selector." }
                 }
               }
             }
@@ -126,7 +144,7 @@
                 "required": ["channel_id", "message_ids"],
                 "properties": {
                   "channel_id": { "type": "string" },
-                  "channel_type": { "type": "integer", "default": 1 },
+                  "channel_type": { "type": "integer", "default": 1, "description": "Channel type: 1=DM, 2=group, 5=thread." },
                   "message_ids": { "type": "array", "maxItems": 100, "items": { "type": "string" } }
                 }
               }

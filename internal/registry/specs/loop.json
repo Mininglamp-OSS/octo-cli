@@ -105,6 +105,84 @@
           },
           {
             "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/TaskStatus"
+          },
+          {
+            "$ref": "#/components/parameters/TaskStatuses"
+          },
+          {
+            "$ref": "#/components/parameters/TaskPriority"
+          },
+          {
+            "$ref": "#/components/parameters/TaskPriorities"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeTypes"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeOctoUID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeOctoUIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeFilters"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorOctoUID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorOctoUIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorFilters"
+          },
+          {
+            "$ref": "#/components/parameters/TaskLabelIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskIncludeNoAssignee"
+          },
+          {
+            "$ref": "#/components/parameters/TaskInvolvesUserID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskMetadata"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateField"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateStart"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateEnd"
+          },
+          {
+            "$ref": "#/components/parameters/TaskOpenOnly"
+          },
+          {
+            "$ref": "#/components/parameters/TaskScheduled"
+          },
+          {
+            "$ref": "#/components/parameters/TaskSort"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDirection"
           }
         ],
         "responses": {
@@ -238,6 +316,95 @@
           "tasks"
         ],
         "operationId": "task.group",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "$ref": "#/components/parameters/TaskStatus"
+          },
+          {
+            "$ref": "#/components/parameters/TaskStatuses"
+          },
+          {
+            "$ref": "#/components/parameters/TaskPriority"
+          },
+          {
+            "$ref": "#/components/parameters/TaskPriorities"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeTypes"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeOctoUID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeOctoUIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskAssigneeFilters"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorOctoUID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorOctoUIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskCreatorFilters"
+          },
+          {
+            "$ref": "#/components/parameters/TaskLabelIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskIncludeNoAssignee"
+          },
+          {
+            "$ref": "#/components/parameters/TaskInvolvesUserID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskMetadata"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateField"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateStart"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDateEnd"
+          },
+          {
+            "$ref": "#/components/parameters/TaskSort"
+          },
+          {
+            "$ref": "#/components/parameters/TaskDirection"
+          },
+          {
+            "$ref": "#/components/parameters/TaskGroupBy"
+          },
+          {
+            "$ref": "#/components/parameters/TaskGroupAssigneeType"
+          },
+          {
+            "$ref": "#/components/parameters/TaskGroupAssigneeID"
+          }
+        ],
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -4338,6 +4505,7 @@
             "name": "owner_id",
             "in": "query",
             "required": false,
+            "description": "Filter logical runtimes to those owned by this Octo user UUID.",
             "schema": {
               "type": "string"
             }
@@ -4553,6 +4721,7 @@
             "name": "days",
             "in": "query",
             "required": false,
+            "description": "Number of recent days to include in this usage report.",
             "schema": {
               "type": "integer"
             }
@@ -4561,6 +4730,7 @@
             "name": "tz",
             "in": "query",
             "required": false,
+            "description": "Timezone used for this usage report's date boundaries.",
             "schema": {
               "type": "string"
             }
@@ -4625,6 +4795,7 @@
             "name": "days",
             "in": "query",
             "required": false,
+            "description": "Number of recent days to include in this usage report.",
             "schema": {
               "type": "integer"
             }
@@ -4633,6 +4804,7 @@
             "name": "tz",
             "in": "query",
             "required": false,
+            "description": "Timezone used for this usage report's date boundaries.",
             "schema": {
               "type": "string"
             }
@@ -4697,6 +4869,7 @@
             "name": "days",
             "in": "query",
             "required": false,
+            "description": "Number of recent days to include in this usage report.",
             "schema": {
               "type": "integer"
             }
@@ -4705,6 +4878,7 @@
             "name": "tz",
             "in": "query",
             "required": false,
+            "description": "Timezone used for this usage report's date boundaries.",
             "schema": {
               "type": "string"
             }
@@ -4769,6 +4943,7 @@
             "name": "days",
             "in": "query",
             "required": false,
+            "description": "Number of recent days to include in this activity report.",
             "schema": {
               "type": "integer"
             }
@@ -4777,6 +4952,7 @@
             "name": "tz",
             "in": "query",
             "required": false,
+            "description": "Timezone used for this activity report's date boundaries.",
             "schema": {
               "type": "string"
             }
@@ -5311,6 +5487,7 @@
           {
             "name": "status",
             "in": "query",
+            "description": "Filter autopilots by lifecycle status.",
             "schema": {
               "type": "string"
             }
@@ -5960,7 +6137,8 @@
                     ]
                   },
                   "reason": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Optional rationale for the evaluation outcome."
                   }
                 }
               }
@@ -6027,6 +6205,271 @@
           "minimum": 1,
           "maximum": 100,
           "default": 20
+        }
+      },
+      "TaskStatus": {
+        "name": "status",
+        "in": "query",
+        "description": "One status or a comma-separated status union. The plural statuses parameter takes precedence when non-empty.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskStatuses": {
+        "name": "statuses",
+        "in": "query",
+        "description": "Comma-separated status union; when non-empty this takes precedence over status.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskPriority": {
+        "name": "priority",
+        "in": "query",
+        "description": "One priority or a comma-separated priority union. The plural priorities parameter takes precedence when non-empty.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskPriorities": {
+        "name": "priorities",
+        "in": "query",
+        "description": "Comma-separated priority union; when non-empty this takes precedence over priority.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskAssigneeTypes": {
+        "name": "assignee_types",
+        "in": "query",
+        "description": "Comma-separated assignee actor types: member, expert, or expert_team.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskAssigneeID": {
+        "name": "assignee_id",
+        "in": "query",
+        "description": "Include tasks assigned to this Fleet actor UUID.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TaskAssigneeIDs": {
+        "name": "assignee_ids",
+        "in": "query",
+        "description": "Comma-separated Fleet actor UUIDs; matching assignees form a union.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskAssigneeOctoUID": {
+        "name": "assignee_octo_uid",
+        "in": "query",
+        "description": "Exact member Octo UID. Mutually exclusive with assignee ID and Octo UID list filters.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "TaskAssigneeOctoUIDs": {
+        "name": "assignee_octo_uids",
+        "in": "query",
+        "description": "Comma-separated exact member Octo UIDs, at most 100. Mutually exclusive with assignee ID and single Octo UID filters.",
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "TaskAssigneeFilters": {
+        "name": "assignee_filters",
+        "in": "query",
+        "description": "Comma-separated typed assignees in public form <member|expert|expert_team>:<UUID>.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskCreatorID": {
+        "name": "creator_id",
+        "in": "query",
+        "description": "Include tasks created by this Fleet actor UUID.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TaskCreatorIDs": {
+        "name": "creator_ids",
+        "in": "query",
+        "description": "Comma-separated Fleet actor UUIDs; matching creators form a union.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskCreatorOctoUID": {
+        "name": "creator_octo_uid",
+        "in": "query",
+        "description": "Exact creator member Octo UID. Mutually exclusive with creator ID and Octo UID list filters.",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "TaskCreatorOctoUIDs": {
+        "name": "creator_octo_uids",
+        "in": "query",
+        "description": "Comma-separated exact creator member Octo UIDs, at most 100. Mutually exclusive with creator ID and single Octo UID filters.",
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "TaskCreatorFilters": {
+        "name": "creator_filters",
+        "in": "query",
+        "description": "Comma-separated typed creators in public form <member|expert|expert_team>:<UUID>.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskLabelIDs": {
+        "name": "label_ids",
+        "in": "query",
+        "description": "Comma-separated label UUIDs; tasks with any selected label match.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskIncludeNoAssignee": {
+        "name": "include_no_assignee",
+        "in": "query",
+        "description": "Include unassigned tasks in the assignee filter.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "TaskInvolvesUserID": {
+        "name": "involves_user_id",
+        "in": "query",
+        "description": "Filter to tasks involving this workspace user through an expert or expert-team assignment.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TaskMetadata": {
+        "name": "metadata",
+        "in": "query",
+        "description": "Flat JSON object of metadata key/value primitives used for containment matching.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskDateField": {
+        "name": "date_field",
+        "in": "query",
+        "description": "Timestamp field selected by the date range; supply with date_start and date_end.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "created_at",
+            "updated_at"
+          ]
+        }
+      },
+      "TaskDateStart": {
+        "name": "date_start",
+        "in": "query",
+        "description": "Inclusive RFC3339 timestamp starting the selected date range; supply all three date filters together.",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "TaskDateEnd": {
+        "name": "date_end",
+        "in": "query",
+        "description": "Exclusive RFC3339 timestamp ending the selected date range; supply all three date filters together.",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "TaskOpenOnly": {
+        "name": "open_only",
+        "in": "query",
+        "description": "When true, exclude tasks in done or cancelled status.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "TaskScheduled": {
+        "name": "scheduled",
+        "in": "query",
+        "description": "When true, include only tasks with a start date or due date.",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "TaskSort": {
+        "name": "sort",
+        "in": "query",
+        "description": "Sort tasks by position, title, created_at, start_date, due_date, or priority; defaults to position.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "position",
+            "title",
+            "created_at",
+            "start_date",
+            "due_date",
+            "priority"
+          ]
+        }
+      },
+      "TaskDirection": {
+        "name": "direction",
+        "in": "query",
+        "description": "Sort direction asc or desc (case-insensitive); ignored for position sorting.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskGroupBy": {
+        "name": "group_by",
+        "in": "query",
+        "description": "Grouping dimension; only assignee is supported and is the default.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "assignee"
+          ]
+        }
+      },
+      "TaskGroupAssigneeType": {
+        "name": "group_assignee_type",
+        "in": "query",
+        "description": "Restrict groups to none (unassigned) or one public actor type: member, expert, or expert_team.",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "none",
+            "member",
+            "expert",
+            "expert_team"
+          ]
+        }
+      },
+      "TaskGroupAssigneeID": {
+        "name": "group_assignee_id",
+        "in": "query",
+        "description": "Assignee UUID required with group_assignee_type member, expert, or expert_team; omit when the type is none.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
         }
       },
       "TaskID": {
@@ -6324,7 +6767,8 @@
                 },
                 "runtime_id": {
                   "type": "string",
-                  "format": "uuid"
+                  "format": "uuid",
+                  "description": "Compatibility runtime selector. Prefer runtime_ref from runtime.list."
                 },
                 "runtime_ref": {
                   "$ref": "#/components/schemas/RuntimeRef"
@@ -6888,14 +7332,17 @@
         "properties": {
           "title": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Task title."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Task description."
           },
           "parent_task_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Parent task UUID in this workspace."
           },
           "assignee_type": {
             "type": "string",
@@ -6903,43 +7350,19 @@
               "expert",
               "expert_team",
               "member"
-            ]
+            ],
+            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid."
           },
           "assignee_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
           },
-          "priority": {
-            "type": "string"
-          }
-        }
-      },
-      "TaskUpdate": {
-        "type": "object",
-        "minProperties": 1,
-        "properties": {
-          "title": {
+          "assignee_octo_uid": {
             "type": "string",
-            "minLength": 1
-          },
-          "description": {
-            "type": "string"
-          },
-          "parent_task_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "assignee_type": {
-            "type": "string",
-            "enum": [
-              "expert",
-              "expert_team",
-              "member"
-            ]
-          },
-          "assignee_id": {
-            "type": "string",
-            "format": "uuid"
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Member Octo UID for assignment in an authorized Octo Project. The backend requires it to be paired with member assignee_type and mutually exclusive with assignee_id."
           },
           "status": {
             "type": "string",
@@ -6952,10 +7375,141 @@
               "blocked",
               "cancelled"
             ],
-            "description": "Move the Task to a lifecycle status. in_review means the work is awaiting review."
+            "description": "Initial task lifecycle status."
           },
           "priority": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "urgent",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "description": "Task priority.",
+            "x-octo-enum-hint": "Use urgent, high, medium, low, or none."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Optional scheduled start date in YYYY-MM-DD format."
+          },
+          "due_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Optional due date in YYYY-MM-DD format."
+          },
+          "attachment_ids": {
+            "type": "array",
+            "description": "Attachment UUIDs to associate with the new task.",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "TaskUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Replacement task title."
+          },
+          "description": {
+            "type": "string",
+            "description": "Replacement task description."
+          },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Parent task UUID; explicit null in --data clears the parent."
+          },
+          "assignee_type": {
+            "type": "string",
+            "enum": [
+              "expert",
+              "expert_team",
+              "member"
+            ],
+            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid."
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
+          },
+          "assignee_octo_uid": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "Member Octo UID for assignment in an authorized Octo Project. The backend requires it to be paired with member assignee_type and mutually exclusive with assignee_id."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "backlog",
+              "todo",
+              "in_progress",
+              "in_review",
+              "done",
+              "blocked",
+              "cancelled"
+            ],
+            "description": "Move the task to a lifecycle status. in_review means the work is awaiting review."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "urgent",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "description": "Task priority.",
+            "x-octo-enum-hint": "Use urgent, high, medium, low, or none."
+          },
+          "position": {
+            "type": "number",
+            "description": "Position for manual task ordering."
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Scheduled start date in YYYY-MM-DD format; explicit null in --data clears it."
+          },
+          "due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Due date in YYYY-MM-DD format; explicit null in --data clears it."
+          },
+          "attachment_ids": {
+            "type": "array",
+            "description": "Attachment UUIDs for the task update.",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "suppress_run": {
+            "type": "boolean",
+            "description": "Suppress the run created by this write; this does not stop existing executions from being cancelled by reassignment."
+          },
+          "handoff_note": {
+            "type": "string",
+            "description": "Optional note supplied to Fleet's handoff path for this update."
           }
         }
       },
@@ -6979,22 +7533,27 @@
         "properties": {
           "prompt": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Prompt used to create and start a task."
           },
           "expert_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Fleet expert UUID; provide this or expert_team_id."
           },
           "expert_team_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Fleet expert-team UUID; provide this or expert_id."
           },
           "parent_task_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Optional parent task UUID in this workspace."
           },
           "attachment_ids": {
             "type": "array",
+            "description": "Attachment UUIDs to associate with the new task.",
             "items": {
               "type": "string",
               "format": "uuid"
@@ -7010,14 +7569,17 @@
         "properties": {
           "content": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Comment text."
           },
           "parent_comment_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Optional parent comment UUID for a reply."
           },
           "suppress_expert_ids": {
             "type": "array",
+            "description": "Request to suppress the selected experts from runs triggered by this comment.",
             "items": {
               "type": "string",
               "format": "uuid"
@@ -7025,6 +7587,7 @@
           },
           "attachment_ids": {
             "type": "array",
+            "description": "Attachment UUIDs to associate with this comment.",
             "items": {
               "type": "string",
               "format": "uuid"
@@ -7041,11 +7604,13 @@
               "expert",
               "expert_team",
               "member"
-            ]
+            ],
+            "description": "Public subscriber actor type."
           },
           "user_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Fleet actor UUID."
           }
         }
       },
@@ -7069,10 +7634,12 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Expert display name."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Expert description."
           },
           "runtime_id": {
             "type": "string",
@@ -7096,10 +7663,12 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Replacement expert display name."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Replacement expert description."
           },
           "runtime_id": {
             "type": "string",
@@ -7214,14 +7783,17 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Expert-team name."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Expert-team description."
           },
           "leader_expert_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "UUID of the expert who leads this team."
           }
         }
       },
@@ -7231,14 +7803,17 @@
         "properties": {
           "name": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Replacement expert-team name."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Replacement expert-team description."
           },
           "leader_expert_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "UUID of the expert who will lead this team."
           }
         }
       },
@@ -7297,17 +7872,19 @@
           },
           "task_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Associate the uploaded file with this task."
           },
           "comment_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Associate the uploaded file with this comment."
           }
         }
       },
       "AutopilotDispatchMode": {
         "type": "string",
-        "description": "Whether the autopilot creates a task or starts an execution directly.",
+        "description": "Choose create_task to create a task per dispatch or direct_execution to dispatch without creating a task.",
         "enum": [
           "create_task",
           "direct_execution"
@@ -7324,13 +7901,15 @@
         "properties": {
           "title": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Autopilot title."
           },
           "description": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Optional autopilot description."
           },
           "assignee_type": {
             "type": "string",
@@ -7338,11 +7917,13 @@
               "expert",
               "expert_team"
             ],
-            "default": "expert"
+            "default": "expert",
+            "description": "Type of expert or expert-team assigned by this autopilot."
           },
           "assignee_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "UUID of the expert or expert-team assigned by this autopilot."
           },
           "dispatch_mode": {
             "$ref": "#/components/schemas/AutopilotDispatchMode"
@@ -7351,7 +7932,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Optional title template for tasks created in create_task mode."
           }
         }
       },
@@ -7362,31 +7944,36 @@
         "properties": {
           "title": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Replacement autopilot title."
           },
           "description": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Replacement description, or null to clear it."
           },
           "assignee_type": {
             "type": "string",
             "enum": [
               "expert",
               "expert_team"
-            ]
+            ],
+            "description": "Type of expert or expert-team assigned by this autopilot."
           },
           "assignee_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "UUID of the expert or expert-team assigned by this autopilot."
           },
           "status": {
             "type": "string",
             "enum": [
               "active",
               "paused"
-            ]
+            ],
+            "description": "Whether the autopilot is active or paused."
           },
           "dispatch_mode": {
             "$ref": "#/components/schemas/AutopilotDispatchMode"
@@ -7395,7 +7982,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Replacement title template for tasks created in create_task mode, or null to clear it."
           }
         }
       },
@@ -7552,29 +8140,34 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Cron schedule expression used when kind is schedule."
           },
           "timezone": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Timezone for interpreting the schedule expression."
           },
           "label": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Optional trigger label."
           },
           "provider": {
             "type": "string",
             "enum": [
               "generic",
               "github"
-            ]
+            ],
+            "description": "Webhook provider."
           },
           "event_filters": {
             "type": "array",
+            "description": "Webhook event filters; use --data because each item is an object.",
             "items": {
               "$ref": "#/components/schemas/WebhookEventFilter"
             }
@@ -7588,31 +8181,35 @@
         "properties": {
           "enabled": {
             "type": "boolean",
-            "description": "whether the trigger is enabled"
+            "description": "Whether the trigger is enabled."
           },
           "cron_expression": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Replacement cron schedule expression, or null to clear it."
           },
           "timezone": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Replacement timezone for interpreting the schedule, or null to clear it."
           },
           "label": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Replacement trigger label, or null to clear it."
           },
           "event_filters": {
             "type": [
               "array",
               "null"
             ],
+            "description": "Replacement webhook event filters; use --data because each item is an object.",
             "items": {
               "$ref": "#/components/schemas/WebhookEventFilter"
             }

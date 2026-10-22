@@ -330,6 +330,45 @@
             "description": "filter to a single folder"
           },
           {
+            "name": "owner",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "me"
+              ]
+            },
+            "description": "Set to me to restrict results to documents owned by the authenticated bot, excluding documents shared with it."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filename substring search."
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "doc",
+                  "sheet",
+                  "board",
+                  "html",
+                  "html_ppt"
+                ]
+              }
+            },
+            "description": "Document types: doc, sheet, board, html, or html_ppt. Repeat --type to include multiple types, encoded as repeated type query keys."
+          },
+          {
             "name": "page",
             "in": "query",
             "schema": {
@@ -2438,7 +2477,7 @@
           }
         },
         "x-octo-strict-response-schema": true,
-        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
+        "description": "Read a comment and its authoritative root record; replies inherit root.anchor. The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
       }
     },
     "/v1/bot/docs/{docId}/versions": {
@@ -3089,7 +3128,7 @@
           }
         },
         "x-octo-strict-response-schema": true,
-        "description": " The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
+        "description": "Read up to 25 replies for this root. Pass nextCursor back as --cursor for the next page or use --page-all to collect all reply pages. The shared HTTP endpoint returns flat JSON, unlike the PPT content endpoint data envelope."
       }
     },
     "/v1/bot/docs/{docId}/sheet/split": {

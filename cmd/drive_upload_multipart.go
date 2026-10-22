@@ -412,7 +412,11 @@ func uploadOneMultipartPart(
 	loopbackAPI bool,
 	part *multipartPart,
 ) (string, error) {
-	for attempt := 0; attempt <= multipartMaxPartRetries; attempt++ {
+	maxRetries := multipartMaxPartRetries
+	if f.Globals.NoRetry {
+		maxRetries = 0
+	}
+	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := multipartRetryBaseDelay * time.Duration(1<<(attempt-1))
 			select {
@@ -438,10 +442,10 @@ func uploadOneMultipartPart(
 		if result.err == nil {
 			return result.etag, nil
 		}
+		if !result.retryable || attempt == maxRetries {
+			return "", result.err
+		}
 		if result.signature {
-			if attempt == multipartMaxPartRetries {
-				return "", result.err
-			}
 			resigned, err := resignOneMultipartPart(ctx, cli, f, mount, prepared.FileID.String(), prepared.UploadID, part.number)
 			if err != nil {
 				return "", err
@@ -449,13 +453,10 @@ func uploadOneMultipartPart(
 			*part = *resigned
 			continue
 		}
-		if !result.retryable || attempt == multipartMaxPartRetries {
-			return "", result.err
-		}
 	}
 	return "", output.ErrWithHint("api_error", "UPLOAD_FAILED",
-		fmt.Sprintf("multipart part %d failed after %d retries", part.number, multipartMaxPartRetries),
-		"retry the upload")
+		fmt.Sprintf("multipart part %d failed after %d retries", part.number, maxRetries),
+		"inspect the upload status before deciding whether to retry")
 }
 
 func resignOneMultipartPart(
@@ -522,7 +523,7 @@ func putMultipartPart(
 			retryable: true,
 			err: output.ErrWithHint("api_error", "UPLOAD_PART_FORBIDDEN",
 				fmt.Sprintf("object storage rejected the signature for part %d", part.number),
-				"re-signing only this part"),
+				"inspect the upload status before deciding whether to retry"),
 		}
 	case resp.StatusCode == http.StatusRequestTimeout ||
 		resp.StatusCode == http.StatusTooManyRequests ||
@@ -531,7 +532,7 @@ func putMultipartPart(
 			retryable: true,
 			err: output.ErrWithHint("api_error", "UPLOAD_PART_RETRYABLE",
 				fmt.Sprintf("object storage returned status %d for part %d", resp.StatusCode, part.number),
-				"retrying this part"),
+				"inspect the upload status before deciding whether to retry"),
 		}
 	case resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated:
 		return partPutResult{
@@ -553,7 +554,7 @@ func putMultipartPart(
 			retryable: true,
 			err: output.ErrWithHint("api_error", "UPLOAD_NOT_CONFIRMED",
 				fmt.Sprintf("object storage did not return an ETag for part %d", part.number),
-				"retrying this part"),
+				"inspect the upload status before deciding whether to retry"),
 		}
 	}
 	return partPutResult{etag: etag}
@@ -596,8 +597,12 @@ func completeMultipartUpload(
 		DisableRetry:         true,
 	}
 
+	maxAttempts := multipartCompleteAttempts
+	if f.Globals.NoRetry {
+		maxAttempts = 1
+	}
 	var lastErr error
-	for attempt := 1; attempt <= multipartCompleteAttempts; attempt++ {
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		raw, doErr := cli.Do(ctx, request)
 		if doErr == nil {
 			return raw, nil
@@ -611,10 +616,10 @@ func completeMultipartUpload(
 		if ee.Type == "network" && ee.HTTPStatus == 0 {
 			return nil, markCompleteResultUnknown(ee, fileID, uploadID)
 		}
-		// A response is definitive even when its status is 5xx: the server is
-		// available and complete is idempotent, so retry a bounded number of times.
-		// Transport failures have no HTTP status and returned above without retry.
-		if ee.HTTPStatus < 500 || attempt == multipartCompleteAttempts {
+		// Default mode retries explicit HTTP 5xx responses up to the bounded
+		// limit; --no-retry keeps only the initial attempt. Transport failures
+		// have no HTTP status and return above without retry.
+		if ee.HTTPStatus < 500 || attempt == maxAttempts {
 			return nil, doErr
 		}
 

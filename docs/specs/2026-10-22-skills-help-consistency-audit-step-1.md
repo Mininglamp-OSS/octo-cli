@@ -1,4 +1,4 @@
-# Octo CLI skills and help consistency audit
+# Octo CLI skills and help consistency audit — step-1
 
 Date: 2026-10-22
 
@@ -26,6 +26,10 @@ scope as historical evidence. If investigation disproves a hypothesis, record
 that result under the same ID. Add new IDs rather than renumbering existing ones.
 Do not mark an issue resolved merely because a test passes or a spec was edited;
 record the observable behavior that closes the discrepancy.
+
+Additional findings from the second audit pass are maintained in
+[step-2](2026-10-22-skills-help-consistency-audit-step-2.md). This step-1
+document retains the earlier audit evidence and its repair dispositions.
 
 ## Baselines and evidence boundaries
 

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Service help and request metadata** — generated long help retains operation
+  descriptions; parameter help and current Docs, HTML, messaging, Marketplace,
+  Loop and Drive request fields match the embedded service contracts.
+- **Registry card edits** — `message edit` supports raw and Registry body modes,
+  requires their respective fields and rejects mixed-mode input before HTTP.
+- **Marketplace install diagnostics** — optional `custom_env` string maps are
+  accepted and their values are masked in generated and generic API diagnostics,
+  including configured Marketplace mount prefixes, without changing wire values.
+- **Loop task inputs** — list/group filters, task fields and priority vocabularies
+  are exposed; numeric flags preserve fractional values such as task position.
+- **Multipart retry controls** — `--no-retry` applies to part PUTs, failure-triggered
+  re-signing and completion requests while preserving initial attempts and cleanup.
+- **Embedded agent guides** — routing, token selection, operator maintenance,
+  dry-run boundaries, paging, prerequisites and domain workflows match current CLI
+  behavior and inspected service contracts.
 - **Output preflight** — invalid effective output formats and jq parse/compile
   errors are rejected before requests or local mutations. Compiled jq programs
   are reused for output; help-only service parents, help and shell completion

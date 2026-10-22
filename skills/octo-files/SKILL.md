@@ -19,7 +19,7 @@ Two small domains are covered here because they share a base URL (`$OCTO_API_BAS
 
 ```bash
 octo-cli file upload      --file ./report.pdf [--type chat] [--path subdir/]
-octo-cli file download    <path> --format json                 # returns a JSON envelope with a presigned URL, not file bytes
+octo-cli file download    <path> [--filename <name>] --format json  # JSON envelope with presigned URL, not file bytes
 octo-cli file credentials --filename report.pdf
 octo-cli file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (bytes) is REQUIRED
 ```
@@ -27,6 +27,8 @@ octo-cli file presigned   --filename report.pdf --fileSize 1048576   # --fileSiz
 ### `upload` — multipart form
 
 Unlike most commands, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path. `--type` (default `chat`) and `--path` are query parameters; they are not multipart form fields. The multipart body carries the file and any promoted body fields declared in the spec as text fields.
+
+The maximum size and allowed/blocked extensions follow the current backend file policy. Multipart and presigned uploads use that policy; direct-to-S3 upload is not a way around it, and there is no fixed 100 MB ceiling guaranteed by the CLI.
 
 The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `message send`.
 
@@ -47,7 +49,7 @@ octo-cli file download /chat/2026/05/abc123.png --jq '.data.url' | xargs curl -o
 
 ### Direct-to-S3 uploads
 
-For files too large for multipart, ask the backend for a presigned target and upload directly:
+For the direct-to-S3 workflow, request a presigned target from the backend:
 
 ```bash
 size=$(stat -f%z big.zip 2>/dev/null || stat -c%s big.zip)    # fileSize in bytes (REQUIRED; no padding)
@@ -63,10 +65,10 @@ curl -X PUT -T big.zip -H "Content-Type: $ctype" ${cdisp:+-H "Content-Dispositio
 ## 2. Bot housekeeping
 
 ```bash
-octo-cli bot register       [--data '{"agent_platform":"…","agent_version":"…","plugin_version":"…"}']
+octo-cli bot register       [--agent-platform <name>] [--agent-version <version>] [--plugin-version <version>]
 octo-cli bot set-commands   --data '{"commands":[{"command":"fix","description":"create a matter"}]}'
 octo-cli bot user-info      --uid <uid>         # --uid is REQUIRED; returns {uid,name,avatar} for that user
-octo-cli bot space-members  [--keyword <q>]     # members of the bot's space (limit cap 200)
+octo-cli bot space-members  [--keyword <q>] [--space-id <sid>] [--limit <n>]  # defaults to 50; maximum 200
 octo-cli bot typing         --channel-id <cid> --channel-type 1 [--on-behalf-of <uid>]
 octo-cli bot heartbeat
 ```
@@ -76,6 +78,8 @@ octo-cli bot heartbeat
 `register` is the **only** operation not behind the `authBot` middleware. The backend routes it by token prefix: `app_*` → `registerAppBot`, `bf_*` → `registerUserBot`. You still supply the normal environment credential (`OCTO_TOKEN`, or legacy alias `OCTO_BOT_TOKEN`); the CLI treats the call like any other.
 
 Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-commands` to advertise slash-command metadata.
+
+The optional agent-platform, agent-version, and plugin-version values report client metadata. Supply them as flags or as the equivalent fields in `--data`; they do not replace the bot token.
 
 ### Get the owner_uid from `bot register`
 

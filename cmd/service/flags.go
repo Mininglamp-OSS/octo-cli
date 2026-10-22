@@ -31,13 +31,14 @@ type operationRuntime struct {
 }
 
 type queryFlag struct {
-	apiName string // URL query parameter name
-	kind    valueKind
-	secret  bool // x-octo-secret: mask the value in verbose / dry-run output
-	strVal  *string
-	intVal  *int
-	boolVal *bool
-	strSlc  *[]string
+	apiName  string // URL query parameter name
+	kind     valueKind
+	secret   bool // x-octo-secret: mask the value in verbose / dry-run output
+	strVal   *string
+	intVal   *int
+	floatVal *float64
+	boolVal  *bool
+	strSlc   *[]string
 }
 
 // headerFlag binds a CLI flag to a request header declared in the spec
@@ -71,6 +72,7 @@ type bodyFlag struct {
 	secret      bool // x-octo-secret: mask the value in verbose / dry-run output
 	strVal      *string
 	intVal      *int
+	floatVal    *float64
 	boolVal     *bool
 	boolDefault *bool
 	strSlc      *[]string
@@ -81,6 +83,7 @@ type valueKind int
 const (
 	kindString valueKind = iota
 	kindInt
+	kindFloat64
 	kindBool
 	kindStringSlice
 	// kindUint64 is a decimal-string flag backing a backend uint64 id. It is
@@ -132,6 +135,13 @@ func registerQueryFlag(cmd *cobra.Command, rt *operationRuntime, p *registry.Par
 			dv = int(n)
 		}
 		cmd.Flags().IntVar(qf.intVal, flagName, dv, desc)
+	case kindFloat64:
+		qf.floatVal = new(float64)
+		dv := 0.0
+		if n, ok := p.Default.(float64); ok {
+			dv = n
+		}
+		cmd.Flags().Float64Var(qf.floatVal, flagName, dv, desc)
 	case kindBool:
 		qf.boolVal = new(bool)
 		dv := false
@@ -380,6 +390,9 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 		case kindInt:
 			bf.intVal = new(int)
 			cmd.Flags().IntVar(bf.intVal, flagName, 0, desc)
+		case kindFloat64:
+			bf.floatVal = new(float64)
+			cmd.Flags().Float64Var(bf.floatVal, flagName, 0, desc)
 		case kindBool:
 			bf.boolVal = new(bool)
 			if defaultValue, ok := prop.Default.(bool); ok {
@@ -430,11 +443,16 @@ func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 	switch p.Type {
 	case "string":
 		return kindString, true
-	case "integer", "number":
+	case "integer":
 		if p.Format == uint64Format {
 			return kindUint64, true
 		}
 		return kindInt, true
+	case "number":
+		if p.Format == uint64Format {
+			return kindUint64, true
+		}
+		return kindFloat64, true
 	case "boolean":
 		return kindBool, true
 	case "array":
@@ -447,11 +465,16 @@ func promotableKind(p *registry.SchemaInfo) (valueKind, bool) {
 
 func queryParamKind(p *registry.ParamInfo) valueKind {
 	switch p.Type {
-	case "integer", "number":
+	case "integer":
 		if p.Format == uint64Format {
 			return kindUint64
 		}
 		return kindInt
+	case "number":
+		if p.Format == uint64Format {
+			return kindUint64
+		}
+		return kindFloat64
 	case "boolean":
 		return kindBool
 	case "array":

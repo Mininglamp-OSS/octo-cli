@@ -9,7 +9,7 @@ metadata:
 
 # octo-shared — CLI fundamentals for AI Agents
 
-`octo-cli` is a thin REST client that exposes the Octo ecosystem (matters, messaging, groups, threads, files, bot, events, docs, html) as a single binary. Every service command is auto-generated from an embedded OpenAPI registry; output is a JSON envelope designed to be parsed by agents.
+`octo-cli` exposes the Octo ecosystem through active service commands, including messaging, groups, threads, files, bot, events, Drive, docs, HTML, Marketplace and Loop. Every service command is generated from an embedded OpenAPI registry; output is a JSON envelope by default and is designed for agents.
 
 > **The `matter` domain is temporarily withheld** while its backend API stabilizes — `octo-cli matter ...` is not registered and the `octo-matter` skill is not listed. Do not emit `matter` commands until it is re-enabled. The examples below use other domains.
 
@@ -22,7 +22,7 @@ otherwise-permitted comment, version, asset, or sheet row/column removal.
 
 ## 1. Authentication
 
-Bots authenticate with a bearer token. There is no interactive user login — but besides the two bot tokens (`app_*`, `bf_*`) there is a third kind, a **user API key** (`uk_*`), which carries a real person's identity and is used mainly for `message search`. Two ways to supply any of them:
+Bots authenticate with a bearer token. There is no interactive user login — but besides the two bot tokens (`app_*`, `bf_*`) there is a third kind, a **user API key** (`uk_*`), which carries a real person's identity and is used for `message search` and the whole `drive` domain. Two ways to supply any of them:
 
 **Stored profile (recommended).** A human (or provisioning step) logs the token in once; it is encrypted at rest under `~/.octo-cli`, and the raw token never appears in any command line, shell history, or transcript afterward:
 
@@ -32,8 +32,8 @@ octo-cli auth login --bot-id cli_xxxxxxxx          # robot id you got when creat
 echo "$TOKEN" | octo-cli auth login --bot-id cli_xxxxxxxx --with-token   # non-interactive
 
 # A user API key (uk_) is stored the same way — encrypted profile, bot_kind shows
-# user_key. Use a friendly --profile name since it has no robot id:
-echo "$UK_TOKEN" | octo-cli auth login --profile alice-search --with-token
+# user_key. Give it a friendly profile name for message search and Drive:
+echo "$UK_TOKEN" | octo-cli auth login --profile alice-search-drive --with-token
 ```
 
 Then, at runtime, select which bot to act as — the agent passes its own **robot id**, which it knows:
@@ -50,24 +50,24 @@ selection, an environment credential overrides stored profiles. `OCTO_TOKEN`
 is canonical; `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias:
 
 ```bash
-export OCTO_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot (DM-only)
-export OCTO_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot (full access)
-export OCTO_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search)
+export OCTO_TOKEN=app_xxxxxxxxxxxxxxxxxxxx      # App Bot
+export OCTO_TOKEN=bf_xxxxxxxxxxxxxxxxxxxxx       # User Bot
+export OCTO_TOKEN=uk_xxxxxxxxxxxxxxxxxxxxx       # User API key (real person; message search and Drive)
 ```
 
 > `OCTO_BOT_ID` is not a secret. Without an environment credential it selects a
 > stored profile; an environment credential takes precedence over that implicit
 > selector.
 
-Token prefix determines capability — the CLI does NOT enforce this locally (the backend rejects unsupported operations with `FORBIDDEN`), with **one exception**: an `app_*` token running `message search` is rejected locally with a `validation` error before any request.
+The registry enforces per-domain token-kind gates where a domain declares them. An incompatible credential is refused locally before HTTP with `TOKEN_KIND_NOT_ALLOWED` (`validation`, exit 2). `message search` also rejects `app_*` locally. Drive accepts App Bot, User Bot and user API key credentials:
 
-| Prefix  | Type         | DM msg | Group read | Group write | Thread | Voice | Search |
-|---------|--------------|--------|------------|-------------|--------|-------|--------|
-| `app_*` | App Bot      | yes    | yes        | **no**      | **no** | **no**| **no** |
-| `bf_*`  | User Bot     | yes    | yes        | yes         | yes    | yes   | yes    |
-| `uk_*`  | User API key | —      | —          | —           | —      | —     | yes    |
+| Prefix  | Type         | DM msg | Group read | Group write | Thread | Voice | Search | Drive |
+|---------|--------------|--------|------------|-------------|--------|-------|--------|-------|
+| `app_*` | App Bot      | yes    | yes        | only `group md-update` when member and `bot_admin` | **no** | **no** | **no** | yes |
+| `bf_*`  | User Bot     | yes    | yes        | yes         | yes    | yes   | yes    | yes   |
+| `uk_*`  | User API key | —      | —          | —           | —      | —     | yes    | yes   |
 
-`uk_*` carries a real person's identity and is meaningful mainly for `message search` (routed to `/v1/user/*`); for other domains use a bot token. `bf_*` can also search on behalf of a person with `--on-behalf-of <uid>`. `identity.bot_kind` reflects the kind: `app_bot`, `user_bot`, or `user_key`.
+App Bot group-read access does not imply general group-write access: `group md-update` is the sole exception, and only when the bot is a group member with `bot_admin`. `uk_*` represents a real person and is routed for `message search` to `/v1/user/*`; Drive user-key requests route to `/v1/user/drive/*`, while bot credentials use `/v1/bot/drive/*`. This does not authorize a user key for other domains. `bf_*` can also search on behalf of a person with `--on-behalf-of <uid>`. `identity.bot_kind` reflects the kind: `app_bot`, `user_bot`, or `user_key`.
 
 Outside `OCTO_CREDENTIAL_MODE=task`, inspect `octo-cli auth status` (or
 `octo-cli config show`) to confirm the active identity. Daemon task mode does
@@ -95,11 +95,11 @@ export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bo
 export OCTO_FORMAT=json                            # default output format
 ```
 
-Routing: all services go through `OCTO_API_BASE_URL`. The `--service` flag on `octo-cli api` is for documentation only — all traffic routes to the same gateway.
+Routing: all services use `OCTO_API_BASE_URL`. On `octo-cli api`, `--service loop` selects Loop Public API handling, adds `Accept: application/vnd.octo+json`, and uses the Public API error parser. The gateway remains unified.
 
 ## 3. Output: the JSON envelope
 
-Every successful invocation prints a single JSON object to stdout:
+The standard success envelope is the default JSON output (`--format json`, with no `--jq`). Selecting `table`, `csv`, or `ndjson`, or applying a jq projection, can change stdout's shape; help and shell completion render text.
 
 ```json
 {
@@ -148,7 +148,7 @@ These flags work on every command (they are root-level persistent flags):
 |-----------------|-------------------------------------------------------------------------|
 | `--format`      | `json` (default) · `table` · `csv` · `ndjson`                           |
 | `--jq`, `-q`    | Apply a jq expression to the success envelope before formatting         |
-| `--dry-run`     | Print the resolved request instead of sending it                        |
+| `--dry-run`     | Describe the resolved request instead of sending it for request-backed commands; see §6 for exceptions |
 | `--verbose`     | Log request/response trace to stderr                                    |
 | `--timeout`     | Per-request deadline, e.g. `30s`, `2m`                                  |
 | `--no-retry`    | Disable the default retry-on-transient policy                           |
@@ -184,7 +184,7 @@ The `hint` field is a one-line next action meant for an agent: follow it literal
 
 ### Promoted flags vs `--data`
 
-Simple top-level body fields auto-promote to typed flags (strings, integers, booleans, `[]string`). For objects, arrays-of-objects, or when sending a large payload, use `--data`:
+Simple top-level body fields auto-promote to typed flags (strings, integers, numbers, booleans, `[]string`). For objects, arrays-of-objects, or when sending a large payload, use `--data`:
 
 ```bash
 octo-cli thread create group-abc --name "design review"
@@ -218,20 +218,36 @@ Use `--page-all` only on operations that expose it. It walks cursor pages until 
 octo-cli message send --data '{"channel_id":"chat-1","channel_type":1,"payload":{"type":1,"content":"foo"}}' --dry-run
 ```
 
-Prints the exact HTTP request body and URL, emits no side effect.
+For ordinary request-backed operations, this prints the resolved request body and URL without sending HTTP. Some local mutations explicitly refuse dry-run: `auth login`, `auth update`, `auth logout`, and `skills --install` return validation errors rather than writing local state. Portable scene export is a live-read exception: `octo-cli docs scene export <docId> --image-format excalidraw -o board.excalidraw --dry-run` performs a scene GET, but does not write the output file.
 
 ## 7. Discovering the API
 
 The registry is embedded in the binary — no network needed:
 
 ```bash
-octo-cli schema --list                # all services + operation IDs
-octo-cli schema --list message        # operations in one domain
-octo-cli schema message.send          # full request/response schema
-octo-cli config show                  # resolved config (token masked)
-octo-cli auth status                  # active bot identity (whoami)
-octo-cli auth list                    # stored profiles (no tokens)
+octo-cli schema --list                   # operations by service
+octo-cli schema --list docs              # operation summaries/descriptions
+octo-cli schema docs.list                # detail plus request/response schemas
+octo-cli docs list --help                # generated operation description + flags
+octo-cli skills                          # list active skill guides
+octo-cli skills octo-drive               # show a guide and its references
+octo-cli config show                     # resolved config (token masked)
+octo-cli auth status                     # active identity (whoami)
+octo-cli auth list                       # stored profile metadata (no tokens)
 ```
+
+`skills` without a name lists active guides; `skills <name>` prints the selected guide and its references.
+
+For operator-only profile setup or maintenance (never put token contents in argv):
+
+```bash
+octo-cli auth login --profile prod --token-file /secure/path/token.txt --api-base-url https://im-test.deepminer.com.cn
+octo-cli auth update --profile prod --api-base-url https://im.deepminer.com.cn
+octo-cli auth logout --profile stale
+octo-cli skills --install <dir>
+```
+
+`--token-file` and `--with-token` are mutually exclusive. `auth login --api-base-url` stores the gateway origin with the profile; `auth update --api-base-url` changes an existing profile's origin without re-entering or rewriting its token. `auth logout` removes a profile, and `skills --install` writes skill files locally. These local mutations require operator intent and reject `--dry-run`.
 
 When an operation isn't auto-registered yet or you need low-level control:
 
@@ -251,6 +267,9 @@ Once these fundamentals are understood, load the skill for the domain you need:
 - `octo-matter` — matters (todos/tasks), assignees, channels, timeline, AI extract — **temporarily withheld** (backend API stabilizing; not currently loadable)
 - `octo-messaging` — message send/edit/sync/read-receipt, groups, threads, events
 - `octo-files` — file upload/download, presigned credentials, bot housekeeping
+- `octo-drive` — personal and shared file storage, folders, documents, sharing, invitations, and transfers
+- `octo-loop` — Loop Public API tasks, runtimes, experts, activity and usage
+- `octo-marketplace` — plugins, skills, MCP probes, uploads and review requests
 - `octo-docs` — docs domain (CRDT/Yjs): documents, spreadsheets, whiteboard scenes, members/sharing, comments, versions, attachments
 - `octo-html` — HTML docs domain (octo-doc, a DIFFERENT backend from octo-docs): self-contained interactive HTML documents, share codes, media assets, comments, agent element read/replace
 - `octo-summary` — create owner-only summaries from explicit sources, then discover, read, and cite summaries visible to the personal Agent's human owner — **temporarily withheld** (create backend at Mininglamp-OSS/octo-smart-summary#181 not yet merged/deployed/enabled; not currently loadable)

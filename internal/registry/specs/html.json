@@ -905,8 +905,8 @@
       },
       "post": {
         "operationId": "html.comment.add",
-        "summary": "Create a comment on a document (needs reader capability)",
-        "description": "Create a comment anchored to text or an artifact aid. Requires at least a reader capability (the doc's share code) or the write token.",
+        "summary": "Create an anchored root comment or reply (requires commenter capability or higher)",
+        "description": "Create an optionally anchored root comment, or reply when parent_id names a thread root. Requires CapComment or higher (commenter, writer, admin, or owner); read-only share-code access is insufficient and lower-capability callers receive a hidden 404. Optional version accepts a non-negative JSON integer or decimal string, a v-prefixed decimal string, or the literal string latest.",
         "x-octo-risk": "write",
         "requestBody": {
           "required": true,
@@ -926,6 +926,19 @@
                   "text": {
                     "type": "string",
                     "description": "comment body"
+                  },
+                  "parent_id": {
+                    "type": "string",
+                    "x-octo-flag": "parent-id",
+                    "description": "Optional comment thread root id; when supplied, creates a reply instead of a root comment."
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "integer"
+                    ],
+                    "x-octo-flag": "version",
+                    "description": "Optional selector for the version on which to stamp the comment: non-negative decimal value, decimal string, v-prefixed decimal string, or literal latest. The CLI flag accepts these as text; --data also accepts a JSON integer."
                   },
                   "anchor": {
                     "type": "object",
@@ -992,7 +1005,7 @@
                   },
                   "applied_in": {
                     "type": "integer",
-                    "description": "optional version the change was applied in"
+                    "description": "Optional version association identifying where the agent's change was applied; distinct from the comment mutation version."
                   }
                 }
               }

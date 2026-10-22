@@ -69,6 +69,9 @@ attachments are fetched through fresh signed URLs, size-bounded, and embedded as
 portable `dataURL` entries, so the output can be imported again with `docs import`.
 The destination is written atomically with mode `0600`.
 
+`--dry-run` still reads the live scene and reports a preview, but does not fetch
+attachment bytes or write the destination file.
+
 ## Excalidraw file import
 
 Import a standard `.excalidraw` JSON envelope (maximum 25 MiB) directly into an

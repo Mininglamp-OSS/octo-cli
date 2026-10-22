@@ -36,7 +36,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	positionalQueryValues := args[positionalQueryStart:]
 
 	// Path substitution. Cobra's Args function already checked the argument count.
-	urlPath := marketplacePath(d.Service, d.Path)
+	urlPath := MarketplacePath(d.Service, d.Path)
 	// Identity routing: reject an incompatible credential kind and pick the
 	// server mount for the one in use, before any path parameter is filled in.
 	urlPath, err := applyIdentityRouting(f, d, urlPath)
@@ -88,13 +88,13 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		SuppressSpaceHeader:            d.SpaceHeaderSet && !d.SpaceHeader,
 		DisableRetry:                   d.RetryMode == "never",
 		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
-		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
-		SecretValues:         collectSecrets(cobraCmd, rt, pathValues, positionalQueryValues),
-		ResponseSecretFields: d.ResponseSecretFields,
-		SensitiveJSONFields:  writeOnlyBodyFields(d.RequestBody),
-		ResponseUnwrap:       d.ResponseUnwrap,
-		UnwrapRequiredFields: d.UnwrapRequiredFields,
+		ResponseSecretFields:           d.ResponseSecretFields,
+		SensitiveJSONFields:            writeOnlyBodyFields(d.RequestBody),
+		ResponseUnwrap:                 d.ResponseUnwrap,
+		UnwrapRequiredFields:           d.UnwrapRequiredFields,
 	}
+	// Path, query, and header secrets do not depend on the merged body.
+	req.SecretValues = collectParameterSecrets(cobraCmd, rt, pathValues, positionalQueryValues)
 	// Binary-response ops may carry an --output/-o destination; when set, the
 	// client writes the 2xx body to that path instead of only describing it.
 	if rt.outputPath != nil {
@@ -154,9 +154,9 @@ func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
 	return err
 }
 
-// attachJSONBody resolves the JSON body and applies the operation's declared
-// pre-send body checks. Kept separate from runOperation so the request-assembly
-// flow reads as one sequence of steps.
+// attachJSONBody resolves the JSON body, applies pre-send checks, and collects
+// body secrets. Kept separate from runOperation so request assembly reads as
+// one sequence of steps.
 func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
 	body, err := resolveBody(f, cobraCmd, rt)
 	if err != nil {
@@ -170,6 +170,15 @@ func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRu
 		}
 	}
 	req.Body = body
+	if body == nil || rt.detail.RequestBody == nil {
+		return nil
+	}
+	bodySecrets, err := CollectBodySecrets(rt.detail.RequestBody, body)
+	if err != nil {
+		return output.ErrValidation(fmt.Sprintf("--data: %v", err),
+			"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")
+	}
+	req.SecretValues = append(req.SecretValues, bodySecrets...)
 	return nil
 }
 
@@ -293,23 +302,12 @@ func rejectDotSegment(label, value string) *output.ExitError {
 		"pass the id value; a dot segment would retarget the request at a different resource")
 }
 
-// collectSecrets gathers the literal values of every x-octo-secret path
-// parameter, query flag or positional query argument, header flag and *promoted*
-// body flag the user supplied, so the transport can mask them in verbose and
-// dry-run output. Returns nil when the operation declares no secrets.
-//
-// It reads resolved parameters and promoted flags, never --data. A secret body
-// property supplied through --data is therefore NOT collected, and would reach
-// the trace unmasked.
-// That is unreachable today rather than fixed: the only three operations
-// declaring a secret body property (drive.share.blob-create / access / download,
-// all `password`) have their generated leaves detached in favour of hand-written
-// composites that pass SecretValues explicitly.
-// TestSecrets_EverySecretBodyPropertyBelongsToADetachedLeaf holds that invariant,
-// so the first generated leaf to declare one fails the build — at which point
-// this has to walk the merged body instead, which is an engine-level change
-// rather than a comment.
-func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues, positionalQueryValues []string) []string {
+// collectParameterSecrets gathers secret path, query, and header parameter values.
+func collectParameterSecrets(
+	cobraCmd *cobra.Command,
+	rt *operationRuntime,
+	pathValues, positionalQueryValues []string,
+) []string {
 	var secrets []string
 	add := func(v string) {
 		if v != "" {
@@ -337,11 +335,6 @@ func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues, p
 	for flagName, hf := range rt.headerFlags {
 		if hf.secret {
 			add(changedFlagValue(cobraCmd, flagName, hf.strVal))
-		}
-	}
-	for flagName, bf := range rt.bodyFlags {
-		if bf.secret {
-			add(changedFlagValue(cobraCmd, flagName, bf.strVal))
 		}
 	}
 	return secrets
@@ -402,11 +395,11 @@ func findParam(d *registry.OperationDetail, name, in string) *registry.ParamInfo
 	return nil
 }
 
-// marketplacePath lets local development bypass the production /market
+// MarketplacePath lets local development bypass the production /market
 // gateway mount. When OCTO_MARKETPLACE_API_PREFIX is present, its value
 // replaces the leading /market segment; setting it to an empty string maps
 // /market/api/v1/... to the standalone service's /api/v1/... routes.
-func marketplacePath(service, path string) string {
+func MarketplacePath(service, path string) string {
 	if service != "marketplace" || !strings.HasPrefix(path, "/market/") {
 		return path
 	}
@@ -422,10 +415,8 @@ func marketplacePath(service, path string) string {
 }
 
 // buildQuery assembles the URL query from flags the user explicitly set, so
-// omitted flags don't override backend defaults. uint64 id params are validated
-// here and emitted as the same decimal text the caller passed, and any
-// spec-declared enum is enforced before the request leaves — query and body
-// enums are checked at the same strictness so the two do not diverge.
+// a default never overrides a backend default. Conditional query requirements,
+// enum checks, and wire formatting are applied before the request leaves.
 func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *output.ExitError) {
 	if err := validateConditionalQueryRequirements(cobraCmd, rt); err != nil {
 		return nil, err
@@ -435,45 +426,62 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 		if !cobraCmd.Flags().Changed(flagName) {
 			continue
 		}
-		enum := queryEnum(rt.detail, qf.apiName)
-		label := "--" + flagName
-		required := paramRequired(rt.detail, qf.apiName, "query")
-		switch qf.kind {
-		case kindInt:
-			if err := checkEnum(label, *qf.intVal, enum); err != nil {
-				return nil, err
-			}
-			q.Set(qf.apiName, strconv.Itoa(*qf.intVal))
-		case kindBool:
-			if err := checkEnum(label, *qf.boolVal, enum); err != nil {
-				return nil, err
-			}
-			q.Set(qf.apiName, strconv.FormatBool(*qf.boolVal))
-		case kindStringSlice:
-			if err := addSliceQueryValues(q, qf, rt, label, required); err != nil {
-				return nil, err
-			}
-		case kindUint64:
-			n, err := output.ParseUint64Decimal(label, *qf.strVal)
-			if err != nil {
-				return nil, err
-			}
-			if err := checkEnum(label, n, enum); err != nil {
-				return nil, err
-			}
-			q.Set(qf.apiName, *qf.strVal)
-		default:
-			if err := rejectEmptyRequiredValue(label, *qf.strVal, required); err != nil {
-				return nil, err
-			}
-			if err := checkEnum(label, *qf.strVal, enum); err != nil {
-				return nil, err
-			}
-			q.Set(qf.apiName, *qf.strVal)
+		if err := addQueryFlagValue(q, rt, flagName, qf); err != nil {
+			return nil, err
 		}
 	}
-
 	return q, nil
+}
+
+// addQueryFlagValue validates and serializes one explicitly set query flag.
+func addQueryFlagValue(
+	q url.Values,
+	rt *operationRuntime,
+	flagName string,
+	qf *queryFlag,
+) *output.ExitError {
+	enum := queryEnum(rt.detail, qf.apiName)
+	label := "--" + flagName
+	required := paramRequired(rt.detail, qf.apiName, "query")
+	switch qf.kind {
+	case kindInt:
+		if err := checkEnum(label, *qf.intVal, enum); err != nil {
+			return err
+		}
+		q.Set(qf.apiName, strconv.Itoa(*qf.intVal))
+	case kindFloat64:
+		if err := checkEnum(label, *qf.floatVal, enum); err != nil {
+			return err
+		}
+		q.Set(qf.apiName, strconv.FormatFloat(*qf.floatVal, 'g', -1, 64))
+	case kindBool:
+		if err := checkEnum(label, *qf.boolVal, enum); err != nil {
+			return err
+		}
+		q.Set(qf.apiName, strconv.FormatBool(*qf.boolVal))
+	case kindStringSlice:
+		if err := addSliceQueryValues(q, qf, rt, label, required); err != nil {
+			return err
+		}
+	case kindUint64:
+		n, err := output.ParseUint64Decimal(label, *qf.strVal)
+		if err != nil {
+			return err
+		}
+		if err := checkEnum(label, n, enum); err != nil {
+			return err
+		}
+		q.Set(qf.apiName, *qf.strVal)
+	default:
+		if err := rejectEmptyRequiredValue(label, *qf.strVal, required); err != nil {
+			return err
+		}
+		if err := checkEnum(label, *qf.strVal, enum); err != nil {
+			return err
+		}
+		q.Set(qf.apiName, *qf.strVal)
+	}
+	return nil
 }
 
 func addPositionalQueryValues(q url.Values, rt *operationRuntime, values []string) *output.ExitError {
@@ -531,7 +539,7 @@ func validateConditionalQueryRequirements(cobraCmd *cobra.Command, rt *operation
 // addSliceQueryValues emits every element of a repeated query flag, holding each to the
 // element enum the spec declares (schema.items.enum) and to the required-non-empty rule.
 //
-// Extracted to keep buildQuery under the complexity limit; the loop is otherwise unchanged.
+// Kept separate so repeated values retain their element-level enum and required checks.
 func addSliceQueryValues(q url.Values, qf *queryFlag, rt *operationRuntime, label string, required bool) *output.ExitError {
 	itemEnum := queryItemEnum(rt.detail, qf.apiName)
 	for _, v := range *qf.strSlc {
@@ -783,6 +791,8 @@ func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[stri
 		switch bf.kind {
 		case kindInt:
 			base[bf.apiName] = *bf.intVal
+		case kindFloat64:
+			base[bf.apiName] = *bf.floatVal
 		case kindBool:
 			base[bf.apiName] = *bf.boolVal
 		case kindStringSlice:
@@ -1772,7 +1782,7 @@ func paginationParseError(err error) *output.ExitError {
 // rawValueAtPath resolves dot-separated object keys while retaining the exact
 // JSON bytes of the selected value. Literal dots in response keys are not
 // supported by x-octo-pagination paths.
-func rawValueAtPath(body []byte, path string) (json.RawMessage, bool, error) {
+func rawValueAtPath(body []byte, path string) (raw json.RawMessage, found bool, err error) {
 	if path == "" {
 		return nil, false, nil
 	}

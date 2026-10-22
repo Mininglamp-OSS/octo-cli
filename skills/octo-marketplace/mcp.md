@@ -60,11 +60,17 @@ start the command locally, complete MCP `initialize` and `tools/list`, then stop
 ## Create / update
 
 Create or edit an **unpublished** connector draft through the unified write
-path. Saving creates a version snapshot but does not publish the draft. An
-already-published Space connector cannot be changed with upsert; submit its new
-manifest/package through `plugin review-request create --data @review.json`
-instead so the live version remains unchanged until approval. Show the target
-and intended change, then continue only after confirmation:
+path. Saving creates a version snapshot but does not publish the draft.
+An already-published Space connector cannot be changed with upsert; submit the
+new version through `plugin review-request create --data @review.json` so the
+live version is not changed by an upsert. The review body is top-level, not the
+`{"plugin": ...}` upsert wrapper: provide required `plugin_id` and `version`,
+plus the full `manifest_json` and `plugin_json` objects together. `changelog` is
+optional; omit `relations` to inherit the live graph or pass the complete
+replacement array. The Space's policy may approve and publish automatically
+(enabled by default when no override is stored); when disabled, the request
+stays pending for owner/admin approval. Show the target and intended change,
+then continue only after confirmation:
 
 ```bash
 octo-cli marketplace plugin upsert --data @plugin.json
@@ -129,14 +135,27 @@ fields with `mcp probe` first.
 > Read-modify-write with `plugin get` and resubmit the complete document.
 
 Re-read with `plugin get --plugin-id <id>` and verify the `${VAR}` placeholders
-round-trip. Then run `plugin publish --plugin-id <id> --version <x.y.z>`; a
-Space-visible connector enters review, while a private connector lists
-immediately. Follow the review commands in `SKILL.md`. Delete only after showing
+round-trip. Then run `plugin publish --plugin-id <id> --version <x.y.z>`. A
+private connector is listed immediately and remains owner-only. A Space-visible
+connector follows the authenticated Space's review policy: automatic approval
+is enabled by default when no override is stored and publishes immediately;
+when disabled, it remains pending for owner/admin approval. Follow the review
+commands in `SKILL.md` only for the pending branch. Delete only after showing
 the owned record and confirming:
 
 ```bash
 octo-cli marketplace plugin delete --plugin-id <id>
 ```
 
-Icon upload uses the presigned target from `marketplace mcp-icon-upload create`;
-pass the returned persistent icon URL through `plugin upsert`'s `plugin.icon`.
+MCP icon presigning requires an image `file_name` and positive `file_size` no
+larger than 2 MiB:
+
+```bash
+octo-cli marketplace mcp-icon-upload create --file-name "<icon.png>" --file-size <bytes>
+```
+
+The optional `--content-type` is accepted but ignored; the server derives the
+upload type from the filename and the returned presign headers are authoritative.
+PUT the image bytes to `presigned_url` using the returned `method` and `headers`.
+After the upload succeeds, use the persistent `download_url` as
+`plugin.icon`. Keep the temporary presigned URL private.

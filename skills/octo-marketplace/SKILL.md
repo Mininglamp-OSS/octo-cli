@@ -57,8 +57,11 @@ octo-cli marketplace plugin publish --plugin-id <plugin-id> \
 
 - A `private` plugin's listing state becomes published immediately, but it stays
   owner-only and is not exposed in the Space catalog.
-- A `space` plugin opens a review request and remains a draft until a Space
-  owner/admin approves it. Save the returned `review_id`.
+- A `space` plugin follows the authenticated Space's review policy. Automatic
+  approval is enabled by default when no override is stored, so publication
+  completes immediately. When automatic approval is disabled, the plugin remains
+  a draft with `pending_review`; save the returned `review_id` for the owner/admin
+  decision flow.
 - Read `display_status` as the user-facing state: `draft`, `pending_review`,
   `published`, `rejected`, or `delisted`. `listing_state` is the lower-level
   listing axis.
@@ -134,6 +137,11 @@ never stop at the first exact match.
 `--page-all`. Filters are `--category-id`, `--q`, repeatable `--tag`, `--mode
 mine`, and `--sort` (`newest`, `oldest`, `updated`, `name`, `placement`, `views`,
 `installs`, `downloads`, `comprehensive`).
+
+`plugin review-request list` and `plugin version list` are offset-paged with
+`--page` / `--page-size` (default 20, max 100); neither supports `--page-all`.
+To inspect a complete review queue or version history, keep the same page size
+and continue through a short page.
 
 `plugin-category list` requires `--scene-code` and `--plugin-type`.
 `plugin-tag list` accepts optional `--scene-code`, `--plugin-type`, `--q`,

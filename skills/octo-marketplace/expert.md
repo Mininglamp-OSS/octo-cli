@@ -43,8 +43,9 @@ Create or edit an **unpublished** draft through the unified write path. Every
 save records a version snapshot but does not publish the expert or team. An
 already-published Space expert/team cannot be changed with upsert; submit its
 new manifest/package/relations through `plugin review-request create --data
-@submission.json` so approval atomically applies the frozen upgrade. Show the
-target and intended change, then continue only after explicit confirmation:
+@submission.json` so the Space policy can apply the frozen upgrade immediately
+or queue it for owner/admin review. Show the target and intended change, then
+continue only after explicit confirmation:
 
 ```bash
 octo-cli marketplace plugin upsert --data @plugin.json
@@ -124,10 +125,27 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 > verbatim.
 
 After saving, publish with `plugin publish --plugin-id <id> --version <x.y.z>
---changelog "…"`. A Space-visible expert/team enters review; follow the
-applicant or reviewer flow in `SKILL.md`. `plugin import` is skill-only and must
-never be used to release an expert or expert_team. To review changed declared
-content directly, use `plugin review-request create --data @submission.json`.
+--changelog "<matching release notes>"`. A private expert/team publishes
+immediately. A Space-visible plugin follows the authenticated Space's
+automatic-review policy: automatic approval is enabled by default when no
+override is stored and publishes immediately; when disabled, it stays pending
+for owner/admin approval. Follow the applicant or reviewer flow in `SKILL.md`
+only for a pending request.
+
+For an already-published Space expert/team upgrade, do not send the upsert
+wrapper as the review body. `plugin review-request create --data
+@submission.json` takes top-level `plugin_id` and `version`, plus the full
+`manifest_json` and `plugin_json` objects together for the frozen replacement.
+`changelog` is optional. Omit `relations` to inherit the live graph; when
+supplied, include the complete replacement relation set. Use a strictly
+forward-moving version label.
+
+The review submission follows the same Space policy: when automatic approval
+is enabled it can publish immediately; when disabled, it remains pending for
+owner/admin approval.
+
+`plugin import` is skill-only and must never be used to release an expert or
+expert_team.
 
 ## Install into a Loop workspace
 
@@ -140,6 +158,12 @@ octo-cli marketplace plugin install --plugin-id <id> --workspace-id <ws> --runti
 
 The response carries exactly one of `agent_id` (expert) or `squad_id`
 (expert_team), depending on the plugin's type.
+
+Optional runtime-specific environment is supplied as the `custom_env` string
+map in `--data`, for example `--data @install.json` with
+`{"custom_env":{"VARIABLE":"<value>"}}`. Treat values as secrets: the install
+schema marks them for verbose/dry-run redaction, but redaction does not protect
+the local body file or shell history.
 
 ## Delete (owner only, confirmed)
 
