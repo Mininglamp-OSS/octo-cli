@@ -39,8 +39,8 @@ echo "$UK_TOKEN" | octo-cli auth login --profile alice-search --with-token
 Then, at runtime, select which bot to act as — the agent passes its own **robot id**, which it knows:
 
 ```bash
-octo-cli --bot-id cli_xxxxxxxx matter list         # or env OCTO_BOT_ID=cli_xxxxxxxx
-octo-cli --profile myname matter list              # or by the friendly profile name
+octo-cli --bot-id cli_xxxxxxxx group list         # or env OCTO_BOT_ID=cli_xxxxxxxx
+octo-cli --profile myname group list              # or by the friendly profile name
 ```
 
 With exactly one stored profile, the selector is optional. With **two or more, you must pass `--bot-id` or `--profile`** — omitting it is a hard error (the CLI never guesses which identity to use).
@@ -156,7 +156,7 @@ These flags work on every command (they are root-level persistent flags):
 | `--bot-id`      | Select/assert the stored credential by robot id (env `OCTO_BOT_ID`)     |
 | `--profile`     | Select the stored credential by profile name                            |
 
-Paginated operations additionally expose:
+Cursor-paginated operations that register the convenience flags expose:
 
 | Flag           | Purpose                                                  |
 |----------------|----------------------------------------------------------|
@@ -167,18 +167,18 @@ Paginated operations additionally expose:
 
 | `error.type`   | Exit | Typical `error.code`                         |
 |----------------|------|----------------------------------------------|
-| `auth_error`   | 3    | `UNAUTHORIZED`, `AUTH_UNAVAILABLE`           |
+| `auth_error`   | 3    | `UNAUTHORIZED`                                |
 | `validation`   | 2    | `VALIDATION_ERROR`, `PAYLOAD_TOO_LARGE`      |
 | `config`       | 2    | missing env vars                             |
 | `permission`   | 1    | `FORBIDDEN`, `SPACE_FORBIDDEN`               |
 | `rate_limited` | 1    | `RATE_LIMITED`                               |
-| `network`      | 1    | `NETWORK_ERROR`, `UPSTREAM_UNAVAILABLE`      |
+| `network`      | 1    | `AUTH_UNAVAILABLE`, `NETWORK_ERROR`, `UPSTREAM_UNAVAILABLE` |
 | `api_error`    | 1    | `MATTER_NOT_FOUND`, `NOT_FOUND`, `INTERNAL_ERROR` |
 | `internal`     | 1    | CLI-side bug                                 |
 
 Agents should switch on **`error.code` first** (specific, deterministic), then `error.type` (broad), then `exit_code` (coarse).
 
-The `hint` field is a one-line next action meant for an agent: follow it literally where it applies. E.g. `MATTER_NOT_FOUND` → "verify ID with `octo-cli matters list`".
+The `hint` field is a one-line next action meant for an agent: follow it literally where it applies. E.g. `MATTER_NOT_FOUND` → "inspect the operation schema with `octo-cli schema matter.get`; matter commands are currently withheld".
 
 ## 6. Input patterns
 
@@ -193,12 +193,15 @@ octo-cli message send --data @body.json
 octo-cli some-cmd --data @-            # read JSON from stdin
 ```
 
-Explicit flags override fields set in `--data`. The `--data` escape hatch exists on every non-multipart command.
+The `--data` escape hatch is available on commands with a JSON request body, not on every non-multipart operation. Check command help or the operation schema; handwritten commands may have different input shapes.
 
 ### Piping with `--jq`
 
 ```bash
-octo-cli group list --jq '.data[].id' | xargs -I{} octo-cli group get {}
+groups=$(octo-cli group list --format json --jq '[.data[].group_no]')
+while IFS= read -r group_no; do
+  octo-cli group get "$group_no"
+done < <(jq -r '.[]' <<<"$groups")
 ```
 
 ### Paginating
@@ -207,7 +210,7 @@ octo-cli group list --jq '.data[].id' | xargs -I{} octo-cli group get {}
 octo-cli docs search --keyword "spec" --page-all --page-limit 20
 ```
 
-`--page-all` applies to any list operation that reports a cursor in `_pagination`. The merged output drops `_pagination` — you get a flat `data` array.
+Use `--page-all` only on operations that expose it. It walks cursor pages until `has_more=false`; page-number operations such as Loop task lists use their own page/page-size flags.
 
 ### Dry-run for agent self-verification
 

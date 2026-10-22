@@ -31,7 +31,11 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	ctx := cobraCmd.Context()
 	d := rt.detail
 
-	// Path substitution. cobra.ExactArgs already ensured count.
+	positionalQueryStart := len(args) - len(rt.queryPositionals)
+	pathArgs := args[:positionalQueryStart]
+	positionalQueryValues := args[positionalQueryStart:]
+
+	// Path substitution. Cobra's Args function already checked the argument count.
 	urlPath := marketplacePath(d.Service, d.Path)
 	// Identity routing: reject an incompatible credential kind and pick the
 	// server mount for the one in use, before any path parameter is filled in.
@@ -43,7 +47,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Path values come from the positional args, except for slots a
 	// spec-declared path flag filled in (the escape hatch for ids starting
 	// with "-").
-	pathValues, verr := resolvePathValues(cobraCmd, rt, args)
+	pathValues, verr := resolvePathValues(cobraCmd, rt, pathArgs)
 	if verr != nil {
 		_ = f.EmitError(verr) //nolint:errcheck // best-effort emit before returning err
 		return verr
@@ -60,9 +64,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		urlPath = strings.ReplaceAll(urlPath, placeholder, url.PathEscape(pathValues[i]))
 	}
 
-	// Query and header parameters. Only flags the user explicitly set are emitted, so a
-	// default never overrides a backend default and an omitted optional header stays absent.
-	q, headers, verr := buildQueryAndHeaders(cobraCmd, rt)
+	// Query and header parameters. Explicitly set flags and positional query values
+	// are emitted, so a default never overrides a backend default and an omitted
+	// optional header stays absent.
+	q, headers, verr := buildQueryAndHeaders(cobraCmd, rt, positionalQueryValues)
 	if verr != nil {
 		return emitAndReturn(f, verr)
 	}
@@ -84,7 +89,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		DisableRetry:                   d.RetryMode == "never",
 		UnknownOutcomeOnNetworkFailure: d.RetryMode == "never",
 		// Values the spec marked x-octo-secret, masked in verbose / dry-run.
-		SecretValues:         collectSecrets(cobraCmd, rt, pathValues),
+		SecretValues:         collectSecrets(cobraCmd, rt, pathValues, positionalQueryValues),
 		ResponseSecretFields: d.ResponseSecretFields,
 		SensitiveJSONFields:  writeOnlyBodyFields(d.RequestBody),
 		ResponseUnwrap:       d.ResponseUnwrap,
@@ -116,18 +121,19 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	return emitOnce(ctx, f, rt, &req)
 }
 
-// buildQueryAndHeaders assembles both parameter positions that come from flags.
+// buildQueryAndHeaders assembles query parameters from flags and any opt-in
+// positional query values, alongside spec-declared header flags.
 //
-// One step rather than two because they share a rule and a failure shape: a parameter the
-// spec marks required must not be forwarded empty, wherever it sits. Keeping them together
-// also keeps runOperation — which is a sequence of pre-flight checks and sits at the
-// complexity limit — from growing a branch per position.
-//
-// This is how a spec-declared header such as If-Match (optimistic-concurrency base version)
-// reaches the wire from a flag, with no per-endpoint transport code.
-func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, map[string]string, *output.ExitError) {
+// One step rather than two because a parameter the spec marks required must
+// not be forwarded empty, wherever it sits. Keeping them together also keeps
+// runOperation — which is a sequence of pre-flight checks — from growing a
+// branch per position.
+func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positionalQueryValues []string) (url.Values, map[string]string, *output.ExitError) {
 	q, err := buildQuery(cobraCmd, rt)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := addPositionalQueryValues(q, rt, positionalQueryValues); err != nil {
 		return nil, nil, err
 	}
 	headers, err := buildHeaders(cobraCmd, rt)
@@ -288,12 +294,13 @@ func rejectDotSegment(label, value string) *output.ExitError {
 }
 
 // collectSecrets gathers the literal values of every x-octo-secret path
-// parameter, query flag, header flag and *promoted* body flag the user supplied,
-// so the transport can mask them in verbose and dry-run output. Returns nil when
-// the operation declares no secrets.
+// parameter, query flag or positional query argument, header flag and *promoted*
+// body flag the user supplied, so the transport can mask them in verbose and
+// dry-run output. Returns nil when the operation declares no secrets.
 //
-// It reads flag values only, never --data. A secret body property supplied
-// through --data is therefore NOT collected, and would reach the trace unmasked.
+// It reads resolved parameters and promoted flags, never --data. A secret body
+// property supplied through --data is therefore NOT collected, and would reach
+// the trace unmasked.
 // That is unreachable today rather than fixed: the only three operations
 // declaring a secret body property (drive.share.blob-create / access / download,
 // all `password`) have their generated leaves detached in favour of hand-written
@@ -302,7 +309,7 @@ func rejectDotSegment(label, value string) *output.ExitError {
 // so the first generated leaf to declare one fails the build — at which point
 // this has to walk the merged body instead, which is an engine-level change
 // rather than a comment.
-func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues []string) []string {
+func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues, positionalQueryValues []string) []string {
 	var secrets []string
 	add := func(v string) {
 		if v != "" {
@@ -315,6 +322,11 @@ func collectSecrets(cobraCmd *cobra.Command, rt *operationRuntime, pathValues []
 		}
 		if p := findParam(rt.detail, name, "path"); p != nil && p.Secret {
 			add(pathValues[i])
+		}
+	}
+	for i, qp := range rt.queryPositionals {
+		if qp.Secret {
+			add(positionalQueryValues[i])
 		}
 	}
 	for flagName, qf := range rt.queryFlags {
@@ -460,7 +472,25 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 			q.Set(qf.apiName, *qf.strVal)
 		}
 	}
+
 	return q, nil
+}
+
+func addPositionalQueryValues(q url.Values, rt *operationRuntime, values []string) *output.ExitError {
+	for i, p := range rt.queryPositionals {
+		value := values[i]
+		label := "<" + p.PositionalName + ">"
+		if value == "" {
+			return output.ErrValidation(
+				fmt.Sprintf("%s is empty, but this operation requires a value", label),
+				"pass a non-empty query value; an empty search term is not usable")
+		}
+		if err := checkEnum(label, value, p.Enum); err != nil {
+			return err
+		}
+		q.Set(p.Name, value)
+	}
+	return nil
 }
 
 func validateConditionalQueryRequirements(cobraCmd *cobra.Command, rt *operationRuntime) *output.ExitError {
@@ -555,8 +585,10 @@ func buildHeaders(cobraCmd *cobra.Command, rt *operationRuntime) (map[string]str
 		}
 		// An explicitly blank replay key cannot identify an uncertain write.
 		// Omitted optional headers remain absent for legacy shared operations.
-		if strings.EqualFold(hf.apiName, "Idempotency-Key") && strings.TrimSpace(*hf.strVal) == "" {
-			return nil, output.ErrValidation("--"+flagName+" must not be blank", "supply a stable key and preserve it with the same body on retry")
+		if strings.EqualFold(hf.apiName, "Idempotency-Key") {
+			if err := ValidateIdempotencyKey("--"+flagName, *hf.strVal); err != nil {
+				return nil, err
+			}
 		}
 		if headers == nil {
 			headers = map[string]string{}

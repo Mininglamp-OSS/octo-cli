@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func closeBoardNumber(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
@@ -124,6 +126,107 @@ func TestDocsBoardCommentDryRunPostsCanonicalAnchor(t *testing.T) {
 	}
 }
 
+func TestDocsBoardCommentRejectsExplicitBlankIdempotencyKeyBeforeRequests(t *testing.T) {
+	scene := `{"elements":[{"id":"e","type":"rectangle","x":0,"y":0,"width":10,"height":10,"isDeleted":false}],"files":{},"baseVersion":"BV"}`
+	anchors := []struct {
+		name string
+		args []string
+	}{
+		{name: "point", args: []string{"--point", "1,2"}},
+		{name: "element", args: []string{"--element-id", "e"}},
+	}
+	modes := []struct {
+		name   string
+		dryRun bool
+	}{
+		{name: "normal"},
+		{name: "dry-run", dryRun: true},
+	}
+	keys := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty"},
+		{name: "whitespace", value: "   "},
+	}
+
+	for _, anchor := range anchors {
+		for _, mode := range modes {
+			for _, key := range keys {
+				t.Run(anchor.name+"/"+mode.name+"/"+key.name, func(t *testing.T) {
+					_, capture := sceneTestFactory(t, func(w http.ResponseWriter, r *http.Request) {
+						w.Header().Set("Content-Type", "application/json")
+						switch r.Method {
+						case http.MethodGet:
+							_, _ = w.Write([]byte(scene))
+						case http.MethodPost:
+							w.WriteHeader(http.StatusCreated)
+							_, _ = w.Write([]byte(`{"id":1}`))
+						default:
+							http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+						}
+					})
+					args := []string{"docs", "comments", "add", "d1", "--body", "review"}
+					args = append(args, anchor.args...)
+					args = append(args, "--idempotency-key="+key.value)
+					if mode.dryRun {
+						args = append([]string{"--dry-run"}, args...)
+					}
+
+					_, _, err := execRoot(t, capture.f, args...)
+					exit := output.AsExitError(err)
+					if exit == nil || exit.Type != "validation" || exit.Code != "VALIDATION_ERROR" {
+						t.Fatalf("explicit blank idempotency key error = %v, want VALIDATION_ERROR", err)
+					}
+					if capture.requests != 0 {
+						t.Fatalf("explicit blank idempotency key made %d HTTP requests, want 0", capture.requests)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestDocsBoardCommentIdempotencyKeyControls(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		keyArg     string
+		wantKey    string
+		wantHeader bool
+	}{
+		{name: "valid key", keyArg: "--idempotency-key=stable", wantKey: "stable", wantHeader: true},
+		{name: "omitted key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, capture := sceneTestFactory(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("request method = %s, want POST", r.Method)
+				}
+				value, present := r.Header["Idempotency-Key"]
+				if present != tc.wantHeader {
+					t.Errorf("Idempotency-Key presence = %t, want %t", present, tc.wantHeader)
+				}
+				if tc.wantHeader && (len(value) != 1 || value[0] != tc.wantKey) {
+					t.Errorf("Idempotency-Key = %v, want %q", value, tc.wantKey)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"id":1}`))
+			})
+			args := []string{"docs", "comments", "add", "d1", "--body", "review", "--point", "1,2"}
+			if tc.keyArg != "" {
+				args = append(args, tc.keyArg)
+			}
+			if _, _, err := execRoot(t, capture.f, args...); err != nil {
+				t.Fatalf("board comment failed: %v", err)
+			}
+			if capture.requests != 1 {
+				t.Fatalf("board comment made %d HTTP requests, want 1", capture.requests)
+			}
+		})
+	}
+}
+
 func TestDocsCommentsAddOwnsBoardFlagsWithoutAlias(t *testing.T) {
 	_, capture := sceneTestFactory(t, serveSceneTest(`{"elements":[],"files":{},"baseVersion":"BV"}`))
 	root := NewRootCmd(capture.f.Factory)
@@ -141,25 +244,30 @@ func TestDocsCommentsAddBoardFlagValidation(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		want string
 	}{
-		{"data conflict", []string{"docs", "comments", "add", "d1", "--data", `{"body":"x"}`, "--point", "1,2"}, "cannot be combined"},
-		{"reply conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--parentId", "7"}, "--parentId"},
-		{"anchor text conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorText", "selection"}, "--anchorText"},
-		{"anchor start conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorStart", "opaque"}, "--anchorStart"},
-		{"anchor end conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorEnd", "opaque"}, "--anchorEnd"},
-		{"block path conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--blockPath", "0,1"}, "--blockPath"},
-		{"occurrence conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--occurrence", "2"}, "--occurrence"},
-		{"anchor conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--element-id", "e"}, "exactly one"},
-		{"missing body", []string{"docs", "comments", "add", "d1", "--point", "1,2"}, "--body must not be empty"},
+		{"data conflict", []string{"docs", "comments", "add", "d1", "--data", `{"body":"x"}`, "--point", "1,2"}},
+		{"reply conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--parentId", "7"}},
+		{"anchor text conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorText", "selection"}},
+		{"anchor start conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorStart", "opaque"}},
+		{"anchor end conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorEnd", "opaque"}},
+		{"block path conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--blockPath", "0,1"}},
+		{"occurrence conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--occurrence", "2"}},
+		{"anchor conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--element-id", "e"}},
+		{"missing body", []string{"docs", "comments", "add", "d1", "--point", "1,2"}},
+		{"invalid point", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "not-a-point"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture.f.Out.Reset()
 			capture.f.ErrOut.Reset()
+			capture.requests = 0
 			_, _, err := execRoot(t, capture.f, tc.args...)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err=%v, want %q", err, tc.want)
+			ee := output.AsExitError(err)
+			if ee == nil || ee.Type != "validation" || ee.Code != "VALIDATION_ERROR" {
+				t.Fatalf("error = %v, want structured validation", err)
+			}
+			if capture.requests != 0 {
+				t.Fatalf("invalid board input made %d requests", capture.requests)
 			}
 		})
 	}

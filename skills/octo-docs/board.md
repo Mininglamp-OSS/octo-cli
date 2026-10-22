@@ -51,10 +51,12 @@ octo-cli docs comments add <docId> --body 'Review this group' \
 
 Element anchors are resolved against the live scene. Bound text normalizes to
 its container; a single element anchors at the visual top-right corner and a
-multi-selection at the common visual-bounds centre. Board anchor flags cannot be
-combined with `--data`, and `--point` and `--element-id` are mutually exclusive.
-`--element-id` is repeatable and preserves commas inside each ID. Element-anchor
-dry runs still read the live scene. Use `--data` for replies and advanced anchors.
+multi-selection at the common visual-bounds centre. Board-anchor flags cannot
+be combined with `--data`, `--parentId`, `--anchorStart`, `--anchorEnd`,
+`--anchorText`, `--blockPath`, or `--occurrence`. `--point` and `--element-id`
+are mutually exclusive. `--element-id` is repeatable and preserves commas inside
+each ID. Element-anchor dry runs still read the live scene. Use `--data` for
+replies and advanced anchors.
 
 ## Portable `.excalidraw` export
 
@@ -70,8 +72,8 @@ The destination is written atomically with mode `0600`.
 ## Excalidraw file import
 
 Import a standard `.excalidraw` JSON envelope (maximum 25 MiB) directly into an
-existing board. The CLI validates `type: "excalidraw"`, a positive integer
-`version`, an `elements` array, and a `files` object before sending the request.
+existing board. The CLI validates `type: "excalidraw"`, integer `version` exactly
+`2`, an `elements` array, and a `files` object before sending the request.
 
 ```bash
 # Safe default: merge imported elements while preserving the existing board.
@@ -111,12 +113,15 @@ octo-cli docs export <docId> --export-format png -o board.png
 octo-cli docs export <docId> --export-format svg -o board.svg
 ```
 
-> `--export-format` is `png` or `svg`; any other value is rejected locally.
-> (The flag is named `--export-format`, not `--format`, so it
-> does not collide with the global `--format` output-envelope flag; the wire
-> query parameter is still `format`.) The export reflects the scene as it is live
-> right now (shapes, text, and embedded images), not a persisted snapshot.
-> `-o` overwrites an existing destination file.
+> This whiteboard image workflow uses `png` or `svg`. The shared `docs export`
+> command locally accepts `md`, `docx`, `pdf`, `xlsx`, `png`, and `svg`, and
+> checks the matching output extension. That local check cannot infer the
+> document type from an opaque ID, so acceptance of `md`, `docx`, `pdf`, or
+> `xlsx` does not establish board-backend support. The flag is named
+> `--export-format` (not `--format`, the global output-envelope flag); its wire
+> query parameter is still `format`.
+> The export reflects the live scene (shapes, text, and embedded images), not a
+> persisted snapshot. `-o` overwrites an existing destination file.
 
 ## Schema lookup
 

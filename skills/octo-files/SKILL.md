@@ -19,14 +19,14 @@ Two small domains are covered here because they share a base URL (`$OCTO_API_BAS
 
 ```bash
 octo-cli file upload      --file ./report.pdf [--type chat] [--path subdir/]
-octo-cli file download    <path> --format json > saved.bin      # <path> = storage key (no bucket prefix), see note below
+octo-cli file download    <path> --format json                 # returns a JSON envelope with a presigned URL, not file bytes
 octo-cli file credentials --filename report.pdf
 octo-cli file presigned   --filename report.pdf --fileSize 1048576   # --fileSize (bytes) is REQUIRED
 ```
 
 ### `upload` — multipart form
 
-Unlike every other command, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path; `--type` (default `chat`) and `--path` become form text fields. Promoted body flags declared in the spec go in as text fields alongside the binary.
+Unlike most commands, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path. `--type` (default `chat`) and `--path` are query parameters; they are not multipart form fields. The multipart body carries the file and any promoted body fields declared in the spec as text fields.
 
 The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `message send`.
 
@@ -82,10 +82,11 @@ Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-c
 `bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from the one-time `bot register` at publish; capture it then and cache it (env/config) rather than re-registering:
 
 ```bash
-owner=$(octo-cli bot register --jq '.data.owner_uid')   # capture once at publish, then cache
+registration=$(octo-cli bot register --format json) # capture once at publish
+owner=$(jq -r '.data.owner_uid' <<<"$registration") # decode the JSON string to a raw UID
 ```
 
-This is the value LLM-backed operations require as `creator_uid` (e.g. the withheld `matter extract`, once the matter domain is re-enabled).
+Use this raw owner UID as `creator_uid` only where the operation schema requires the bot owner. Inspect an active operation with `octo-cli schema <operation-id>`.
 
 ### `typing` and `heartbeat`
 
@@ -95,14 +96,16 @@ Both are fire-and-forget. `typing` signals an "…is typing" UI state in DM chan
 
 ```bash
 # 1. Upload the binary.
-up=$(octo-cli file upload --file ./log.txt --type chat)
+up=$(octo-cli file upload --file ./log.txt --type chat --format json)
 url=$(jq -r '.data.url'  <<<"$up")
 name=$(jq -r '.data.name' <<<"$up")
+size=$(jq -r '.data.size' <<<"$up")
 
 # 2. Attach it to a message.
 octo-cli message send --data "$(jq -n \
-  --arg c "chat-1" --arg u "$url" --arg n "$name" \
-  '{chat_id:$c, text:"see log", attachments:[{url:$u, name:$n, type:"text/plain"}]}')"
+  --arg c "chat-1" --arg u "$url" --arg n "$name" --argjson s "$size" \
+  '{channel_id:$c, channel_type:1, payload:{type:8, url:$u, name:$n, size:$s}}')" \
+  --dry-run
 ```
 
 ## 4. Error recovery

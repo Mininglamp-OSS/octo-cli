@@ -13,20 +13,21 @@ import (
 )
 
 // operationRuntime holds everything the RunE closure needs to build the
-// outbound request from the user's flag values.
+// outbound request from the user's flags and positional values.
 type operationRuntime struct {
-	detail        *registry.OperationDetail
-	pathParams    []string               // path param names in order
-	pathFlags     []*pathFlag            // optional flag alternatives to positional args
-	pathFlagNames map[string]bool        // flag names claimed by pathFlags
-	queryFlags    map[string]*queryFlag  // flag name → query param binding
-	headerFlags   map[string]*headerFlag // flag name → header param binding
-	bodyFlags     map[string]*bodyFlag   // flag name → body field binding
-	bodyData      *string                // --data (nil when command has no body)
-	pageAll       *bool                  // --page-all (nil when no pagination)
-	pageLimit     *int                   // --page-limit
-	filePath      *string                // --file (multipart operations only)
-	outputPath    *string                // --output/-o (binary-response operations only)
+	detail           *registry.OperationDetail
+	pathParams       []string               // path param names in order
+	pathFlags        []*pathFlag            // optional flag alternatives to positional args
+	pathFlagNames    map[string]bool        // flag names claimed by pathFlags
+	queryFlags       map[string]*queryFlag  // flag name → query param binding
+	queryPositionals []*registry.ParamInfo  // opt-in required query parameters supplied as args
+	headerFlags      map[string]*headerFlag // flag name → header param binding
+	bodyFlags        map[string]*bodyFlag   // flag name → body field binding
+	bodyData         *string                // --data (nil when command has no body)
+	pageAll          *bool                  // --page-all (nil when no pagination)
+	pageLimit        *int                   // --page-limit
+	filePath         *string                // --file (multipart operations only)
+	outputPath       *string                // --output/-o (binary-response operations only)
 }
 
 type queryFlag struct {
@@ -102,48 +103,59 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 		if p.In != "query" {
 			continue
 		}
-		flagName := paramFlagName(p)
-		if rt.pathFlagNames[flagName] || reservedFlagNames[flagName] {
+		if p.PositionalName != "" {
+			rt.queryPositionals = append(rt.queryPositionals, p)
 			continue
 		}
-		qf := &queryFlag{apiName: p.Name, kind: queryParamKind(p), secret: p.Secret}
-		desc := p.Description
-		if len(p.Enum) > 0 {
-			desc = fmt.Sprintf("%s (one of: %s)", desc, formatEnum(p.Enum))
+		registerQueryFlag(cmd, rt, p)
+	}
+}
+
+func registerQueryFlag(cmd *cobra.Command, rt *operationRuntime, p *registry.ParamInfo) {
+	flagName := paramFlagName(p)
+	if rt.pathFlagNames[flagName] || reservedFlagNames[flagName] {
+		return
+	}
+	qf := &queryFlag{apiName: p.Name, kind: queryParamKind(p), secret: p.Secret}
+	desc := p.Description
+	if len(p.Enum) > 0 {
+		desc = fmt.Sprintf("%s (one of: %s)", desc, formatEnum(p.Enum))
+	}
+	if p.Required {
+		desc = strings.TrimSpace(desc + " (required)")
+	}
+	switch qf.kind {
+	case kindInt:
+		qf.intVal = new(int)
+		dv := 0
+		if n, ok := p.Default.(float64); ok {
+			dv = int(n)
 		}
-		switch qf.kind {
-		case kindInt:
-			qf.intVal = new(int)
-			dv := 0
-			if n, ok := p.Default.(float64); ok {
-				dv = int(n)
-			}
-			cmd.Flags().IntVar(qf.intVal, flagName, dv, desc)
-		case kindBool:
-			qf.boolVal = new(bool)
-			dv := false
-			if b, ok := p.Default.(bool); ok {
-				dv = b
-			}
-			cmd.Flags().BoolVar(qf.boolVal, flagName, dv, desc)
-		case kindStringSlice:
-			qf.strSlc = new([]string)
-			cmd.Flags().StringSliceVar(qf.strSlc, flagName, nil, desc)
-		case kindUint64:
-			qf.strVal = new(string)
-			cmd.Flags().StringVar(qf.strVal, flagName, uint64Default(p.Default), uint64Desc(desc))
-		default:
-			qf.strVal = new(string)
-			dv := ""
-			if s, ok := p.Default.(string); ok {
-				dv = s
-			}
-			cmd.Flags().StringVar(qf.strVal, flagName, dv, desc)
+		cmd.Flags().IntVar(qf.intVal, flagName, dv, desc)
+	case kindBool:
+		qf.boolVal = new(bool)
+		dv := false
+		if b, ok := p.Default.(bool); ok {
+			dv = b
 		}
-		rt.queryFlags[flagName] = qf
-		if p.Required {
-			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
+		cmd.Flags().BoolVar(qf.boolVal, flagName, dv, desc)
+	case kindStringSlice:
+		qf.strSlc = new([]string)
+		cmd.Flags().StringSliceVar(qf.strSlc, flagName, nil, desc)
+	case kindUint64:
+		qf.strVal = new(string)
+		cmd.Flags().StringVar(qf.strVal, flagName, uint64Default(p.Default), uint64Desc(desc))
+	default:
+		qf.strVal = new(string)
+		dv := ""
+		if s, ok := p.Default.(string); ok {
+			dv = s
 		}
+		cmd.Flags().StringVar(qf.strVal, flagName, dv, desc)
+	}
+	rt.queryFlags[flagName] = qf
+	if p.Required {
+		_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail
 	}
 }
 
@@ -177,7 +189,11 @@ func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.O
 			continue
 		}
 		hf := &headerFlag{apiName: p.Name, secret: p.Secret, strVal: new(string)}
-		cmd.Flags().StringVar(hf.strVal, flagName, "", p.Description)
+		desc := p.Description
+		if p.Required {
+			desc = strings.TrimSpace(desc + " (required)")
+		}
+		cmd.Flags().StringVar(hf.strVal, flagName, "", desc)
 		rt.headerFlags[flagName] = hf
 		if p.Required {
 			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail

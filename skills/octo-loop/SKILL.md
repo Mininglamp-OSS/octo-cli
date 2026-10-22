@@ -71,10 +71,19 @@ tables.
 
 ```bash
 octo-cli loop task list --workspace-id <ws>
+octo-cli loop task search "oauth timeout" --workspace-id <ws>
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
 octo-cli loop execution message list <execution-id> --workspace-id <ws>
+```
+
+Task search takes one required query argument; quote queries containing spaces.
+`--workspace-id`, `--page`, and `--page-size` remain flags. For a query that
+starts with `-`, put flags before the `--` end-of-options marker:
+
+```bash
+octo-cli loop task search --workspace-id <ws> -- "-draft"
 ```
 
 Inspect the current contract before constructing a write:
@@ -97,7 +106,11 @@ Read before you write.
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop task comment list <task-id> --workspace-id <ws>
 octo-cli loop task metadata list <task-id> --workspace-id <ws>
-octo-cli loop task children-by-parent --workspace-id <ws>
+# For one known parent, use the single-parent command:
+octo-cli loop task child list <task-id> --workspace-id <ws>
+# Batch selection uses comma-separated parent task UUIDs. Omitting the optional
+# flag preserves the API's existing empty-collection response.
+octo-cli loop task children-by-parent --workspace-id <ws> --parent-task-ids "<uuid-1>,<uuid-2>"
 ```
 
 Comment history is paginated with `--page` / `--page-size`.
@@ -151,7 +164,8 @@ octo-cli loop task create --workspace-id <ws> --data "@$body_dir/task.json"
 Metadata is persistent task state, not a log. Read it on entry and write only
 high-value facts that will be read again (for example `pr_url`,
 `pipeline_status`, `blocked_reason`). Inspect the contract first — the set path
-is keyed by a metadata id:
+is keyed by the persistent metadata key (for example, `pr_url`), not a separate
+metadata-record ID; the request body supplies its `value`:
 
 ```bash
 octo-cli schema task.metadata.set

@@ -45,9 +45,9 @@ For `streamable-http` and `sse`, probe without persisting (retained endpoint):
 octo-cli marketplace mcp probe --data @connection.json
 ```
 
-A newer connector-namespaced alias is also available server-side at
-`POST /api/v1/connectors/_probe`; the `marketplace mcp probe` command targets
-`/mcps/_probe` which the backend retains.
+The backend registers both `POST /api/v1/connectors/_probe` and
+`POST /api/v1/mcps/_probe`. Through the unified Octo gateway these paths have
+the `/market` prefix; `marketplace mcp probe` uses `/market/api/v1/mcps/_probe`.
 
 `connection.json` carries only probe fields: `transport`, `url`, `command`,
 `args`, `env`, `headers`. Use empty values for consumer-supplied secrets; do not

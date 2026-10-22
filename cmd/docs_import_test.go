@@ -301,3 +301,40 @@ func TestDocsImport_NullResponseDoesNotPanic(t *testing.T) {
 		})
 	}
 }
+
+func TestDocsImport_RejectsOpaqueDocumentIDSentinelsBeforeRequest(t *testing.T) {
+	file := writeImportFixture(t, ".md", []byte("# Imported\n"))
+	for _, docID := range []string{"", ".", ".."} {
+		t.Run(docID, func(t *testing.T) {
+			calls := 0
+			tf, _ := importTestRoot(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"baseVersion":"BV2","warnings":[]}`))
+			})
+			if _, _, err := execRoot(t, tf, "docs", "import", docID, "--file", file); err == nil {
+				t.Fatalf("docId %q was accepted", docID)
+			}
+			if calls != 0 {
+				t.Fatalf("docId %q made %d requests", docID, calls)
+			}
+		})
+	}
+}
+
+func TestDocsImport_EscapesOpaqueDocumentID(t *testing.T) {
+	var gotPath string
+	tf, _ := importTestRoot(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"baseVersion":"BV2","warnings":[]}`))
+	})
+	file := writeImportFixture(t, ".md", []byte("# Imported\n"))
+	if _, _, err := execRoot(t, tf, "docs", "import", "d/文档", "--file", file); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	const wantPath = "/v1/bot/docs/d%2F%E6%96%87%E6%A1%A3/import/markdown"
+	if gotPath != wantPath {
+		t.Fatalf("request path = %q, want %q", gotPath, wantPath)
+	}
+}

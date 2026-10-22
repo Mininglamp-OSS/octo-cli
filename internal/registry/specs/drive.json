@@ -826,7 +826,7 @@
                 "properties": {
                   "space_id": { "type": "string", "description": "destination drive space id" },
                   "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },
-                  "doc_id": { "type": "string", "description": "document id from `drive doc candidates`" },
+                  "doc_id": { "type": "string", "description": "document id from drive doc candidates" },
                   "source": { "type": "string", "default": "user-mount", "enum": ["user-mount", "docs-sync"], "description": "origin tag; octo-drive's allowedMountSources accepts both (user-upload / im-transfer are Type-2 only and are rejected)" }
                 }
               }
@@ -1117,8 +1117,8 @@
                 "type": "object",
                 "required": ["im_group_no", "im_channel_type", "im_msg_id", "target_space_id"],
                 "properties": {
-                  "im_group_no": { "type": "string", "description": "group/channel id from `octo-cli message search files`" },
-                  "im_channel_type": { "type": "integer", "enum": [1, 2, 5], "description": "channel kind of the source message: 1=DM, 2=group, 5=thread. Required, and it must be the kind the message actually came from, for two reasons. (1) It picks the upstream message-read route: 1 uses the person/DM route, while 2 and 5 share the group route (group vs sub-thread is chosen by the composite group_no, not by this field), so 1 vs 2/5 resolves a different message or nothing. (2) It is stored as the first segment of the row's source_key (channelType#channelID#msgID), which `blobs/im-transferred/batch` matches on — a wrong value makes that already-transferred lookup miss the row. It is NOT the transfer idempotency key: that is (target space, type=blob, object path), so a wrong value cannot produce a duplicate file." },
+                  "im_group_no": { "type": "string", "description": "group/channel id from octo-cli message search files" },
+                  "im_channel_type": { "type": "integer", "enum": [1, 2, 5], "description": "channel kind of the source message: 1=DM, 2=group, 5=thread. Required, and it must be the kind the message actually came from, for two reasons. (1) It picks the upstream message-read route: 1 uses the person/DM route, while 2 and 5 share the group route (group vs sub-thread is chosen by the composite group_no, not by this field), so 1 vs 2/5 resolves a different message or nothing. (2) It is stored as the first segment of the row's source_key (channelType#channelID#msgID), which blobs/im-transferred/batch matches on — a wrong value makes that already-transferred lookup miss the row. It is NOT the transfer idempotency key: that is (target space, type=blob, object path), so a wrong value cannot produce a duplicate file." },
                   "im_msg_id": { "type": "string", "description": "message id as a string — never a JSON number, which would lose precision" },
                   "target_space_id": { "type": "string", "description": "destination drive space id" },
                   "target_parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },

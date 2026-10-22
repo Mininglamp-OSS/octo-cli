@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Output preflight** — invalid effective output formats and jq parse/compile
+  errors are rejected before requests or local mutations. Compiled jq programs
+  are reused for output; help-only service parents, help and shell completion
+  retain their text output independently of output options. Jq parse and compile
+  failures use static diagnostics without caller-provided identifiers.
+- **Local mutation dry-runs** — `auth login/update/logout` and `skills --install`
+  reject `--dry-run` before reading credentials or changing local files.
+- **Document command consistency** — board comments forward `Idempotency-Key`
+  and reject explicitly blank keys before scene reads or writes;
+  import/export refuse empty and dot-segment IDs; handwritten input errors use
+  validation envelopes; missing export format has a required-option diagnosis.
+  Document share creation refuses explicitly supplied blob-only permissions.
+- **Skills and command help** — repair shell/attachment recipes and align
+  credential precedence, input shapes, import replacement warnings, role
+  vocabularies, required markers, parameter types and service/timeout guidance.
+- **Loop query contracts** — task search takes one required positional query
+  and sends it as HTTP query `q`; `--workspace-id`, `--page`, and `--page-size`
+  remain flags. Batch child lookup exposes comma-separated `--parent-task-ids`.
+- **HTML document pagination** — `html list` exposes `--page` and `--page-size`.
+  Omitting them still uses the backend's first page of 20 documents; comment
+  listing continues to return its complete single-response result.
 - **`auth status` credential selection** — reports the same credential source,
   masked token, and effective API origin as ordinary requests, including when
   environment credentials override stored profiles. Explicit selectors still

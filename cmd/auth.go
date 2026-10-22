@@ -38,13 +38,27 @@ func newAuthCmd(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
+func authMutationPreRun(f *cmdutil.Factory, hint string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, _ []string) error {
+		if !f.Globals.DryRun {
+			return nil
+		}
+		return failErr(f, output.ErrValidation(
+			"--dry-run is not supported for auth "+cmd.Name(),
+			hint,
+		))
+	}
+}
+
 func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 	var apiBaseURL string
 
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update non-secret settings for a stored bot profile",
-		Args:  cobra.NoArgs,
+		Use:     "update",
+		Short:   "Update non-secret settings for a stored bot profile",
+		Long:    "Updates the selected profile's API base URL. This local mutation rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to update the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(apiBaseURL) == "" {
 				return failErr(f, output.ErrValidation(
@@ -110,8 +124,10 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 		Long: "Store an Octo or Loop bearer credential under a profile. Identify a bot with --bot-id " +
 			"(its robot id, recommended) and/or --profile (a friendly name). The " +
 			"token is read from a hidden prompt on a terminal, or from stdin with " +
-			"--with-token, or from --token-file — never from the command line.",
-		Args: cobra.NoArgs,
+			"--with-token, or from --token-file — never from the command line. " +
+			"This local credential write rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to store the credential locally"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			botID := f.Globals.BotID
 			name := f.Globals.Profile
@@ -260,9 +276,11 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 
 func newAuthLogoutCmd(f *cmdutil.Factory) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout",
-		Short: "Remove a stored bot credential",
-		Args:  cobra.NoArgs,
+		Use:     "logout",
+		Short:   "Remove a stored bot credential",
+		Long:    "Removes the selected local profile. This local mutation rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to remove the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := f.AuthStore()
 			if err != nil {

@@ -82,6 +82,12 @@ func docsImportFormatForPath(path string) (docsImportFormat, error) {
 //
 //nolint:gocyclo // each branch returns a distinct structured CLI error and is covered independently
 func runDocsImport(cmd *cobra.Command, f *cmdutil.Factory, docID, filePath, mode string, modeChanged bool) error {
+	docSegment, err := opaquePathSegment(docID, "docId")
+	if err != nil {
+		ee := output.ErrValidation(err.Error(), "use a non-empty document ID other than '.' or '..'")
+		_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning the structured input error
+		return ee
+	}
 	format, err := docsImportFormatForPath(filePath)
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
@@ -132,7 +138,7 @@ func runDocsImport(cmd *cobra.Command, f *cmdutil.Factory, docID, filePath, mode
 		}
 	}
 	if f.Globals != nil && f.Globals.DryRun {
-		path := "/v1/bot/docs/" + url.PathEscape(docID) + "/import/" + format.name
+		path := "/v1/bot/docs/" + docSegment + "/import/" + format.name
 		details := map[string]any{
 			"dry_run":      true,
 			"method":       http.MethodPost,
@@ -172,7 +178,7 @@ func runDocsImport(cmd *cobra.Command, f *cmdutil.Factory, docID, filePath, mode
 		_ = f.EmitError(err) //nolint:errcheck // the original error remains authoritative if rendering it also fails
 		return err
 	}
-	basePath := "/v1/bot/docs/" + url.PathEscape(docID)
+	basePath := "/v1/bot/docs/" + docSegment
 	importPath := basePath + "/import/" + format.name
 	var query url.Values
 	if format.excalidraw {

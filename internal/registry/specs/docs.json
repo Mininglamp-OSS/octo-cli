@@ -1687,7 +1687,7 @@
                     "items": {
                       "type": "string"
                     },
-                    "description": "element ids to soft-delete; each becomes a tombstone with a superseding version so it converges under CAS. Pass via --data."
+                    "description": "element ids to soft-delete; each becomes a tombstone with a superseding version so it converges under CAS. Supply with --deletedElementIds or in --data."
                   },
                   "files": {
                     "type": "object",
@@ -1816,7 +1816,7 @@
                   "principalSpaceId": {
                     "type": "string",
                     "x-octo-flag": "principal-space-id",
-                    "description": "principal Space id; for Bot calls, omission defaults to the authenticated Bot Space, an explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup"
+                    "description": "optional principal Space id for Bot calls; omission defaults to the authenticated Bot Space. An explicit matching value supports add/upsert, and a foreign value can only update an existing exact membership without a directory lookup"
                   },
                   "role": {
                     "type": "string",
@@ -1871,7 +1871,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "principal Space id of the membership to remove; required to disambiguate the same uid across Spaces"
+            "description": "principal Space id of the membership to remove; identifies the Space-qualified membership when the same uid has memberships in multiple Spaces"
           }
         ],
         "responses": {
@@ -2043,8 +2043,8 @@
     "/v1/bot/docs/{docId}/forward-grant": {
       "post": {
         "operationId": "docs.forward-grant",
-        "summary": "Grant (never downgrade) a single uid reader/writer access (needs admin)",
-        "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader or writer is grantable here; admin is not forward-grantable.",
+        "summary": "Grant (never downgrade) a single uid reader/commenter/writer access (needs admin)",
+        "description": "Max-merge grant used when forwarding a doc to a chat recipient. Only reader, commenter, or writer is grantable here; admin is not forward-grantable.",
         "x-octo-risk": "write",
         "parameters": [
           {
@@ -3053,6 +3053,7 @@
           {
             "name": "cursor",
             "in": "query",
+            "description": "comment ID cursor returned as nextCursor for the previous reply page",
             "schema": {
               "type": "integer",
               "minimum": 0

@@ -32,10 +32,26 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 				return err
 			}
 			if skipValidation(cmd) {
+				// Help and completion render their own text, not a Factory
+				// success result. Other credential-free and local auth commands
+				// read OCTO_FORMAT without resolving credentials: profiles do
+				// not carry a format setting.
+				if !skipOutputPreflight(cmd, args) {
+					format := config.Load().Format
+					if f.Globals != nil && f.Globals.Format != "" {
+						format = f.Globals.Format
+					}
+					if err := f.PreflightOutput(format); err != nil {
+						return err
+					}
+				}
 				return nil
 			}
 			cfg, err := f.Config()
 			if err != nil {
+				return err
+			}
+			if err := f.PreflightOutput(f.Format()); err != nil {
 				return err
 			}
 			return cfg.Validate()
@@ -49,7 +65,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.StringVarP(&f.Globals.JQ, "jq", "q", "", "filter output with a jq expression")
 	pf.BoolVar(&f.Globals.DryRun, "dry-run", false, "print request without executing")
 	pf.BoolVar(&f.Globals.Verbose, "verbose", false, "write request/response trace to stderr")
-	pf.StringVar(&f.Globals.Timeout, "timeout", "", "per-request timeout (e.g. 30s, 2m)")
+	pf.StringVar(&f.Globals.Timeout, "timeout", "", "per-request timeout (default 30s; invalid values warn and use 30s)")
 	pf.BoolVar(&f.Globals.NoRetry, "no-retry", false, "disable retry on transient failures")
 	pf.StringVar(&f.Globals.Space, "space", "", "space id (for platform-scoped bots)")
 	pf.StringVar(&f.Globals.BotID, "bot-id", "", "select/assert the bot credential by robot id (env OCTO_BOT_ID)")
@@ -145,6 +161,22 @@ func skipValidation(cmd *cobra.Command) bool {
 			if c.Parent() != nil && c.Parent().Parent() == nil {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// skipOutputPreflight identifies commands whose output does not use the Factory
+// formatter: built-in help/completion commands and annotated service parents
+// or groups when they have no arguments and render help.
+func skipOutputPreflight(cmd *cobra.Command, args []string) bool {
+	if len(args) == 0 && cmd.Annotations["skipValidation"] == "true" {
+		return true
+	}
+	for current := cmd; current != nil; current = current.Parent() {
+		switch current.Name() {
+		case "help", "completion":
+			return true
 		}
 	}
 	return false

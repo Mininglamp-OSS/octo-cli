@@ -187,6 +187,16 @@
           },
           {
             "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "x-octo-positional": "query",
+            "description": "Required non-empty task search query.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -312,6 +322,15 @@
           },
           {
             "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "parent_task_ids",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated parent task UUIDs. If omitted, the API returns an empty collection.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7568,7 +7587,8 @@
         "minProperties": 1,
         "properties": {
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "whether the trigger is enabled"
           },
           "cron_expression": {
             "type": [

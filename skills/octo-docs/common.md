@@ -1,10 +1,12 @@
 # octo-docs — Common features (comments, versions, members, attachments)
 
-Read this for shared document management and document/sheet/board comments and
-versions. For PPT comments, versions, export and media usage, read `ppt.md`.
+Read this for shared document management, versions, and document/sheet/board
+comments. Comment anchors vary by type: document text range, sheet cell, board
+point or element(s), or PPT document/slide/element/normalized position. Read
+`ppt.md` for PPT comment commands/details, versions, export, and media.
 Jump to the section you need:
 
-- [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
+- [Comments](#comments) — add/list/reply/resolve; anchors vary by type: doc text range, sheet cell, board point/elements, or PPT document/slide/element/position
 - [Versions](#versions) — snapshot / preview / rename / delete / restore
 - [Members & sharing](#members--sharing) — roles, forward-grant
 - [Attachments](#attachments) — presign/upload local bytes and ingest external images
@@ -16,8 +18,9 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 
 ## Comments
 
-Comments live out-of-band from the body and are anchored to a text range (docs)
-or a cell (sheets).
+Comments live out-of-band from the body and use type-specific anchors: a text
+range (docs), a cell (sheets), a canvas point or element(s) (boards), or the
+document, slide, element, or normalized point (PPT; see `ppt.md`).
 
 ```bash
 # List thread roots + replies. --includeResolved 1 also returns resolved threads.
@@ -121,7 +124,7 @@ octo-cli docs members set    <docId> --uid <uid> --role writer   # authenticated
 octo-cli docs members set    <docId> --uid <uid> --role writer --principal-space-id <spaceId>
 octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # required; owner cannot be removed
 
-# Grant-only forward access (never downgrades). Only reader|writer are grantable.
+# Grant-only forward access (never downgrades). Only reader|commenter|writer are grantable.
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 
 # Space-level share scope — read/set who in the space can reach the doc.
