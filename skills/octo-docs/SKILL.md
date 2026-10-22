@@ -98,6 +98,10 @@ octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html
 
 octo-cli docs get    <docId>                 # metadata + doc_type + your role
 
+# WARNING: Doc (.md/.markdown/.docx) and sheet (.xlsx) imports atomically replace
+# existing content; they do not append or merge. Board .excalidraw imports default
+# to merge; --mode replace overwrites the board. See board.md before choosing it.
+
 # Import a local file into an existing target. .md/.markdown/.docx require a doc;
 # .xlsx requires a sheet and imports its first visible worksheet.
 octo-cli docs import <docId> --file ./input.md

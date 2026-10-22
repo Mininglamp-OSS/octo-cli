@@ -2,8 +2,11 @@ package output
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/itchyny/gojq"
 )
 
 func TestApplyJQ_Empty(t *testing.T) {
@@ -86,6 +89,70 @@ func TestApplyJQ_ParseError(t *testing.T) {
 	_, err := ApplyJQ(map[string]any{}, "....invalid...")
 	if err == nil {
 		t.Error("expected parse error")
+	}
+}
+
+func TestCompileJQ_CompilerErrorsDoNotEchoIdentifiers(t *testing.T) {
+	tests := []struct {
+		name string
+		expr string
+	}{
+		{
+			name: "function",
+			expr: "app_REVIEW_FAKE_SECRET012345(.)",
+		},
+		{
+			name: "variable",
+			expr: "$app_REVIEW_FAKE_SECRET012345",
+		},
+		{
+			name: "module",
+			expr: `import "app_REVIEW_FAKE_SECRET012345" as m; .`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := gojq.Parse(tc.expr); err != nil {
+				t.Fatalf("test expression must parse before compilation: %v", err)
+			}
+			_, err := CompileJQ(tc.expr)
+			if err == nil {
+				t.Fatal("CompileJQ returned no error for invalid expression")
+			}
+			cliErr := AsExitError(err)
+			if cliErr == nil {
+				t.Fatalf("CompileJQ error is not structured: %v", err)
+			}
+			if cliErr.Type != "config" || cliErr.Code != "CLI_ERROR" {
+				t.Fatalf("CompileJQ error type/code = %q/%q, want config/CLI_ERROR", cliErr.Type, cliErr.Code)
+			}
+			if len(cliErr.Detail) != 0 {
+				t.Fatalf("CompileJQ error exposed compiler details: %s", cliErr.Detail)
+			}
+			if errors.Unwrap(err) != nil {
+				t.Fatalf("CompileJQ error retained an underlying cause: %v", err)
+			}
+			for _, visible := range []string{err.Error(), cliErr.Message, cliErr.Hint, string(cliErr.Detail)} {
+				if strings.Contains(visible, "app_REVIEW_FAKE_SECRET012345") {
+					t.Fatalf("CompileJQ error exposed caller-provided identifier: %q", visible)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileJQ_ValidExpressionCanRun(t *testing.T) {
+	program, err := CompileJQ(".id")
+	if err != nil {
+		t.Fatalf("CompileJQ: %v", err)
+	}
+	got, err := program.Apply(map[string]any{"id": "allowed"})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(got) != 1 || got[0] != "allowed" {
+		t.Fatalf("got %v, want [allowed]", got)
 	}
 }
 

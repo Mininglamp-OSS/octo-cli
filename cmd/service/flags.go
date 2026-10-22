@@ -111,6 +111,9 @@ func registerQueryFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Op
 		if len(p.Enum) > 0 {
 			desc = fmt.Sprintf("%s (one of: %s)", desc, formatEnum(p.Enum))
 		}
+		if p.Required {
+			desc = strings.TrimSpace(desc + " (required)")
+		}
 		switch qf.kind {
 		case kindInt:
 			qf.intVal = new(int)
@@ -177,7 +180,11 @@ func registerHeaderFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.O
 			continue
 		}
 		hf := &headerFlag{apiName: p.Name, secret: p.Secret, strVal: new(string)}
-		cmd.Flags().StringVar(hf.strVal, flagName, "", p.Description)
+		desc := p.Description
+		if p.Required {
+			desc = strings.TrimSpace(desc + " (required)")
+		}
+		cmd.Flags().StringVar(hf.strVal, flagName, "", desc)
 		rt.headerFlags[flagName] = hf
 		if p.Required {
 			_ = cmd.MarkFlagRequired(flagName) //nolint:errcheck // static flag name, can't fail

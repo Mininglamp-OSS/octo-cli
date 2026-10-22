@@ -142,12 +142,15 @@ octo-cli html publish --version 2 --data '{"slug":"<doc-ref>","html":"<html><bod
 
 # List, inspect, and list versions.
 octo-cli html list
+octo-cli html list --page 2 --page-size 50
 octo-cli html get <doc-ref>
 octo-cli html versions <doc-ref>
 ```
 
 `html list` returns the backend's offset envelope as `data` plus `_pagination`
-(`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
+(`total`, `page`, `page_size`). Use `--page` and `--page-size` to request a page;
+when omitted, the backend defaults to page 1 with 20 items and clamps page sizes
+above 100. It has no cursor flags or `--page-all` support.
 
 Mounts (`group`, `space`, or `thread`) control placement/registration only. For
 `group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
@@ -262,8 +265,9 @@ octo-cli html comment list --slug <doc-ref> [--version all]
 octo-cli html comment add --data '{"slug":"<doc-ref>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
 ```
 
-`html comment list` likewise preserves offset metadata in `_pagination`; it has
-no cursor flags or `--page-all` support.
+`html comment list` currently returns all comments in a single response with
+offset metadata in `_pagination`. It is not a paginated interface and has no
+`--page`, `--page-size`, cursor flags, or `--page-all` support.
 
 ## 6. Agent element edit and reply
 

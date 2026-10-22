@@ -111,9 +111,19 @@ func newSkillsCmd(f *cmdutil.Factory) *cobra.Command {
 
   octo-cli skills                    list available skills
   octo-cli skills <name>             print one skill (name, description, content + references)
-  octo-cli skills --install <dir>    write every skill (SKILL.md + references) to <dir>/<name>/`,
+  octo-cli skills --install <dir>    write every skill (SKILL.md + references) to <dir>/<name>/
+
+Installation changes local files and rejects --dry-run; listing and showing remain available.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("install") && f.Globals.DryRun {
+				ee := output.ErrValidation(
+					"--dry-run is not supported with skills --install",
+					"omit --dry-run to write skills to the target directory",
+				)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
+				return ee
+			}
 			if cmd.Flags().Changed("install") && install == "" {
 				ee := output.ErrValidation(
 					"--install requires a directory",

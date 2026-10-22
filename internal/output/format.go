@@ -24,8 +24,13 @@ const (
 // map) or a plain slice / object. When the format can't represent v sensibly
 // (e.g. table on a scalar), it falls back to JSON.
 func Format(w io.Writer, format string, v any) error {
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", FormatJSON:
+	rawFormat := format
+	format, err := normalizeFormat(format)
+	if err != nil {
+		return err
+	}
+	switch format {
+	case FormatJSON:
 		return writeJSON(w, v)
 	case FormatTable:
 		return writeTable(w, v)
@@ -34,7 +39,26 @@ func Format(w io.Writer, format string, v any) error {
 	case FormatNDJSON:
 		return writeNDJSON(w, v)
 	default:
-		return fmt.Errorf("unknown format %q (expected json|table|csv|ndjson)", format)
+		return fmt.Errorf("unknown format %q (expected json|table|csv|ndjson)", rawFormat)
+	}
+}
+
+// ValidateFormat checks an output format without rendering a value.
+func ValidateFormat(format string) error {
+	_, err := normalizeFormat(format)
+	return err
+}
+
+func normalizeFormat(format string) (string, error) {
+	raw := format
+	format = strings.ToLower(strings.TrimSpace(format))
+	switch format {
+	case "", FormatJSON:
+		return FormatJSON, nil
+	case FormatTable, FormatCSV, FormatNDJSON:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unknown format %q (expected json|table|csv|ndjson)", raw)
 	}
 }
 

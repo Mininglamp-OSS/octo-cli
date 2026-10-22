@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func closeBoardNumber(got, want float64) bool { return math.Abs(got-want) < 1e-9 }
@@ -141,25 +143,30 @@ func TestDocsCommentsAddBoardFlagValidation(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
-		want string
 	}{
-		{"data conflict", []string{"docs", "comments", "add", "d1", "--data", `{"body":"x"}`, "--point", "1,2"}, "cannot be combined"},
-		{"reply conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--parentId", "7"}, "--parentId"},
-		{"anchor text conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorText", "selection"}, "--anchorText"},
-		{"anchor start conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorStart", "opaque"}, "--anchorStart"},
-		{"anchor end conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorEnd", "opaque"}, "--anchorEnd"},
-		{"block path conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--blockPath", "0,1"}, "--blockPath"},
-		{"occurrence conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--occurrence", "2"}, "--occurrence"},
-		{"anchor conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--element-id", "e"}, "exactly one"},
-		{"missing body", []string{"docs", "comments", "add", "d1", "--point", "1,2"}, "--body must not be empty"},
+		{"data conflict", []string{"docs", "comments", "add", "d1", "--data", `{"body":"x"}`, "--point", "1,2"}},
+		{"reply conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--parentId", "7"}},
+		{"anchor text conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorText", "selection"}},
+		{"anchor start conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorStart", "opaque"}},
+		{"anchor end conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--anchorEnd", "opaque"}},
+		{"block path conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--blockPath", "0,1"}},
+		{"occurrence conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--occurrence", "2"}},
+		{"anchor conflict", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "1,2", "--element-id", "e"}},
+		{"missing body", []string{"docs", "comments", "add", "d1", "--point", "1,2"}},
+		{"invalid point", []string{"docs", "comments", "add", "d1", "--body", "x", "--point", "not-a-point"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			capture.f.Out.Reset()
 			capture.f.ErrOut.Reset()
+			capture.requests = 0
 			_, _, err := execRoot(t, capture.f, tc.args...)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err=%v, want %q", err, tc.want)
+			ee := output.AsExitError(err)
+			if ee == nil || ee.Type != "validation" || ee.Code != "VALIDATION_ERROR" {
+				t.Fatalf("error = %v, want structured validation", err)
+			}
+			if capture.requests != 0 {
+				t.Fatalf("invalid board input made %d requests", capture.requests)
 			}
 		})
 	}

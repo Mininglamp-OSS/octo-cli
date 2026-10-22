@@ -5,6 +5,8 @@ need to read or edit its live body. Only `doc_type: doc` bodies are editable thi
 way; a **spreadsheet** (`sheet`) uses `sheet.md` and a **whiteboard** (`board`)
 uses `board.md` — both return `409 unsupported_doc_type` from `content`.
 
+> **Import warning:** `docs import` with a `.md`, `.markdown`, or `.docx` file atomically replaces existing document content; it does not apply the incremental ops below. `.excalidraw` board imports use a different contract and default to merge; see `board.md`.
+
 Read the live body and its base-version token, then apply a batch of incremental
 block ops guarded by that token. A newly-created doc is **empty** — seed its text
 with a first `docs content edit`.
@@ -15,8 +17,8 @@ with a first `docs content edit`.
 octo-cli docs content get <docId>
 
 # Apply an incremental edit (writer). --base-version is REQUIRED and is sent as
-# the If-Match header; the ops batch goes through --data as a JSON array.
-octo-cli docs content edit <docId> --base-version "<token>" --data '<ops JSON>'
+# the If-Match header; the request body is a JSON object with a required "ops" array.
+octo-cli docs content edit <docId> --base-version "<token>" --data @ops.json
 
 # Export the rendered document. The output extension must match the format.
 octo-cli docs export <docId> --export-format md -o document.md

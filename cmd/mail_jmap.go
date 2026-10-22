@@ -112,7 +112,7 @@ func newMailMessageChangesCmd(f *cmdutil.Factory) *cobra.Command {
 			return emitJSON(f, response)
 		},
 	}
-	command.Flags().StringVar(&sinceState, "since-state", "", "previous JMAP Email state")
+	command.Flags().StringVar(&sinceState, "since-state", "", "previous JMAP Email state (required)")
 	command.Flags().IntVar(&maxChanges, "max-changes", 100, "maximum changed Email ids in one page")
 	return command
 }

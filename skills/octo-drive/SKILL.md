@@ -18,7 +18,7 @@ Drive uses the same credential as every other domain. Set one of:
 
 ```bash
 export OCTO_TOKEN=<uk_… | bf_… | app_…>      # preferred slot, any token kind
-export OCTO_BOT_TOKEN=<bf_… | app_…>         # long-standing variable, still fine
+export OCTO_BOT_TOKEN=<uk_… | bf_… | app_…>    # fully compatible alias of OCTO_TOKEN
 ```
 
 `OCTO_TOKEN` wins when both are set, so you can run one command as a real person without disturbing a bot setup:
@@ -27,7 +27,7 @@ export OCTO_BOT_TOKEN=<bf_… | app_…>         # long-standing variable, still
 OCTO_TOKEN=$UK_KEY octo-cli drive space list
 ```
 
-A stored profile (`octo-cli auth login`) takes precedence over both. Do **not** create a drive-only profile — there is no such concept.
+An explicit `--bot-id` / `--profile` selector wins. Without one, precedence is `OCTO_TOKEN` > `OCTO_BOT_TOKEN` > an implicit stored profile (two or more profiles require a selector).
 
 The token kind decides which identity the backend sees, and the CLI routes the request accordingly:
 
@@ -228,7 +228,7 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 - `--permission` is held to the spec's `view | download` enum locally: anything else is `ENUM_NOT_ALLOWED` / exit 2 with no request sent.
 - **Both sides need a credential.** There is no anonymous share. The token (and password) authorise the *share*; your credential authenticates *you*. The receiver does not have to be a member of the file's space.
 - `share access` / `share download` accept only links on your configured Octo origin — same scheme, host and port — in exactly the `/drive/s/<token>` or `/d/<docId>?sp=<docSpaceId>` shape. Anything else fails with `INVALID_SHARE_URL` — the CLI parses the link, it never fetches the host in it. Pass the link exactly as `share create` produced it; a scheme-downgraded copy of an otherwise correct link is refused.
-- `downloadable` tells you which command to use next. Documents are always `false`, and so is a blob shared with `--permission view` — `share download` on either answers `permission_denied`. Only `--permission download` yields bytes.
+- `downloadable` tells you which command to use next. Documents are always `false`; `share download` on a document link fails locally with `validation / NOT_DOWNLOADABLE` before any request. A blob share marked `false` should not be assumed to have the same local error; rely on its actual response.
 - Revoke with the `share_id`, not the token: `octo-cli drive share revoke "$SHARE_ID"`. The `share_id` is itself treated as a secret — the backend returns one opaque id that is both the management handle and the access token — so `--verbose`, `--dry-run` and error output show it as `***REDACTED***`. That is the mask, not a wrong id: the real value still goes on the wire. Read it from `share create` / `share list` output, which is not masked.
 - **base64url ids can start with `-`** (about one in 64), which cobra reads as a flag. Pass those as a flag instead — `octo-cli drive share revoke --share-id "$SHARE_ID"` — or put the value after a `--` separator. The same applies to `--invite-id` (`invite revoke`) and `--invite-token` (`invite accept`). Using the flag form unconditionally is the safe habit for a script.
 

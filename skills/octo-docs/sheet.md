@@ -7,6 +7,8 @@ dropdown validation rules, run find & replace, or export it.
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 `SKILL.md`.
 
+> **Import warning:** importing an `.xlsx` file with `docs import` atomically replaces existing sheet content; it does not merge cell changes. This differs from board `.excalidraw` imports, which default to merge; see `board.md`.
+
 Export a sheet to XLSX with a required, matching destination extension:
 
 ```bash

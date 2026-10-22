@@ -7,6 +7,26 @@ import (
 	"github.com/itchyny/gojq"
 )
 
+// JQProgram is a compiled jq expression that can be applied to multiple values.
+type JQProgram struct {
+	code *gojq.Code
+}
+
+// CompileJQ parses and compiles an expression without evaluating it.
+func CompileJQ(expr string) (*JQProgram, error) {
+	query, err := gojq.Parse(expr)
+	if err != nil {
+		return nil, fmt.Errorf("parse jq expression: %w", err)
+	}
+	code, err := gojq.Compile(query)
+	if err != nil {
+		return nil, ErrWithHint("config", "CLI_ERROR",
+			"jq expression could not be compiled",
+			"check the --jq expression's function, variable, and module references")
+	}
+	return &JQProgram{code: code}, nil
+}
+
 // ApplyJQ runs a jq expression against v and returns the resulting values.
 // When the query yields a single result, the first (and only) element of the
 // returned slice holds it; when it yields multiple, all are returned in order.
@@ -15,18 +35,21 @@ func ApplyJQ(v any, expr string) ([]any, error) {
 	if expr == "" {
 		return []any{v}, nil
 	}
-
-	query, err := gojq.Parse(expr)
+	program, err := CompileJQ(expr)
 	if err != nil {
-		return nil, fmt.Errorf("parse jq expression: %w", err)
+		return nil, err
 	}
+	return program.Apply(v)
+}
 
+// Apply runs the compiled expression against v and returns its resulting values.
+func (program *JQProgram) Apply(v any) ([]any, error) {
 	input, err := normalizeForJQ(v)
 	if err != nil {
 		return nil, fmt.Errorf("normalize input: %w", err)
 	}
 
-	iter := query.Run(input)
+	iter := program.code.Run(input)
 	var results []any
 	for {
 		r, ok := iter.Next()

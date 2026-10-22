@@ -68,6 +68,9 @@ type Factory struct {
 	cli      *client.Client
 	mailCred *credential.MailCredential
 	mailCLI  *client.Client
+	// Compiled output query, paired with its expression for safe Factory reuse.
+	jqExpression string
+	jqProgram    *output.JQProgram
 	// botIdentityVerified records that the active Bot id is trusted: either it
 	// was obtained from the authoritative registration endpoint or recovered
 	// from an exact local Mail binding for the active Bot-token fingerprint.
@@ -543,6 +546,29 @@ func (f *Factory) Format() string {
 	return output.FormatJSON
 }
 
+// PreflightOutput validates the already-resolved output format and compiles
+// --jq before a command performs any work. The compiled program is reused by
+// emit and keyed by its source expression so factories can safely run more
+// than one root command.
+func (f *Factory) PreflightOutput(format string) error {
+	expr := ""
+	if f.Globals != nil {
+		expr = f.Globals.JQ
+	}
+	if expr == "" {
+		f.jqExpression = ""
+		f.jqProgram = nil
+	} else if f.jqProgram == nil || f.jqExpression != expr {
+		program, err := output.CompileJQ(expr)
+		if err != nil {
+			return err
+		}
+		f.jqExpression = expr
+		f.jqProgram = program
+	}
+	return output.ValidateFormat(format)
+}
+
 // EmitSuccess renders a success envelope, applying --jq first (if set) and
 // then the configured output format. Non-nil raw is placed inside the envelope.
 func (f *Factory) EmitSuccess(raw []byte) error {
@@ -616,7 +642,13 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	}
 
 	if f.Globals != nil && f.Globals.JQ != "" {
-		results, err := output.ApplyJQ(envelope, f.Globals.JQ)
+		var results []any
+		var err error
+		if f.jqProgram != nil && f.jqExpression == f.Globals.JQ {
+			results, err = f.jqProgram.Apply(envelope)
+		} else {
+			results, err = output.ApplyJQ(envelope, f.Globals.JQ)
+		}
 		if err != nil {
 			return err
 		}
@@ -627,7 +659,6 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 			envelope = results
 		}
 	}
-
 	return output.Format(f.IOStreams.Out, f.Format(), envelope)
 }
 

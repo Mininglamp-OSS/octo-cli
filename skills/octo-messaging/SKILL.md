@@ -146,7 +146,7 @@ Available to both bot types (5):
 ```bash
 octo-cli group list      [--space-id <sid>]               # groups the bot is a member of
 octo-cli group get       <group_no>
-octo-cli group members   <group_no>                        # paginated
+octo-cli group members   <group_no>
 octo-cli group md-get    <group_no>                        # group markdown description
 octo-cli group md-update <group_no> --content "# Updated description"  # write, but bot_admin gate — not App-Bot-blocked
 ```
@@ -196,14 +196,15 @@ Even though the semantics are "list", the handler is `POST /v1/bot/events` — t
 ```bash
 cursor=0
 while :; do
-  batch=$(octo-cli event list --event-id "$cursor" --limit 100)
+  batch=$(octo-cli event list --event-id "$cursor" --limit 100 --format json)
   # response shape: {ok, data:{status, results:[{event_id, event_type, message{...}}]}}
-  echo "$batch" | jq -c '.data.results[]' | while read -r ev; do
+  # Use Bash process substitution so this loop runs in the parent shell.
+  while IFS= read -r ev; do
     id=$(jq -r '.event_id' <<<"$ev")
     process "$ev"
     octo-cli event ack "$id"
     cursor=$id
-  done
+  done < <(jq -c '.data.results[]' <<<"$batch")
   sleep 2
 done
 ```

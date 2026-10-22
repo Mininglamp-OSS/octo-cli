@@ -15,6 +15,26 @@
         "operationId": "html.list",
         "summary": "List documents (owner-scoped index)",
         "description": "Owner-scoped document index. The backend returns offset pagination metadata; generic cursor-based --page-all does not apply.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "Page number; the backend defaults to 1 when omitted.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "description": "Items per page; the backend defaults to 20 when omitted and clamps values above 100.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
         "x-octo-risk": "read",
         "x-octo-response-unwrap": null,
         "responses": {

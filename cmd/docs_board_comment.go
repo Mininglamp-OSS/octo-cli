@@ -14,6 +14,7 @@ import (
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 const (
@@ -37,9 +38,10 @@ func registerDocsBoardCommentCmd(root *cobra.Command, f *cmdutil.Factory) {
 	add.Long += `
 
 For a board root comment, pass --body and exactly one of --point X,Y or
-repeatable --element-id ID. Board flags cannot be combined with --data. Element
-anchors read the live scene, including during --dry-run. Replies and advanced
-anchor forms continue to use --data.`
+repeatable --element-id ID. Board flags cannot be combined with --data,
+--parentId, --anchorStart, --anchorEnd, --anchorText, --blockPath, or --occurrence.
+Element anchors read the live scene, including during --dry-run.
+Replies and advanced anchor forms continue to use --data.`
 	add.Flags().StringVar(&o.point, "point", "", "board point anchor as X,Y")
 	add.Flags().StringArrayVar(&o.elementIDs, "element-id", nil, "board element anchor; repeat for multi-selection (commas are preserved)")
 	add.RunE = func(cmd *cobra.Command, args []string) error {
@@ -48,7 +50,9 @@ anchor forms continue to use --data.`
 			return originalRunE(cmd, args)
 		}
 		if flag := firstChangedFlag(cmd, "data", "parentId", "anchorStart", "anchorEnd", "anchorText", "blockPath", "occurrence"); flag != "" {
-			return fmt.Errorf("--point and --element-id cannot be combined with --%s", flag)
+			return output.ErrValidation(
+				fmt.Sprintf("--point and --element-id cannot be combined with --%s", flag),
+				"remove the conflicting flag or use --data without board flags")
 		}
 		body, err := cmd.Flags().GetString("body")
 		if err != nil {
@@ -62,27 +66,21 @@ anchor forms continue to use --data.`
 func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string, o *boardCommentFlags) error {
 	docSegment, err := opaquePathSegment(docID, "docId")
 	if err != nil {
+		return output.ErrValidation(err.Error(), "use a non-empty document ID other than '.' or '..'")
+	}
+	if err := validateBoardCommentFlags(o); err != nil {
 		return err
-	}
-	if strings.TrimSpace(o.body) == "" {
-		return errors.New("--body must not be empty")
-	}
-	if (o.point == "") == (len(o.elementIDs) == 0) {
-		return errors.New("set exactly one of --point or --element-id")
 	}
 	var anchor map[string]any
 	var label string
 	if o.point != "" {
 		x, y, err := parseBoardPoint(o.point)
 		if err != nil {
-			return err
+			return output.ErrValidation(err.Error(), "pass --point as X,Y using finite coordinates within the supported range")
 		}
 		anchor = map[string]any{"version": 1, "kind": "point", "x": x, "y": y}
 		label = fmt.Sprintf("Canvas point · %.0f, %.0f", x, y)
 	} else {
-		if len(o.elementIDs) > maxBoardCommentIDs {
-			return fmt.Errorf("at most %d --element-id values are allowed", maxBoardCommentIDs)
-		}
 		s, err := getScene(cmd, f, docID)
 		if err != nil {
 			return err
@@ -97,8 +95,16 @@ func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string
 		return err
 	}
 	body := map[string]any{"body": o.body, "anchorStart": encoded, "anchorEnd": encoded, "anchorText": label}
+	headers := map[string]string{}
+	if cmd.Flags().Changed("idempotency-key") {
+		key, err := cmd.Flags().GetString("idempotency-key")
+		if err != nil {
+			return err
+		}
+		headers["Idempotency-Key"] = key
+	}
 	if f.Globals != nil && f.Globals.DryRun {
-		data, err := json.Marshal(map[string]any{"dry_run": true, "method": http.MethodPost, "url": "/v1/bot/docs/" + docSegment + "/comments", "headers": map[string]string{}, "body": body})
+		data, err := json.Marshal(map[string]any{"dry_run": true, "method": http.MethodPost, "url": "/v1/bot/docs/" + docSegment + "/comments", "headers": headers, "body": body})
 		if err != nil {
 			return err
 		}
@@ -108,11 +114,26 @@ func runDocsBoardCommentAdd(cmd *cobra.Command, f *cmdutil.Factory, docID string
 	if err != nil {
 		return err
 	}
-	result, err := cli.Do(cmd.Context(), &client.Request{Method: http.MethodPost, Path: "/v1/bot/docs/" + docSegment + "/comments", Body: body, SuppressSpaceHeader: true})
+	result, err := cli.Do(cmd.Context(), &client.Request{Method: http.MethodPost, Path: "/v1/bot/docs/" + docSegment + "/comments", Headers: headers, Body: body, SuppressSpaceHeader: true})
 	if err != nil {
 		return err
 	}
 	return f.EmitSuccess(result)
+}
+
+func validateBoardCommentFlags(o *boardCommentFlags) error {
+	if strings.TrimSpace(o.body) == "" {
+		return output.ErrValidation("--body must not be empty", "pass a non-empty --body")
+	}
+	if (o.point == "") == (len(o.elementIDs) == 0) {
+		return output.ErrValidation("set exactly one of --point or --element-id", "pass exactly one board anchor flag")
+	}
+	if len(o.elementIDs) > maxBoardCommentIDs {
+		return output.ErrValidation(
+			fmt.Sprintf("at most %d --element-id values are allowed", maxBoardCommentIDs),
+			fmt.Sprintf("use no more than %d --element-id values", maxBoardCommentIDs))
+	}
+	return nil
 }
 
 func firstChangedFlag(cmd *cobra.Command, names ...string) string {
@@ -186,11 +207,11 @@ func normalizeBoardElementIDs(requested []string, byID map[string]map[string]any
 	for _, raw := range requested {
 		id := strings.TrimSpace(raw)
 		if id == "" || len(id) > 256 || strings.IndexFunc(id, func(r rune) bool { return r <= 0x20 || (r >= 0x7f && r <= 0x9f) }) >= 0 {
-			return nil, fmt.Errorf("invalid element id %q", raw)
+			return nil, output.ErrValidation(fmt.Sprintf("invalid element id %q", raw), "pass a live scene element ID without control characters")
 		}
 		e := byID[id]
 		if e == nil {
-			return nil, fmt.Errorf("element %q not found or deleted", id)
+			return nil, output.ErrValidation(fmt.Sprintf("element %q not found or deleted", id), "choose an existing, non-deleted scene element")
 		}
 		if containerID, ok := e["containerId"].(string); ok && containerID != "" && byID[containerID] != nil {
 			id = containerID
