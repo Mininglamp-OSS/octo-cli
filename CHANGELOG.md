@@ -23,9 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Skills and command help** — repair shell/attachment recipes and align
   credential precedence, input shapes, import replacement warnings, role
   vocabularies, required markers, parameter types and service/timeout guidance.
-- **Loop query contracts** — task search exposes required `--q`, and batch child
-  lookup exposes comma-separated `--parent-task-ids`; the Fleet public OpenAPI
-  declares the same parameters.
+- **Loop query contracts** — task search takes one required positional query
+  and sends it as HTTP query `q`; `--workspace-id`, `--page`, and `--page-size`
+  remain flags. Batch child lookup exposes comma-separated `--parent-task-ids`.
 - **HTML document pagination** — `html list` exposes `--page` and `--page-size`.
   Omitting them still uses the backend's first page of 20 documents; comment
   listing continues to return its complete single-response result.

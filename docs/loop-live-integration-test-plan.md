@@ -197,7 +197,7 @@ Cases:
 | LIVE-100 | Create task | HTTP success; `.data.task_id` non-empty |
 | LIVE-101 | Get task | Returned ID/title match fixture |
 | LIVE-102 | Update title and description | Follow-up get returns new values |
-| LIVE-103 | Call search endpoint | Valid collection; targeted query is blocked by the current contract |
+| LIVE-103 | Search by run ID | Valid collection using `"$RUN_ID"` as the positional query (`q`) |
 | LIVE-104 | List timeline | Valid collection envelope |
 | LIVE-105 | Create comment | Comment returned or visible in list |
 | LIVE-106 | List comments | Fixture comment present |
@@ -336,7 +336,7 @@ calls: do not add `--dry-run`.
 run_loop task create --data "$TASK_CREATE_BODY"
 run_loop task get "$TASK_ID"
 run_loop task update "$TASK_ID" --data "$TASK_UPDATE_BODY"
-run_loop task search --page 1 --page-size 20
+run_loop task search "$RUN_ID" --page 1 --page-size 20
 run_loop task timeline list "$TASK_ID"
 
 run_loop task comment create "$TASK_ID" \
@@ -451,9 +451,6 @@ prints credentials.
 2. **Execution fixture:** execution behavior cannot run without an online
    daemon consuming tasks.
 3. **Expert cleanup:** public API can archive but cannot delete experts.
-4. **Task search parameters:** `task.search` currently exposes only `page` and
-   `page_size`; no keyword or filter parameter is defined, so the live suite
-   cannot perform a deterministic run-ID search.
 
 ## 9. Pass criteria
 

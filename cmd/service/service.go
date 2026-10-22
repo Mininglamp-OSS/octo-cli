@@ -6,9 +6,10 @@
 //
 // operationId "domain.verb" or "domain.resource.verb" maps to
 // "octo-cli <domain> [<resource>] <verb>" (architecture §5.2). Path parameters
-// become positional args; query parameters become typed flags; simple
-// top-level body fields are auto-promoted to flags (Rule 5a), with a --data
-// escape hatch for complex bodies.
+// become positional args; query parameters become typed flags unless a required
+// string query parameter opts into positional input; simple top-level body fields
+// are auto-promoted to flags (Rule 5a), with a --data escape hatch for complex
+// bodies.
 package service
 
 import (
@@ -177,19 +178,30 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	// Path flags must register before every other kind so they win a name
 	// collision, and before Args is decided so the arity can relax.
 	registerPathFlags(cmd, rt, d)
+	registerQueryFlags(cmd, rt, d)
+	for _, p := range rt.queryPositionals {
+		cmd.Use += " <" + p.PositionalName + ">"
+	}
 	cmd.Long = buildLongDesc(d, rt)
 	if len(rt.pathFlags) > 0 {
+		cmd.SetFlagErrorFunc(leadingDashFlagError(rt))
+	}
+	if len(rt.queryPositionals) > 0 {
+		cmd.Args = func(c *cobra.Command, args []string) error {
+			expected := positionalPathArgCount(c, rt) + len(rt.queryPositionals)
+			return cobra.ExactArgs(expected)(c, args)
+		}
+	} else if len(rt.pathFlags) > 0 {
 		// A flagged path param may arrive as a flag instead of a positional, so
 		// the exact count is no longer knowable here. runOperation reports the
 		// precise "supply <x> or --x" error.
 		cmd.Args = cobra.MaximumNArgs(len(rt.pathParams))
-		cmd.SetFlagErrorFunc(leadingDashFlagError(rt))
 	} else {
 		cmd.Args = cobra.ExactArgs(len(rt.pathParams))
 	}
 
-	registerQueryFlags(cmd, rt, d)
 	registerHeaderFlags(cmd, rt, d)
+
 	registerBodyFlags(cmd, rt, d)
 
 	if d.Pagination != nil {
@@ -241,6 +253,12 @@ func buildLongDesc(d *registry.OperationDetail, rt *operationRuntime) string {
 			strings.ReplaceAll(pf.paramName, "_", "-"), pf.flagName,
 			commandPathFor(d), pf.flagName, commandPathFor(d))
 	}
+	for _, p := range rt.queryPositionals {
+		fmt.Fprintf(&b, "\n\n<%s> is sent as the HTTP query parameter %q. Quote a value "+
+			"containing spaces so it stays one argument. If it begins with \"-\", "+
+			"put it after a \"--\" separator.",
+			p.PositionalName, p.Name)
+	}
 	return b.String()
 }
 
@@ -277,6 +295,18 @@ func leadingDashFlagError(rt *operationRuntime) func(*cobra.Command, error) erro
 				"or put it after a \"--\" separator: %s -- <id>",
 				strings.Join(names, " / "), cmd.CommandPath()))
 	}
+}
+
+// positionalPathArgCount returns the number of path values that still need
+// positional arguments after accounting for path parameters supplied by flag.
+func positionalPathArgCount(cmd *cobra.Command, rt *operationRuntime) int {
+	count := len(rt.pathParams)
+	for _, pf := range rt.pathFlags {
+		if cmd.Flags().Changed(pf.flagName) {
+			count--
+		}
+	}
+	return count
 }
 
 // extractPathParams returns the names of {placeholder} segments in path

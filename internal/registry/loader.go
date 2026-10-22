@@ -278,6 +278,9 @@ type ParamInfo struct {
 	// positionally at all — a base64url id starting with "-" is parsed as a flag
 	// before the command runs (see cmd/service.pathFlag).
 	FlagName string `json:"flag_name,omitempty"`
+	// PositionalName is the CLI operand label from x-octo-positional. The
+	// parameter's Name remains its wire key.
+	PositionalName string `json:"positional_name,omitempty"`
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
@@ -688,12 +691,13 @@ func operationParameters(doc map[string]any, pathStr string, op map[string]any) 
 				}
 			}
 			parameter := ParamInfo{
-				Name:        stringOf(pm["name"]),
-				In:          stringOf(pm["in"]),
-				Required:    boolOf(pm["required"]),
-				Description: stringOf(pm["description"]),
-				FlagName:    stringOf(pm["x-octo-flag"]),
-				Secret:      truthy(pm["x-octo-secret"]),
+				Name:           stringOf(pm["name"]),
+				In:             stringOf(pm["in"]),
+				Required:       boolOf(pm["required"]),
+				Description:    stringOf(pm["description"]),
+				FlagName:       stringOf(pm["x-octo-flag"]),
+				PositionalName: stringOf(pm["x-octo-positional"]),
+				Secret:         truthy(pm["x-octo-secret"]),
 			}
 			if conditional, ok := pm["x-octo-required-unless-query"].(map[string]any); ok {
 				name, value := stringOf(conditional["name"]), stringOf(conditional["value"])

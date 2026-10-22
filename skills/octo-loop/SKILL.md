@@ -71,11 +71,19 @@ tables.
 
 ```bash
 octo-cli loop task list --workspace-id <ws>
-octo-cli loop task search --workspace-id <ws> --q "oauth timeout"
+octo-cli loop task search "oauth timeout" --workspace-id <ws>
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
 octo-cli loop execution message list <execution-id> --workspace-id <ws>
+```
+
+Task search takes one required query argument; quote queries containing spaces.
+`--workspace-id`, `--page`, and `--page-size` remain flags. For a query that
+starts with `-`, put flags before the `--` end-of-options marker:
+
+```bash
+octo-cli loop task search --workspace-id <ws> -- "-draft"
 ```
 
 Inspect the current contract before constructing a write:

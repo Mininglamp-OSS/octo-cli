@@ -192,6 +192,7 @@
             "name": "q",
             "in": "query",
             "required": true,
+            "x-octo-positional": "query",
             "description": "Required non-empty task search query.",
             "schema": {
               "type": "string"

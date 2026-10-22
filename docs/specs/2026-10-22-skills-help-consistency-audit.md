@@ -2,7 +2,8 @@
 
 Date: 2026-10-22
 
-Status: source repairs verified. Dated dispositions below record the current state.
+Status: source repairs and positional task-search behavior verified. Dated
+dispositions below record the current state.
 
 ## Purpose and maintenance
 
@@ -108,6 +109,9 @@ the CLI/skill/help changes; `octo-fleet:openapi/public-v1.yaml` contains the two
 matching query declarations. The supplied Docs, HTML and Marketplace backend
 repositories were read as authorities and were not modified. The installed
 0.18.0 binary was not replaced by this source repair pass.
+
+This records the earlier source pass only; it does not verify the later CLI-only
+positional query contract documented under LOOP-001.
 
 **Automated verification:** `go test ./... -count=1`, `go vet ./...`, and
 `go build -o <temporary-binary> ./cmd/octo-cli` passed. Behavioral regressions
@@ -869,10 +873,13 @@ under SKILL-001.
 
 ### LOOP-001 — Task search does not expose the backend-required query
 
-- **Disposition (2026-10-22): Resolved in source.** The user confirmed
-  synchronized CLI/Fleet repair. Both specs declare required string q; the
-  Loop skill demonstrates it. The missing-query regression and actual
-  reserved-character query selection passed; the definitions match across repos.
+- **Disposition (2026-10-22): Resolved in source.** `task.search` takes one
+  required positional query:
+  `octo-cli loop task search "oauth timeout" --workspace-id <ws>`.
+  It sends the value as HTTP query `q` on `GET /fleet/api/v1/tasks/_search`.
+  `--workspace-id`, `--page`, and `--page-size` remain flags; `--q` is not an
+  alias. Other search commands and the Fleet backend/OpenAPI are unchanged
+  by this CLI-shape update.
 - **Version/evidence:** Runtime request construction and unknown-flag refusal on
   both CLI baselines; embedded spec plus Backend source.
 - **Observation:** `loop task search` exposes page/page-size/workspace inputs,
@@ -893,6 +900,20 @@ under SKILL-001.
   not establish a usable operation.
 - **Boundary:** the actual deployed search endpoint was not called. Additional
   backend search controls and their eventual public vocabulary were not designed.
+- **Extension contract:** `x-octo-positional: "query"` is opt-in for required
+  string query parameters only, never path parameters. These query operands are
+  appended after existing path parameters in declared `parameters` order;
+  `PositionalName` supplies the CLI label while `Name` remains the HTTP key.
+  An absent extension does not change existing behavior.
+- **Acceptance:** `go test ./cmd -run '^TestLoopTaskSearch' -count=1` was
+  observed failing before the positional-input change and passing afterward.
+  Actual source CLI requests preserved spaces, reserved characters, Unicode,
+  dot and leading-dash queries under wire key `q`, together with workspace
+  and pagination inputs. Missing, empty and extra query arguments, `--q`,
+  and missing workspace were refused with exit 2 before HTTP. An empty
+  query reported `VALIDATION_ERROR`; `loop skill search --q` remained usable.
+  Rendered help and schema expose the required operand and its HTTP mapping.
+  The CI-pinned golangci-lint v2.12.2 full scan with Go 1.24.0 reported no issues.
 
 ### LOOP-002 — Batch child-task command cannot identify any parent tasks
 
