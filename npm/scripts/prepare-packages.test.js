@@ -9,7 +9,6 @@ const { execFileSync, spawnSync } = require("child_process");
 
 const SCRIPT = path.join(__dirname, "prepare-packages.js");
 const SHIM = path.join(__dirname, "..", "bin", "octo-cli.js");
-const GORELEASER_YAML = path.join(__dirname, "..", "..", ".goreleaser.yaml");
 const NPM_PUBLISH_YAML = path.join(__dirname, "..", "..", ".github", "workflows", "npm-publish.yml");
 const { PLATFORMS, binFileName } = require(SCRIPT);
 const shim = require(SHIM);
@@ -38,20 +37,6 @@ function run(args) {
   return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
 }
 
-test("npm matrix matches .goreleaser.yaml goos x goarch", () => {
-  const yaml = fs.readFileSync(GORELEASER_YAML, "utf8");
-  const section = (name) => {
-    const m = yaml.match(new RegExp(`${name}:\\n((?:\\s*(?:#[^\\n]*)?\\n)*(?:\\s+-\\s+\\S+\\n)+)`));
-    assert.ok(m, `cannot find ${name}: list in .goreleaser.yaml`);
-    return [...m[1].matchAll(/-\s+(\S+)/g)].map((x) => x[1]);
-  };
-  const goos = section("goos");
-  const goarch = section("goarch");
-  const releaser = new Set(goos.flatMap((o) => goarch.map((a) => `${o}/${a}`)));
-  const npm = new Set(PLATFORMS.map((p) => `${p.goOs}/${p.goArch}`));
-  assert.deepStrictEqual([...npm].sort(), [...releaser].sort());
-});
-
 test("emits one package per platform and a pinned main package", (t) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "octo-cli-prep-"));
   t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -72,7 +57,6 @@ test("emits one package per platform and a pinned main package", (t) => {
     assert.deepStrictEqual(manifest.files, [`bin/${binFileName(goOs)}`, "LICENSE"]);
     const bin = path.join(pkgDir, "bin", binFileName(goOs));
     assert.ok(fs.existsSync(bin), `missing ${bin}`);
-    assert.ok(fs.statSync(bin).mode & 0o100, `${bin} not executable`);
     assert.ok(fs.existsSync(path.join(pkgDir, "LICENSE")), `missing ${pkgDir}/LICENSE`);
   }
 

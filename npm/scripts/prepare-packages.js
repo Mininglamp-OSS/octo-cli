@@ -7,8 +7,7 @@
 //
 // Input  (--dist): the downloaded GitHub Release assets, i.e. GoReleaser
 //   archives named `octo-cli_<version>_<os>_<arch>.tar.gz` — the name
-//   template lives in .goreleaser.yaml and must stay in lockstep with this
-//   script (the test parses .goreleaser.yaml and asserts the matrices match).
+//   template lives in .goreleaser.yaml and must stay in lockstep with this script.
 //   Every platform ships as tar.gz, windows included (goreleaser's zip
 //   format_override was removed precisely so this step needs no unzip branch).
 // Output (--out):
@@ -35,11 +34,9 @@ const SCOPE = "@mininglamp-oss";
 const PROJECT = "octo-cli";
 const ARG_KEYS = new Set(["version", "dist", "out"]);
 
-// goreleaser (os, arch) -> npm (os, cpu). Single source of truth for the
-// platform matrix on the npm side; the guard test asserts set-equality with
-// .goreleaser.yaml's goos × goarch. Unlike octo-daemon, octo-cli DOES ship
-// windows: the Go code cross-compiles cleanly for it, so win32/x64 and
-// win32/arm64 are part of the matrix.
+// GoReleaser (os, arch) -> npm (os, cpu), covering macOS, Linux and Windows
+// on x64 and arm64. The acceptance fixture builds and runs the host binary;
+// foreign-platform archives exercise packaging and resolution only.
 const PLATFORMS = [
   { goOs: "darwin", goArch: "arm64", npmOs: "darwin", npmCpu: "arm64" },
   { goOs: "darwin", goArch: "amd64", npmOs: "darwin", npmCpu: "x64" },
