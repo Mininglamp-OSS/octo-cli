@@ -276,7 +276,10 @@ function verifyInstalled(owner, targetVersion, context) {
   try {
     // Resolve from the physical package, as Node does for the launcher. pnpm's
     // logical global entry does not expose its virtual-store dependency siblings.
-    binaryPath = createRequire(fs.realpathSync(manifestPath)).resolve(
+    const physicalManifestPath = process.platform === "win32"
+      ? fs.realpathSync.native(manifestPath)
+      : fs.realpathSync(manifestPath);
+    binaryPath = createRequire(physicalManifestPath).resolve(
       `${context.current.platformPackage}/bin/${process.platform === "win32" ? "octo-cli.exe" : "octo-cli"}`,
     );
   } catch (_err) {

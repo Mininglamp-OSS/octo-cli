@@ -302,47 +302,6 @@ test("real global installations upgrade through their configured registry", { ti
 
       registry.changeTagAfterLookup(STALE);
       result = await instance.run(["upgrade"], { npm_config_user_agent: "unrelated-manager/99" });
-      if (process.platform === "win32" && name === "pnpm" && result.status !== 0) {
-        const options = { cwd: instance.project, env: instance.env };
-        const listing = await execute(instance.manager.file, [...instance.manager.args, "list", "-g", "--depth=0", "--json"], options);
-        const record = JSON.parse(listing.stdout)[0].dependencies[PACKAGE];
-        const manifest = path.join(record.path, "package.json");
-        const platformManifest = `${PACKAGE}-${process.platform}-${process.arch}/package.json`;
-        const bases = [manifest, fs.realpathSync(manifest), fs.realpathSync.native(manifest)];
-        const inspect = (base, target) => {
-          const fs = require("node:fs");
-          const path = require("node:path");
-          const { createRequire } = require("node:module");
-          try {
-            const localRequire = createRequire(base);
-            const candidates = localRequire.resolve.paths(target).map((directory) => ({
-              path: path.join(directory, target),
-              exists: fs.existsSync(path.join(directory, target)),
-            }));
-            try {
-              const resolved = localRequire.resolve(target);
-              return { base, candidates, resolved, version: JSON.parse(fs.readFileSync(resolved, "utf8")).version };
-            } catch (error) {
-              return { base, candidates, code: error.code, message: error.message };
-            }
-          } catch (error) {
-            return { base, code: error.code, message: error.message };
-          }
-        };
-        const resolutions = [];
-        for (const base of bases) {
-          resolutions.push({
-            current: inspect(base, platformManifest),
-            fresh: await execute(process.execPath, ["-e", `process.stdout.write(JSON.stringify((${inspect.toString()})(process.argv[1],process.argv[2])))`, base, platformManifest], options),
-          });
-        }
-        t.diagnostic(JSON.stringify({
-          record,
-          installed: JSON.parse(fs.readFileSync(manifest, "utf8")),
-          scope_entries: fs.readdirSync(path.dirname(path.dirname(fs.realpathSync.native(manifest)))),
-          resolutions,
-        }));
-      }
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(JSON.parse(result.stdout).data, {
         manager: name, previous_version: OLD, target_version: TARGET, current_version: TARGET, updated: true,
