@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -350,6 +352,102 @@ func TestAPISecretsForRequest_CollectsBodySecrets(t *testing.T) {
 	}
 }
 
+func TestAPISecretsForRequest_CollectsSecretMapValues(t *testing.T) {
+	reg := registry.MustNew()
+	const secret = "api-custom-env-secret-4f2a"
+
+	got, err := apiSecretsForRequest(reg, http.MethodPost, "/market/api/v1/plugins/install",
+		map[string]any{"custom_env": map[string]any{"API_TOKEN": secret}})
+	if err != nil {
+		t.Fatalf("apiSecretsForRequest: %v", err)
+	}
+	if len(got) != 1 || got[0] != secret {
+		t.Errorf("secret values = %v, want [%q]", got, secret)
+	}
+}
+
+func TestAPI_MasksCustomEnvOnMarketplaceLocalPrefixes(t *testing.T) {
+	const secret = "api-custom-env-prefix-secret-7b42"
+	body := `{"plugin_id":"plugin-1","workspace_id":"workspace-1","runtime_id":"runtime-1",` +
+		`"custom_env":{"API_TOKEN":"` + secret + `"}}`
+
+	for _, tc := range []struct {
+		name, prefix, path string
+	}{
+		{name: "canonical prefix", prefix: "market", path: "/market/api/v1/plugins/install"},
+		{name: "escaped operation literal", prefix: "market", path: "/market/api/v1/plugins/%69nstall"},
+		{name: "escaped module and version", prefix: "market", path: "/%6darket/api/v%31/plugins/install"},
+		{name: "uppercase hex escape", prefix: "market", path: "/%6Darket/api/v1/plugins/install"},
+		{name: "empty prefix", prefix: "", path: "/api/v1/plugins/install"},
+		{name: "empty prefix escaped literal", prefix: "", path: "/api/v1/plugins/%69nstall"},
+		{name: "custom prefix", prefix: "local-market", path: "/local-market/api/v1/plugins/install"},
+		{name: "escaped custom prefix", prefix: "local-market", path: "/%6cocal-market/api/v1/plugins/%69nstall"},
+		{name: "escaped configured prefix", prefix: "local%2Dmarket", path: "/local-market/api/v1/plugins/install"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OCTO_MARKETPLACE_API_PREFIX", tc.prefix)
+			root, tf := secretsTestRoot(t, "https://octo.test", client.Options{DryRun: true})
+			root.SetArgs([]string{"api", http.MethodPost, tc.path, "--data", body, "--dry-run"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("api dry-run: %v (stderr: %s)", err, tf.ErrOut.String())
+			}
+
+			stdout, stderr := tf.Out.String(), tf.ErrOut.String()
+			if strings.Contains(stdout, secret) {
+				t.Errorf("stdout exposed custom_env value: %s", stdout)
+			}
+			if strings.Contains(stderr, secret) {
+				t.Errorf("stderr exposed custom_env value: %s", stderr)
+			}
+
+			var envelope struct {
+				Data struct {
+					URL  string         `json:"url"`
+					Body map[string]any `json:"body"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+				t.Fatalf("stdout is not valid JSON: %v (%s)", err, stdout)
+			}
+			if got, want := envelope.Data.URL, "https://octo.test"+tc.path; got != want {
+				t.Errorf("dry-run URL = %q, want caller path %q", got, want)
+			}
+			customEnv, ok := envelope.Data.Body["custom_env"].(map[string]any)
+			if !ok {
+				t.Fatalf("dry-run body omitted custom_env: %#v", envelope.Data.Body)
+			}
+			if _, ok := customEnv["API_TOKEN"]; !ok {
+				t.Errorf("dry-run body omitted API_TOKEN: %#v", customEnv)
+			}
+		})
+	}
+}
+
+func TestMatchPathTemplate_UnreservedLiteralEscapes(t *testing.T) {
+	const rawID = "opaque%2Fid%7E"
+	for _, tc := range []struct {
+		name, template, path string
+		match                bool
+	}{
+		{"unreserved characters", "/aZ0-._~/{id}", "/%61%5A%30%2D%2e%5f%7E/" + rawID, true},
+		{"escaped template literal", "/%61%5A%30%2D%2e%5f%7E/{id}", "/aZ0-._~/" + rawID, true},
+		{"literal case remains significant", "/A/{id}", "/%61/" + rawID, false},
+		{"encoded slash stays within its segment", "/plugins/install/{id}", "/plugins%2Finstall/" + rawID, false},
+		{"double encoding stays encoded", "/plugins/install/{id}", "/plugins%252Finstall/" + rawID, false},
+		{"reserved characters stay encoded", "/market+api/{id}", "/market%2Bapi/" + rawID, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values, matched := matchPathTemplate(tc.template, pathSegments(tc.path))
+			if matched != tc.match {
+				t.Fatalf("match = %v, want %v for %q against %q", matched, tc.match, tc.path, tc.template)
+			}
+			if matched && values["id"] != rawID {
+				t.Errorf("captured id = %q, want unchanged %q", values["id"], rawID)
+			}
+		})
+	}
+}
+
 // TestAPI_DataKeepsUint64Precision is the non-blocking parity item. Every generated command
 // decodes --data with UseNumber so a uint64 id above 2^53 is not rounded, because a rounded
 // id is a *valid* id naming a row the caller did not ask for. `api` used a plain Unmarshal —
@@ -440,10 +538,9 @@ func TestAPI_DecodeIsStrictAndLossless(t *testing.T) {
 
 // TestAPI_RefusesANonStringValueAtASecretProperty is round-16 P1-3, request half.
 //
-// Both halves of the redaction path assumed "declared secret ⇒ Go string", and a JSON number
-// satisfies neither: bodySecretValues asserted `child.(string)` so the value was never
-// declared, and redactBodyValue returned a json.Number verbatim so declaring it would not
-// have helped. `api` performs no schema validation, so an unquoted numeric password was
+// Both halves of redaction assumed "declared secret ⇒ Go string"; a JSON number
+// cannot be collected by CollectBodySecrets, while redactBodyValue leaves the
+// json.Number in output. `api` performs no schema validation, so an unquoted
 // accepted, sent, and printed in both the request trace and the error detail — and an
 // all-digit share password is an ordinary choice, with the quotes the only thing protecting
 // it.
@@ -509,18 +606,13 @@ func TestAPI_AStringValueAtASecretPropertyStillWorks(t *testing.T) {
 
 // TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask is round-16 P2-2's tripwire.
 //
-// `api` recovers secrets by matching the concrete path and walking the body, which leaves a
-// secret in *query* position unmasked because pathSegments drops the query component. A
-// header declaration is safe here: the generic command has no arbitrary-header input, so
-// there is no caller-supplied header value for it to collect; generated commands collect
-// those values from their bound flags. If `api` ever gains a header option, its own tests must
-// extend apiSecretsForRequest before that option ships. A secret on a non-string schema is
-// likewise unsupported because the request side refuses it outright rather than masking it.
+// `api` recovers path and body secrets, but a query-position secret would be missed because
+// pathSegments drops the query. Header declarations are safe today because `api` has no
+// arbitrary-header input. This test retains those parameter-boundary constraints; body-secret
+// shapes are exercised by request-level consumers instead of a schema-wide type census.
 //
-// No embedded spec declares either today, which is why neither is a live leak — but nothing
-// pinned that, so adding one would produce an unmasked credential-equivalent value with no
-// test failing. This is a census over every spec rather than a list, so a new declaration
-// fails here and names what has to be built first.
+// The census covers every operation's parameters rather than relying on a list, so a future
+// unsupported declaration is caught here.
 func TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask(t *testing.T) {
 	reg := registry.MustNew()
 
@@ -545,32 +637,7 @@ func TestSecrets_NoSpecDeclaresASecretApiCannotCollectOrMask(t *testing.T) {
 						"disclosure rules are written for string values", info.ID, p.Type, p.Name)
 				}
 			}
-			if d.RequestBody != nil {
-				assertSecretPropertiesAreStrings(t, info.ID, "", d.RequestBody)
-			}
 		}
-	}
-}
-
-// assertSecretPropertiesAreStrings walks a request-body schema and reports any x-octo-secret
-// property whose declared type is not a string. `api` refuses a non-string value at such a
-// property, so a spec declaring one would make every call to that operation unusable.
-func assertSecretPropertiesAreStrings(t *testing.T, opID, path string, schema *registry.SchemaInfo) {
-	t.Helper()
-	for name := range schema.Properties {
-		prop := schema.Properties[name]
-		where := path + "." + name
-		if prop.Secret && prop.Type != "" && prop.Type != "string" {
-			t.Errorf("%s declares x-octo-secret on %s, whose type is %q — `api` refuses a "+
-				"non-string value there, so the declaration would make the operation uncallable",
-				opID, where, prop.Type)
-		}
-		if prop.Type == "object" || prop.Items != nil {
-			assertSecretPropertiesAreStrings(t, opID, where, &prop)
-		}
-	}
-	if schema.Items != nil {
-		assertSecretPropertiesAreStrings(t, opID, path+"[]", schema.Items)
 	}
 }
 

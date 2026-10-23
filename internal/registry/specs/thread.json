@@ -26,7 +26,7 @@
                 "required": ["name"],
                 "properties": {
                   "name": { "type": "string", "maxLength": 100 },
-                  "source_message_id": { "type": "integer" }
+                  "source_message_id": { "type": "integer", "description": "Optional source message ID to associate with the new thread." }
                 }
               }
             }
@@ -40,8 +40,8 @@
         "x-octo-risk": "read",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "page_index", "in": "query", "schema": { "type": "integer" } },
-          { "name": "page_size", "in": "query", "schema": { "type": "integer" } }
+          { "name": "page_index", "in": "query", "schema": { "type": "integer" }, "description": "Page index for the thread list." },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer" }, "description": "Maximum threads to return per page." }
         ],
         "responses": { "200": { "description": "Thread list" } }
       }

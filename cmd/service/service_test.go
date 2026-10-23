@@ -27,7 +27,7 @@ import (
 // TestMain isolates the whole package from the developer's own OCTO_
 // environment. These tests assert on the exact request the engine builds, and
 // ambient variables rewrite it: OCTO_MARKETPLACE_API_PREFIX replaces the
-// leading /market segment (run.go marketplacePath), OCTO_API_BASE_URL and
+// leading /market segment (run.go MarketplacePath), OCTO_API_BASE_URL and
 // OCTO_SPACE_ID feed the resolved config, OCTO_FORMAT reshapes the envelope.
 //
 // The sweep is by prefix rather than by name on purpose. Naming variables is

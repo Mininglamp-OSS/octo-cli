@@ -12,12 +12,12 @@ metadata:
 
 Three related domains live here. They all call `$OCTO_API_BASE_URL/v1/bot/*` — except the `message search` family under a `uk_` (user API key) token, which the CLI routes to `/v1/user/*` (real-person mount; see the `message search` section).
 
-| Domain    | App Bot           | User Bot |
-|-----------|-------------------|----------|
-| `message` | yes (DM only)     | yes (DM + group + thread) |
-| `group`   | read-only         | full     |
-| `thread`  | **blocked**       | full     |
-| `event`   | yes               | yes      |
+| Domain    | App Bot | User Bot |
+|-----------|---------|----------|
+| `message` | yes (DM only) | yes (DM + group + thread) |
+| `group`   | read-only except `md-update` with `bot_admin` | full; operation-specific `bot_admin` gates apply |
+| `thread`  | **blocked** | full; `md-update` additionally requires `bot_admin` |
+| `event`   | yes | yes |
 
 Search capability (the `message search` family) is a separate axis by token kind:
 
@@ -27,7 +27,7 @@ Search capability (the `message search` family) is a separate axis by token kind
 | `bf_*`  | yes         | Searches as the bot; add `--on-behalf-of <uid>` for a real-person (OBO) view. |
 | `uk_*`  | yes         | Real-person identity; routed to `/v1/user/*`.          |
 
-Before attempting a write, confirm the token type with `octo-cli config show` — App Bot writes outside DM get `FORBIDDEN` from the server ("app bot does not support group operations").
+Before a write, confirm the token type with `octo-cli config show`. App Bot group mutations are rejected except `group md-update`, which still requires the bot to be a group member and have `bot_admin`.
 
 ## 1. `message` — 4 core commands (+ 6 search subcommands, see below)
 
@@ -38,14 +38,20 @@ octo-cli message send --channel-id <cid> --channel-type 1 \
   --data '{"payload":{"type":1,"content":"hello"}}' \
   [--stream-no <n>] [--on-behalf-of <uid>]
 
-# Edit by (message-id, channel-id, channel-type). content-edit is the new
-# content, stored opaquely server-side — carry the new payload, same shape as send.
-octo-cli message edit --message-id <mid> --message-seq <seq> \
+# Raw edit mode: content_edit is a non-empty JSON-encoded string; omit template_ref.
+octo-cli message edit --message-id <mid> [--message-seq <seq>] \
   --channel-id <cid> --channel-type <t> \
   --content-edit '{"type":1,"content":"updated"}'
 
+# Registry edit mode uses a real template reference in the JSON body; omit content_edit.
+octo-cli message edit --data @registry-edit.json
+
+# registry-edit.json supplies message_id, channel_id, channel_type, template_ref,
+# state, data, and a positive card_seq; transient is optional.
+
 # Pull history for a channel. Use --data for non-trivial filters.
-octo-cli message sync --data '{"channel_id":"ch_abc","channel_type":1,"limit":50}'
+octo-cli message sync --channel-id <cid> --channel-type 1 \
+  --start-message-seq <start> --end-message-seq <end> --pull-mode <mode> --limit 50
 
 # Mark messages read.
 octo-cli message read-receipt --channel-id <cid> --channel-type 1 \
@@ -85,10 +91,15 @@ Chat content types:
 | 13   | EmojiSticker      | (emoji sticker)                |
 | 14   | RichText          | (rich text)                    |
 | 16   | InviteJoinOrg     | (org invite)                   |
+| 17   | InteractiveCard  | Raw card payload or Registry template reference |
 
 (System/notification types — 1000+ for group events, 2000 Tip — are server-generated, not sent by bots.) Text example: `{"type":1,"content":"hello"}`.
 
-`--on-behalf-of <uid>` makes `send`/`typing` act as a user persona (OBO) — requires an active OBO grant + channel scope, else the server returns `OBO not authorized`.
+### InteractiveCard (type 17)
+
+InteractiveCard sends are deployment- and bot-policy-gated. Raw sends use a validated card payload; Registry sends use `template_ref` with `state` and `data`. Choose one mode and do not combine the raw card with a Registry reference. Type-17 sends reject `--on-behalf-of` even when the bot otherwise has an active OBO grant.
+
+For eligible ordinary `send` and `typing` requests, `--on-behalf-of <uid>` acts as that user persona and requires an active OBO grant plus channel scope.
 
 ## message search — 6 subcommands
 
@@ -137,7 +148,7 @@ octo-cli message search groups --keyword "quarterly report"
 
 ### Filters and pagination
 
-Rich filters (`sender_ids`, `member_uids`, `content_types`, `sent_at_from`/`sent_at_to`, `file_exts`, …) go through `--data '{"filters":{…}}'`. All families except `around` and `groups` paginate; the cursor travels in the request **body** (`--page-all` handles this).
+Rich filters (`sender_ids`, `member_uids`, `content_types`, `sent_at_from`/`sent_at_to`, `file_exts`, …) go through `--data '{"filters":{…}}'`. For manual paging, pass `--cursor <cursor>` and `--page-size <n>`; the cursor is carried in the request body. Use `--channel-type` on `search`, `all`, `files`, `media`, and `around` when a channel type is needed; `groups` has no channel-type input. All families except `around` and `groups` paginate, and `--page-all` handles their cursor loop.
 
 ## 2. `group` — 9 commands (both 5 / User Bot only 4)
 
@@ -148,48 +159,52 @@ octo-cli group list      [--space-id <sid>]               # groups the bot is a 
 octo-cli group get       <group_no>
 octo-cli group members   <group_no>
 octo-cli group md-get    <group_no>                        # group markdown description
-octo-cli group md-update <group_no> --content "# Updated description"  # write, but bot_admin gate — not App-Bot-blocked
+octo-cli group md-update <group_no> --content "# Updated description"  # member + bot_admin required; App Bot supported
 ```
 
 User Bot only (4):
 
 ```bash
-octo-cli group create        --members u1 --members u2 --name "eng" --creator u0
-octo-cli group update        <group_no> --data '{"name":"new name"}'
+octo-cli group create        --members u1 --members u2 [--name "eng"] [--creator u0] [--space-id <sid>]
+octo-cli group update        <group_no> [--name <name>] [--notice <notice>]  # bot_admin; supply at least one
 octo-cli group member-add    <group_no> --members u3 --members u4
-octo-cli group member-remove <group_no> --members u3
+octo-cli group member-remove <group_no> --members u3  # bot_admin
 ```
 
-App Bot attempting any of the four write operations gets `FORBIDDEN` with message `"app bot does not support group operations"`.
+The four User-Bot-only group operations above are rejected for App Bots. This does not include `group md-update`, which is available to either bot kind when the bot is a member and has `bot_admin`.
 
 ## 3. `thread` — 8 commands, **User Bot only**
 
 Every thread operation calls `validateBotGroupAccess()` on the backend and rejects App Bot unconditionally. Don't attempt these with an `app_*` token.
 
 ```bash
-octo-cli thread create    <group_no> --name "Incident #42"
-octo-cli thread list      <group_no>                          # paginated
+octo-cli thread create    <group_no> --name "Incident #42" [--source-message-id <mid>]
+octo-cli thread list      <group_no> --page-index <n> --page-size <n>  # page-number pagination
 octo-cli thread get       <group_no> <short_id>
 octo-cli thread members   <group_no> <short_id>
 octo-cli thread join      <group_no> <short_id>
 octo-cli thread leave     <group_no> <short_id>
 octo-cli thread md-get    <group_no> <short_id>
-octo-cli thread md-update <group_no> <short_id> --content "# …"
+octo-cli thread md-update <group_no> <short_id> --content "# …"  # requires bot_admin
 ```
 
-The User Bot must be a member of the parent group.
+The User Bot must be a member of the parent group. `thread md-update` additionally requires `bot_admin` in that group.
 
 ## 4. `event` — polling for inbound events
 
 ```bash
 octo-cli event list                          # newest page
-octo-cli event list --event-id 1234 --limit 50   # cursor = highest event-id seen
+octo-cli event list --event-id 1234 --limit 50 --wait 20 --timeout 25s  # wait in seconds; set timeout above wait
 octo-cli event ack  <event_id>
 ```
 
 ### Important: `event list` is a **POST**
 
 Even though the semantics are "list", the handler is `POST /v1/bot/events` — the cursor travels in the body, not the query string. The CLI handles this; agents calling `octo-cli api` must use `POST`.
+
+### Optional server-side wait
+
+`--wait <seconds>` opts into a server-side hold only when no visible events are pending. Absent or zero wait preserves immediate polling; the server clamps the hold to 30 seconds. Set the CLI `--timeout` above the requested wait (the CLI default is 30 seconds); callers with a shorter outer deadline must use a smaller wait. The OpenClaw channel plugin has a 10-second request timeout, so keep its wait below that limit.
 
 ### Standard poll loop
 

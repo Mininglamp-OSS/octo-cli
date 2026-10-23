@@ -62,14 +62,14 @@ Two traps worth naming:
 - `space_id` (the drive space) and `doc_space_id` (the document's own Octo Space) are **different scopes**. Building a document link from `space_id` produces a link to the wrong place. The CLI fails closed rather than substituting.
 - `doc unmount` takes the **mount node id** (`.data.id`), not the `doc_id`.
 
-## 3. The five workflows
+## 3. The six workflows
 
 ### Space → folder → upload → share → download
 
 ```bash
 SPACE=$(octo-cli drive space create --name "Project files" -q '.data.id' | tr -d '"')
 FOLDER=$(octo-cli drive folder create --space-id "$SPACE" --parent-id 0 --name Contracts -q '.data.id' | tr -d '"')
-FILE=$(octo-cli drive upload file ./contract.pdf --space-id "$SPACE" --parent-id "$FOLDER" -q '.data.id' | tr -d '"')
+FILE=$(octo-cli drive upload file ./contract.pdf --space-id "$SPACE" --parent-id "$FOLDER" --name contract.pdf --content-type application/pdf -q '.data.id' | tr -d '"')
 
 SHARE_URL=$(octo-cli drive share create "$FILE" -q '.data.share_url' | tr -d '"')
 # Hand SHARE_URL to the receiver verbatim. They never extract a token:
@@ -79,12 +79,15 @@ octo-cli drive share download "$SHARE_URL" -o ./contract.pdf
 # A space member can also download by internal id:
 octo-cli drive download file "$FILE" -o ./copy.pdf
 ```
+For `drive upload file`, optional `--name` and `--content-type` override the stored filename and MIME type; when omitted, the filename comes from the local path and content type is detected.
 
 ### Personal space → mount a document → share its link
 
 ```bash
 SPACE=$(octo-cli drive space ensure-personal -q '.data.id' | tr -d '"')
-DOC=$(octo-cli drive doc candidates --space-id "$SPACE" -q '.data.items[0].doc_id' | tr -d '"')
+# Candidate listing supports real pagination:
+# `--page` is 1-based; `--page-size` selects the page size.
+DOC=$(octo-cli drive doc candidates --space-id "$SPACE" --page 1 --page-size 50 -q '.data.items[0].doc_id' | tr -d '"')
 MOUNT=$(octo-cli drive doc mount --space-id "$SPACE" --doc-id "$DOC" -q '.data.id' | tr -d '"')
 DOC_URL=$(octo-cli drive share create "$MOUNT" -q '.data.share_url' | tr -d '"')
 
@@ -98,12 +101,14 @@ octo-cli drive share access "$DOC_URL"      # resolves the target; grants nothin
 
 ```bash
 SPACE=$(octo-cli drive space create --name "Collab" -q '.data.id' | tr -d '"')
-INVITE_ID=$(octo-cli drive invite create "$SPACE" --role editor -q '.data.invite_id' | tr -d '"')
+INVITE_ID=$(octo-cli drive invite create "$SPACE" --role editor --expires-in-seconds 86400 -q '.data.invite_id' | tr -d '"')
 TOKEN=$(octo-cli drive invite list "$SPACE" -q '.data.invites[0].invite_token' | tr -d '"')
 
-octo-cli drive invite accept "$TOKEN"          # as the invitee's credential
-octo-cli drive invite revoke "$SPACE" "$INVITE_ID"
+octo-cli drive invite accept --invite-token "$TOKEN"          # as the invitee's credential
+octo-cli drive invite revoke "$SPACE" --invite-id "$INVITE_ID"
 ```
+`--expires-in-seconds` controls invite lifetime; omitted or `0` uses the backend's seven-day default.
+
 
 `invite_id` / `invite_token` are base64url and may start with `-`; prefer
 `--invite-id` / `--invite-token` in scripts so a leading dash is never parsed as a flag.
@@ -111,7 +116,8 @@ octo-cli drive invite revoke "$SPACE" "$INVITE_ID"
 Roles accepted by `invite create`: `preview_only`, `downloader`, `uploader_downloader`, `editor`, `admin` (admin only if you are the space's `super_admin`). `custom` and `super_admin` are rejected on invites. Or add a known uid directly:
 
 ```bash
-octo-cli drive member add "$SPACE" --uid "$UID" --role editor
+# Set OCTO_UID to the target's Octo user or bot identity first.
+octo-cli drive member add "$SPACE" --uid "$OCTO_UID" --role editor
 ```
 
 `member add` / `member set-role` accept one more role than invites do — `custom`, the lowest rank (below `preview_only`). `super_admin` is never grantable: it is bound to the space creator at space creation.
@@ -131,7 +137,8 @@ Drive has no user search — get a uid from the message/group commands or your o
 MSG=$(octo-cli message search files --chat-id "$GROUP" -q '.data.items[0].message_id' | tr -d '"')
 FILE=$(octo-cli drive im-transfer create \
   --im-group-no "$GROUP" --im-channel-type 2 --im-msg-id "$MSG" \
-  --target-space-id "$SPACE" -q '.data.id' | tr -d '"')
+  --target-space-id "$SPACE" --target-parent-id "$FOLDER" --name-override "attachment.pdf" \
+  -q '.data.id' | tr -d '"')
 ```
 
 `--im-channel-type` is required: `1`=DM, `2`=group, `5`=thread, and it must be the kind the message actually came from. It picks the upstream message-read route (`1` uses the DM route; `2` and `5` share the group route, where group vs sub-thread comes from the composite `group_no`), and it is stored as the first segment of the row's `source_key` (`channelType#channelID#msgID`), which the chat file-card's already-transferred lookup matches on — a wrong value makes that lookup miss. Anything outside `1|2|5` is rejected locally (`ENUM_NOT_ALLOWED`, exit 2).
@@ -147,11 +154,20 @@ octo-cli drive browse --space-id "$SPACE" --type blob --source user-upload
 FILE=$(octo-cli drive browse --space-id "$SPACE" -q '.data.entries[0].id' | tr -d '"')
 octo-cli drive file get    "$FILE"                       # type → blob | doc | folder
 octo-cli drive file move   "$FILE" --parent-id "$FOLDER"
-octo-cli drive file rename "$FILE" --name new-name.pdf
-octo-cli drive file copy   "$FILE" --parent-id "$FOLDER"
+octo-cli drive file copy   "$FILE" --parent-id "$FOLDER" --name "copy-of-file.pdf"
+octo-cli drive folder move "$FOLDER_NODE" --parent-id 0
+
+# Cross-space destinations are optional; on-conflict is forwarded as a string.
+octo-cli drive file move "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
+octo-cli drive file copy "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
+octo-cli drive folder move "$FOLDER_NODE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
 ```
 
+
 `file get` is how you branch: `type` tells you whether an id is a blob, a mounted document, or a folder.
+
+`--target-space-id` is optional; omitting it keeps move/copy in the source space. The three move/copy operations accept `--on-conflict` as a string forwarded to Drive. The handler documents `rename`, but the backend controls conflict handling and outcome; the CLI does not promise that a name will be automatically changed.
+
 
 `browse` returns the complete listing; its `page` object is an envelope, not a database page, so `--page-index` / `--page-size` do not actually narrow the result yet.
 
@@ -165,7 +181,7 @@ octo-cli drive search --q "预算" --scope space --space-id "$SPACE"
 octo-cli drive search --q "合同" --data '{"filters":{"type":"blob","owner_scope":"me"}}'
 ```
 
-Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope` (me|others), `updated_after` (RFC3339), `size_min`/`size_max` (bytes). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
+Advanced `filters` (a JSON object passed via `--data`): `type` (folder|doc|blob), `owner_scope` (me|others), `updated_after` (RFC3339), `size_min`/`size_max` (bytes). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
 
 ## 4. Upload and download in detail
 
@@ -173,14 +189,14 @@ Advanced `--filters` (pass via `--data`): `type` (folder|doc|blob), `owner_scope
 
 The server owns mode selection. `drive upload file` sends exactly one prepare request and always declares `X-Drive-Upload-Capabilities: multipart-v1`; the server ignores the header below its multipart threshold and returns a multipart snapshot when scheduling is required. There is no probe request or 409 retry. A multipart response enters the scheduler directly; `"single"`, a missing value, or an unknown value uses the legacy single-part path. An unknown mode without `upload_url` is `UPLOAD_MODE_CONFLICT`, with the pending row cancelled. Low-level callers can also send the header with `drive upload prepare --upload-capabilities multipart-v1`.
 
-The multipart path:
+The multipart path honors the inherited global `--no-retry` flag:
 
 - treats `part_size` as bytes, matching the backend response;
 - opens the local file once, then streams every part with exact offsets and `Content-Length` instead of reading the file into memory;
 - signs all parts in batches of at most 20, covering `1..part_count` without gaps;
 - uploads with at most the server's `max_concurrent_parts` workers;
-- retries a failed part up to three times; `403` re-signs only that part, while other terminal 4xx responses stop the scheduler;
-- reads each part's `ETag` and completes with `{upload_id, parts:[{part_number, etag}]}`.
+- by default, retries a failed part up to three times (four PUT attempts total); a 403 re-signs only that part. With `--no-retry`, the initial PUT still runs, but a failed attempt does not cause another PUT or signature request. If the URL has expired before the first PUT, the CLI still obtains a valid signature for that initial attempt.
+- by default, completion retries an explicit HTTP 5xx within a four-attempt bound; `--no-retry` still sends the first complete request but does not repeat it.
 
 Progress goes to stderr only. `--dry-run` describes the prepare request and local file, but fetches no URL, sends no bytes, and creates no pending row.
 
@@ -205,7 +221,7 @@ For single-part uploads, a failure after the pending row exists cancels it. The 
 
 If `pending_file` is not `cancelled`, run `octo-cli drive upload cancel <file-id>` yourself.
 
-Completion is intentionally cautious about ambiguous outcomes. An explicit HTTP 5xx response is a definite, idempotent failure and gets a bounded retry. A connection interruption or timeout may mean the request already reached the server: that path sends exactly one request and returns `RESULT_UNKNOWN`; the CLI does not retry or abort the session. Inspect the file's actual state before starting another upload.
+By default, explicit HTTP 5xx completion responses get a bounded retry; `--no-retry` keeps only the first complete attempt. Retry behavior alone does not establish the remote upload's final state. A connection interruption or timeout may mean the request already reached the server: that path always sends exactly one request and returns `RESULT_UNKNOWN`; the CLI does not retry or abort the session. Inspect the file's actual state before starting another upload.
 
 A `413 file_too_large` from prepare reports the declared size and the server's effective limit; no upload bytes are sent and no pending multipart session is created.
 
@@ -224,12 +240,12 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 ```
 
 - The password is passed out of band — it is never in the URL, and it is masked in `--verbose` / `--dry-run` output.
-- **Prefer `--password-file <path>` (or `--password-file -` for stdin) over `--password`.** A value on argv is readable from `ps` and `/proc` and lands in shell history for the process lifetime, the same reason `auth login` takes its token from `--token-file` / stdin and never from the command line. `--password` still works for interactive use. One trailing newline is stripped from the file; nothing else is, so a password may begin or end with a space.
+- `--password` and `--password-file` are mutually exclusive. Prefer `--password-file <path>` (or `--password-file -` for stdin) over `--password`. A value on argv is readable from `ps` and `/proc` and lands in shell history for the process lifetime, the same reason `auth login` takes its token from `--token-file` / stdin and never from the command line. `--password` still works for interactive use. One trailing newline is stripped from the file; nothing else is, so a password may begin or end with a space.
 - `--permission` is held to the spec's `view | download` enum locally: anything else is `ENUM_NOT_ALLOWED` / exit 2 with no request sent.
 - **Both sides need a credential.** There is no anonymous share. The token (and password) authorise the *share*; your credential authenticates *you*. The receiver does not have to be a member of the file's space.
 - `share access` / `share download` accept only links on your configured Octo origin — same scheme, host and port — in exactly the `/drive/s/<token>` or `/d/<docId>?sp=<docSpaceId>` shape. Anything else fails with `INVALID_SHARE_URL` — the CLI parses the link, it never fetches the host in it. Pass the link exactly as `share create` produced it; a scheme-downgraded copy of an otherwise correct link is refused.
 - `downloadable` tells you which command to use next. Documents are always `false`; `share download` on a document link fails locally with `validation / NOT_DOWNLOADABLE` before any request. A blob share marked `false` should not be assumed to have the same local error; rely on its actual response.
-- Revoke with the `share_id`, not the token: `octo-cli drive share revoke "$SHARE_ID"`. The `share_id` is itself treated as a secret — the backend returns one opaque id that is both the management handle and the access token — so `--verbose`, `--dry-run` and error output show it as `***REDACTED***`. That is the mask, not a wrong id: the real value still goes on the wire. Read it from `share create` / `share list` output, which is not masked.
+- Revoke with the `share_id`, not the token: `octo-cli drive share revoke --share-id "$SHARE_ID"`. The `share_id` is itself treated as a secret — the backend returns one opaque id that is both the management handle and the access token — so `--verbose`, `--dry-run` and error output show it as `***REDACTED***`. That is the mask, not a wrong id: the real value still goes on the wire. Read it from `share create` / `share list` output, which is not masked.
 - **base64url ids can start with `-`** (about one in 64), which cobra reads as a flag. Pass those as a flag instead — `octo-cli drive share revoke --share-id "$SHARE_ID"` — or put the value after a `--` separator. The same applies to `--invite-id` (`invite revoke`) and `--invite-token` (`invite accept`). Using the flag form unconditionally is the safe habit for a script.
 
 ## 6. Errors
@@ -256,7 +272,11 @@ octo-cli drive share create "$FILE" --permission download --expires-in-seconds 8
 | `UPLOAD_FAILED` | api_error / 1 | the presigned PUT was rejected or the confirm failed; the detail carries `file_id` and whether the pending row was cancelled |
 | `file_too_large` | validation / 2 | the declared size exceeds the server's effective limit; the message includes that limit. Do not retry unchanged |
 | `client_capability_required` | validation / 2 | the server requires a declared upload capability; `upload file` always declares it on its single prepare request. Low-level prepare can pass `--upload-capabilities multipart-v1` |
-| `upload_session_not_active` | validation / 2 | the multipart session already completed, expired, or was aborted; inspect the file state instead of retrying blindly |
+| `upload_mode_conflict` | validation / 2 | follow the server's `upload_mode` and use the matching single-part or multipart flow |
+| `object_size_mismatch` | validation / 2 | compare `actual_size` with `declared_size`; restart the upload with the complete file |
+| `upload_session_not_active` | validation / 2 | read `status`: `completing` is not active; treat `confirmed` as success, start a new session if aborted or expired, and never replay the same `upload_id` |
+| `upload_policy_unavailable` | api_error / 1 | wait for `retry_after_seconds`, then retry with bounded backoff |
+| `too_many_upload_sessions` | rate_limited / 1 | finish or abort existing sessions to free a slot, then retry |
 | `RESULT_UNKNOWN` | network / 1 | completion may have succeeded. Inspect the file before retrying; the CLI deliberately does not abort or replay this request |
 | `INVALID_FLAG` | validation / 2 | a positional id starting with `-` was parsed as a flag; pass it as the named flag or after `--` |
 

@@ -107,19 +107,25 @@ Do not search the machine or guess a path.
    `--plugin-name` is the visible Marketplace title; `--name` is the stable
    machine name from `SKILL.md`. `plugin import` builds the attachment tree and
    saves a draft version. On update, add `--plugin-name "<new-display-name>"`
-   only when the user explicitly confirmed a rename. Optional `--category-id`,
-   `--tags`, `--icon`, `--changelog`.
+   only when the user explicitly confirmed a rename. Optional fields include
+   `--category-id`, `--tags`, `--icon`, `--description` and `--changelog`.
+   On update, omitting `--description` preserves the existing Marketplace
+   description; on create, the parsed description is used when available.
 6. Read the returned `plugin_id`, then `plugin get --plugin-id <plugin-id>` to
    verify the draft.
 7. Publish explicitly:
 
    ```bash
    octo-cli marketplace plugin publish --plugin-id <plugin-id> \
-     --version 1.0.0 --changelog "Initial release"
+     --version <imported-version> --changelog "<matching release notes>"
    ```
 
-   A Space-visible skill returns `pending_review` plus a `review_id`; it becomes
-   catalog-visible only after a Space owner/admin approves that request.
+   Use exactly the version submitted to import (for example, `1.0.0` on create
+   or `<next-version>` on update) and a changelog matching that version.
+   A Space-visible Skill follows the authenticated Space's review policy:
+   automatic approval is enabled by default when no override is stored and
+   publishes immediately. When disabled, the draft remains `pending_review`;
+   save the returned `review_id` and wait for owner/admin approval.
 
 If parse returns `RATE_LIMITED`, wait and retry within the user's timeout. Parse
 itself is not idempotent: re-triggering an already-parsed upload returns `409
@@ -165,14 +171,20 @@ JSON
 octo-cli marketplace plugin review-request create --data @review.json
 ```
 
-Keep `<plugin-id>` and `<parse-task-id>` distinct. The published version remains
-live until a Space owner/admin approves the request. Version labels must be
+Keep `<plugin-id>` and `<parse-task-id>` distinct. The review request uses the
+authenticated Space's automatic-review policy: automatic approval is enabled
+by default when no override is stored; when enabled, the submission is approved
+and published immediately. When disabled, the current version remains live
+until a Space owner/admin approves the request. Version labels must be
 forward-moving `MAJOR.MINOR.PATCH` values; if review is rejected, correct the
 content and submit another review request.
 
 ```bash
-octo-cli marketplace plugin version list --plugin-id <id>
+octo-cli marketplace plugin version list --plugin-id <id> --page 1 --page-size 100
 ```
+
+There is no `--page-all` for version history. Keep `--page-size 100` on each
+request and continue through a short page to inspect every version.
 
 ## Update metadata / manage owned skills
 
@@ -213,4 +225,12 @@ octo-cli marketplace plugin delete --plugin-id <id>
 > resubmit the complete list — omitting the `relations` key soft-deletes all
 > relations on save.
 
-Skill icon upload is a presigned flow: `marketplace skill-icon-upload create`.
+Skill icon presigning requires a file name and byte size:
+
+```bash
+octo-cli marketplace skill-icon-upload create --file-name "<icon.png>" --file-size <bytes>
+```
+
+PUT the image bytes to the returned `presigned_url` with its returned `method`
+and `headers`. The Skill response includes an `object_key` but no persistent
+`download_url`; do not store the temporary `presigned_url` as `plugin.icon`.

@@ -103,6 +103,49 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"expert", "expert_team", "member"},
 		why:  "same TaskSubscriptionRequest schema as task.subscribe"},
 
+	{op: "task.create", in: "body", field: "status",
+		want: []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssueStatuses; " +
+			"CreateIssue calls validateIssueEnum with this set at issue.go:2089; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.create", in: "body", field: "priority",
+		want: []string{"urgent", "high", "medium", "low", "none"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssuePriorities; " +
+			"CreateIssue validates this set at issue.go:2092; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.update", in: "body", field: "priority",
+		want: []string{"urgent", "high", "medium", "low", "none"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssuePriorities; " +
+			"UpdateIssue validates this set at issue.go:2353-2355; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.list", in: "query", field: "date_field",
+		want: []string{"created_at", "updated_at"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1113-1134 parseIssueDateFilter " +
+			"allows these fields; ListIssues uses it at issue.go:937 and the public query " +
+			"adapter copies query values in internal/publicapi/normalize.go:423-449."},
+	{op: "task.list", in: "query", field: "sort",
+		want: []string{"position", "title", "created_at", "start_date", "due_date", "priority"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:959-973 ListIssues sort switch; " +
+			"unknown values return 400."},
+	{op: "task.group", in: "query", field: "date_field",
+		want: []string{"created_at", "updated_at"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1113-1134 parseIssueDateFilter " +
+			"allows these fields; ListGroupedIssues uses it at issue.go:1356 and the public " +
+			"query adapter copies query values in internal/publicapi/normalize.go:423-449."},
+	{op: "task.group", in: "query", field: "sort",
+		want: []string{"position", "title", "created_at", "start_date", "due_date", "priority"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1387-1396 ListGroupedIssues " +
+			"sort switch; unknown values return 400."},
+	{op: "task.group", in: "query", field: "group_by",
+		want: []string{"assignee"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1234-1240 defaults to and " +
+			"accepts only assignee grouping."},
+	{op: "task.group", in: "query", field: "group_assignee_type",
+		want: []string{"none", "member", "expert", "expert_team"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1362-1377 handles none or " +
+			"isIssueActorType (issue.go:1183-1185 accepts member/agent/squad); " +
+			"internal/publicapi/normalize.go:423-439 maps public expert/expert_team before validation."},
+
 	// --- drive (this PR's domain) ---
 	{op: "drive.member.add", in: "body", field: "role",
 		want: []string{"preview_only", "downloader", "uploader_downloader", "editor", "admin", "super_admin", "custom"},
@@ -155,6 +198,18 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.list", in: "query", field: "sort",
 		want: []string{"updatedAt:asc", "updatedAt:desc"},
 		why:  "octo-docs-backend list route sort whitelist; an unknown value is coerced rather than rejected server-side, so the local gate is at worst equally strict"},
+	{op: "docs.list", in: "query", field: "owner",
+		want: []string{"me"},
+		why: "octo-docs-backend@ae11631 src/api/routes/docs.ts:428-440 recognizes owner=me; " +
+			"other values do not select an owner. The human-only discoverable path at " +
+			"docs.ts:445-448 is intentionally not exposed by the bot CLI."},
+	{op: "docs.list", in: "query[]", field: "type",
+		want: []string{"doc", "sheet", "board", "html", "html_ppt"},
+		why: "octo-docs-backend@ae11631 src/api/routes/docs.ts:449-451 passes repeated " +
+			"?type= values to normalizeTypeFilter; src/db/docType.ts:54-68 filters against " +
+			"DOC_TYPES. Repeated values are not CSV; human-only discoverable remains excluded " +
+			"per docs.ts:445-448."},
+
 	{op: "docs.scene.export", in: "query", field: "format",
 		want: []string{"png", "svg", "excalidraw"},
 		why:  "PNG/SVG are backend renderers; the CLI intercepts excalidraw to assemble a portable local export"},

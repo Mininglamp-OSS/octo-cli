@@ -22,9 +22,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agent_platform": { "type": "string" },
-                  "agent_version": { "type": "string" },
-                  "plugin_version": { "type": "string" }
+                  "agent_platform": { "type": "string", "description": "Agent platform name reported during registration." },
+                  "agent_version": { "type": "string", "description": "Agent version reported during registration." },
+                  "plugin_version": { "type": "string", "description": "Plugin version reported during registration." }
                 }
               }
             }
@@ -119,7 +119,7 @@
         "parameters": [
           { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "optional LIKE filter on name" },
           { "name": "space_id", "in": "query", "schema": { "type": "string" }, "description": "override space (defaults to bot's space)" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 } }
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 }, "description": "Maximum members to return; defaults to 50 and is capped at 200." }
         ],
         "responses": {
           "200": {

@@ -66,7 +66,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.BoolVar(&f.Globals.DryRun, "dry-run", false, "print request without executing")
 	pf.BoolVar(&f.Globals.Verbose, "verbose", false, "write request/response trace to stderr")
 	pf.StringVar(&f.Globals.Timeout, "timeout", "", "per-request timeout (default 30s; invalid values warn and use 30s)")
-	pf.BoolVar(&f.Globals.NoRetry, "no-retry", false, "disable retry on transient failures")
+	pf.BoolVar(&f.Globals.NoRetry, "no-retry", false, "disable retries, including multipart PUT, failure-triggered re-signing and completion; expired URLs may still be signed before the first PUT")
 	pf.StringVar(&f.Globals.Space, "space", "", "space id (for platform-scoped bots)")
 	pf.StringVar(&f.Globals.BotID, "bot-id", "", "select/assert the bot credential by robot id (env OCTO_BOT_ID)")
 	pf.StringVar(&f.Globals.Profile, "profile", "", "select the bot credential by profile name")

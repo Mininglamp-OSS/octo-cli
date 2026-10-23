@@ -367,7 +367,11 @@
               "schema": {
                 "type": "object",
                 "required": ["parent_id"],
-                "properties": { "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" } }
+                "properties": {
+                  "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" },
+                  "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
+                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
+                }
               }
             }
           }
@@ -416,7 +420,11 @@
               "schema": {
                 "type": "object",
                 "required": ["parent_id"],
-                "properties": { "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" } }
+                "properties": {
+                  "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" },
+                  "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
+                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
+                }
               }
             }
           }
@@ -442,7 +450,9 @@
                 "required": ["parent_id"],
                 "properties": {
                   "parent_id": { "type": "integer", "format": "uint64", "description": "destination parent folder id" },
-                  "name": { "type": "string", "description": "name for the copied root node; defaults to the source name" }
+                  "name": { "type": "string", "description": "name for the copied root node; defaults to the source name" },
+                  "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
+                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
                 }
               }
             }

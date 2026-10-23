@@ -26,6 +26,12 @@ document, slide, element, or normalized point (PPT; see `ppt.md`).
 # List thread roots + replies. --includeResolved 1 also returns resolved threads.
 octo-cli docs comments list <docId> [--includeResolved 1] [--cursor <id>] [--limit 50]
 
+# Read a comment and its authoritative root anchor (replies inherit root.anchor).
+octo-cli docs comments get <docId> <commentId>
+
+# Replies return up to 25 items with nextCursor; pass it as --cursor or use --page-all.
+octo-cli docs comments replies <docId> <rootId> [--cursor <id>] [--page-all]
+
 # Root comment: needs an anchor. With a live editor selection, pass the opaque
 # base64 Yjs positions. Without one (a bot), pass --anchorText and the backend
 # resolves it to an anchor.
@@ -50,6 +56,14 @@ octo-cli docs comments edit   <docId> <id> --resolved=true      # writer; false 
 octo-cli docs comments delete <docId> <id>          # soft delete (author)
 octo-cli docs comments delete <docId> <id> --hard 1 # hard delete (admin)
 ```
+
+`docs comments list` is cursor-based; pass its returned `nextCursor` via
+`--cursor` for the next page. It does not support `--page-all`. `docs comments
+replies` returns up to 25 items per page and a `nextCursor`; pass that cursor
+manually or use `--page-all` to fetch all pages (bounded by `--page-limit`,
+default 10). Stop when `nextCursor` is null. `docs comments get` returns both
+the requested comment and its authoritative root; for a reply, use
+`root.anchor` as the thread's anchor.
 
 Anchors are opaque base64-encoded Yjs positions produced by the editor — the
 backend never parses base64 anchors. A bot with no live editor selection can

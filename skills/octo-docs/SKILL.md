@@ -89,9 +89,10 @@ octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId 
 # Native gallery choices: signal, terra, orbital, picnic (requires the matching backend).
 # Read ppt.md for style selection and the create -> read -> edit -> verify workflow.
 
-# List docs you own or are a member of. Page-based (see the pagination note below).
-octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
-
+# List docs you own or are a member of. owner=me narrows to docs owned by this bot.
+# q searches filenames by substring. Repeat --type from doc|sheet|board|html|html_ppt
+# to combine types; the CLI sends repeated type query keys (not a CSV value).
+octo-cli docs list [--folderId f_123] [--owner me] [--q "quarterly"] [--type doc] [--type sheet] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
 # Full-text search every doc the bot may read. Repeat --doc-type to combine kinds.
 # Search is cursor-based; --page-all follows nextCursor automatically.
 octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html] [--page-size 20] [--page-all]
@@ -123,9 +124,11 @@ Pagination depends on the endpoint's response contract:
 - `docs search` is **cursor-based** — response is `{total, items, nextCursor}`.
   Pass `nextCursor` back via `--cursor`, or use `--page-all` to follow it
   automatically; `--page-limit` caps automatic requests (default 10).
-- `docs comments list` and `docs versions list` are **cursor-based** — response is
-  `{items, nextCursor}`. Pass the returned `nextCursor` back via `--cursor` to get
-  the next page; stop when `nextCursor` is null.
+- `docs comments list` and `docs versions list` are cursor-based — pass the
+  returned `nextCursor` via `--cursor` to get the next page; stop when it is null.
+- `docs comments replies` returns up to 25 replies with `nextCursor`; pass it
+  via `--cursor` or use `--page-all` to collect pages (`--page-limit` caps
+  automatic requests, default 10).
 
 ## Not in this version
 

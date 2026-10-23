@@ -221,12 +221,13 @@ func (r *Registry) EnabledOperations() []OperationInfo {
 // needed to route to and describe the operation without loading its full
 // parameter / schema detail. Use GetOperation for the expanded view.
 type OperationInfo struct {
-	ID      string `json:"id"`
-	Service string `json:"service"`
-	Method  string `json:"method"`
-	Path    string `json:"path"`
-	Summary string `json:"summary,omitempty"`
-	Risk    string `json:"risk,omitempty"`
+	ID          string `json:"id"`
+	Service     string `json:"service"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Summary     string `json:"summary,omitempty"`
+	Description string `json:"description,omitempty"`
+	Risk        string `json:"risk,omitempty"`
 }
 
 // ConditionalQueryRequirement describes x-octo-required-unless-query: the
@@ -463,12 +464,13 @@ func (r *Registry) ListOperations(service string) []OperationInfo {
 			return
 		}
 		out = append(out, OperationInfo{
-			ID:      id,
-			Service: service,
-			Method:  strings.ToUpper(method),
-			Path:    pathStr,
-			Summary: stringOf(op["summary"]),
-			Risk:    stringOf(op["x-octo-risk"]),
+			ID:          id,
+			Service:     service,
+			Method:      strings.ToUpper(method),
+			Path:        pathStr,
+			Summary:     stringOf(op["summary"]),
+			Description: stringOf(op["description"]),
+			Risk:        stringOf(op["x-octo-risk"]),
 		})
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -543,12 +545,13 @@ func walkOperations(doc map[string]any, fn func(path, method string, op map[stri
 func buildDetail(service string, doc map[string]any, pathStr, method string, op map[string]any) *OperationDetail {
 	d := &OperationDetail{
 		OperationInfo: OperationInfo{
-			ID:      stringOf(op["operationId"]),
-			Service: service,
-			Method:  strings.ToUpper(method),
-			Path:    pathStr,
-			Summary: stringOf(op["summary"]),
-			Risk:    stringOf(op["x-octo-risk"]),
+			ID:          stringOf(op["operationId"]),
+			Service:     service,
+			Method:      strings.ToUpper(method),
+			Path:        pathStr,
+			Summary:     stringOf(op["summary"]),
+			Description: stringOf(op["description"]),
+			Risk:        stringOf(op["x-octo-risk"]),
 		},
 		BaseURLEnv:           stringOf(doc["x-octo-base-url"]),
 		Credential:           stringOf(doc["x-octo-credential"]),

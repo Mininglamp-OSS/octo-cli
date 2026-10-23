@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
@@ -26,7 +27,7 @@ import (
 // helper — this is the escape hatch when an endpoint isn't in the registry
 // yet or when a caller needs to exercise something bespoke.
 func newAPICmd(f *cmdutil.Factory) *cobra.Command {
-	var paramsSpec, dataSpec, service, workspaceID string
+	var paramsSpec, dataSpec, serviceName, workspaceID string
 
 	cmd := &cobra.Command{
 		Use:   "api <METHOD> <PATH>",
@@ -101,7 +102,7 @@ flags are not auto-generated and --page-all is not available.`,
 				headers = map[string]string{"X-Workspace-ID": workspaceID}
 			}
 			respBody, err := cli.Do(cobraCmd.Context(), &client.Request{
-				Service: service,
+				Service: serviceName,
 				Method:  method,
 				Path:    path,
 				Query:   q,
@@ -122,7 +123,7 @@ flags are not auto-generated and --page-all is not available.`,
 
 	cmd.Flags().StringVar(&paramsSpec, "params", "", "query parameters as JSON object (e.g. '{\"status\":\"open\"}')")
 	cmd.Flags().StringVar(&dataSpec, "data", "", "request body: inline JSON, @filepath, or @- for stdin")
-	cmd.Flags().StringVar(&service, "service", "", "service key for special handling (e.g. loop); all services share OCTO_API_BASE_URL and PATH selects the endpoint")
+	cmd.Flags().StringVar(&serviceName, "service", "", "service key for special handling (e.g. loop); all services share OCTO_API_BASE_URL and PATH selects the endpoint")
 	cmd.Flags().StringVar(&workspaceID, "workspace-id", "", "workspace UUID sent as X-Workspace-ID")
 	return cmd
 }
@@ -178,14 +179,14 @@ func decodeStrict(dec *json.Decoder, into any) error {
 // --dry-run and --verbose printed the password verbatim.
 //
 // A non-string value at a secret property is refused rather than declared. See
-// bodySecretValues for why refusing is the right half of that fix to take.
+// service.CollectBodySecrets for why refusing an unmaskable value is the right boundary.
 func apiSecretsForRequest(reg *registry.Registry, method, path string, body any) ([]string, *output.ExitError) {
 	secrets := apiSecretsForPath(reg, method, path)
 	if body == nil || reg == nil {
 		return secrets, nil
 	}
 	if d := matchOperation(reg, method, path); d != nil && d.RequestBody != nil {
-		found, err := bodySecretValues(d.RequestBody, body, "")
+		found, err := service.CollectBodySecrets(d.RequestBody, body)
 		if err != nil {
 			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err),
 				"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")
@@ -225,129 +226,6 @@ func apiResponseSecretFieldsForRequest(reg *registry.Registry, method, path stri
 	return d.ResponseSecretFields
 }
 
-// bodySecretValues walks the supplied body against the schema and returns the values sitting
-// at properties the spec marks secret, at any depth. A non-string value at such a property is
-// an error rather than a collected secret.
-//
-// Refusing is the whole fix on this side, and it is deliberately not symmetrical with the
-// response side. Both halves of the redaction path used to assume "declared secret ⇒ Go
-// string": collection asserted child.(string), so a --data number was never declared, and
-// redactBodyValue returned a json.Number verbatim, so declaring it would not have helped
-// either. `api` does no schema validation, so an unquoted numeric password was accepted, sent
-// and printed twice — in the request trace and in the error detail — and an all-digit share
-// password is an ordinary choice with the quotes the only thing protecting it.
-//
-// Teaching both halves to stringify would fix it too, and would be worse here: it widens the
-// masker over every numeric value in a request body, which masks ordinary ids out of every
-// diagnostic. A type error costs the caller one retry with quotes and cannot disclose
-// anything. The response side gets the masking treatment instead, because there the value
-// arrives from the backend and no caller mistake is involved.
-//
-// The error names the property and never the value: this is the default-deny family, and the
-// point of refusing is that the value has no masked spelling yet.
-//
-// The object and array walks are separate functions only to keep each under the complexity
-// limit; the recursion is one traversal.
-func bodySecretValues(schema *registry.SchemaInfo, value any, at string) ([]string, error) {
-	switch v := value.(type) {
-	case map[string]any:
-		return objectSecretValues(schema, v, at)
-	case []any:
-		return arraySecretValues(schema, v, at)
-	}
-	return nil, nil
-}
-
-// objectSecretValues collects the secret leaves of one JSON object against its schema.
-func objectSecretValues(schema *registry.SchemaInfo, obj map[string]any, at string) ([]string, error) {
-	var out []string
-	for name := range schema.Properties {
-		prop := schema.Properties[name]
-		child, present := obj[name]
-		if !present {
-			continue
-		}
-		where := joinPropertyPath(at, name)
-		if prop.Secret {
-			str, err := secretStringAt(where, child)
-			if err != nil {
-				return nil, err
-			}
-			if str != "" {
-				out = append(out, str)
-			}
-			continue
-		}
-		if prop.Type == "object" || prop.Items != nil {
-			nested, err := bodySecretValues(&prop, child, where)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, nested...)
-		}
-	}
-	return out, nil
-}
-
-// arraySecretValues collects the secret leaves of one JSON array against its item schema.
-func arraySecretValues(schema *registry.SchemaInfo, items []any, at string) ([]string, error) {
-	if schema.Items == nil {
-		return nil, nil
-	}
-	var out []string
-	for i, item := range items {
-		nested, err := bodySecretValues(schema.Items, item, fmt.Sprintf("%s[%d]", at, i))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, nested...)
-	}
-	return out, nil
-}
-
-// secretStringAt reads the value at a declared-secret property, refusing any JSON kind but a
-// string. An empty string is not a secret to mask and is not an error either.
-//
-// An explicit null is left alone rather than refused: it carries no value to disclose, and
-// `api` does no schema validation otherwise, so refusing it would reject a call the backend
-// may well accept.
-func secretStringAt(where string, child any) (string, error) {
-	if child == nil {
-		return "", nil
-	}
-	str, ok := child.(string)
-	if !ok {
-		return "", fmt.Errorf("%s is declared secret and must be a JSON string, not %s",
-			where, jsonKindOf(child))
-	}
-	return str, nil
-}
-
-// joinPropertyPath names a body property for an error message.
-func joinPropertyPath(at, name string) string {
-	if at == "" {
-		return name
-	}
-	return at + "." + name
-}
-
-// jsonKindOf names the JSON kind of a decoded value, for a type error that must not print
-// the value itself.
-func jsonKindOf(v any) string {
-	switch v.(type) {
-	case json.Number, int, int64, float64:
-		return "a number"
-	case bool:
-		return "a boolean"
-	case map[string]any:
-		return "an object"
-	case []any:
-		return "an array"
-	}
-	return "a non-string value"
-}
-
-// pathSegments splits a concrete request path, dropping any query string or fragment.
 func pathSegments(path string) []string {
 	if i := strings.IndexAny(path, "?#"); i >= 0 {
 		path = path[:i]
@@ -392,11 +270,14 @@ func apiSecretsForPath(reg *registry.Registry, method, path string) []string {
 //
 // A spec declares one path, but x-octo-mount-by-token-kind routes the same operation to a
 // different prefix per credential kind — /v1/user/drive for a user key, /v1/bot/drive for a
-// bot. Matching only the declared spelling would leave the other mount unmasked, and a
-// caller using `api` against the mount their token actually needs is the likely case, not
-// the unlikely one.
+// bot. Marketplace also supports a local path prefix; use the same mapping as generated
+// commands so `api` can match requests sent through that mount without rewriting their path.
 func candidatePaths(d *registry.OperationDetail) []string {
 	paths := []string{d.Path}
+	localPath := service.MarketplacePath(d.Service, d.Path)
+	if localPath != d.Path {
+		paths = append(paths, localPath)
+	}
 	for _, from := range d.MountByTokenKind {
 		suffix, ok := strings.CutPrefix(d.Path, from)
 		if !ok {
@@ -413,8 +294,8 @@ func candidatePaths(d *registry.OperationDetail) []string {
 	return paths
 }
 
-// matchPathTemplate reports whether a "/a/{b}/c" template matches the given concrete
-// segments, and returns the value each placeholder captured.
+// matchPathTemplate compares literal segments with RFC 3986 unreserved escapes
+// decoded for recognition only. Placeholder values retain their original spelling.
 func matchPathTemplate(template string, got []string) (map[string]string, bool) {
 	want := strings.Split(strings.Trim(template, "/"), "/")
 	if len(want) != len(got) {
@@ -427,11 +308,44 @@ func matchPathTemplate(template string, got []string) (map[string]string, bool) 
 			values[name] = got[i]
 			continue
 		}
-		if seg != got[i] {
+		if !equalPathLiteral(seg, got[i]) {
 			return nil, false
 		}
 	}
 	return values, true
+}
+
+func equalPathLiteral(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if !strings.Contains(a, "%") && !strings.Contains(b, "%") {
+		return false
+	}
+	for a != "" && b != "" {
+		var ca, cb byte
+		ca, a = pathLiteralByte(a)
+		cb, b = pathLiteralByte(b)
+		if ca != cb {
+			return false
+		}
+	}
+	return a == b
+}
+
+func pathLiteralByte(s string) (value byte, rest string) {
+	if len(s) >= 3 && s[0] == '%' {
+		hi := strings.IndexByte("0123456789abcdef", s[1]|0x20)
+		lo := strings.IndexByte("0123456789abcdef", s[2]|0x20)
+		if hi >= 0 && lo >= 0 {
+			c := byte(hi<<4 | lo)
+			if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
+				c >= '0' && c <= '9' || strings.IndexByte("-._~", c) >= 0 {
+				return c, s[3:]
+			}
+		}
+	}
+	return s[0], s[1:]
 }
 
 // findSecretPathParam reports whether the operation declares name as a secret path

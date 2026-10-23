@@ -177,10 +177,10 @@
                 "type": "object",
                 "required": ["members"],
                 "properties": {
-                  "name": { "type": "string" },
+                  "name": { "type": "string", "description": "Optional name for the group." },
                   "members": { "type": "array", "maxItems": 200, "items": { "type": "string" } },
-                  "creator": { "type": "string" },
-                  "space_id": { "type": "string" }
+                  "creator": { "type": "string", "description": "UID of the human creator; defaults to the first human member." },
+                  "space_id": { "type": "string", "description": "Space for the new group; defaults to the bot's space." }
                 }
               }
             }
@@ -220,8 +220,8 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" },
-                  "notice": { "type": "string" }
+                  "name": { "type": "string", "description": "New group name; supply this or notice." },
+                  "notice": { "type": "string", "description": "New group notice; supply this or name." }
                 }
               }
             }

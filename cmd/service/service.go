@@ -238,6 +238,10 @@ func buildLongDesc(d *registry.OperationDetail, rt *operationRuntime) string {
 		b.WriteString(d.Summary)
 		b.WriteString("\n\n")
 	}
+	if d.Description != "" {
+		b.WriteString(d.Description)
+		b.WriteString("\n\n")
+	}
 	fmt.Fprintf(&b, "operationId: %s\n%s %s", d.ID, d.Method, d.Path)
 	if d.Risk != "" {
 		fmt.Fprintf(&b, "  [risk: %s]", d.Risk)
