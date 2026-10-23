@@ -269,7 +269,7 @@ octo-cli schema --list              # all operations across all domains
 octo-cli schema --list message      # operations in one domain
 octo-cli schema message.send        # request/response schema for one op
 octo-cli config show                # resolved config (token masked)
-octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile
+octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile (wins over OCTO_API_BASE_URL)
 
 # Generic passthrough for ops that aren't auto-registered.
 octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
@@ -331,7 +331,8 @@ The success envelope's `identity.source` names the variable actually used
 All backend services are accessed through a single API base URL.
 The value is a gateway origin (`http(s)://host[:port]`) rather than a
 service-specific path; query strings, fragments, credentials, and API paths are
-rejected.
+rejected. Precedence is the active profile's `api_base_url`, then
+`OCTO_API_BASE_URL`, then `https://im.deepminer.com.cn`.
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
@@ -339,7 +340,7 @@ rejected.
 | `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
 | `OCTO_TASK_TOKEN`   | Dedicated daemon-issued task credential; read only when task mode is explicitly selected. |
 | `OCTO_CREDENTIAL_MODE` | Set to `task` for one task-workflow invocation; unset for ordinary authentication. |
-| `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
+| `OCTO_API_BASE_URL`  | API base URL for environment credentials or profiles that record none; defaults to `https://im.deepminer.com.cn`. |
 | `OCTO_BOT_ID`       | Select a stored profile by robot id when no environment credential is set. |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **API base URL precedence** — the active profile's stored `api_base_url` now
+  outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored
+  profile is routed to the origin it was created against even when the
+  environment names another one; environment credentials and profiles without a
+  URL still use the environment value. To move a profile to another gateway, use
+  `octo-cli auth update --api-base-url <origin>`.
+
 ### Fixed
 
 - **Service help and request metadata** — generated long help retains operation

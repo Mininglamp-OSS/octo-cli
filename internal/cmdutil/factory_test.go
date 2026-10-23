@@ -148,6 +148,59 @@ func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
 	}
 }
 
+func TestFactory_ProfileBaseURLPrecedence(t *testing.T) {
+	const (
+		profileOrigin = "https://profile.example.com"
+		envOrigin     = "https://env.example.com"
+	)
+	cases := []struct {
+		name       string
+		profileURL string
+		envURL     string
+		envToken   bool
+		want       string
+	}{
+		{"profile outranks env", profileOrigin, envOrigin, false, profileOrigin},
+		{"profile without URL falls back to env", "", envOrigin, false, envOrigin},
+		{"profile without URL falls back to default", "", "", false, config.DefaultAPIBaseURL},
+		{"environment credential uses env", profileOrigin, envOrigin, true, envOrigin},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			t.Setenv(config.EnvAPIBaseURL, tc.envURL)
+			t.Setenv(config.EnvToken, "")
+			t.Setenv(config.EnvBotToken, "")
+			t.Setenv(config.EnvBotID, "")
+
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveProfile("target", &authstore.ProfileMeta{
+				APIBaseURL: tc.profileURL,
+				RobotID:    "bot-target",
+			}, "app_target"); err != nil {
+				t.Fatal(err)
+			}
+
+			f := NewDefaultFactory()
+			if tc.envToken {
+				t.Setenv(config.EnvToken, "app_env")
+			} else {
+				f.Globals.Profile = "target"
+			}
+			cfg, err := f.Config()
+			if err != nil {
+				t.Fatalf("Config: %v", err)
+			}
+			if cfg.APIBaseURL != tc.want {
+				t.Fatalf("APIBaseURL = %q, want %q", cfg.APIBaseURL, tc.want)
+			}
+		})
+	}
+}
+
 func TestFactory_TaskCredentialMode(t *testing.T) {
 	t.Run("uses dedicated token without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"

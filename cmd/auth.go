@@ -109,7 +109,7 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set OCTO API base URL for this profile")
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
 	return cmd
 }
 
@@ -201,7 +201,7 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "read the token from stdin instead of a prompt")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the token from this file")
-	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "override OCTO_API_BASE_URL for this profile")
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "store this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
 	cmd.MarkFlagsMutuallyExclusive("with-token", "token-file")
 	return cmd
 }
