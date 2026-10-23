@@ -77,7 +77,7 @@ func multipartScalarValue(bf *bodyFlag) string {
 	case kindInt:
 		return strconv.Itoa(*bf.intVal)
 	case kindFloat64:
-		return strconv.FormatFloat(*bf.floatVal, 'g', -1, 64)
+		return strconv.FormatFloat(*bf.floatVal, 'f', -1, 64)
 	case kindBool:
 		return strconv.FormatBool(*bf.boolVal)
 	default:

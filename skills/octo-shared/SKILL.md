@@ -151,7 +151,7 @@ These flags work on every command (they are root-level persistent flags):
 | `--dry-run`     | Describe the resolved request instead of sending it for request-backed commands; see §6 for exceptions |
 | `--verbose`     | Log request/response trace to stderr                                    |
 | `--timeout`     | Per-request deadline, e.g. `30s`, `2m`                                  |
-| `--no-retry`    | Disable the default retry-on-transient policy                           |
+| `--no-retry`    | Disable retries, including multipart PUTs, failure-triggered re-signing and completion; URLs expired before the first PUT may still be signed |
 | `--space`       | Override `OCTO_SPACE_ID` for this invocation                            |
 | `--bot-id`      | Select/assert the stored credential by robot id (env `OCTO_BOT_ID`)     |
 | `--profile`     | Select the stored credential by profile name                            |

@@ -453,7 +453,7 @@ func addQueryFlagValue(
 		if err := checkEnum(label, *qf.floatVal, enum); err != nil {
 			return err
 		}
-		q.Set(qf.apiName, strconv.FormatFloat(*qf.floatVal, 'g', -1, 64))
+		q.Set(qf.apiName, strconv.FormatFloat(*qf.floatVal, 'f', -1, 64))
 	case kindBool:
 		if err := checkEnum(label, *qf.boolVal, enum); err != nil {
 			return err

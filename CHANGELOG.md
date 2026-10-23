@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escapes, without changing outbound paths or wire values.
 - **Loop task inputs** — list/group filters, task fields and priority vocabularies
   are exposed; numeric flags preserve fractional values such as task position.
+- **Numeric text fields** — query flags and multipart scalar fields use plain
+  decimal notation for large and small values while preserving fractions.
 - **Multipart retry controls** — `--no-retry` applies to part PUTs, failure-triggered
   re-signing and completion requests while preserving initial attempts and cleanup.
+  Global help states these boundaries and the initial expired-URL signing step.
 - **Embedded agent guides** — routing, token selection, operator maintenance,
   dry-run boundaries, paging, prerequisites and domain workflows match current CLI
   behavior and inspected service contracts.
