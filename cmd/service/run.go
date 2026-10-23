@@ -71,6 +71,9 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if verr != nil {
 		return emitAndReturn(f, verr)
 	}
+	// A Workspace path flag and its binding header share one selector. Resolve
+	// both from the same value so Fleet can authorize before route dispatch.
+	headers = bindWorkspacePathHeader(rt, pathValues, headers)
 
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
@@ -569,6 +572,21 @@ func queryItemEnum(d *registry.OperationDetail, apiName string) []any {
 		return p.Items.Enum
 	}
 	return nil
+}
+
+func bindWorkspacePathHeader(rt *operationRuntime, pathValues []string, headers map[string]string) map[string]string {
+	if !rt.pathFlagNames["workspace-id"] || findParam(rt.detail, "X-Workspace-ID", "header") == nil {
+		return headers
+	}
+	for i, name := range rt.pathParams {
+		if name == "workspace_id" {
+			if headers == nil {
+				headers = map[string]string{}
+			}
+			headers["X-Workspace-ID"] = pathValues[i]
+		}
+	}
+	return headers
 }
 
 // buildHeaders assembles the per-request headers from spec-declared header

@@ -54,9 +54,6 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.comments.add", in: "body", field: "anchor.kind", want: []string{"document", "slide", "element", "point"}, why: "Same local PPT continuation; src/ppt/comments.ts anchor validation (new routes not yet submitted)"},
 	{op: "docs.ppt.export", in: "query", field: "format", want: []string{"html"}, why: "Same local PPT continuation; src/api/ppt/export.ts export format guard"},
 	// --- loop ---
-	{op: "workspace.member.list", in: "query", field: "obo",
-		want: []string{"true"},
-		why:  "octo-server origin/main@85a77d13 modules/project/api_bot_read.go botOBOPrincipal rejects every obo query value other than the literal true"},
 	{op: "expert_team.evaluate", in: "body", field: "outcome",
 		want: []string{"action", "no_action", "failed"},
 		why:  "Fleet expert_team_evaluations Public API contract carried by octo-cli PR #151; development schema and command regression tests pin the same three outcomes"},

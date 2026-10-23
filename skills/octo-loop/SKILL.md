@@ -50,11 +50,11 @@ store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.
 
 All Loop commands use the same gateway as every other domain. Fleet operations
-resolve under `$OCTO_API_BASE_URL/fleet/api/v1/*`. Project member listing uses
-the Octo Server Bot endpoint `/v1/bot/projects/<project-id>/members` and accepts
-only a `bf_` User Bot credential with an authorized owner delegation grant.
-It requires ordinary credential mode and explicit `--obo`; Loop task
-credentials, App Bot tokens and user API keys are not accepted for this read.
+resolve under `$OCTO_API_BASE_URL/fleet/api/v1/*`. Project member listing also
+uses Fleet: its existing authorization checks the Bot's Project membership,
+then its verified owner's current membership when owner fallback is enabled.
+Fleet reads the Server internal member list with a service credential and
+forwards the response. Callers do not supply an owner UID or an OBO grant.
 
 ## Workspace selector
 
@@ -70,17 +70,16 @@ octo-cli loop workspace list
 
 The existing member-list command reads the Octo Project roster. Its Project
 UUID is the same identity used by Loop as the workspace ID. Supply it either
-positionally or through `--workspace-id`, once, together with the explicit
-Space query and owner-delegation opt-in:
+positionally or through `--workspace-id`, once:
 
 ```bash
-octo-cli loop workspace member list <project-id> --space-id <space-id> --obo
-octo-cli loop workspace member list --workspace-id <project-id> --space-id <space-id> --obo --limit 50 --offset 50
+octo-cli loop workspace member list <project-id>
+octo-cli loop workspace member list --workspace-id <project-id> --limit 50 --offset 50
 ```
 
-`--space-id` is required even when the credential profile has a Space configured.
-The server chooses the Bot owner and verifies the delegation grant and the
-owner's Project access. Callers cannot select another human identity.
+Fleet resolves the Project's Space and verifies the request against that scope.
+Its configured owner fallback uses the authenticated Bot owner's identity;
+callers cannot select another human identity. No `--obo` flag is needed.
 
 Read members from `.data.items[]`. Each member contains `uid`, `name`, `role`
 (`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
@@ -90,9 +89,9 @@ seats; consumers choosing a human assignee must check `robot == 0`.
 
 Pagination uses `--limit` (default 50, maximum 200) and `--offset` (default 0).
 Read `.data.total`, `.data.limit`, and `.data.offset` to request subsequent
-pages, advancing offset by limit until it reaches total. The response also
-retains `.data.decision_id`. These replace the old `--page` / `--page-size`
-parameters for member listing. Authorization failures are returned directly.
+pages, advancing offset by limit until it reaches total. These replace the old
+`--page` / `--page-size` parameters for Project member listing. Authorization
+failures are returned directly.
 
 ## Discover and execute operations
 
@@ -412,7 +411,7 @@ mention:
 ```bash
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
-octo-cli loop workspace member list <ws> --space-id <space-id> --obo
+octo-cli loop workspace member list <ws>
 ```
 
 Do not mention an expert or expert-team just to say thanks, confirm, or wrap up

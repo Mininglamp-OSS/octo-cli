@@ -216,10 +216,10 @@ octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
 octo-cli loop task list --workspace-id <workspace-uuid>
-# Project members use Octo Server with a bf_ User Bot and an owner delegation grant.
-octo-cli loop workspace member list <project-uuid> --space-id <space-id> --obo
+# Project members use Fleet authorization, including its verified Bot-owner fallback.
+octo-cli loop workspace member list <project-uuid>
 # Alternatively select the Project with --workspace-id; results are in .data.items[].
-octo-cli loop workspace member list --workspace-id <project-uuid> --space-id <space-id> --obo --limit 50 --offset 50
+octo-cli loop workspace member list --workspace-id <project-uuid> --limit 50 --offset 50
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # HTML documents registered in docs-backend use the same search endpoint.

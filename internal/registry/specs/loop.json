@@ -3111,10 +3111,15 @@
         "x-octo-risk": "high-risk-write"
       }
     },
-    "/v1/bot/projects/{workspace_id}/members": {
+    "/fleet/api/v1/workspaces/{workspace_id}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ],
       "get": {
         "summary": "List Octo Project members",
-        "description": "Read the Octo Project member list using a User Bot's authorized owner delegation. The Loop workspace ID is the Octo Project ID. Pass it positionally or with --workspace-id, together with --space-id and explicit --obo. Requires a bf_ credential and a valid owner delegation grant. Returns items containing Octo uid, name, role and robot, plus total, limit, offset and decision_id. Use limit/offset pagination. Member listings include both people and Bot seats.",
+        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Uses limit/offset pagination and returns items containing Octo uid, name, role and robot, plus total, limit and offset. Legacy workspaces retain their native Fleet member response.",
         "tags": [
           "workspaces"
         ],
@@ -3129,26 +3134,6 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            }
-          },
-          {
-            "name": "space_id",
-            "in": "query",
-            "required": true,
-            "description": "Octo Space containing the Project. Required as a query parameter even when the profile has a Space configured.",
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "obo",
-            "in": "query",
-            "required": true,
-            "description": "Explicitly request the Bot owner's authorized delegation. The server selects and verifies the owner; callers cannot supply a human UID.",
-            "schema": {
-              "type": "boolean",
-              "enum": [true]
             }
           },
           {
@@ -3193,18 +3178,28 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "description": "Octo Project members and offset pagination metadata.",
+            "description": "Project members and offset pagination metadata, forwarded by Fleet after authorization.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["items", "total", "limit", "offset", "decision_id"],
+                  "required": [
+                    "items",
+                    "total",
+                    "limit",
+                    "offset"
+                  ],
                   "properties": {
                     "items": {
                       "type": "array",
                       "items": {
                         "type": "object",
-                        "required": ["uid", "name", "role", "robot"],
+                        "required": [
+                          "uid",
+                          "name",
+                          "role",
+                          "robot"
+                        ],
                         "properties": {
                           "uid": {
                             "type": "string",
@@ -3215,12 +3210,19 @@
                           },
                           "role": {
                             "type": "integer",
-                            "enum": [0, 1, 2],
+                            "enum": [
+                              0,
+                              1,
+                              2
+                            ],
                             "description": "Project role: 0 common member, 1 admin, 2 owner."
                           },
                           "robot": {
                             "type": "integer",
-                            "enum": [0, 1],
+                            "enum": [
+                              0,
+                              1
+                            ],
                             "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
                           }
                         }
@@ -3238,10 +3240,6 @@
                     "offset": {
                       "type": "integer",
                       "minimum": 0
-                    },
-                    "decision_id": {
-                      "type": "string",
-                      "description": "Server-generated delegation decision identifier."
                     }
                   }
                 }
@@ -3249,11 +3247,10 @@
             }
           }
         },
-        "x-octo-allowed-token-kinds": ["user_bot"],
-        "x-octo-space-header": false,
         "x-octo-risk": "read"
       }
     },
+
     "/fleet/api/v1/labels": {
       "get": {
         "summary": "List labels",

@@ -5,18 +5,18 @@ import (
 	"testing"
 )
 
-func TestWorkspaceMemberListUsesOctoProjectContract(t *testing.T) {
+func TestWorkspaceMemberListUsesFleetProjectContract(t *testing.T) {
 	op, ok := MustNew().GetOperation("workspace.member.list")
 	if !ok {
 		t.Fatal("workspace.member.list is missing")
 	}
-	if op.Path != "/v1/bot/projects/{workspace_id}/members" {
-		t.Fatalf("member-list path = %q, want the Octo Project Bot member endpoint", op.Path)
+	if op.Path != "/fleet/api/v1/workspaces/{workspace_id}/members" {
+		t.Fatalf("member-list path = %q, want the authorized Fleet member endpoint", op.Path)
 	}
-	if !reflect.DeepEqual(op.AllowedTokenKinds, []string{"user_bot"}) {
-		t.Errorf("allowed token kinds = %v, want only user_bot", op.AllowedTokenKinds)
+	if !reflect.DeepEqual(op.AllowedTokenKinds, []string(nil)) {
+		t.Errorf("allowed token kinds = %v, want Fleet credential policy", op.AllowedTokenKinds)
 	}
-	wantRequired := map[string]bool{"workspace_id": true, "space_id": true, "obo": true, "limit": false, "offset": false}
+	wantRequired := map[string]bool{"workspace_id": true, "X-Workspace-ID": true, "limit": false, "offset": false}
 	for _, parameter := range op.Parameters {
 		want, exists := wantRequired[parameter.Name]
 		if !exists {
@@ -43,7 +43,7 @@ func TestWorkspaceMemberListUsesOctoProjectContract(t *testing.T) {
 			t.Errorf("Project member response is missing %s", name)
 		}
 	}
-	for _, name := range []string{"total", "limit", "offset", "decision_id"} {
+	for _, name := range []string{"total", "limit", "offset"} {
 		if _, exists := op.ResponseSchema.Properties[name]; !exists {
 			t.Errorf("Project member page is missing %s", name)
 		}

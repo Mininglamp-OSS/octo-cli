@@ -89,14 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Project member listing (breaking)** — `loop workspace member list` now
-  reads `/v1/bot/projects/{workspace_id}/members` using an authorized `bf_`
-  owner's delegation. Supply the Project ID positionally or with
-  `--workspace-id`, plus required `--space-id` and explicit `--obo`. Pagination
-  uses `--limit` / `--offset`; member records are in `.data.items[]` with Octo
-  `uid`, `name`, numeric `role` and `robot`. Page totals and `decision_id` are
-  preserved. The previous Fleet-local member endpoint and `--page` /
-  `--page-size` flags are replaced for this command.
+- **Project member listing (breaking)** — `loop workspace member list` reads
+  `/fleet/api/v1/workspaces/{workspace_id}/members`. Fleet verifies Project
+  access using its Bot/verified-owner policy and forwards the internally
+  authenticated Server response. Supply the Project ID positionally or with
+  `--workspace-id`; pagination uses `--limit` / `--offset`. Project records in
+  `.data.items[]` retain Octo `uid`, `name`, numeric `role` and `robot`, plus
+  JSON page metadata. This read no longer requires `--obo`, an explicit
+  `--space-id`, or a Server OBO grant.
 - **Loop task token isolation (breaking)** — task mode now consumes only
   `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or
   falls back to profiles. Pair daemon-launched tasks with daemon v1.2.1 or later,
