@@ -44,7 +44,7 @@
 
 ## Command Structure (12 active domains, 339 embedded operations)
 
-Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
 > **`matter` is temporarily withheld** (backend API not yet stable). The spec
 > stays embedded — `octo-cli schema matter.*` still introspects it — but the command
@@ -127,8 +127,15 @@ octo-cli schema [--list [domain] | <operation-id>]
 octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...] [--workspace-id <uuid>]
 octo-cli config show
 octo-cli completion bash|zsh|fish|powershell
+octo-cli upgrade [--dry-run]
 octo-cli version
 ```
+
+`octo-cli upgrade` updates the invoked global installation through its owning npm,
+Bun, or pnpm executable, inheriting that manager's native registry mirror and
+authentication configuration. It resolves stable `latest` to an exact version and
+verifies the installed platform binary. `--dry-run` checks ownership locally
+without registry access. Upgrade requires no Octo credentials.
 
 `octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `update` changes non-secret profile settings such as the API base URL without re-entering or rewriting the token, and `--clear-api-base-url` removes the stored origin so the environment or default applies again. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 

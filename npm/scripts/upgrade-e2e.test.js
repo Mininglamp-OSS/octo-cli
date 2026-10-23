@@ -305,9 +305,9 @@ test("real global installations upgrade through their configured registry", { ti
       if (process.platform === "win32" && name === "pnpm" && result.status !== 0) {
         const options = { cwd: instance.project, env: instance.env };
         const listing = await execute(instance.manager.file, [...instance.manager.args, "list", "-g", "--depth=0", "--json"], options);
-        const record = JSON.parse(listing.stdout)[0].dependencies[PACKAGE_NAME];
+        const record = JSON.parse(listing.stdout)[0].dependencies[PACKAGE];
         const manifest = path.join(record.path, "package.json");
-        const platformManifest = `${PACKAGE_NAME}-${process.platform}-${process.arch}/package.json`;
+        const platformManifest = `${PACKAGE}-${process.platform}-${process.arch}/package.json`;
         const bases = [manifest, fs.realpathSync(manifest), fs.realpathSync.native(manifest)];
         const inspect = (base, target) => {
           const fs = require("node:fs");

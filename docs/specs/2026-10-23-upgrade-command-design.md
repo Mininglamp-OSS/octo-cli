@@ -367,7 +367,7 @@ Configuration references:
 - [Bun npmrc support](https://bun.com/docs/pm/npmrc)
 - [Bun global configuration](https://bun.com/docs/runtime/bunfig)
 - [pnpm global root](https://pnpm.io/cli/root)
-- [pnpm update](https://pnpm.io/10.x/cli/update)
+- [pnpm add](https://pnpm.io/cli/add)
 - [pnpm 11 global-layout and native-command changes](https://pnpm.io/blog/releases/11.0)
 
 ## Open issues
