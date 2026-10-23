@@ -330,6 +330,8 @@ Implementation boundaries:
   explicitly relative configuration-file paths.
   Post-install dependency resolution uses the freshly resolved physical main
   manifest, matching Node's launcher behavior through pnpm virtual-store links.
+  On Windows, ownership canonicalization expands native short-path and
+  extended-length aliases before comparing package and command paths.
 - `npm/scripts/upgrade-e2e.test.js` builds real host executables, prepares release
   packages and exercises isolated global installs against an authenticated local
   registry. `.github/workflows/upgrade-acceptance.yml` runs it on macOS, Linux and

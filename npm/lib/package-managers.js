@@ -276,14 +276,14 @@ function entryTarget(state, entry) {
   }
 }
 
-
 function samePath(left, right) {
   if (!left || !right) return false;
   let a;
   let b;
   try {
-    a = fs.realpathSync(left);
-    b = fs.realpathSync(right);
+    const realpath = process.platform === "win32" ? fs.realpathSync.native : fs.realpathSync;
+    a = realpath(left);
+    b = realpath(right);
   } catch (_err) {
     return false;
   }
