@@ -71,10 +71,11 @@ function managerRun(manager, args, options) {
 function isolatedEnvironment(home) {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
-    if (/^(?:npm_config_|pnpm_|bun_|octo_)/i.test(key)) delete env[key];
+    if (/^(?:npm_config_|pnpm_|bun_|octo_)/i.test(key) || key.toLowerCase() === "path") delete env[key];
   }
   return {
     ...env,
+    PATH: process.env.PATH,
     HOME: home,
     USERPROFILE: home,
     APPDATA: path.join(home, "appdata"),
