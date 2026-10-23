@@ -143,7 +143,7 @@ func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
 	f := NewDefaultFactory()
 	f.Globals.Profile = "legacy"
 	_, err = f.Config()
-	if err == nil || !strings.Contains(err.Error(), `profile "legacy"`) || !strings.Contains(err.Error(), "auth login") {
+	if err == nil || !strings.Contains(err.Error(), `profile "legacy"`) || !strings.Contains(err.Error(), "auth update --profile legacy --api-base-url") {
 		t.Fatalf("Config error = %v, want named profile recovery guidance", err)
 	}
 }
@@ -161,6 +161,7 @@ func TestFactory_ProfileBaseURLPrecedence(t *testing.T) {
 		want       string
 	}{
 		{"profile outranks env", profileOrigin, envOrigin, false, profileOrigin},
+		{"profile wins without env", profileOrigin, "", false, profileOrigin},
 		{"profile without URL falls back to env", "", envOrigin, false, envOrigin},
 		{"profile without URL falls back to default", "", "", false, config.DefaultAPIBaseURL},
 		{"environment credential uses env", profileOrigin, envOrigin, true, envOrigin},

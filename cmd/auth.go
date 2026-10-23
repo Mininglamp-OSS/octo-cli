@@ -51,29 +51,36 @@ func authMutationPreRun(f *cmdutil.Factory, hint string) func(*cobra.Command, []
 }
 
 func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
-	var apiBaseURL string
+	var (
+		apiBaseURL      string
+		clearAPIBaseURL bool
+	)
 
 	cmd := &cobra.Command{
 		Use:     "update",
 		Short:   "Update non-secret settings for a stored bot profile",
-		Long:    "Updates the selected profile's API base URL. This local mutation rejects --dry-run.",
+		Long:    "Updates the selected profile's API base URL, or clears it with --clear-api-base-url. This local mutation rejects --dry-run.",
 		Args:    cobra.NoArgs,
 		PreRunE: authMutationPreRun(f, "omit --dry-run to update the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(apiBaseURL) == "" {
-				return failErr(f, output.ErrValidation(
-					"--api-base-url is required",
-					"pass the public OCTO API origin for this Bot profile",
-				))
+			if clearAPIBaseURL {
+				apiBaseURL = ""
+			} else {
+				if strings.TrimSpace(apiBaseURL) == "" {
+					return failErr(f, output.ErrValidation(
+						"--api-base-url or --clear-api-base-url is required",
+						"pass the public OCTO API origin for this Bot profile, or clear the stored origin",
+					))
+				}
+				normalized, err := config.NormalizeAPIBaseURL(apiBaseURL)
+				if err != nil {
+					return failErr(f, output.ErrValidation(
+						err.Error(),
+						"pass only the Octo gateway base URL, without a service path",
+					))
+				}
+				apiBaseURL = normalized
 			}
-			normalized, err := config.NormalizeAPIBaseURL(apiBaseURL)
-			if err != nil {
-				return failErr(f, output.ErrValidation(
-					err.Error(),
-					"pass only the Octo gateway base URL, without a service path",
-				))
-			}
-			apiBaseURL = normalized
 
 			store, err := f.AuthStore()
 			if err != nil {
@@ -89,7 +96,7 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 					return failErr(f, err)
 				}
 				result := map[string]any{
-					"profile": name, "api_base_url": apiBaseURL,
+					"profile": name, "api_base_url": nullableString(apiBaseURL),
 				}
 				putIfSet(result, "robot_id", meta.RobotID)
 				return emitJSON(f, result)
@@ -110,6 +117,8 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
+	cmd.Flags().BoolVar(&clearAPIBaseURL, "clear-api-base-url", false, "remove the stored API base URL so OCTO_API_BASE_URL or the default applies")
+	cmd.MarkFlagsMutuallyExclusive("api-base-url", "clear-api-base-url")
 	return cmd
 }
 

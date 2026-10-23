@@ -130,7 +130,7 @@ octo-cli completion bash|zsh|fish|powershell
 octo-cli version
 ```
 
-`octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `update` changes non-secret profile settings such as the API base URL without re-entering or rewriting the token. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
+`octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `update` changes non-secret profile settings such as the API base URL without re-entering or rewriting the token, and `--clear-api-base-url` removes the stored origin so the environment or default applies again. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
 Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`, `octo-mail`) — keep those in sync when command shapes change.
 

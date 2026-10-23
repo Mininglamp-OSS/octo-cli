@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/authstore"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
@@ -129,6 +130,71 @@ func TestAuth_UpdateAPIBaseURLPreservesCredentials(t *testing.T) {
 	}
 	if activeOf(t, out)["api_base_url"] != "http://127.0.0.1:28080" {
 		t.Fatalf("active profile = %#v", activeOf(t, out))
+	}
+}
+
+func TestAuth_ClearAPIBaseURLFallsBack(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"environment", "https://env.example", "https://env.example"},
+		{"default", "", config.DefaultAPIBaseURL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			t.Setenv(config.EnvAPIBaseURL, tc.env)
+			loginToken(t, "cli_clear", "app_demo_token")
+
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatalf("authstore.New: %v", err)
+			}
+			if err := store.UpdateProfileAPIBaseURL("cli_clear", "https://octo.example"); err != nil {
+				t.Fatalf("seed API base URL: %v", err)
+			}
+
+			f := newTestFactoryWithReg()
+			out, _, err := execRoot(t, f,
+				"auth", "update", "--bot-id", "cli_clear", "--clear-api-base-url")
+			if err != nil {
+				t.Fatalf("auth update --clear-api-base-url: %v", err)
+			}
+			if data := dataOf(t, out); data["api_base_url"] != nil {
+				t.Fatalf("api_base_url = %v, want null", data["api_base_url"])
+			}
+
+			profiles, err := store.LoadProfiles()
+			if err != nil {
+				t.Fatalf("LoadProfiles: %v", err)
+			}
+			if got := profiles["cli_clear"].APIBaseURL; got != "" {
+				t.Fatalf("stored API base URL = %q, want cleared", got)
+			}
+
+			f = newAuthTestFactory()
+			out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_clear")
+			if err != nil {
+				t.Fatalf("auth status: %v", err)
+			}
+			if got := activeOf(t, out)["api_base_url"]; got != tc.want {
+				t.Fatalf("effective api_base_url = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAuth_ClearAPIBaseURLRequiresOneOf(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_clear", "app_demo_token")
+
+	f := newTestFactoryWithReg()
+	_, _, err := execRoot(t, f, "auth", "update", "--bot-id", "cli_clear")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" {
+		t.Fatalf("auth update without a URL action = %v, want validation", err)
 	}
 }
 

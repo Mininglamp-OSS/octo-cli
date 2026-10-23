@@ -270,6 +270,7 @@ octo-cli schema --list message      # operations in one domain
 octo-cli schema message.send        # request/response schema for one op
 octo-cli config show                # resolved config (token masked)
 octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile (wins over OCTO_API_BASE_URL)
+octo-cli auth update --clear-api-base-url                # remove the stored endpoint; env or default applies
 
 # Generic passthrough for ops that aren't auto-registered.
 octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'

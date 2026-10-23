@@ -385,7 +385,7 @@ func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) erro
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
 		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
 		if err != nil {
-			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth update --profile %s --api-base-url <origin>` or clear it with `--clear-api-base-url`", profile, err, profile)
 		}
 		cfg.APIBaseURL = normalized
 	}

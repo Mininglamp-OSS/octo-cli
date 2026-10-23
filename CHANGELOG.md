@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile is routed to the origin it was created against even when the
   environment names another one; environment credentials and profiles without a
   URL still use the environment value. To move a profile to another gateway, use
-  `octo-cli auth update --api-base-url <origin>`.
+  `octo-cli auth update --api-base-url <origin>`; `--clear-api-base-url` removes
+  the stored origin so the environment or default applies again.
 
 ### Fixed
 
