@@ -52,12 +52,16 @@ Key properties:
 
 ## Installation
 
-### npm
+### npm, Bun or pnpm
 
 For Node-based agent runtimes (OpenClaw, etc.):
 
 ```bash
 npm install -g @mininglamp-oss/octo-cli
+
+# Or use the global package manager for your runtime:
+bun install -g @mininglamp-oss/octo-cli
+pnpm add -g @mininglamp-oss/octo-cli
 ```
 
 The npm package resolves the matching platform sub-package, which already
@@ -96,6 +100,30 @@ Windows release archives are `.tar.gz` as well; Windows 10+ includes `tar.exe`.
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/install.sh | sh
 ```
+
+### Upgrade a global package installation
+
+```bash
+octo-cli upgrade --dry-run
+octo-cli upgrade
+```
+
+`upgrade` identifies the npm, Bun or pnpm installation that owns the invoked
+command and updates it to the configured registry's stable `latest` release.
+An equal or newer installed version is a successful no-op. It verifies the
+installed package, platform binary and command before reporting success.
+
+Registry mirrors, scoped registries and authentication use the owning manager's
+native settings: npm's user/global `.npmrc` and environment, Bun's supported
+`.npmrc` and global `.bunfig.toml`, or pnpm's native configuration. The invoking
+project's registry settings do not redirect the upgrade.
+
+Dry run checks local ownership without contacting a registry or installing.
+Upgrade requires no Octo credentials and preserves `--format` / `--jq`.
+Use the original installation method for raw binaries, `go install`, project-local
+or temporary installs. Loop task mode does not allow upgrades. Package-manager
+failures stop the command; an installation failure can leave partially changed
+files, so inspect the structured error before retrying.
 
 ## Quick Start
 
