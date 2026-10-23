@@ -162,10 +162,14 @@ func TestAuth_ClearAPIBaseURLFallsBack(t *testing.T) {
 			if err != nil {
 				t.Fatalf("auth update --clear-api-base-url: %v", err)
 			}
-			if data := dataOf(t, out); data["api_base_url"] != nil {
-				t.Fatalf("api_base_url = %v, want null", data["api_base_url"])
+			if data := dataOf(t, out); data["api_base_url"] != "" {
+				t.Fatalf("api_base_url = %v, want empty string", data["api_base_url"])
 			}
 
+			store, err = authstore.New()
+			if err != nil {
+				t.Fatalf("authstore.New after update: %v", err)
+			}
 			profiles, err := store.LoadProfiles()
 			if err != nil {
 				t.Fatalf("LoadProfiles: %v", err)

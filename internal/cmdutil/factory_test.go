@@ -202,6 +202,34 @@ func TestFactory_ProfileBaseURLPrecedence(t *testing.T) {
 	}
 }
 
+// TestFactory_InvalidProfileBaseURLFailsClosedWithEnv pins the policy choice
+// that an invalid stored origin is refused even when OCTO_API_BASE_URL names a
+// valid gateway: the profile's own metadata is authoritative, so silently
+// falling back would route the profile token somewhere it was not issued for.
+func TestFactory_InvalidProfileBaseURLFailsClosedWithEnv(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvAPIBaseURL, "https://env.example")
+	t.Setenv(config.EnvToken, "")
+	t.Setenv(config.EnvBotToken, "")
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("bad", &authstore.ProfileMeta{
+		APIBaseURL: "https://bad.example/fleet/api",
+		RobotID:    "bot-bad",
+	}, "app_bad"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "bad"
+	_, err = f.Config()
+	if err == nil || !strings.Contains(err.Error(), `profile "bad" has an invalid API base URL`) {
+		t.Fatalf("Config error = %v, want refusal of the invalid profile URL", err)
+	}
+}
+
 func TestFactory_TaskCredentialMode(t *testing.T) {
 	t.Run("uses dedicated token without opening auth store", func(t *testing.T) {
 		blockedStore := t.TempDir() + "/not-a-directory"

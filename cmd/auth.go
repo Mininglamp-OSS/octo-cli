@@ -96,7 +96,7 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 					return failErr(f, err)
 				}
 				result := map[string]any{
-					"profile": name, "api_base_url": nullableString(apiBaseURL),
+					"profile": name, "api_base_url": apiBaseURL,
 				}
 				putIfSet(result, "robot_id", meta.RobotID)
 				return emitJSON(f, result)
