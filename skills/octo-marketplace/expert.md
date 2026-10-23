@@ -27,10 +27,13 @@ records of any visibility. Use the immutable `plugin_id`, never a name.
 
 ## Read member skills
 
-`plugin get --include-relations` returns the relations. For an expert_team, each
-member is an `expert_team_expert` relation; a member/expert's skills are
-`expert_skill` relations whose target is a skill plugin. Read a skill's document
-by its own plugin id:
+`plugin get --include-relations` returns only the selected plugin's directly
+connected live relations whose targets are visible to the caller; it is not a
+transitive graph read. For an expert_team, these are its
+`expert_team_expert` member relations, not each member expert's own
+`expert_skill` relations. Fetch a member expert by its `plugin_id` with
+`--include-relations` to inspect those skill links. Read a skill's document by
+its own plugin id:
 
 ```bash
 octo-cli marketplace plugin skillmd --plugin-id <skill-plugin-id>
@@ -148,6 +151,15 @@ owner/admin approval.
 expert_team.
 
 ## Install into a Loop workspace
+
+Before installing, ensure the active Marketplace caller can see every declared
+dependency used by the install: an expert's skill plugins, or an expert_team's
+member experts and each member's skill plugins. A visible root plugin does not
+guarantee that its dependencies are visible. Install refuses a hidden declared
+relation target rather than silently provisioning an incomplete expert/team.
+The root's `plugin get --include-relations` output is only a one-level,
+visibility-filtered view; it does not prove the whole install graph is
+accessible.
 
 Provision an expert or expert_team into a Loop workspace/runtime (creates the
 agent or squad, acting as the caller against octo-fleet, with rollback):

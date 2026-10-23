@@ -171,6 +171,12 @@ var requestSideVocabularies = []vocabulary{
 	{op: "drive.search", in: "body", field: "scope",
 		want: []string{"all", "space"},
 		why:  "octo-drive internal/search/query.go ScopeAll/ScopeSpace; service.go validate() rejects anything else with ErrInvalidArgument"},
+	{op: "drive.search", in: "body[]", field: "filters.types",
+		want: []string{"folder", "doc", "blob"},
+		why:  "octo-drive origin/main@2db4df5 internal/search/service.go:431-447, read from the remote repository API; validate rejects all other node types"},
+	{op: "drive.search", in: "body", field: "filters.owner_scope",
+		want: []string{"", "me", "others", "null"},
+		why:  "octo-drive origin/main@2db4df5 internal/search/service.go:449-452 explicitly accepts the empty no-filter value as well as me and others; JSON null is also declared as an allowed value"},
 	{op: "drive.browse", in: "query", field: "source",
 		want: []string{"all", "user-upload", "im-transfer", "user-mount", "docs-sync"},
 		why:  "octo-drive browse filter: the blob and mount source sets unioned, plus all"},
@@ -469,6 +475,8 @@ func enumStrings(t *testing.T, opID, field string, values []any) []string {
 	out := make([]string, 0, len(values))
 	for _, v := range values {
 		switch val := v.(type) {
+		case nil:
+			out = append(out, "null")
 		case string:
 			out = append(out, val)
 		case json.Number:

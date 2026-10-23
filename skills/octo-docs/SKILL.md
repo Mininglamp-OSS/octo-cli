@@ -95,7 +95,7 @@ octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId 
 octo-cli docs list [--folderId f_123] [--owner me] [--q "quarterly"] [--type doc] [--type sheet] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
 # Full-text search every doc the bot may read. Repeat --doc-type to combine kinds.
 # Search is cursor-based; --page-all follows nextCursor automatically.
-octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html] [--page-size 20] [--page-all]
+octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html|html_ppt] [--page-size 20] [--page-all]
 
 octo-cli docs get    <docId>                 # metadata + doc_type + your role
 

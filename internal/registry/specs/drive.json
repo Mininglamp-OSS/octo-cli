@@ -243,7 +243,7 @@
       "post": {
         "operationId": "drive.search",
         "summary": "Full-text search files, folders and mounted documents across the caller's drive spaces",
-        "description": "Full-text search over the caller's visible drive. Matches file/folder names and blob/doc bodies (OCR/extracted text) via OpenSearch, gated by the spaces the caller is a member of. Same command for a real person (uk_, routed to /v1/user/drive/search) and a bot (bf_/app_, routed to /v1/bot/drive/search); results are always scoped to what the active identity's uid can see, so a bot only sees spaces it was added to. Scalar options are flags; the advanced --filters object (type / owner_scope / updated_after / size_min / size_max) is passed via --data. Requires the drive search backend (OpenSearch) to be configured on the server, otherwise it returns 503 unavailable.",
+        "description": "Full-text search over the caller's visible drive. Matches file/folder names and blob/doc bodies (OCR/extracted text) via OpenSearch, gated by the spaces the caller is a member of. Same command for a real person (uk_, routed to /v1/user/drive/search) and a bot (bf_/app_, routed to /v1/bot/drive/search); results are always scoped to what the active identity's uid can see, so a bot only sees spaces it was added to. Scalar request fields use flags; advanced filtering is a nested `filters` object in the request JSON supplied with --data, not a separate --filters flag. Requires the drive search backend (OpenSearch) to be configured on the server, otherwise it returns 503 unavailable.",
         "x-octo-risk": "read",
         "x-octo-lossless-id-fields": ["items[].file_id", "items[].parent_id"],
         "requestBody": {
@@ -259,7 +259,17 @@
                   "space_id": { "type": "string", "description": "drive space id to restrict to; required when --scope=space, ignored otherwise" },
                   "page_index": { "type": "integer", "default": 0, "description": "0-based page number" },
                   "page_size": { "type": "integer", "default": 20, "description": "page size (server caps to its max, default max 50)" },
-                  "filters": { "type": "object", "description": "advanced filters, pass via --data. Fields: type (folder|doc|blob), owner_scope (me|others), updated_after (RFC3339 timestamp, matches items updated at/after it), size_min and size_max (bytes, uint64). Example: --data '{\"filters\":{\"type\":\"blob\",\"owner_scope\":\"me\"}}'" }
+                  "filters": {
+                    "type": "object",
+                    "description": "Advanced search filters, nested under filters in the request JSON passed with --data. Example: --data '{\"filters\":{\"types\":[\"blob\"],\"owner_scope\":\"me\"}}'.",
+                    "properties": {
+                      "types": { "type": "array", "description": "Include only these node types; absent or empty means no type restriction.", "items": { "type": "string", "enum": ["folder", "doc", "blob"] } },
+                      "owner_scope": { "type": ["string", "null"], "enum": ["", "me", "others", null], "description": "Filter by whether the caller owns the item; omitted, empty, or null means no ownership restriction." },
+                      "updated_after": { "type": "string", "format": "date-time", "description": "Match items updated at or after this RFC3339 timestamp." },
+                      "size_min": { "type": ["integer", "null"], "format": "uint64", "description": "Minimum size in bytes; null means no lower bound. Must not exceed size_max when both are supplied." },
+                      "size_max": { "type": ["integer", "null"], "format": "uint64", "description": "Maximum size in bytes; null means no upper bound. Must be at least size_min when both are supplied." }
+                    }
+                  }
                 }
               }
             }
@@ -370,7 +380,7 @@
                 "properties": {
                   "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" },
                   "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
-                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
+                  "on_conflict": { "type": "string", "description": "Accepted for wire compatibility but currently ignored by the backend; duplicate sibling names are allowed and no automatic rename is performed." }
                 }
               }
             }
@@ -423,7 +433,7 @@
                 "properties": {
                   "parent_id": { "type": "integer", "format": "uint64", "description": "new parent folder id; 0 is the space root" },
                   "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
-                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
+                  "on_conflict": { "type": "string", "description": "Accepted for wire compatibility but currently ignored by the backend; duplicate sibling names are allowed and no automatic rename is performed." }
                 }
               }
             }
@@ -452,7 +462,7 @@
                   "parent_id": { "type": "integer", "format": "uint64", "description": "destination parent folder id" },
                   "name": { "type": "string", "description": "name for the copied root node; defaults to the source name" },
                   "target_space_id": { "type": "string", "description": "optional destination Drive space id; omitted keeps the current space" },
-                  "on_conflict": { "type": "string", "description": "optional conflict selector; the handler documents `rename`, but the backend controls conflict handling and outcome" }
+                  "on_conflict": { "type": "string", "description": "Accepted for wire compatibility but currently ignored by the backend; duplicate sibling names are allowed and no automatic rename is performed." }
                 }
               }
             }

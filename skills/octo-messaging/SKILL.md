@@ -106,8 +106,8 @@ For eligible ordinary `send` and `typing` requests, `--on-behalf-of <uid>` acts 
 Full-text search over messages and files. Registered as `message search`, `message search all|files|media|around|groups`.
 
 ```bash
-# In-channel message search (payload.type in [1,11,14]).
-octo-cli message search --chat-id <cid> --keyword "quarterly report" [--sort time_desc]
+# In-channel message search (payload.type in [1,11,14]); this example uses a group channel.
+octo-cli message search --chat-id <group-cid> --channel-type 2 --keyword "quarterly report" [--sort time_desc]
 
 # Cross-channel message search (omit --chat-id). NOTE: without --chat-id the CLI
 # routes to the cross-channel _search_global_messages endpoint, which is a MIXED
@@ -115,29 +115,30 @@ octo-cli message search --chat-id <cid> --keyword "quarterly report" [--sort tim
 octo-cli message search --keyword "quarterly report"
 
 # Messages + files (mixed feed) — in-channel or (no --chat-id) cross-channel.
-octo-cli message search all --chat-id <cid> --keyword invoice
+octo-cli message search all --chat-id <group-cid> --channel-type 2 --keyword invoice
 
 # Files only (payload.type=8), by filename / caption.
-octo-cli message search files --chat-id <cid> --keyword "*.pdf"
+octo-cli message search files --chat-id <group-cid> --channel-type 2 --keyword "*.pdf"
 
 # Images + videos (payload.type in [2,5]) — IN-CHANNEL ONLY, keyword NOT allowed.
-octo-cli message search media --chat-id <cid> [--sort time_desc]
+octo-cli message search media --chat-id <group-cid> --channel-type 2 [--sort time_desc]
 
-# Context window around an anchor message — IN-CHANNEL ONLY.
-octo-cli message search around --chat-id <cid> --anchor-message-id <mid>
+# Context window around an anchor message — IN-CHANNEL ONLY, not cursor pagination.
+octo-cli message search around --chat-id <group-cid> --channel-type 2 --anchor-message-id <mid> [--page-size 10]
 
 # Cross-channel aggregated overview (which channels matched) — CROSS-CHANNEL ONLY.
 # Use it as level 1 of a two-step search: find matching channels, then pull
 # messages per channel with `message search` / `message search all`.
-octo-cli message search groups --keyword "quarterly report"
+octo-cli message search groups --keyword "quarterly report" [--sequence 42]
 ```
 
 ### `--chat-id` decides in-channel vs cross-channel
 
 - **With `--chat-id`** → scoped to that channel.
 - **Without `--chat-id`** → `search` / `search all` / `search files` route to their cross-channel `_search_global_*` endpoints (CLI-side, in `internal/client/search_route.go` — not backend dispatch). Plain `search` cross-channel degrades to the **mixed messages+files** feed.
-- `media` and `around` **require `--chat-id`** (no cross-channel endpoint; the backend rejects a request without a channel_id). `around` also requires `--anchor-message-id`; `media` does **not** accept `--keyword`.
+- When `--chat-id` is supplied, `--channel-type` is also required; the CLI does not infer it. Use `1` for DM, `2` for group, or `5` for thread. A thread channel ID must contain the backend's `____` delimiter. Cross-channel search omits `--chat-id` and does not inherit this single-channel requirement.
 - `groups` is **cross-channel only** and does **not** accept `--chat-id`.
+- `groups` accepts optional `--sequence <int64>`; the backend echoes the supplied value for correlation. In CLI JSON output, read it at `.data.data.sequence` (the backend's `{data,pagination}` object is inside the CLI envelope). It is not a pagination cursor.
 
 ### Token subjects
 
@@ -148,7 +149,8 @@ octo-cli message search groups --keyword "quarterly report"
 
 ### Filters and pagination
 
-Rich filters (`sender_ids`, `member_uids`, `content_types`, `sent_at_from`/`sent_at_to`, `file_exts`, …) go through `--data '{"filters":{…}}'`. For manual paging, pass `--cursor <cursor>` and `--page-size <n>`; the cursor is carried in the request body. Use `--channel-type` on `search`, `all`, `files`, `media`, and `around` when a channel type is needed; `groups` has no channel-type input. All families except `around` and `groups` paginate, and `--page-all` handles their cursor loop.
+- For `search`, `all`, `files`, and `media`, omitted/zero `--page-size` uses the backend default of 20; nonzero values must be 1–100. Non-empty keywords are limited by the backend to 64 Unicode code points. `around --page-size` controls the context window (same default/range), not cursor pagination.
+- Rich filters (`sender_ids`, `member_uids`, `content_types`, `sent_at_from`/`sent_at_to`, `file_exts`, …) go through `--data '{"filters":{…}}'`. For manual paging, pass `--cursor <cursor>` and `--page-size <n>`; the cursor is carried in the request body. `groups` has no channel-type input. All families except `around` and `groups` paginate, and `--page-all` handles their cursor loop.
 
 ## 2. `group` — 9 commands (both 5 / User Bot only 4)
 
@@ -166,19 +168,22 @@ User Bot only (4):
 
 ```bash
 octo-cli group create        --members u1 --members u2 [--name "eng"] [--creator u0] [--space-id <sid>]
-octo-cli group update        <group_no> [--name <name>] [--notice <notice>]  # bot_admin; supply at least one
+octo-cli group update        <group_no> [--name <name>] [--notice <notice>]  # bot_admin; provide name or notice
 octo-cli group member-add    <group_no> --members u3 --members u4
 octo-cli group member-remove <group_no> --members u3  # bot_admin
 ```
 
-The four User-Bot-only group operations above are rejected for App Bots. This does not include `group md-update`, which is available to either bot kind when the bot is a member and has `bot_admin`.
+The four User-Bot-only group operations above are rejected for App Bots. This does not include `group md-update`, which is available to either bot kind when the bot is a member and has `bot_admin`. Create, member-add, and member-remove require at least one `--members` value. Group updates require a `name` or `notice` property; an explicit empty string is accepted by the backend, but an unknown property alone is not an update.
+
+Group names longer than 50 Unicode code points are truncated to 50 by the backend on create/update; they are not rejected for length.
 
 ## 3. `thread` — 8 commands, **User Bot only**
 
 Every thread operation calls `validateBotGroupAccess()` on the backend and rejects App Bot unconditionally. Don't attempt these with an `app_*` token.
 
 ```bash
-octo-cli thread create    <group_no> --name "Incident #42" [--source-message-id <mid>]
+octo-cli thread create    <group_no> --name "Incident #42" [--source-message-id <mid>] [--on-behalf-of <uid>]
+octo-cli thread list      <group_no>  # bare array, first page (up to 100)
 octo-cli thread list      <group_no> --page-index <n> --page-size <n>  # page-number pagination
 octo-cli thread get       <group_no> <short_id>
 octo-cli thread members   <group_no> <short_id>
@@ -188,12 +193,16 @@ octo-cli thread md-get    <group_no> <short_id>
 octo-cli thread md-update <group_no> <short_id> --content "# …"  # requires bot_admin
 ```
 
-The User Bot must be a member of the parent group. `thread md-update` additionally requires `bot_admin` in that group.
+The User Bot must be a member of the parent group. `thread md-update` additionally requires `bot_admin` in that group. A non-empty thread-create `--on-behalf-of <uid>` creates the thread as that user only when the bot has an active OBO grant and that user can read the parent group; the backend checks both and fails closed. An empty/blank value leaves the bot as creator.
+
+Without either thread-list page parameter, the backend returns a bare array for page 1 with up to 100 threads. Supplying either `--page-index` or `--page-size` changes the response to `{count,list}`. In paged mode, page index defaults/clamps to 1; page size defaults to 15 when nonpositive and caps at 100.
+
+Group and thread markdown updates share a configurable byte-size ceiling (10,240 bytes in the inspected default configuration; deployment configuration can change it). Thread markdown additionally rejects whitespace-only content; the group markdown handler does not apply that blank-content check.
 
 ## 4. `event` — polling for inbound events
 
 ```bash
-octo-cli event list                          # newest page
+octo-cli event list                          # next batch, earliest first
 octo-cli event list --event-id 1234 --limit 50 --wait 20 --timeout 25s  # wait in seconds; set timeout above wait
 octo-cli event ack  <event_id>
 ```
@@ -201,6 +210,8 @@ octo-cli event ack  <event_id>
 ### Important: `event list` is a **POST**
 
 Even though the semantics are "list", the handler is `POST /v1/bot/events` — the cursor travels in the body, not the query string. The CLI handles this; agents calling `octo-cli api` must use `POST`.
+
+The backend reads after the exclusive `event_id` cursor in ascending event-ID order. Cursor `0` starts at the earliest queued event; `event list` is not a newest-first page.
 
 ### Optional server-side wait
 

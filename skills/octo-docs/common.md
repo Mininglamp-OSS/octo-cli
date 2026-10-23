@@ -133,7 +133,7 @@ Schema: `octo-cli schema docs.versions.restore`.
 ## Members & sharing
 
 ```bash
-octo-cli docs members list   <docId>                             # admin; items include principalSpaceId
+octo-cli docs members list   <docId>                             # reader or higher; items include principalSpaceId
 octo-cli docs members set    <docId> --uid <uid> --role writer   # authenticated Bot Space; role: reader|commenter|writer|admin
 octo-cli docs members set    <docId> --uid <uid> --role writer --principal-space-id <spaceId>
 octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # required; owner cannot be removed
@@ -187,6 +187,9 @@ binary through these commands. PPT also has a direct authenticated binary-media
 endpoint used by a runtime HTTP client; see `ppt.md` for that distinct flow. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
 the bytes yourself directly to object storage.
+The size must be a positive integer (at least 1 byte). The backend applies its
+configured cap by MIME tier: `image/` types use the image cap; other types use
+the file cap.
 
 ```bash
 # Step 1: register + get a presigned PUT target.
