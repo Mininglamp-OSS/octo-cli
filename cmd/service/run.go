@@ -882,8 +882,8 @@ func (v bodySchemaValidator) validate(schema *registry.SchemaInfo, value any, pa
 		return err
 	}
 	if value == nil && (!v.enforcePublicAPIConstraints || schema.Type != "boolean") {
-		// Enum and uint64 constraints above reject null. Other optional fields
-		// preserve the historical clearing-value passthrough.
+		// Enum constraints and non-nullable uint64 constraints have been checked
+		// above. Other optional fields preserve historical null passthrough.
 		return nil
 	}
 	return v.validateByType(schema, value, path, flagName)
@@ -1044,17 +1044,18 @@ func validateString(schema *registry.SchemaInfo, value any, path string) *output
 // flag when there is one, which is the decimal-string surface a caller reaching
 // for a string actually wants.
 //
-// An explicit null is rejected on the same grounds, and is called out separately because it
-// used to be waved through here while validateObject also skipped it — so `--data
-// '{"parent_id":null}'` reached the wire, where Go decodes null into a scalar field as the
-// zero value, addressing folder 0. That is the documented root: a *valid* id pointing at a
-// place nobody named, which is the same harm the lossless-uint64 handling exists to prevent.
+// A null is rejected unless the schema's type explicitly includes null. This is
+// separate from enum validation: an enum-constrained nullable field still needs
+// null among its enum members before it can pass the earlier enum gate.
 func checkUint64Field(schema *registry.SchemaInfo, value any, path, flagName string) *output.ExitError {
 	if schema.Format != uint64Format {
 		return nil
 	}
 	label := enumFieldLabel(path, flagName)
 	if value == nil {
+		if schema.Nullable {
+			return nil
+		}
 		return output.ErrValidation(
 			fmt.Sprintf("%s must be a JSON integer uint64 id, got null", label),
 			"omit the field to take the backend default, or pass the id as a bare JSON number with digits only")

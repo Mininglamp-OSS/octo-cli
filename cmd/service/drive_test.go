@@ -459,6 +459,101 @@ func TestDrive_RequestShapes(t *testing.T) {
 	}
 }
 
+func TestDriveSearch_NullFiltersAreForwarded(t *testing.T) {
+	const requestBody = `{"q":"audit","filters":{"size_min":null,"size_max":null,"owner_scope":null}}`
+	var gotMethod, gotPath, gotBody string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.SetArgs([]string{"drive", "search", "--data", requestBody})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("drive.search with null filters: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/drive/search" {
+		t.Fatalf("request = %s %s, want POST /v1/bot/drive/search", gotMethod, gotPath)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("decode request body %q: %v", gotBody, err)
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(body["filters"], &filters); err != nil {
+		t.Fatalf("decode filters from request body %q: %v", gotBody, err)
+	}
+	for _, field := range []string{"size_min", "size_max", "owner_scope"} {
+		if value, ok := filters[field]; !ok || string(value) != "null" {
+			t.Errorf("filters.%s = %q (present: %t), want JSON null in request body %s",
+				field, value, ok, gotBody)
+		}
+	}
+}
+
+func TestDriveSearch_Uint64FilterBoundariesRemainLossless(t *testing.T) {
+	const maxUint64 = "18446744073709551615"
+	const requestBody = `{"q":"audit","filters":{"size_min":0,"size_max":` + maxUint64 + `}}`
+	var gotBody string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.SetArgs([]string{"drive", "search", "--data", requestBody})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("drive.search with uint64 boundary filters: %v", err)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("decode request body %q: %v", gotBody, err)
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(body["filters"], &filters); err != nil {
+		t.Fatalf("decode filters from request body %q: %v", gotBody, err)
+	}
+	if got := string(filters["size_min"]); got != "0" {
+		t.Errorf("filters.size_min = %s, want exact lower bound 0", got)
+	}
+	if got := string(filters["size_max"]); got != maxUint64 {
+		t.Errorf("filters.size_max = %s, want exact uint64 maximum %s", got, maxUint64)
+	}
+}
+
+func TestDriveSearch_InvalidFiltersAreRejectedLocally(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"negative size", `{"q":"audit","filters":{"size_min":-1}}`},
+		{"size exceeds uint64", `{"q":"audit","filters":{"size_max":18446744073709551616}}`},
+		{"fractional size", `{"q":"audit","filters":{"size_min":1.5}}`},
+		{"unknown owner scope", `{"q":"audit","filters":{"owner_scope":"everyone"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestSent bool
+			root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				requestSent = true
+			})
+			root.SetArgs([]string{"drive", "search", "--data", tc.data})
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("invalid Drive search filters must be rejected before HTTP")
+			}
+			if requestSent {
+				t.Error("invalid Drive search filters must not be sent to the backend")
+			}
+			if ee := output.AsExitError(err); ee == nil || ee.Type != "validation" {
+				t.Errorf("error = %v, want a validation error", err)
+			}
+		})
+	}
+}
+
 // TestDrive_UploadCapabilityHeader proves the low-level prepare command exposes
 // the capability declaration required by the frozen multipart contract. The
 // header is optional so legacy single-part calls remain byte-identical.

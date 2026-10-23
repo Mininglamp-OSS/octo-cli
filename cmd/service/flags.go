@@ -488,6 +488,10 @@ func queryParamKind(p *registry.ParamInfo) valueKind {
 func formatEnum(values []any) string {
 	parts := make([]string, 0, len(values))
 	for _, v := range values {
+		if v == nil {
+			parts = append(parts, "null")
+			continue
+		}
 		parts = append(parts, fmt.Sprintf("%v", v))
 	}
 	return strings.Join(parts, ", ")

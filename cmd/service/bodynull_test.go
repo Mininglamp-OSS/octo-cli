@@ -8,31 +8,25 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// Round-17: an explicit JSON `null` walked past both local gates this PR exists to add.
+// Round-17: an explicit JSON `null` used to bypass the enum and uint64 gates.
 //
-// validateObject visited only non-nil children:
+// validateObject originally skipped present null children, so constrained values reached the
+// wire unchecked. The fix walks present nulls and lets each field's explicit schema contract
+// decide: an enum permits null only when null is an enum member, and a uint64 permits null only
+// when its type explicitly includes null.
 //
-//	for name := range schema.Properties {
-//	    if child, exists := obj[name]; exists && child != nil {
-//
-// so a property *present with value null* never reached checkEnum or checkUint64Field, and
-// was marshalled onto the wire unchanged. checkEnum's own docstring says this case must be
-// refused — "An object / array / null where the schema declares a scalar vocabulary cannot
-// match any member, so reject rather than forward" — so the function written to catch it was
-// simply never called.
-//
-// Required fields were never affected: validateObject treats a present null as missing and
-// reports it that way. The exposure was the *optional* constrained properties, and the
-// outcome now agrees across both — a present null is never accepted for a constrained field.
-// A required one is reported as missing, an optional one as an invalid value.
+// Required fields remain reported as missing when set to null. Non-nullable constrained fields
+// still reject null; unconstrained optional fields retain the historical clearing-value
+// passthrough.
 //
 // Reproduced against a binary built from 2153838 before the fix:
 //
 //	drive doc mount    --dry-run --data '{…,"source":null}'    -> ok:true, body carried "source":null
 //	drive folder create --dry-run --data '{…,"parent_id":null}' -> ok:true, body carried "parent_id":null
 //
-// while the same fields with an out-of-vocabulary or wrongly-typed value were correctly
-// refused (ENUM_NOT_ALLOWED / VALIDATION_ERROR).
+// parent_id remains a required safety boundary: it is a non-nullable uint64 id, so null cannot
+// be forwarded as the backend's zero value (folder 0).
+//
 
 // TestNullIsRefusedOnAConstrainedField is the direct behavioural pin, using a synthetic
 // schema so every combination of (required, optional) × (enum, uint64) is present whether or
@@ -134,18 +128,11 @@ func TestNullIsRefusedOnAConstrainedField(t *testing.T) {
 	}
 }
 
-// TestNullIsRefusedOnEveryConstrainedSpecField is the derived form of the same property, and
-// the reason it is derived rather than a list: review named six reachable fields, and a list
-// of six goes stale the first time a spec gains a seventh.
-//
-// It walks every operation in every embedded spec, finds each request-body property that
-// carries an enum or `format: uint64` at any depth, builds the smallest body that reaches
-// that property with an explicit null, and asserts the validator refuses it.
-//
-// This doubles as the census the round asked for: the reachable set is *reported* by the test
-// rather than asserted to be a particular size, so a new constrained field is covered the
-// moment it is declared.
-func TestNullIsRefusedOnEveryConstrainedSpecField(t *testing.T) {
+// TestNullConstrainedSpecFieldsFollowSchemaContract is the derived form: every request-body
+// field with an enum or `format: uint64` is checked against its explicit nullable contract.
+// Nullable enums still require null to be an enum member; non-nullable constrained fields must
+// reject it. In particular, parent_id remains in this census as a non-nullable uint64.
+func TestNullConstrainedSpecFieldsFollowSchemaContract(t *testing.T) {
 	reg := registry.MustNew()
 	var checked int
 
@@ -158,12 +145,18 @@ func TestNullIsRefusedOnEveryConstrainedSpecField(t *testing.T) {
 			for _, field := range constrainedLeaves(d.RequestBody, nil) {
 				checked++
 				body := bodyWithNullAt(d.RequestBody, field)
-				v := bodySchemaValidator{}
-				err := v.validate(d.RequestBody, body, "", "")
+				err := (bodySchemaValidator{}).validate(d.RequestBody, body, "", "")
+				leaf := constrainedSchemaAt(d.RequestBody, field)
+				if constrainedNullAllowed(leaf) {
+					if err != nil {
+						t.Errorf("%s: explicitly nullable %s rejected null: %v",
+							info.ID, strings.Join(field, "."), err)
+					}
+					continue
+				}
 				if err == nil {
-					t.Errorf("%s: %s set to an explicit null was accepted and would be sent "+
-						"upstream, skipping the %s gate", info.ID, strings.Join(field, "."),
-						constraintName(d.RequestBody, field))
+					t.Errorf("%s: non-nullable %s accepted explicit null and would send it upstream",
+						info.ID, strings.Join(field, "."))
 				}
 			}
 		}
@@ -198,24 +191,28 @@ func constrainedLeaves(schema *registry.SchemaInfo, at []string) [][]string {
 	return out
 }
 
-// constraintName says which gate the field would have skipped, for a failure message that
-// names the actual hole rather than "validation".
-func constraintName(schema *registry.SchemaInfo, field []string) string {
-	cur := schema
+func constrainedSchemaAt(schema *registry.SchemaInfo, field []string) *registry.SchemaInfo {
+	current := schema
 	for _, name := range field {
-		if cur.Items != nil && cur.Properties == nil {
-			cur = cur.Items
+		for current.Items != nil && len(current.Properties) == 0 {
+			current = current.Items
 		}
-		next, ok := cur.Properties[name]
-		if !ok {
-			return "enum/uint64"
+		next := current.Properties[name]
+		current = &next
+	}
+	return current
+}
+
+func constrainedNullAllowed(schema *registry.SchemaInfo) bool {
+	if !schema.Nullable {
+		return false
+	}
+	for _, member := range schema.Enum {
+		if member == nil {
+			return true
 		}
-		cur = &next
 	}
-	if cur.Format == uint64Format {
-		return "uint64"
-	}
-	return "enum"
+	return len(schema.Enum) == 0
 }
 
 // bodyWithNullAt builds the smallest body that places an explicit null at field, filling in
