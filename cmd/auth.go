@@ -63,6 +63,12 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 		Args:    cobra.NoArgs,
 		PreRunE: authMutationPreRun(f, "omit --dry-run to update the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if clearAPIBaseURL && cmd.Flags().Changed("api-base-url") {
+				return failErr(f, output.ErrValidation(
+					"--api-base-url and --clear-api-base-url are mutually exclusive",
+					"pass exactly one of them",
+				))
+			}
 			if clearAPIBaseURL {
 				apiBaseURL = ""
 			} else {
@@ -118,7 +124,6 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
 	cmd.Flags().BoolVar(&clearAPIBaseURL, "clear-api-base-url", false, "remove the stored API base URL so OCTO_API_BASE_URL or the default applies")
-	cmd.MarkFlagsMutuallyExclusive("api-base-url", "clear-api-base-url")
 	return cmd
 }
 
@@ -241,6 +246,7 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 				}
 				putIfSet(active, "bot_kind", cred.BotKind)
 				putIfSet(active, "api_base_url", cfg.APIBaseURL)
+				putIfSet(active, "api_base_url_source", cfg.APIBaseURLSource)
 				putIfSet(active, "space_id", cfg.SpaceID)
 				return emitJSON(f, map[string]any{"active": active})
 			}

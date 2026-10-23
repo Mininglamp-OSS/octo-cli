@@ -51,7 +51,7 @@ func TestAuth_StatusMatchesEnvironmentCredential(t *testing.T) {
 					t.Fatalf("status: %v", err)
 				}
 				active := activeOf(t, out)
-				want := map[string]any{"source": "env:" + alias, "bot_token": credential.MaskToken(token), "bot_kind": "user_bot", "space_id": "env-space", "api_base_url": "https://env.example", "robot_id_claimed": "claimed-env-bot"}
+				want := map[string]any{"source": "env:" + alias, "bot_token": credential.MaskToken(token), "bot_kind": "user_bot", "space_id": "env-space", "api_base_url": "https://env.example", "api_base_url_source": "env", "robot_id_claimed": "claimed-env-bot"}
 				for key, value := range want {
 					if active[key] != value {
 						t.Errorf("active.%s = %v, want %v", key, active[key], value)

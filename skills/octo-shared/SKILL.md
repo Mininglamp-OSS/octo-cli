@@ -101,7 +101,9 @@ Routing: all services go through one gateway. A stored profile's
 default `https://im.deepminer.com.cn` — so a profile that records a test origin
 keeps using it after `export OCTO_API_BASE_URL=...`. Change that profile with
 `octo-cli auth update --api-base-url <origin>` instead, or remove the stored
-origin with `--clear-api-base-url`. On `octo-cli api`, `--service loop` selects
+origin with `--clear-api-base-url`. `config show` and `auth status` report the
+winning layer as `api_base_url_source` (`profile`, `env`, or `default`). On
+`octo-cli api`, `--service loop` selects
 Loop Public API handling, adds `Accept: application/vnd.octo+json`, and uses the
 Public API error parser. The gateway remains unified.
 

@@ -333,7 +333,9 @@ All backend services are accessed through a single API base URL.
 The value is a gateway origin (`http(s)://host[:port]`) rather than a
 service-specific path; query strings, fragments, credentials, and API paths are
 rejected. Precedence is the active profile's `api_base_url`, then
-`OCTO_API_BASE_URL`, then `https://im.deepminer.com.cn`.
+`OCTO_API_BASE_URL`, then `https://im.deepminer.com.cn`; `config show` and
+`auth status` report the winning layer as `api_base_url_source`
+(`profile`, `env`, or `default`).
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
