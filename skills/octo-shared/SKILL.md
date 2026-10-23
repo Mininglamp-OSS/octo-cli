@@ -283,3 +283,27 @@ Once these fundamentals are understood, load the skill for the domain you need:
 - `octo-docs` — docs domain (CRDT/Yjs): documents, spreadsheets, whiteboard scenes, members/sharing, comments, versions, attachments
 - `octo-html` — HTML docs domain (octo-doc, a DIFFERENT backend from octo-docs): self-contained interactive HTML documents, share codes, media assets, comments, agent element read/replace
 - `octo-summary` — create owner-only summaries from explicit sources, then discover, read, and cite summaries visible to the personal Agent's human owner — **temporarily withheld** (create backend at Mininglamp-OSS/octo-smart-summary#181 not yet merged/deployed/enabled; not currently loadable)
+
+## 9. CLI maintenance
+
+When the operator requests a CLI update, globally installed npm, Bun and pnpm
+copies support:
+
+```bash
+octo-cli upgrade --dry-run
+octo-cli upgrade
+```
+
+Dry run verifies the owning global installation and reports its manager,
+version and paths without registry access or mutation. Upgrade uses that same
+manager's native mirror, scoped-registry and authentication settings to install
+the stable `latest` release by exact version. Equal or newer versions are
+successful no-ops. Success is reported only after checking the installed
+package, platform binary and fixed global command.
+
+This maintenance command requires no Octo credential; identity and Space
+selectors do not choose the installation. Existing `--format` and `--jq`
+controls apply. Loop task mode rejects upgrades. Raw binaries, source links,
+project-local and temporary installs need their original installation method.
+Manager failures stop the operation, and a failed install may already have
+changed files; follow the structured error rather than switching managers.

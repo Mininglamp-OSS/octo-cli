@@ -14,9 +14,9 @@
 // Output (--out):
 //   <out>/octo-cli-<npmOs>-<npmCpu>/   one package per platform, binary
 //                                       inside `bin/`, os/cpu constrained
-//   <out>/octo-cli/                     the main package: shim + manifest
-//                                       with optionalDependencies pinned to
-//                                       the exact same version
+//   <out>/octo-cli/                     the main package: launcher, upgrade
+//                                       helper + manifest with optional
+//                                       dependencies pinned to the same version
 //
 // Publish order matters: sub-packages first, then the main package — an
 // installer must never resolve a main package whose optionalDependencies
@@ -147,14 +147,15 @@ function main() {
     console.log(`[prepare-packages] ${pkgName}@${version} <- ${path.basename(archive)}`);
   }
 
-  // Main package: copy the checked-in template + shim, stamp version and
-  // the exact-pinned optionalDependencies.
+  // Main package: copy the checked-in launcher and upgrade helper, stamp the
+  // version and the exact-pinned optionalDependencies.
   const mainDir = path.join(outDir, PROJECT);
   fs.mkdirSync(path.join(mainDir, "bin"), { recursive: true });
   fs.copyFileSync(
     path.join(npmDir, "bin", "octo-cli.js"),
     path.join(mainDir, "bin", "octo-cli.js"),
   );
+  fs.cpSync(path.join(npmDir, "lib"), path.join(mainDir, "lib"), { recursive: true });
   for (const doc of ["README.md", "LICENSE"]) copyProjectDoc(npmDir, mainDir, doc);
 
   const manifest = JSON.parse(fs.readFileSync(path.join(npmDir, "package.json"), "utf8"));

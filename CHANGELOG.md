@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unchanged; no octo-server Project API or command alias is introduced.
 
 ### Added
+- **`octo-cli upgrade`** — update an npm, Bun or pnpm global installation through
+  its owning package manager and native registry/mirror configuration. Resolve
+  stable `latest`, install the exact version and verify the resulting command
+  and platform binary; equal/newer versions are no-ops. Offline `--dry-run`
+  reports verified local ownership. The credential-free command preserves
+  format/jq output and remains unavailable in Loop task mode.
 - **`octo-cli api --workspace-id`** — generic passthrough requests can now send
   explicit workspace context through the `X-Workspace-ID` header.
 - **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and

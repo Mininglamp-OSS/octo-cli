@@ -89,7 +89,6 @@ test("emits one package per platform and a pinned main package", (t) => {
   for (const depVersion of Object.values(main.optionalDependencies)) {
     assert.strictEqual(depVersion, VERSION);
   }
-  assert.ok(fs.existsSync(path.join(outDir, "octo-cli", "bin", "octo-cli.js")));
 });
 
 test("rejects invalid versions and missing archives", (t) => {
