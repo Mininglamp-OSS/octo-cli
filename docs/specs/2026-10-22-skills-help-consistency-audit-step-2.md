@@ -910,7 +910,7 @@ authorization and deployment behavior is outside the local acceptance evidence.
 | DOCS-002 | Document comment get/replies operations and the pagination supported by reply reads; keep root-comment listing guidance operation-specific. | Operation/spec review and embedded guide export. |
 | HTML-001 | State comment capability requirements and the reader-share-code boundary. | Source authorization contract and help/guide review. Live capability checks were not exercised. |
 | HTML-002 | Allow string/integer comment versions, expose the parent-comment flag and describe reply `applied_in` as a separate version association. | Actual CLI preserved `latest`, `v3`, JSON integer `3`, `parent_id` and integer `applied_in` in the appropriate requests. |
-| MARKET-001 | Accept optional string-map `custom_env`; collect secret values from the merged body through one shared collector used by generated commands and generic API diagnostics, including configured Marketplace mounts. | Failing-before/passing-after map and mount-prefix tests; actual CLI dry-run/verbose/error diagnostics hid synthetic values while the local receiver observed the unchanged wire body. |
+| MARKET-001 | Accept optional string-map `custom_env`; collect secret values from the merged body through one shared collector used by generated commands and generic API diagnostics, including configured Marketplace mounts and equivalent unreserved literal-path escapes. Preserve outbound paths and opaque placeholder values. | Failing-before/passing-after map, mount-prefix and escaped-literal tests; actual CLI dry-run/verbose/error diagnostics hid synthetic values while the local receiver observed unchanged paths and wire bodies. |
 | MARKET-002 | Document Space auto/manual approval and private owner-only installation prerequisites. | Source-contract and guide review. Live installation approvals were not exercised. |
 | MARKET-003 | Use one consistent imported/published version through the publication workflow. | Version-field and workflow review against the inspected service contracts. No live publication performed. |
 | MARKET-004 | Document review-request envelopes and required identifier/version/content relationships. | Request/response contract and embedded guide review. |
@@ -981,6 +981,19 @@ were first observed failing for their predicted reason against an isolated
 pre-fix snapshot. Temporary fixtures used local receivers and invented tokens.
 The updated permanent tests assert request behavior, value preservation and
 diagnostic privacy rather than guide wording or implementation structure.
+
+### Generic API path recognition acceptance — 2026-10-23
+
+Registry recognition compares literal path segments with RFC 3986 unreserved
+escapes decoded on either side. It preserves literal case, encoded separators,
+other reserved escapes and the original spelling of captured path parameters.
+Request paths and bodies are sent unchanged.
+
+The escaped-path privacy regressions failed before the fix by exposing synthetic
+`custom_env` values. Actual binary acceptance then passed 20 isolated scenarios:
+nine canonical/escaped/configured-prefix forms through both dry-run and verbose
+error paths, plus two reserved-encoding boundaries. The local receiver observed
+11 requests with unchanged paths and bodies; diagnostics exposed no secret values.
 
 ### Verification boundaries
 

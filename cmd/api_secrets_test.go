@@ -374,8 +374,15 @@ func TestAPI_MasksCustomEnvOnMarketplaceLocalPrefixes(t *testing.T) {
 	for _, tc := range []struct {
 		name, prefix, path string
 	}{
+		{name: "canonical prefix", prefix: "market", path: "/market/api/v1/plugins/install"},
+		{name: "escaped operation literal", prefix: "market", path: "/market/api/v1/plugins/%69nstall"},
+		{name: "escaped module and version", prefix: "market", path: "/%6darket/api/v%31/plugins/install"},
+		{name: "uppercase hex escape", prefix: "market", path: "/%6Darket/api/v1/plugins/install"},
 		{name: "empty prefix", prefix: "", path: "/api/v1/plugins/install"},
+		{name: "empty prefix escaped literal", prefix: "", path: "/api/v1/plugins/%69nstall"},
 		{name: "custom prefix", prefix: "local-market", path: "/local-market/api/v1/plugins/install"},
+		{name: "escaped custom prefix", prefix: "local-market", path: "/%6cocal-market/api/v1/plugins/%69nstall"},
+		{name: "escaped configured prefix", prefix: "local%2Dmarket", path: "/local-market/api/v1/plugins/install"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OCTO_MARKETPLACE_API_PREFIX", tc.prefix)
@@ -411,6 +418,31 @@ func TestAPI_MasksCustomEnvOnMarketplaceLocalPrefixes(t *testing.T) {
 			}
 			if _, ok := customEnv["API_TOKEN"]; !ok {
 				t.Errorf("dry-run body omitted API_TOKEN: %#v", customEnv)
+			}
+		})
+	}
+}
+
+func TestMatchPathTemplate_UnreservedLiteralEscapes(t *testing.T) {
+	const rawID = "opaque%2Fid%7E"
+	for _, tc := range []struct {
+		name, template, path string
+		match                bool
+	}{
+		{"unreserved characters", "/aZ0-._~/{id}", "/%61%5A%30%2D%2e%5f%7E/" + rawID, true},
+		{"escaped template literal", "/%61%5A%30%2D%2e%5f%7E/{id}", "/aZ0-._~/" + rawID, true},
+		{"literal case remains significant", "/A/{id}", "/%61/" + rawID, false},
+		{"encoded slash stays within its segment", "/plugins/install/{id}", "/plugins%2Finstall/" + rawID, false},
+		{"double encoding stays encoded", "/plugins/install/{id}", "/plugins%252Finstall/" + rawID, false},
+		{"reserved characters stay encoded", "/market+api/{id}", "/market%2Bapi/" + rawID, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values, matched := matchPathTemplate(tc.template, pathSegments(tc.path))
+			if matched != tc.match {
+				t.Fatalf("match = %v, want %v for %q against %q", matched, tc.match, tc.path, tc.template)
+			}
+			if matched && values["id"] != rawID {
+				t.Errorf("captured id = %q, want unchanged %q", values["id"], rawID)
 			}
 		})
 	}

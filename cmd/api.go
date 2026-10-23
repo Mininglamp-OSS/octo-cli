@@ -294,8 +294,8 @@ func candidatePaths(d *registry.OperationDetail) []string {
 	return paths
 }
 
-// matchPathTemplate reports whether a "/a/{b}/c" template matches the given concrete
-// segments, and returns the value each placeholder captured.
+// matchPathTemplate compares literal segments with RFC 3986 unreserved escapes
+// decoded for recognition only. Placeholder values retain their original spelling.
 func matchPathTemplate(template string, got []string) (map[string]string, bool) {
 	want := strings.Split(strings.Trim(template, "/"), "/")
 	if len(want) != len(got) {
@@ -308,11 +308,44 @@ func matchPathTemplate(template string, got []string) (map[string]string, bool) 
 			values[name] = got[i]
 			continue
 		}
-		if seg != got[i] {
+		if !equalPathLiteral(seg, got[i]) {
 			return nil, false
 		}
 	}
 	return values, true
+}
+
+func equalPathLiteral(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if !strings.Contains(a, "%") && !strings.Contains(b, "%") {
+		return false
+	}
+	for a != "" && b != "" {
+		var ca, cb byte
+		ca, a = pathLiteralByte(a)
+		cb, b = pathLiteralByte(b)
+		if ca != cb {
+			return false
+		}
+	}
+	return a == b
+}
+
+func pathLiteralByte(s string) (value byte, rest string) {
+	if len(s) >= 3 && s[0] == '%' {
+		hi := strings.IndexByte("0123456789abcdef", s[1]|0x20)
+		lo := strings.IndexByte("0123456789abcdef", s[2]|0x20)
+		if hi >= 0 && lo >= 0 {
+			c := byte(hi<<4 | lo)
+			if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ||
+				c >= '0' && c <= '9' || strings.IndexByte("-._~", c) >= 0 {
+				return c, s[3:]
+			}
+		}
+	}
+	return s[0], s[1:]
 }
 
 // findSecretPathParam reports whether the operation declares name as a secret path

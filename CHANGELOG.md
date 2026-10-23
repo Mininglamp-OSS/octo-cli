@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requires their respective fields and rejects mixed-mode input before HTTP.
 - **Marketplace install diagnostics** — optional `custom_env` string maps are
   accepted and their values are masked in generated and generic API diagnostics,
-  including configured Marketplace mount prefixes, without changing wire values.
+  including configured Marketplace mount prefixes and equivalent unreserved path
+  escapes, without changing outbound paths or wire values.
 - **Loop task inputs** — list/group filters, task fields and priority vocabularies
   are exposed; numeric flags preserve fractional values such as task position.
 - **Multipart retry controls** — `--no-retry` applies to part PUTs, failure-triggered
