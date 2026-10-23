@@ -36,7 +36,7 @@ func TestLegacyProjectRemovedFromRegistry(t *testing.T) {
 
 func TestLegacyProjectRemovalPreservesWorkspaceScope(t *testing.T) {
 	r := MustNew()
-	for _, id := range []string{"task.get", "task.quick_create", "autopilot.create", "autopilot.update", "workspace.get", "workspace.member.list"} {
+	for _, id := range []string{"task.get", "task.quick_create", "autopilot.create", "autopilot.update", "workspace.get"} {
 		op, ok := r.GetOperation(id)
 		if !ok {
 			t.Fatalf("retained operation %s missing", id)

@@ -270,6 +270,9 @@ func buildLongDesc(d *registry.OperationDetail, rt *operationRuntime) string {
 // for use in help examples ("drive share revoke").
 func commandPathFor(d *registry.OperationDetail) string {
 	segs := strings.Split(d.ID, ".")
+	if d.Service != "" && segs[0] != d.Service {
+		segs = append([]string{d.Service}, segs...)
+	}
 	for i := range segs {
 		segs[i] = strings.ReplaceAll(segs[i], "_", "-")
 	}
