@@ -15,6 +15,7 @@ const VERSION = "1.2.3";
 const SHIM = path.join(__dirname, "..", "bin", "octo-cli.js");
 const NPM_DIR = path.join(__dirname, "..");
 const shim = require(SHIM);
+const managers = require(path.join(NPM_DIR, "lib", "package-managers.js"));
 
 function findExecutable(name) {
   for (const directory of (process.env.PATH || "").split(path.delimiter)) {
@@ -373,6 +374,104 @@ test("Windows npm command shims resolve the invoked npm CLI entry", async (t) =>
   assert.equal(result.status, 0, result.stderr);
   const manager = JSON.parse(result.stdout);
   assert.equal(manager.args[0], cliEntry, "npm must launch npm-cli.js, not the earlier npm-prefix.js assignment");
+});
+
+test("Windows pnpm12 command shim resolves its extended listed package path", { skip: process.platform !== "win32" }, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "octo-cli-pnpm12-shim-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const home = path.join(directory, "pnpm home");
+  const root = path.join(home, "global", "v11");
+  const listedGroupPath = path.join(root, "e5c-18e12659a7ef1aac-0");
+  const commandGroupPath = path.join(root, "99a852fcce6d0ad41f3f21949bb7a7fd8a927d18641ad8fb9a963fdaf21db609");
+  const listedPackagePath = path.join(listedGroupPath, "node_modules", ...PACKAGE_NAME.split("/"));
+  const commandPackagePath = path.join(commandGroupPath, "node_modules", ...PACKAGE_NAME.split("/"));
+  const launcherPath = path.join(listedPackagePath, "bin", "octo-cli.js");
+  fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+  fs.writeFileSync(path.join(listedPackagePath, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
+  fs.writeFileSync(launcherPath, "");
+  fs.symlinkSync(listedGroupPath, commandGroupPath, "junction");
+
+  const bin = path.join(home, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const commandPath = path.join(bin, "octo-cli.cmd");
+  const relativeTarget = path.relative(bin, path.join(commandPackagePath, "bin", "octo-cli.js"));
+  fs.writeFileSync(commandPath, [
+    "@SETLOCAL",
+    '@IF EXIST "%~dp0\\node.exe" (',
+    `  "%~dp0\\node.exe"  "%~dp0\\${relativeTarget}" %*`,
+    ") ELSE (",
+    "  @SET PATHEXT=%PATHEXT:;.JS;=;%",
+    `  node  "%~dp0\\${relativeTarget}" %*`,
+    ")",
+    "",
+  ].join("\r\n"));
+  const nativeListedPackagePath = fs.realpathSync.native(listedPackagePath);
+  const extendedListedPath = nativeListedPackagePath.startsWith("\\\\?\\")
+    ? nativeListedPackagePath
+    : `\\\\?\\${nativeListedPackagePath}`;
+  const state = {
+    manager: { name: "pnpm" },
+    root,
+    bin,
+    listing: [{
+      path: root,
+      private: true,
+      dependencies: {
+        [PACKAGE_NAME]: { version: VERSION, path: extendedListedPath },
+      },
+    }],
+  };
+  const owner = managers.stateOwnsInvocation(
+    state,
+    PACKAGE_NAME,
+    VERSION,
+    commandPackagePath,
+    path.join(commandPackagePath, "bin", "octo-cli.js"),
+  );
+  assert.ok(owner, "pnpm ownership must accept the extended native package path and its fixed command alias");
+  assert.equal(owner.commandPath, commandPath);
+});
+
+test("Windows Bun .bunx sidecar resolves its relative global package target", { skip: process.platform !== "win32" }, (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "octo-cli-bunx-shim-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const prefix = path.join(directory, "coexisting");
+  const globalDirectory = path.join(prefix, "cache", ".bun", "install", "global");
+  const logicalRoot = path.join(globalDirectory, "node_modules");
+  const logicalPackagePath = path.join(logicalRoot, ...PACKAGE_NAME.split("/"));
+  const launcherPath = path.join(logicalPackagePath, "bin", "octo-cli.js");
+  fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+  fs.writeFileSync(path.join(logicalPackagePath, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
+  fs.writeFileSync(launcherPath, "");
+  const nativeGlobalDirectory = fs.realpathSync.native(globalDirectory);
+  const root = path.join(nativeGlobalDirectory, "node_modules");
+  const packagePath = path.join(root, ...PACKAGE_NAME.split("/"));
+
+  const bin = path.join(prefix, "custom bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const nativeBin = fs.realpathSync.native(bin);
+  const executable = path.join(bin, "octo-cli.exe");
+  fs.writeFileSync(executable, "Bun shim fixture");
+  const target = path.relative(path.dirname(bin), launcherPath);
+  const targetBytes = Buffer.from(target, "utf16le");
+  const quoteAndNull = Buffer.from([0x22, 0x00, 0x00, 0x00]);
+  const shebang = Buffer.concat([Buffer.from("node", "utf16le"), Buffer.from([0x20, 0x00])]);
+  const lengths = Buffer.alloc(8);
+  lengths.writeUInt32LE(targetBytes.length, 0);
+  lengths.writeUInt32LE(10, 4);
+  const flags = Buffer.alloc(2);
+  flags.writeUInt16LE(0xab37);
+  fs.writeFileSync(executable.replace(/\.exe$/i, ".bunx"), Buffer.concat([targetBytes, quoteAndNull, shebang, lengths, flags]));
+
+  const state = {
+    manager: { name: "bun" },
+    root,
+    bin: nativeBin,
+    listing: `${nativeGlobalDirectory} node_modules (7)\n└── ${PACKAGE_NAME}@${VERSION}\n`,
+  };
+  const owner = managers.stateOwnsInvocation(state, PACKAGE_NAME, VERSION, packagePath, launcherPath);
+  assert.ok(owner, "Bun ownership must resolve the actual UTF-16LE .bunx target across native and short paths");
+  assert.ok(managers.samePath(owner.commandPath, executable));
 });
 
 

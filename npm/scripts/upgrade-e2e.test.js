@@ -293,25 +293,6 @@ test("real global installations upgrade through their configured registry", { ti
 
       const beforeDryRun = registry.requests.length;
       result = await instance.run(["--profile", "unconfigured-profile", "--space", "unused-space", "upgrade", "--dry-run"], { npm_config_user_agent: "pnpm/0 npm/? bun/?" });
-      if (process.platform === "win32" && result.status !== 0) {
-        const localArgs = name === "bun" ? ["pm", "ls", "-g"] : ["list", "-g", "--depth=0", "--json"];
-        const binArgs = name === "bun" ? ["pm", "bin", "-g"] : ["bin", "-g"];
-        const options = { cwd: instance.project, env: instance.env };
-        const entries = fs.readdirSync(path.dirname(instance.command))
-          .filter((entry) => entry.startsWith("octo-cli"))
-          .map((entry) => ({
-            name: entry,
-            contents: /\.(?:cmd|bunx)$/.test(entry)
-              ? fs.readFileSync(path.join(path.dirname(instance.command), entry)).toString(entry.endsWith(".bunx") ? "base64" : "utf8")
-              : null,
-          }));
-        t.diagnostic(JSON.stringify({
-          manager: name,
-          native_list: await execute(instance.manager.file, [...instance.manager.args, ...localArgs], options),
-          native_bin: await execute(instance.manager.file, [...instance.manager.args, ...binArgs], options),
-          entries,
-        }));
-      }
       assert.equal(result.status, 0, result.stderr);
       const plan = JSON.parse(result.stdout).data;
       assert.equal(plan.manager, name);
