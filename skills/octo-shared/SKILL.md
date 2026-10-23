@@ -83,7 +83,8 @@ environment and profile credential rules remain unchanged.
 
 ## 2. Unified gateway configuration
 
-All Octo domains use one gateway. Override it only for test or self-hosted
+All Octo domains use one gateway. Environment credentials and profiles that
+record no URL fall back to `OCTO_API_BASE_URL`; set it for test or self-hosted
 deployments:
 
 ```bash
@@ -95,7 +96,16 @@ export OCTO_SPACE_ID=space_xxx                     # only for platform-scoped bo
 export OCTO_FORMAT=json                            # default output format
 ```
 
-Routing: all services use `OCTO_API_BASE_URL`. On `octo-cli api`, `--service loop` selects Loop Public API handling, adds `Accept: application/vnd.octo+json`, and uses the Public API error parser. The gateway remains unified.
+Routing: all services go through one gateway. A stored profile's
+`api_base_url` wins over `OCTO_API_BASE_URL`, which wins over the production
+default `https://im.deepminer.com.cn` — so a profile that records a test origin
+keeps using it after `export OCTO_API_BASE_URL=...`. Change that profile with
+`octo-cli auth update --api-base-url <origin>` instead, or remove the stored
+origin with `--clear-api-base-url`. `config show` and `auth status` report the
+winning layer as `api_base_url_source` (`profile`, `env`, or `default`). On
+`octo-cli api`, `--service loop` selects
+Loop Public API handling, adds `Accept: application/vnd.octo+json`, and uses the
+Public API error parser. The gateway remains unified.
 
 ## 3. Output: the JSON envelope
 

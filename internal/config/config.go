@@ -41,8 +41,11 @@ const (
 // authoritative path for command execution.
 type Config struct {
 	// APIBaseURL is the unified base URL for all backend services.
-	// Set via OCTO_API_BASE_URL.
+	// Set via OCTO_API_BASE_URL or the active profile's stored origin.
 	APIBaseURL string
+	// APIBaseURLSource reports where APIBaseURL came from: "profile", "env",
+	// or "default". It makes the precedence rule observable in diagnostics.
+	APIBaseURLSource string
 	// BotToken is the active Octo or Loop bearer credential.
 	BotToken string
 	// CredentialMode controls credential selection, not server authorization.
@@ -72,12 +75,19 @@ func Load() *Config {
 	if mode == CredentialModeTask {
 		spaceID = ""
 	}
+	apiBaseURL := os.Getenv(EnvAPIBaseURL)
+	apiBaseURLSource := "env"
+	if apiBaseURL == "" {
+		apiBaseURL = DefaultAPIBaseURL
+		apiBaseURLSource = "default"
+	}
 	return &Config{
-		APIBaseURL:     envOrDefault(EnvAPIBaseURL, DefaultAPIBaseURL),
-		BotToken:       token.Token,
-		CredentialMode: mode,
-		SpaceID:        spaceID,
-		Format:         envOrDefault(EnvFormat, "json"),
+		APIBaseURL:       apiBaseURL,
+		APIBaseURLSource: apiBaseURLSource,
+		BotToken:         token.Token,
+		CredentialMode:   mode,
+		SpaceID:          spaceID,
+		Format:           envOrDefault(EnvFormat, "json"),
 	}
 }
 

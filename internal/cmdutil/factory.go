@@ -367,10 +367,11 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 	return s, nil
 }
 
-// overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
-// but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
+// overlayProfileBaseURL applies the active profile's stored API base URL.
+// Precedence is profile > OCTO_API_BASE_URL > default: a profile that records
+// an origin routes there even when the environment variable names another one.
 func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) error {
-	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
+	if profile == "" {
 		return nil
 	}
 	store, err := f.AuthStore()
@@ -384,9 +385,13 @@ func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) erro
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
 		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
 		if err != nil {
-			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+			return output.ErrValidation(
+				fmt.Sprintf("profile %q has an invalid API base URL: %v", profile, err),
+				fmt.Sprintf("repair it with `octo-cli --profile %s auth update --api-base-url <origin>` or remove it with `octo-cli --profile %s auth update --clear-api-base-url`", profile, profile),
+			)
 		}
 		cfg.APIBaseURL = normalized
+		cfg.APIBaseURLSource = "profile"
 	}
 	return nil
 }

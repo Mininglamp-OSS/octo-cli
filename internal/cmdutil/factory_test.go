@@ -143,8 +143,98 @@ func TestFactory_ProfileBaseURLErrorNamesProfile(t *testing.T) {
 	f := NewDefaultFactory()
 	f.Globals.Profile = "legacy"
 	_, err = f.Config()
-	if err == nil || !strings.Contains(err.Error(), `profile "legacy"`) || !strings.Contains(err.Error(), "auth login") {
-		t.Fatalf("Config error = %v, want named profile recovery guidance", err)
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" ||
+		!strings.Contains(ee.Message, `profile "legacy" has an invalid API base URL`) ||
+		!strings.Contains(ee.Hint, "octo-cli --profile legacy auth update --api-base-url <origin>") ||
+		!strings.Contains(ee.Hint, "octo-cli --profile legacy auth update --clear-api-base-url") {
+		t.Fatalf("Config error = %v (%+v), want structured profile recovery guidance", err, ee)
+	}
+}
+
+func TestFactory_ProfileBaseURLPrecedence(t *testing.T) {
+	const (
+		profileOrigin = "https://profile.example.com"
+		envOrigin     = "https://env.example.com"
+	)
+	cases := []struct {
+		name       string
+		profileURL string
+		envURL     string
+		envToken   bool
+		want       string
+		wantSource string
+	}{
+		{"profile outranks env", profileOrigin, envOrigin, false, profileOrigin, "profile"},
+		{"profile wins without env", profileOrigin, "", false, profileOrigin, "profile"},
+		{"profile without URL falls back to env", "", envOrigin, false, envOrigin, "env"},
+		{"profile without URL falls back to default", "", "", false, config.DefaultAPIBaseURL, "default"},
+		{"environment credential uses env", profileOrigin, envOrigin, true, envOrigin, "env"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			t.Setenv(config.EnvAPIBaseURL, tc.envURL)
+			t.Setenv(config.EnvToken, "")
+			t.Setenv(config.EnvBotToken, "")
+			t.Setenv(config.EnvBotID, "")
+
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveProfile("target", &authstore.ProfileMeta{
+				APIBaseURL: tc.profileURL,
+				RobotID:    "bot-target",
+			}, "app_target"); err != nil {
+				t.Fatal(err)
+			}
+
+			f := NewDefaultFactory()
+			if tc.envToken {
+				t.Setenv(config.EnvToken, "app_env")
+			} else {
+				f.Globals.Profile = "target"
+			}
+			cfg, err := f.Config()
+			if err != nil {
+				t.Fatalf("Config: %v", err)
+			}
+			if cfg.APIBaseURL != tc.want {
+				t.Fatalf("APIBaseURL = %q, want %q", cfg.APIBaseURL, tc.want)
+			}
+			if cfg.APIBaseURLSource != tc.wantSource {
+				t.Fatalf("APIBaseURLSource = %q, want %q", cfg.APIBaseURLSource, tc.wantSource)
+			}
+		})
+	}
+}
+
+// TestFactory_InvalidProfileBaseURLFailsClosedWithEnv pins the policy choice
+// that an invalid stored origin is refused even when OCTO_API_BASE_URL names a
+// valid gateway: the profile's own metadata is authoritative, so silently
+// falling back would route the profile token somewhere it was not issued for.
+func TestFactory_InvalidProfileBaseURLFailsClosedWithEnv(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvAPIBaseURL, "https://env.example")
+	t.Setenv(config.EnvToken, "")
+	t.Setenv(config.EnvBotToken, "")
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProfile("bad", &authstore.ProfileMeta{
+		APIBaseURL: "https://bad.example/fleet/api",
+		RobotID:    "bot-bad",
+	}, "app_bad"); err != nil {
+		t.Fatal(err)
+	}
+
+	f := NewDefaultFactory()
+	f.Globals.Profile = "bad"
+	_, err = f.Config()
+	if err == nil || !strings.Contains(err.Error(), `profile "bad" has an invalid API base URL`) {
+		t.Fatalf("Config error = %v, want refusal of the invalid profile URL", err)
 	}
 }
 

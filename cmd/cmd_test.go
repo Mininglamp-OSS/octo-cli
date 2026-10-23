@@ -196,9 +196,10 @@ func TestCmd_SchemaUnknownOperation(t *testing.T) {
 func TestCmd_ConfigShow(t *testing.T) {
 	f := newTestFactoryWithReg()
 	f.SetConfig(&config.Config{
-		APIBaseURL: "http://gateway.local",
-		BotToken:   "app_abcdefgh12345",
-		Format:     "json",
+		APIBaseURL:       "http://gateway.local",
+		APIBaseURLSource: "profile",
+		BotToken:         "app_abcdefgh12345",
+		Format:           "json",
 	})
 
 	out, _, err := execRoot(t, f, "config", "show")
@@ -212,6 +213,9 @@ func TestCmd_ConfigShow(t *testing.T) {
 	data, _ := env["data"].(map[string]any)
 	if data["api_base_url"] != "http://gateway.local" {
 		t.Errorf("api_base_url = %v", data["api_base_url"])
+	}
+	if data["api_base_url_source"] != "profile" {
+		t.Errorf("api_base_url_source = %v", data["api_base_url_source"])
 	}
 	// Masked token: "app_abcd***".
 	tok, _ := data["bot_token"].(string)
