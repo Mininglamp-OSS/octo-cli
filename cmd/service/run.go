@@ -74,6 +74,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// A Workspace path flag and its binding header share one selector. Resolve
 	// both from the same value so Fleet can authorize before route dispatch.
 	headers = bindWorkspacePathHeader(rt, pathValues, headers)
+	if err := applyTaskAssigneeQuery(cobraCmd, f, rt, q, headers); err != nil {
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+		return err
+	}
 
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
@@ -103,15 +107,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
-	if d.Multipart {
-		raw, ct, err := buildMultipartBody(cobraCmd, rt)
-		if err != nil {
-			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
-			return err
-		}
-		req.RawBody = raw
-		req.ContentType = ct
-	} else if err := attachJSONBody(f, cobraCmd, rt, &req); err != nil {
+	if err := attachRequestBody(f, cobraCmd, rt, &req); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
@@ -157,9 +153,20 @@ func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
 	return err
 }
 
-// attachJSONBody resolves the JSON body, applies pre-send checks, and collects
-// body secrets. Kept separate from runOperation so request assembly reads as
-// one sequence of steps.
+// attachRequestBody selects the multipart or JSON encoder.
+func attachRequestBody(f *cmdutil.Factory, cmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
+	if !rt.detail.Multipart {
+		return attachJSONBody(f, cmd, rt, req)
+	}
+	raw, contentType, err := buildMultipartBody(cmd, rt)
+	if err != nil {
+		return err
+	}
+	req.RawBody, req.ContentType = raw, contentType
+	return nil
+}
+
+// attachJSONBody resolves and validates JSON, then collects declared secrets.
 func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
 	body, err := resolveBody(f, cobraCmd, rt)
 	if err != nil {
@@ -639,10 +646,39 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		return nil, nil
 	}
 
+	base, err := readJSONBodyInput(f, rt.bodyData)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := applyBodyFlags(cobraCmd, rt, base); err != nil {
+		return nil, err
+	}
+	if err := applyTaskAssigneeBody(cobraCmd, f, rt, base); err != nil {
+		return nil, err
+	}
+	if err := applyGeneratedIdempotencyKey(rt, base); err != nil {
+		return nil, err
+	}
+
+	if err := validateRequiredBodyFields(rt, base); err != nil {
+		return nil, err
+	}
+	if err := validateBodyVariants(rt, base); err != nil {
+		return nil, err
+	}
+
+	if len(base) == 0 {
+		return nil, nil
+	}
+	return base, nil
+}
+
+func readJSONBodyInput(f *cmdutil.Factory, input *string) (map[string]any, error) {
 	base := map[string]any{}
 
-	if rt.bodyData != nil && *rt.bodyData != "" {
-		raw, err := cmdutil.ParseInput(f, *rt.bodyData)
+	if input != nil && *input != "" {
+		raw, err := cmdutil.ParseInput(f, *input)
 		if err != nil {
 			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err), "pass inline JSON, @file, or @-")
 		}
@@ -684,23 +720,6 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		}
 	}
 
-	if err := applyBodyFlags(cobraCmd, rt, base); err != nil {
-		return nil, err
-	}
-	if err := applyGeneratedIdempotencyKey(rt, base); err != nil {
-		return nil, err
-	}
-
-	if err := validateRequiredBodyFields(rt, base); err != nil {
-		return nil, err
-	}
-	if err := validateBodyVariants(rt, base); err != nil {
-		return nil, err
-	}
-
-	if len(base) == 0 {
-		return nil, nil
-	}
 	return base, nil
 }
 

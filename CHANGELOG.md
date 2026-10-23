@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discovery; document current conflict, search, event, thread, upload-policy,
   registration and dependency-visibility semantics. Docs search advertises
   `html_ppt`; member reads describe reader access and nullable grant attribution.
+- **Loop task assignment** — restore Multica-style `task assign --to/--to-id/--unassign`
+  and `--assignee` on task create/update/list. Infer actor types from complete
+  workspace member, expert and expert-team lists; preserve Project member UIDs,
+  reject ambiguous/incomplete lookups, and allow explicit JSON null to clear an
+  assignee. Existing typed flags remain available for offline dry-runs.
 - **Service help and request metadata** — generated long help retains operation
   descriptions; parameter help and current Docs, HTML, messaging, Marketplace,
   Loop and Drive request fields match the embedded service contracts.

@@ -44,6 +44,9 @@ func RegisterServiceCommands(parent *cobra.Command, f *cmdutil.Factory) {
 		if svc == "matter" {
 			attachMatterStatusAliases(svcCmd, f)
 		}
+		if svc == "loop" {
+			attachTaskAssignAlias(svcCmd, f)
+		}
 	}
 }
 
@@ -203,6 +206,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	registerHeaderFlags(cmd, rt, d)
 
 	registerBodyFlags(cmd, rt, d)
+	registerTaskAssigneeFlags(cmd, d)
 
 	if d.Pagination != nil {
 		var pageAll bool

@@ -83,8 +83,8 @@ callers cannot select another human identity. No `--obo` flag is needed.
 
 Read members from `.data.items[]`. Each member contains `uid`, `name`, `role`
 (`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
-`uid` as opaque, case-sensitive text; pass a person's UID as
-`--assignee-octo-uid` when assigning a Project task. Member listings include Bot
+`uid` as opaque, case-sensitive text; pass a person's UID as `task assign --to-id`
+or use the explicit `--assignee-octo-uid` field. Member listings include Bot
 seats; consumers choosing a human assignee must check `robot == 0`.
 
 Pagination uses `--limit` (default 50, maximum 200) and `--offset` (default 0).
@@ -285,6 +285,28 @@ a lifecycle transition.
 ```bash
 octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <actor-id>
+octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
+octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
+octo-cli loop task update <task-id> --workspace-id <ws> --assignee-id <actor-id>
+octo-cli loop task list --workspace-id <ws> --assignee "Alice"
+```
+
+These Multica-style selectors infer the member/expert/expert-team type by reading
+all pages of the three existing workspace lists. Names match case-insensitively:
+an exact name wins over a substring; an ambiguous name fails with matching IDs.
+`--to-id` and untyped `--assignee-id` match exact IDs only. Project member UIDs
+are case-sensitive; native members use their Fleet user UUID. Bot members and
+archived actors are excluded. A failed or incomplete list stops assignment.
+The selected credential and workspace apply to every lookup and write; Fleet
+continues to enforce authorization. Assignment can start or cancel executions.
+
+`--to`, `--to-id` and `--unassign` are mutually exclusive. `--assignee` cannot be
+mixed with explicit assignee fields or filters. Creating/updating with an
+explicit type keeps the original direct API behavior:
+
+```bash
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <uuid> --assignee-type expert   # or expert_team, member
 octo-cli loop task update <task-id> --workspace-id <ws> \
@@ -295,6 +317,10 @@ octo-cli loop task update <task-id> --workspace-id <ws> \
 backend requires it to be paired with `assignee_type=member` and forbids
 combining it with `assignee_id`; project authorization remains backend-enforced.
 `assignee_id` normally means a Fleet actor UUID.
+
+`task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
+The same body is accepted through `task update --data`. Dry-runs perform no
+assignee lookup: use explicit typed fields or `--unassign` for an offline preview.
 
 Task create/update also accept `--parent-task-id`, `--start-date`,
 `--due-date`, and comma-separated `--attachment-ids`. On update, `--position`

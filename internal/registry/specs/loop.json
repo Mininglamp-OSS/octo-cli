@@ -7515,16 +7515,23 @@
             "description": "Parent task UUID; explicit null in --data clears the parent."
           },
           "assignee_type": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "enum": [
               "expert",
               "expert_team",
-              "member"
+              "member",
+              null
             ],
-            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid."
+            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid; explicit null with assignee_id:null clears the assignee."
           },
           "assignee_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
             "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
           },
