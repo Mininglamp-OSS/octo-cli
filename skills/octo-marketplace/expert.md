@@ -40,6 +40,16 @@ octo-cli marketplace plugin skillmd --plugin-id <skill-plugin-id>
 octo-cli marketplace plugin download --plugin-id <skill-plugin-id> -o <tmp>/skill.zip
 ```
 
+Relations may pin an exact `target_version_id`. Read that snapshot instead of
+the live document, and inspect who still references a plugin:
+
+```bash
+octo-cli marketplace plugin version list --plugin-id <plugin-id>
+octo-cli marketplace plugin version get <plugin-id> <version-id>
+octo-cli marketplace plugin version download <plugin-id> <version-id> --path SKILL.md -o <tmp>/SKILL.md
+octo-cli marketplace plugin dependents list <plugin-id>
+```
+
 ## Create / update
 
 Create or edit an **unpublished** draft through the unified write path. Every
@@ -68,7 +78,7 @@ every write:
   (team → member expert). The leader is the member relation whose
   `data.is_leader` is true. `expert_skill` and `expert_connector` belong on each
   member expert's own upsert/review document, never directly on the team source.
-  Every relation requires `target_plugin_id` and `relation_type`.
+  Every relation requires `target_plugin_id` and `relation_type`. Skill and member-expert relations may pin an exact `target_version_id`; omit it and the server pins the target's current published version. A connector relation must never carry a version.
 
 Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin version list --plugin-id <id>` after a release.
 
@@ -158,8 +168,10 @@ member experts and each member's skill plugins. A visible root plugin does not
 guarantee that its dependencies are visible. Install refuses a hidden declared
 relation target rather than silently provisioning an incomplete expert/team.
 The root's `plugin get --include-relations` output is only a one-level,
-visibility-filtered view; it does not prove the whole install graph is
-accessible.
+visibility-filtered view. Use `plugin graph get --plugin-id <id>` for the flat
+transitive closure the caller can see, and `plugin dependency-resolution get <id>` to preview the exact versions an install would bind (including
+a team's members and their skills). A resolution response reports `installable`
+and per-target checks; hidden or unpublished targets stay refused.
 
 Provision an expert or expert_team into a Loop workspace/runtime (creates the
 agent or squad, acting as the caller against octo-fleet, with rollback):
