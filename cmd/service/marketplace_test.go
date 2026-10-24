@@ -51,6 +51,13 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"skill_parse_task.get":     {http.MethodGet, "/market/api/v1/skill_parse_tasks/{skill_parse_task_id}"},
 		"skill_icon_upload.create": {http.MethodPost, "/market/api/v1/skill_icon_uploads"},
 		"mcp_icon_upload.create":   {http.MethodPost, "/market/api/v1/mcp_icon_uploads"},
+
+		// Dependency and version reads (2026-10 dependency-pin work).
+		"plugin.version.get":               {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/versions/{version_id}"},
+		"plugin.version.download":          {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/versions/{version_id}/file"},
+		"plugin.dependents.list":           {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/dependents"},
+		"plugin.dependency_resolution.get": {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/dependency_resolution"},
+		"plugin.graph.get":                 {http.MethodGet, "/market/api/v1/plugins/detail_graph"},
 	}
 
 	if got := len(r.ListOperations("marketplace")); got != len(wants) {
