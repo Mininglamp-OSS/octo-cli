@@ -402,11 +402,11 @@ test("real global installations upgrade through their configured registry", { ti
       const conflictingMetadataRequests = registry.conflictingRequests.slice(conflictingRequestStart)
         .filter((request) => request.path === `/${PACKAGE}`);
       assert.equal(conflictingMetadataRequests.length, 0, "pnpm must not select the project-scoped registry from nested TMPDIR");
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       const mainMetadataRequests = registry.requests.slice(mainRequestStart)
         .filter((request) => request.path === `/${PACKAGE}`);
       assert.ok(mainMetadataRequests.some((request) => request.authorization === "Bearer fixture-not-a-real-secret"),
         "pnpm must resolve metadata through the configured global scoped registry with its existing auth");
-      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
       assert.deepEqual(JSON.parse(result.stdout).data, {
         manager: "pnpm", previous_version: OLD, target_version: TARGET, current_version: TARGET, updated: true,
       });
