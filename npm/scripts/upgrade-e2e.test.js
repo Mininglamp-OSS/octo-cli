@@ -379,6 +379,9 @@ test("real global installations upgrade through their configured registry", { ti
         id: "pnpm-project-nested-tmpdir",
         pnpmHomeInsideProject: true,
       });
+      const initial = await instance.run(["version"]);
+      assert.equal(initial.status, 0, `${initial.stderr}\n${initial.stdout}`);
+      assert.equal(JSON.parse(initial.stdout).data.version, OLD, "the nested global installation must start with the old executable");
       fs.writeFileSync(path.join(instance.project, "pnpm-workspace.yaml"), "packages: []\n");
       const conflictingOrigin = new URL(registry.conflictingUrl);
       fs.writeFileSync(path.join(instance.project, ".npmrc"), [
