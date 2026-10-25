@@ -113,6 +113,9 @@ command and updates it to the configured registry's stable `latest` release.
 An equal or newer installed version is a successful no-op. It verifies the
 installed package, platform binary and command before reporting success.
 
+Updates enable optional dependencies for npm/pnpm and explicitly install Bun's
+matching platform package, because its executable is required to run the CLI.
+
 Registry mirrors, scoped registries and authentication use the owning manager's
 native settings: npm's user/global `.npmrc` and environment, Bun's supported
 `.npmrc` and global `.bunfig.toml`, or pnpm's native configuration. The invoking

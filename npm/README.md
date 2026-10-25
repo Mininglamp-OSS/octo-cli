@@ -42,6 +42,11 @@ to resolve the configured registry's stable `latest` release and install the
 exact version. Equal or newer installed releases are successful no-ops.
 Success requires verification of the resulting package and platform executable.
 
+During installation, npm/pnpm explicitly enable optional dependencies, and Bun
+installs the matching platform package alongside the main package. The platform
+executable is required even when optional dependencies are disabled in your
+manager configuration.
+
 Use the manager's native mirror and authentication configuration: npm's
 user/global `.npmrc` or environment; Bun's supported `.npmrc` and global
 `.bunfig.toml`; pnpm's own global configuration and registry/authentication
