@@ -160,7 +160,7 @@ test("npm global state accepts complete real npm JSON with an injected ls status
   assert.equal(owner.commandPath, commandPath);
 });
 
-test("npm global state rejects spawn, signal, truncated, invalid, and non-listing results", (t) => {
+test("npm global state rejects spawn, signal, truncated, invalid, and non-listing results", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "octo-npm-state-failures-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const prefix = path.join(directory, "prefix");
@@ -174,14 +174,20 @@ test("npm global state rejects spawn, signal, truncated, invalid, and non-listin
   const manager = fakeNpmManager(directory);
   const listing = JSON.stringify({ name: "global", dependencies: {} });
   const invalidCases = [
-    { name: "signal during listing", env: { REVIEW_LISTING: listing, REVIEW_SIGNAL: "1" } },
+    {
+      name: "signal during listing",
+      env: { REVIEW_LISTING: listing, REVIEW_SIGNAL: "1" },
+      skip: process.platform === "win32" && "Windows does not provide POSIX self-signal exit semantics",
+    },
     { name: "truncated JSON", env: { REVIEW_LISTING: "{\"dependencies\":", REVIEW_STATUS: "1" } },
     { name: "valid JSON with the wrong npm data shape", env: { REVIEW_LISTING: "[]", REVIEW_STATUS: "1" } },
     { name: "unexpected nonzero exit", env: { REVIEW_LISTING: listing, REVIEW_STATUS: "2" } },
   ];
   assert.equal(managers.queryLocalState({ name: "npm", file: path.join(directory, "missing-npm"), args: [] }, { cwd: directory, env }), null, "a failed spawn must not produce state");
   for (const invalidCase of invalidCases) {
-    const result = managers.queryLocalState(manager, { cwd: directory, env: { ...env, ...invalidCase.env } });
-    assert.equal(result, null, invalidCase.name);
+    await t.test(invalidCase.name, { skip: invalidCase.skip }, () => {
+      const result = managers.queryLocalState(manager, { cwd: directory, env: { ...env, ...invalidCase.env } });
+      assert.equal(result, null, invalidCase.name);
+    });
   }
 });
