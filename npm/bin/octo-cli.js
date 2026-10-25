@@ -149,7 +149,7 @@ function main() {
   const upgradeInvocation = isUpgradeInvocation(args);
   let bin;
   try {
-    bin = path.toNamespacedPath(resolveBinary());
+    bin = resolveBinary();
   } catch (err) {
     if (upgradeInvocation) emitUpgradePlatformFailure(err);
     console.error(err.message);
@@ -182,7 +182,8 @@ function main() {
   let result;
   let handoffFailure = false;
   try {
-    result = spawnSync(bin, args, { stdio: "inherit", env: childEnv });
+    // Keep ordinary paths for Node's package/realpath APIs; extend only executable launch paths.
+    result = spawnSync(path.toNamespacedPath(bin), args, { stdio: "inherit", env: childEnv });
     if (upgradeInvocation && result.error) {
       handoffFailure = true;
     } else {
@@ -200,14 +201,14 @@ function main() {
           prepareReporter(commandPath) {
             reporterDir = fs.mkdtempSync(path.join(path.dirname(commandPath), ".octo-cli-upgrade-"));
             fs.chmodSync(reporterDir, 0o700);
-            const candidatePath = path.toNamespacedPath(path.join(reporterDir, binaryNameFor(process.platform)));
+            const candidatePath = path.join(reporterDir, binaryNameFor(process.platform));
             fs.copyFileSync(bin, candidatePath);
             fs.chmodSync(candidatePath, fs.statSync(bin).mode & 0o777);
 
             const probeEnv = { ...process.env };
             delete probeEnv.OCTO_CLI_UPGRADE_HANDOFF;
             delete probeEnv.OCTO_CLI_UPGRADE_REPORT;
-            const probe = spawnSync(candidatePath, ["--format=json", "version"], {
+            const probe = spawnSync(path.toNamespacedPath(candidatePath), ["--format=json", "version"], {
               stdio: "ignore",
               env: probeEnv,
               windowsHide: true,
@@ -218,7 +219,7 @@ function main() {
             reporterPath = candidatePath;
           },
         });
-        result = spawnSync(reporterPath, args, {
+        result = spawnSync(path.toNamespacedPath(reporterPath), args, {
           stdio: "inherit",
           env: {
             ...process.env,
