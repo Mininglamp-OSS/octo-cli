@@ -48,7 +48,8 @@ success is reported. No Octo credential is required.
 Use --dry-run to check local ownership without contacting a registry or
 installing. Project-local, temporary, source-linked and standalone installations
 must be updated through their original installation method.`,
-		Args: cobra.NoArgs,
+		Args:        cobra.NoArgs,
+		Annotations: map[string]string{"skipValidation": "true"},
 		RunE: func(_ *cobra.Command, _ []string) error {
 			handoffDir := os.Getenv(upgradeHandoffEnvVar)
 			if os.Getenv(upgradeReportEnvVar) == "1" {

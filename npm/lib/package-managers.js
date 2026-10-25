@@ -66,6 +66,9 @@ function managerCommand(name, env = process.env) {
       if (!fs.existsSync(candidate)) continue;
       let resolved;
       try {
+        const stat = fs.statSync(candidate);
+        if (!stat.isFile()) continue;
+        if (!windows) fs.accessSync(candidate, fs.constants.X_OK);
         resolved = fs.realpathSync(candidate);
       } catch (_err) {
         continue;
@@ -145,11 +148,14 @@ function queryLocalState(manager, options) {
     const prefixResult = run(manager, ["prefix", "--global"], options);
     const rootResult = run(manager, ["root", "--global"], options);
     const listResult = run(manager, ["ls", "--global", "--long", "--json", "--depth=0"], options);
-    if (![prefixResult, rootResult, listResult].every(completed)) return null;
+    if (!completed(prefixResult) || !completed(rootResult)
+      || listResult.error || listResult.signal
+      || (listResult.status !== 0 && listResult.status !== 1)) return null;
     const prefix = prefixResult.stdout.trim();
     const root = rootResult.stdout.trim();
     const listing = parseJson(listResult.stdout);
-    if (!prefix || !root || !listing) return null;
+    if (!prefix || !root || !listing || typeof listing !== "object" || Array.isArray(listing)
+      || !listing.dependencies || typeof listing.dependencies !== "object" || Array.isArray(listing.dependencies)) return null;
     return { manager, prefix, root, bin: path.join(prefix, process.platform === "win32" ? "" : "bin"), listing };
   }
 
@@ -375,7 +381,7 @@ function metadataVersion(state, packageName, cwd, env) {
   let args;
   if (state.manager.name === "npm") args = ["view", "--global", `${packageName}@latest`, "version", "--json", "--prefer-online"];
   else if (state.manager.name === "bun") args = ["info", "--global", `${packageName}@latest`, "version", "--json"];
-  else args = ["view", `${packageName}@latest`, "version", "--json"];
+  else args = ["view", "--ignore-workspace", `${packageName}@latest`, "version", "--json"];
   const result = run(state.manager, args, { cwd, env });
   if (!completed(result)) return null;
   const text = result.stdout.trim();
@@ -397,7 +403,7 @@ function installExact(state, packageName, platformPackage, version, cwd, env) {
     // explicitly as well so the launcher's pinned dependency is always resolvable.
     args = ["install", "--global", `${packageName}@${version}`, `${platformPackage}@${version}`];
   } else {
-    args = ["add", "--global", "--config.optional=true", `${packageName}@${version}`];
+    args = ["add", "--global", "--ignore-workspace", "--config.optional=true", `${packageName}@${version}`];
   }
   return run(state.manager, args, { cwd, env });
 }

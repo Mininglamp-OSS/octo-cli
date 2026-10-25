@@ -154,7 +154,7 @@ func skipValidation(cmd *cobra.Command) bool {
 	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "version", "help", "schema", "config", "completion", "skills", "sheet-cell", "upgrade", "":
+		case "version", "help", "schema", "config", "completion", "skills", "sheet-cell", "":
 			return true
 		case "auth":
 			// Only the top-level `octo-cli auth` is credential-free. Nested
@@ -172,7 +172,7 @@ func skipValidation(cmd *cobra.Command) bool {
 // formatter: built-in help/completion commands and annotated service parents
 // or groups when they have no arguments and render help.
 func skipOutputPreflight(cmd *cobra.Command, args []string) bool {
-	if len(args) == 0 && cmd.Annotations["skipValidation"] == "true" {
+	if len(args) == 0 && cmd.HasSubCommands() && cmd.Annotations["skipValidation"] == "true" {
 		return true
 	}
 	for current := cmd; current != nil; current = current.Parent() {

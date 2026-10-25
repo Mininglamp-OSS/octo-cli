@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
@@ -57,6 +59,40 @@ func decodeUpgradeEnvelope(t *testing.T, raw string) upgradePublicEnvelope {
 		t.Fatalf("decode public envelope: %v\n%s", err, raw)
 	}
 	return envelope
+}
+
+func TestUpgrade_CredentialExemptionIsCommandSpecific(t *testing.T) {
+	parent := &cobra.Command{
+		Use:         "service",
+		Annotations: map[string]string{"skipValidation": "true"},
+	}
+	leaf := &cobra.Command{Use: "upgrade"}
+	parent.AddCommand(leaf)
+	if skipValidation(leaf) {
+		t.Error("a service leaf named upgrade must require credentials")
+	}
+	f := newUpgradeTestFactory()
+	if !skipValidation(newUpgradeCmd(f.Factory)) {
+		t.Error("the local upgrade command must remain credential-free")
+	}
+}
+
+func TestUpgrade_CredentialFreeLeafRequiresOutputPreflight(t *testing.T) {
+	leaf := &cobra.Command{
+		Use:         "offline",
+		Annotations: map[string]string{"skipValidation": "true"},
+	}
+	if skipOutputPreflight(leaf, nil) {
+		t.Error("a credential-free leaf must validate output options")
+	}
+	parent := &cobra.Command{
+		Use:         "service",
+		Annotations: map[string]string{"skipValidation": "true"},
+	}
+	parent.AddCommand(leaf)
+	if !skipOutputPreflight(parent, nil) {
+		t.Error("a service group rendering help must skip output preflight")
+	}
 }
 
 func TestUpgrade_DirectGoInvocationReturnsValidationGuidance(t *testing.T) {

@@ -94,42 +94,53 @@ async function registryFixture(tmp) {
   const packages = new Map();
   const tarballs = new Map();
   const requests = [];
+  const conflictingRequests = [];
   let latest = TARGET;
   let nextTag;
-  const server = http.createServer((req, res) => {
-    const pathname = decodeURIComponent(new URL(req.url, "http://fixture.invalid").pathname);
-    requests.push({ path: pathname, authorization: req.headers.authorization });
-    if (req.headers.authorization !== "Bearer fixture-not-a-real-secret") {
-      res.writeHead(401, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "fixture registry requires authentication" }));
-      return;
-    }
-    if (tarballs.has(pathname)) {
-      res.setHeader("content-type", "application/octet-stream");
-      res.end(tarballs.get(pathname));
-      return;
-    }
-    const name = pathname.slice(1);
-    if (!packages.has(name)) {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "fixture package not found" }));
-      return;
-    }
-    const versions = packages.get(name);
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({
-      name,
-      "dist-tags": { latest },
-      time: Object.fromEntries(Object.keys(versions).map((version) => [version, "2020-01-01T00:00:00.000Z"])),
-      versions,
-    }));
+  function createServer(selectedLatest, requestLog, afterPackageMetadata) {
+    return http.createServer((req, res) => {
+      const pathname = decodeURIComponent(new URL(req.url, "http://fixture.invalid").pathname);
+      requestLog.push({ path: pathname, authorization: req.headers.authorization });
+      if (req.headers.authorization !== "Bearer fixture-not-a-real-secret") {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "fixture registry requires authentication" }));
+        return;
+      }
+      if (tarballs.has(pathname)) {
+        res.setHeader("content-type", "application/octet-stream");
+        res.end(tarballs.get(pathname));
+        return;
+      }
+      const name = pathname.slice(1);
+      if (!packages.has(name)) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "fixture package not found" }));
+        return;
+      }
+      const versions = packages.get(name);
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        name,
+        "dist-tags": { latest: selectedLatest() },
+        time: Object.fromEntries(Object.keys(versions).map((version) => [version, "2020-01-01T00:00:00.000Z"])),
+        versions,
+      }));
+      afterPackageMetadata(name);
+    });
+  }
+  const server = createServer(() => latest, requests, (name) => {
     if (name === PACKAGE && nextTag) {
       latest = nextTag;
       nextTag = undefined;
     }
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const conflictingServer = createServer(() => STALE, conflictingRequests, () => {});
+  await Promise.all([
+    new Promise((resolve) => server.listen(0, "127.0.0.1", resolve)),
+    new Promise((resolve) => conflictingServer.listen(0, "127.0.0.1", resolve)),
+  ]);
   const url = `http://127.0.0.1:${server.address().port}/`;
+  const conflictingUrl = `http://127.0.0.1:${conflictingServer.address().port}/`;
   const npm = managerCommand("npm");
   try {
     for (const version of [OLD, TARGET, STALE, UNLAUNCHABLE, MISSING_PLATFORM]) {
@@ -175,14 +186,20 @@ async function registryFixture(tmp) {
       }
     }
   } catch (error) {
-    await new Promise((resolve) => server.close(resolve));
+    await Promise.all([
+      new Promise((resolve) => server.close(resolve)),
+      new Promise((resolve) => conflictingServer.close(resolve)),
+    ]);
     throw error;
   }
   return {
-    url, requests,
+    url, conflictingUrl, requests, conflictingRequests,
     setLatest(value) { latest = value; nextTag = undefined; },
     changeTagAfterLookup(value) { nextTag = value; },
-    close: () => new Promise((resolve) => server.close(resolve)),
+    close: () => Promise.all([
+      new Promise((resolve) => server.close(resolve)),
+      new Promise((resolve) => conflictingServer.close(resolve)),
+    ]),
   };
 }
 
@@ -222,7 +239,9 @@ async function globalInstall(tmp, name, registry, options = {}) {
     }
     command = path.join(binDir, process.platform === "win32" ? "octo-cli.exe" : "octo-cli");
   } else {
-    env.PNPM_HOME = path.join(home, "pnpm home");
+    env.PNPM_HOME = options.pnpmHomeInsideProject
+      ? path.join(project, "pnpm home")
+      : path.join(home, "pnpm home");
     const globalBin = path.join(env.PNPM_HOME, "bin");
     fs.mkdirSync(globalBin, { recursive: true });
     env.PATH = [globalBin, env.PNPM_HOME, env.PATH].join(path.delimiter);
@@ -238,8 +257,12 @@ async function globalInstall(tmp, name, registry, options = {}) {
   // replace the group directory to which its Windows command shim points.
   env.NPM_CONFIG_USERCONFIG = "../.npmrc";
   env.NPM_CONFIG_REGISTRY = "http://127.0.0.1:1/";
+  const handoffTempDir = process.env.OCTO_UPGRADE_TEST_HANDOFF_TMPDIR;
   const run = (args, extraEnv = {}) => {
-    const options = { cwd: project, env: { ...env, ...extraEnv } };
+    const handoffTempEnv = handoffTempDir
+      ? { TMPDIR: handoffTempDir, TMP: handoffTempDir, TEMP: handoffTempDir }
+      : {};
+    const options = { cwd: project, env: { ...env, ...handoffTempEnv, ...extraEnv } };
     if (process.platform === "win32" && command.endsWith(".cmd")) {
       // Fixture arguments are fixed words/flags. Quote the fixture command
       // path, which deliberately includes spaces and an ampersand.
@@ -348,5 +371,49 @@ test("real global installations upgrade through their configured registry", { ti
         assert.ok(!result.stderr.includes("fixture-not-a-real-secret"));
       });
     }
+  }
+  if (selected.includes("pnpm")) {
+    await t.test("pnpm uses the configured scoped registry when TMPDIR is nested under the invoking project", async () => {
+      registry.setLatest(TARGET);
+      const instance = await globalInstall(tmp, "pnpm", registry.url, {
+        id: "pnpm-project-nested-tmpdir",
+        pnpmHomeInsideProject: true,
+      });
+      fs.writeFileSync(path.join(instance.project, "pnpm-workspace.yaml"), "packages: []\n");
+      const conflictingOrigin = new URL(registry.conflictingUrl);
+      fs.writeFileSync(path.join(instance.project, ".npmrc"), [
+        `@mininglamp-oss:registry=${registry.conflictingUrl}`,
+        `//127.0.0.1:${conflictingOrigin.port}/:_authToken=fixture-not-a-real-secret`,
+        "",
+      ].join("\n"));
+      const nestedTemp = path.join(instance.project, "nested", "tmp");
+      fs.mkdirSync(nestedTemp, { recursive: true });
+      const freshCache = path.join(instance.home, "upgrade-cache");
+      const mainRequestStart = registry.requests.length;
+      const conflictingRequestStart = registry.conflictingRequests.length;
+      const result = await instance.run(["upgrade"], {
+        TMPDIR: nestedTemp,
+        TMP: nestedTemp,
+        TEMP: nestedTemp,
+        XDG_CACHE_HOME: freshCache,
+        NPM_CONFIG_CACHE: path.join(instance.home, "upgrade-npm-cache"),
+        npm_config_cache: path.join(instance.home, "upgrade-npm-cache"),
+      });
+      const conflictingMetadataRequests = registry.conflictingRequests.slice(conflictingRequestStart)
+        .filter((request) => request.path === `/${PACKAGE}`);
+      assert.equal(conflictingMetadataRequests.length, 0, "pnpm must not select the project-scoped registry from nested TMPDIR");
+      const mainMetadataRequests = registry.requests.slice(mainRequestStart)
+        .filter((request) => request.path === `/${PACKAGE}`);
+      assert.ok(mainMetadataRequests.some((request) => request.authorization === "Bearer fixture-not-a-real-secret"),
+        "pnpm must resolve metadata through the configured global scoped registry with its existing auth");
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+      assert.deepEqual(JSON.parse(result.stdout).data, {
+        manager: "pnpm", previous_version: OLD, target_version: TARGET, current_version: TARGET, updated: true,
+      });
+
+      const installed = await instance.run(["version"]);
+      assert.equal(installed.status, 0, installed.stderr);
+      assert.equal(JSON.parse(installed.stdout).data.version, TARGET, "the installed binary must match the metadata source");
+    });
   }
 });

@@ -44,7 +44,7 @@
 
 ## Command Structure (12 active domains, 339 embedded operations)
 
-Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `skills`, `sheet-cell`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
 
 > **`matter` is temporarily withheld** (backend API not yet stable). The spec
 > stays embedded — `octo-cli schema matter.*` still introspects it — but the command

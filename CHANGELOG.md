@@ -97,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and platform binary; equal/newer versions are no-ops. Offline `--dry-run`
   reports verified local ownership. The credential-free command preserves
   format/jq output and remains unavailable in Loop task mode.
+  Reporter execution is preflighted in the verified global command directory,
+  supporting `noexec` handoff filesystems. pnpm registry/authentication selection
+  remains project-independent when temporary and global directories lie beneath
+  the invoking project.
 - **`octo-cli api --workspace-id`** — generic passthrough requests can now send
   explicit workspace context through the `X-Workspace-ID` header.
 - **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and

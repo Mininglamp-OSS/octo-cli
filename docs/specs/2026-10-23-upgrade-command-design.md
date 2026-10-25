@@ -157,7 +157,7 @@ using the same manager, environment and global configuration context:
   the installed pnpm release.
 
 Do not implement a `.npmrc`/TOML parser or an independent registry HTTP client.
-Do not modify package-manager configuration or replace a failed mirror with
+Do not modify existing package-manager configuration or replace a failed mirror with
 another source. No GitHub/API availability check is required for this update path.
 Do not expose credentials in commands, output or errors.
 
@@ -167,6 +167,11 @@ update. Preserve the meaning of explicit relative configuration paths when
 establishing that context. Global directory settings and registry lookup must
 agree with the context used for installation. This does not promise identical
 configuration precedence across managers: each manager remains authoritative.
+
+The private context contains its own package manifest and empty project `.npmrc`.
+pnpm metadata lookup and global installation both use `--ignore-workspace`.
+User/global registry and authentication files remain native configuration sources;
+no existing configuration file is rewritten.
 
 Resolve `latest` through the selected manager and require a stable SemVer
 release. Compare SemVer precedence against the installed package version. An
@@ -210,14 +215,20 @@ public output contract. Launcher/Go preparation and result handoff is private,
 local and separate from stdout. Without valid launcher ownership context, a
 direct invocation of the Go executable cannot initiate a global installation.
 
-The launcher retains a temporary copy of the previous Go executable for final
-reporting, loaded outside the package being replaced. The initial Go process
-exits before installation; the retained reporter starts only afterward and
-applies the original format/jq controls to the private result. Verification
-separately executes the newly installed platform binary. The temporary copy is
-removed after reporting and is not an installation rollback mechanism.
+Before installation, the launcher retains a copy of the previous Go executable in
+a private directory beneath the verified global command's bin directory and runs
+a version preflight there. The initial Go process has already exited. Installation
+starts only after the retained copy is executable. The retained reporter starts
+after installation and applies the original format/jq controls to the private
+result. Verification separately executes the newly installed platform binary.
+Dry runs, version no-ops and preparation failures use the original executable.
+The handoff temporary directory contains data only and may be mounted `noexec`.
+The retained copy is removed after reporting and is not a rollback mechanism.
 Irrecoverable launcher failures emit the same safe stderr error envelope
 directly, without echoing native exceptions.
+Unsupported platforms and missing platform dependencies are reported as
+`UPGRADE_UNSUPPORTED_PLATFORM` and `UPGRADE_PLATFORM_DEPENDENCY_MISSING`
+respectively, with validation exit code 2 and source-build or reinstall guidance.
 
 The launcher lifecycle must preserve existing format/jq behavior and one final
 public result, including an error envelope if the new executable cannot start.
@@ -326,8 +337,9 @@ Implementation boundaries:
   Go request/report stages.
 - `npm/bin/octo-cli.js` coordinates process exit, the retained reporter and
   cleanup; `npm/lib/` owns package-manager metadata, version selection and
-  verification. Helpers execute from the private handoff directory, preserving
-  explicitly relative configuration-file paths.
+  verification. Helpers execute from a self-contained private handoff context,
+  preserving explicitly relative configuration-file paths and excluding ancestor
+  project/workspace registry settings.
   Post-install dependency resolution uses the freshly resolved physical main
   manifest, matching Node's launcher behavior through pnpm virtual-store links.
   On Windows, ownership canonicalization expands native short-path and

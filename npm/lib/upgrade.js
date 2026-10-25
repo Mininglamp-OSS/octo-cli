@@ -330,6 +330,9 @@ function perform(options) {
     env: cleanEnv,
     current: { ...current, mainPackagePath, launcherPath: canonicalLauncher },
   };
+  fs.writeFileSync(path.join(context.cwd, "package.json"), JSON.stringify({ private: true }));
+  fs.writeFileSync(path.join(context.cwd, ".npmrc"), "");
+
   const owner = findOwner(context);
 
   if (request.dry_run) {
@@ -356,6 +359,7 @@ function perform(options) {
   }
 
   ensureStillOwned(owner, context);
+  options.prepareReporter(owner.commandPath);
   stableInstallVersion(owner, target.version, context);
   verifyInstalled(owner, target.version, context);
   return successData(owner, context, target.version);
