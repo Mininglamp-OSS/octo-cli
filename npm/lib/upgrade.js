@@ -232,7 +232,7 @@ function readGoVersion(binaryPath, cwd, env) {
   delete cleanEnvironment.OCTO_CLI_UPGRADE_REPORT;
   let result;
   try {
-    result = spawnSync(binaryPath, ["--format=json", "version"], {
+    result = spawnSync(path.toNamespacedPath(binaryPath), ["--format=json", "version"], {
       cwd,
       env: cleanEnvironment,
       encoding: "utf8",

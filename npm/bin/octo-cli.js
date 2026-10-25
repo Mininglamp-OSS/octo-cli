@@ -149,7 +149,7 @@ function main() {
   const upgradeInvocation = isUpgradeInvocation(args);
   let bin;
   try {
-    bin = resolveBinary();
+    bin = path.toNamespacedPath(resolveBinary());
   } catch (err) {
     if (upgradeInvocation) emitUpgradePlatformFailure(err);
     console.error(err.message);
@@ -200,7 +200,7 @@ function main() {
           prepareReporter(commandPath) {
             reporterDir = fs.mkdtempSync(path.join(path.dirname(commandPath), ".octo-cli-upgrade-"));
             fs.chmodSync(reporterDir, 0o700);
-            const candidatePath = path.join(reporterDir, binaryNameFor(process.platform));
+            const candidatePath = path.toNamespacedPath(path.join(reporterDir, binaryNameFor(process.platform)));
             fs.copyFileSync(bin, candidatePath);
             fs.chmodSync(candidatePath, fs.statSync(bin).mode & 0o777);
 

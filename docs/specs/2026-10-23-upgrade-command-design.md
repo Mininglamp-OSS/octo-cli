@@ -344,6 +344,8 @@ Implementation boundaries:
   manifest, matching Node's launcher behavior through pnpm virtual-store links.
   On Windows, ownership canonicalization expands native short-path and
   extended-length aliases before comparing package and command paths.
+  Native executable launch paths use Windows extended-length form for the
+  current binary, retained reporter and post-install version probe.
 - `npm/scripts/upgrade-e2e.test.js` builds real host executables, prepares release
   packages and exercises isolated global installs against an authenticated local
   registry. `.github/workflows/upgrade-acceptance.yml` runs it on macOS, Linux and
