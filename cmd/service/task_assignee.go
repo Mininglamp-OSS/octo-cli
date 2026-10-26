@@ -341,44 +341,59 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, 
 		if err != nil {
 			return nil, err
 		}
-		if total >= 0 && expected >= 0 && total != expected {
-			return nil, assignmentError("assignee list changed during pagination; retry the lookup")
-		}
-		if total >= 0 {
-			expected = total
-		}
 		if members && total < 0 && len(items) > 0 && items[0].UID == "" && items[0].UserID != "" {
 			// Native Fleet workspaces return one unpaginated member array.
 			return items, nil
 		}
-		fingerprint, err := json.Marshal(items)
-		if err != nil {
-			return nil, fmt.Errorf("encode assignee page: %w", err)
+		if err := trackTaskAssigneePage(items, total, &expected, seen); err != nil {
+			return nil, err
 		}
-		if len(items) > 0 && seen[string(fingerprint)] {
-			return nil, assignmentError("assignee pagination repeated a page")
-		}
-		seen[string(fingerprint)] = true
 		records = append(records, items...)
-		if members && total < 0 {
-			// Project rosters are arrays. Fleet forwards X-Total-Count as a header,
-			// so the body alone signals the last page by returning fewer rows.
-			if len(items) > memberPageSize {
-				return nil, assignmentError("member page exceeded the requested page size")
-			}
-			if len(items) < memberPageSize {
-				return records, nil
-			}
-			continue
+		complete, err := taskAssigneePageComplete(len(records), len(items), total, members, memberPageSize)
+		if err != nil {
+			return nil, err
 		}
-		if len(records) == total {
+		if complete {
 			return records, nil
-		}
-		if len(items) == 0 || len(records) > total {
-			return nil, assignmentError("assignee pagination returned an incomplete or invalid list")
 		}
 	}
 	return nil, assignmentError("assignee list exceeds the lookup page limit; use an explicit type and ID")
+}
+
+func trackTaskAssigneePage(items []taskAssigneeRecord, total int, expected *int, seen map[string]bool) error {
+	if total >= 0 && *expected >= 0 && total != *expected {
+		return assignmentError("assignee list changed during pagination; retry the lookup")
+	}
+	if total >= 0 {
+		*expected = total
+	}
+	fingerprint, err := json.Marshal(items)
+	if err != nil {
+		return fmt.Errorf("encode assignee page: %w", err)
+	}
+	if len(items) > 0 && seen[string(fingerprint)] {
+		return assignmentError("assignee pagination repeated a page")
+	}
+	seen[string(fingerprint)] = true
+	return nil
+}
+
+func taskAssigneePageComplete(recordCount, itemCount, total int, members bool, pageSize int) (bool, error) {
+	if members && total < 0 {
+		// Project rosters are arrays. Fleet forwards X-Total-Count as a header,
+		// so the body alone signals the last page by returning fewer rows.
+		if itemCount > pageSize {
+			return false, assignmentError("member page exceeded the requested page size")
+		}
+		return itemCount < pageSize, nil
+	}
+	if recordCount == total {
+		return true, nil
+	}
+	if itemCount == 0 || recordCount > total {
+		return false, assignmentError("assignee pagination returned an incomplete or invalid list")
+	}
+	return false, nil
 }
 
 func decodeTaskAssigneePage(body []byte) ([]taskAssigneeRecord, int, error) {
