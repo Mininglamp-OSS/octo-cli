@@ -71,6 +71,13 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if verr != nil {
 		return emitAndReturn(f, verr)
 	}
+	// A Workspace path flag and its binding header share one selector. Resolve
+	// both from the same value so Fleet can authorize before route dispatch.
+	headers = bindWorkspacePathHeader(rt, pathValues, headers)
+	if err := applyTaskAssigneeQuery(cobraCmd, f, rt, q, headers); err != nil {
+		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
+		return err
+	}
 
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
@@ -100,15 +107,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
-	if d.Multipart {
-		raw, ct, err := buildMultipartBody(cobraCmd, rt)
-		if err != nil {
-			_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
-			return err
-		}
-		req.RawBody = raw
-		req.ContentType = ct
-	} else if err := attachJSONBody(f, cobraCmd, rt, &req); err != nil {
+	if err := attachRequestBody(f, cobraCmd, rt, &req); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
@@ -136,6 +135,9 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 	if err := addPositionalQueryValues(q, rt, positionalQueryValues); err != nil {
 		return nil, nil, err
 	}
+	if err := normalizeWorkspaceMemberPagination(rt, q); err != nil {
+		return nil, nil, err
+	}
 	headers, err := buildHeaders(cobraCmd, rt)
 	if err != nil {
 		return nil, nil, err
@@ -146,6 +148,58 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 	return q, headers, nil
 }
 
+// Fleet's Project member route accepts page/page_size. Keep the older CLI
+// limit/offset flags only when their offset names an exact page boundary.
+func normalizeWorkspaceMemberPagination(rt *operationRuntime, q url.Values) *output.ExitError {
+	if rt.detail.ID != "workspace.member.list" {
+		return nil
+	}
+	pageSize, err := workspaceMemberPageSize(q)
+	if err != nil {
+		return err
+	}
+	if !q.Has("offset") {
+		return nil
+	}
+	if q.Has("page") {
+		return output.ErrValidation("--offset and --page cannot be combined", "use one page selector")
+	}
+	offset, parseErr := strconv.Atoi(q.Get("offset"))
+	if parseErr != nil || offset < 0 || offset%pageSize != 0 {
+		return output.ErrValidation("--offset must be a nonnegative multiple of the page size", "use --page for arbitrary Project pages")
+	}
+	// Pin the page size used for the offset calculation on the wire too.
+	if !q.Has("page_size") {
+		q.Set("page_size", strconv.Itoa(pageSize))
+	}
+	q.Set("page", strconv.Itoa(offset/pageSize+1))
+	q.Del("offset")
+	return nil
+}
+
+func workspaceMemberPageSize(q url.Values) (int, *output.ExitError) {
+	if q.Has("limit") && q.Has("page_size") {
+		return 0, output.ErrValidation("--limit and --page-size cannot be combined", "use one page-size selector")
+	}
+	pageSize := 50
+	if raw := q.Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return 0, output.ErrValidation("--limit must be between 1 and 200", "choose a valid Project member page size")
+		}
+		pageSize = value
+		q.Set("page_size", raw)
+		q.Del("limit")
+	} else if raw := q.Get("page_size"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return 0, output.ErrValidation("--page-size must be between 1 and 200", "choose a valid Project member page size")
+		}
+		pageSize = value
+	}
+	return pageSize, nil
+}
+
 // emitAndReturn emits a validation failure and returns it, which is the shape every
 // pre-flight check in runOperation shares. Factored out so adding a check does not add
 // another three-line block to a function already at the complexity limit.
@@ -154,9 +208,20 @@ func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
 	return err
 }
 
-// attachJSONBody resolves the JSON body, applies pre-send checks, and collects
-// body secrets. Kept separate from runOperation so request assembly reads as
-// one sequence of steps.
+// attachRequestBody selects the multipart or JSON encoder.
+func attachRequestBody(f *cmdutil.Factory, cmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
+	if !rt.detail.Multipart {
+		return attachJSONBody(f, cmd, rt, req)
+	}
+	raw, contentType, err := buildMultipartBody(cmd, rt)
+	if err != nil {
+		return err
+	}
+	req.RawBody, req.ContentType = raw, contentType
+	return nil
+}
+
+// attachJSONBody resolves and validates JSON, then collects declared secrets.
 func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
 	body, err := resolveBody(f, cobraCmd, rt)
 	if err != nil {
@@ -571,6 +636,21 @@ func queryItemEnum(d *registry.OperationDetail, apiName string) []any {
 	return nil
 }
 
+func bindWorkspacePathHeader(rt *operationRuntime, pathValues []string, headers map[string]string) map[string]string {
+	if !rt.pathFlagNames["workspace-id"] || findParam(rt.detail, "X-Workspace-ID", "header") == nil {
+		return headers
+	}
+	for i, name := range rt.pathParams {
+		if name == "workspace_id" {
+			if headers == nil {
+				headers = map[string]string{}
+			}
+			headers["X-Workspace-ID"] = pathValues[i]
+		}
+	}
+	return headers
+}
+
 // buildHeaders assembles the per-request headers from spec-declared header
 // flags the user explicitly set. Returns nil when none were set, so an omitted
 // optional header stays absent from the wire.
@@ -621,10 +701,39 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		return nil, nil
 	}
 
+	base, err := readJSONBodyInput(f, rt.bodyData)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := applyBodyFlags(cobraCmd, rt, base); err != nil {
+		return nil, err
+	}
+	if err := applyTaskAssigneeBody(cobraCmd, f, rt, base); err != nil {
+		return nil, err
+	}
+	if err := applyGeneratedIdempotencyKey(rt, base); err != nil {
+		return nil, err
+	}
+
+	if err := validateRequiredBodyFields(rt, base); err != nil {
+		return nil, err
+	}
+	if err := validateBodyVariants(rt, base); err != nil {
+		return nil, err
+	}
+
+	if len(base) == 0 {
+		return nil, nil
+	}
+	return base, nil
+}
+
+func readJSONBodyInput(f *cmdutil.Factory, input *string) (map[string]any, error) {
 	base := map[string]any{}
 
-	if rt.bodyData != nil && *rt.bodyData != "" {
-		raw, err := cmdutil.ParseInput(f, *rt.bodyData)
+	if input != nil && *input != "" {
+		raw, err := cmdutil.ParseInput(f, *input)
 		if err != nil {
 			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err), "pass inline JSON, @file, or @-")
 		}
@@ -666,23 +775,6 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		}
 	}
 
-	if err := applyBodyFlags(cobraCmd, rt, base); err != nil {
-		return nil, err
-	}
-	if err := applyGeneratedIdempotencyKey(rt, base); err != nil {
-		return nil, err
-	}
-
-	if err := validateRequiredBodyFields(rt, base); err != nil {
-		return nil, err
-	}
-	if err := validateBodyVariants(rt, base); err != nil {
-		return nil, err
-	}
-
-	if len(base) == 0 {
-		return nil, nil
-	}
 	return base, nil
 }
 

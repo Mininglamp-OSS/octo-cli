@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discovery; document current conflict, search, event, thread, upload-policy,
   registration and dependency-visibility semantics. Docs search advertises
   `html_ppt`; member reads describe reader access and nullable grant attribution.
+- **Loop task assignment** — restore Multica-style `task assign --to/--to-id/--unassign`
+  and `--assignee` on task create/update/list. Infer actor types from complete
+  workspace member, expert and expert-team lists; preserve Project member UIDs,
+  reject ambiguous/incomplete lookups, and allow explicit JSON null to clear an
+  assignee. Existing typed flags remain available for offline dry-runs.
 - **Service help and request metadata** — generated long help retains operation
   descriptions; parameter help and current Docs, HTML, messaging, Marketplace,
   Loop and Drive request fields match the embedded service contracts.
@@ -89,6 +94,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Project member listing (breaking)** — `loop workspace member list` reads
+  `/fleet/api/v1/workspaces/{workspace_id}/members`. Fleet verifies Project
+  access using its Bot/verified-owner policy and forwards the internally
+  authenticated Server response. Supply the Project ID positionally or with
+  `--workspace-id`; pagination uses `--page` / `--page-size`, with aligned
+  `--limit` / `--offset` compatibility aliases. Project records in `.data[]`
+  retain Octo `uid`, `name`, numeric `role` and `robot`; no total count is
+  exposed in the CLI output. This read no longer requires `--obo`, an explicit
+  `--space-id`, or a Server OBO grant.
 - **Loop task token isolation (breaking)** — task mode now consumes only
   `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or
   falls back to profiles. Pair daemon-launched tasks with daemon v1.2.1 or later,

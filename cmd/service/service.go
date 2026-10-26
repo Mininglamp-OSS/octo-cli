@@ -44,6 +44,9 @@ func RegisterServiceCommands(parent *cobra.Command, f *cmdutil.Factory) {
 		if svc == "matter" {
 			attachMatterStatusAliases(svcCmd, f)
 		}
+		if svc == "loop" {
+			attachTaskAssignAlias(svcCmd, f)
+		}
 	}
 }
 
@@ -203,6 +206,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 	registerHeaderFlags(cmd, rt, d)
 
 	registerBodyFlags(cmd, rt, d)
+	registerTaskAssigneeFlags(cmd, d)
 
 	if d.Pagination != nil {
 		var pageAll bool
@@ -270,6 +274,9 @@ func buildLongDesc(d *registry.OperationDetail, rt *operationRuntime) string {
 // for use in help examples ("drive share revoke").
 func commandPathFor(d *registry.OperationDetail) string {
 	segs := strings.Split(d.ID, ".")
+	if d.Service != "" && segs[0] != d.Service {
+		segs = append([]string{d.Service}, segs...)
+	}
 	for i := range segs {
 		segs[i] = strings.ReplaceAll(segs[i], "_", "-")
 	}

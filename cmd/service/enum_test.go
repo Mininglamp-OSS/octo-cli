@@ -40,6 +40,7 @@ func TestEnum_CanonicalComparison(t *testing.T) {
 		{"uint64", uint64(1), intEnum},
 		{"string", "download", strEnum},
 		{"bool", true, boolEnum},
+		{"explicitly nullable enum", nil, []any{"member", nil}},
 		{"empty enum accepts anything", "whatever", nil},
 	}
 	for _, tc := range allowed {
@@ -65,6 +66,7 @@ func TestEnum_CanonicalComparison(t *testing.T) {
 		{"string outside the set", "edit", strEnum},
 		{"empty string", "", strEnum},
 		{"bool outside the set", false, boolEnum},
+		{"literal null text is not JSON null", "null", []any{"member", nil}},
 	}
 	for _, tc := range rejected {
 		t.Run("reject/"+tc.name, func(t *testing.T) {

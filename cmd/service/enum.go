@@ -40,12 +40,8 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 	if len(allowed) == 0 {
 		return nil
 	}
-	if value == nil {
-		for _, candidate := range allowed {
-			if candidate == nil {
-				return nil
-			}
-		}
+	if value == nil && enumAllowsNull(allowed) {
+		return nil
 	}
 	got, ok := canonicalEnumValue(value)
 	if !ok {
@@ -61,6 +57,15 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 		}
 	}
 	return enumError(label, value, allowed)
+}
+
+func enumAllowsNull(allowed []any) bool {
+	for _, value := range allowed {
+		if value == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // jsonKindName names the JSON kind of a rejected value, so the message an agent reads talks
@@ -136,6 +141,9 @@ func specNumberText(f float64) string {
 // formatEnumValue renders the rejected value for the error message: strings
 // quoted so an empty or space-padded value is visible, everything else bare.
 func formatEnumValue(v any) string {
+	if v == nil {
+		return "null"
+	}
 	if s, ok := v.(string); ok {
 		return strconv.Quote(s)
 	}

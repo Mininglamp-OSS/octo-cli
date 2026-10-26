@@ -49,20 +49,56 @@ Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.
 
-All Loop commands use the same gateway as every other domain. The embedded
-paths include the Fleet module namespace, so requests resolve under
-`$OCTO_API_BASE_URL/fleet/api/v1/*`.
+All Loop commands use the same gateway as every other domain. Fleet operations
+resolve under `$OCTO_API_BASE_URL/fleet/api/v1/*`. Project member listing also
+uses Fleet: its existing authorization checks the Bot's Project membership,
+then its verified owner's current membership when owner fallback is enabled.
+Fleet reads the Server internal member list with a service credential and
+forwards the response. Callers do not supply an owner UID or an OBO grant.
 
 ## Workspace selector
 
-Workspace-scoped Loop commands require the `--workspace-id <uuid>` flag (sent as
+Workspace-scoped Fleet commands require the `--workspace-id <uuid>` flag (sent as
 the `X-Workspace-ID` header). Use the Workspace UUID, not its Web slug. There is no environment fallback for it — pass it
 explicitly. Discover available workspaces first:
 
 ```bash
 octo-cli loop workspace list
-octo-cli loop workspace member list <workspace-id> --workspace-id <workspace-id>
 ```
+
+### Project members
+
+The existing member-list command reads the Octo Project roster. Its Project
+UUID is the same identity used by Loop as the workspace ID. Supply it either
+positionally or through `--workspace-id`, once:
+
+```bash
+octo-cli loop workspace member list <project-id>
+octo-cli loop workspace member list --workspace-id <project-id> --page 2 --page-size 50
+octo-cli loop workspace member list --workspace-id <project-id> --limit 50 --offset 50
+octo-cli loop expert list --workspace-id <project-id>
+octo-cli loop expert-team list --workspace-id <project-id>
+```
+
+Fleet resolves the Project's Space and verifies the request against that scope.
+Its configured owner fallback uses the authenticated Bot owner's identity;
+callers cannot select another human identity. No `--obo` flag is needed.
+
+Read Project members from `.data[]`. Each member contains `uid`, `name`, `role`
+(`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
+`uid` as opaque, case-sensitive text; pass a person's UID as `task assign --to-id`
+or use the explicit `--assignee-octo-uid` field. Member listings include Bot
+seats; consumers choosing a human assignee must check `robot == 0`.
+
+Pagination uses `--page` (one-based, default 1) and `--page-size` (default 50,
+maximum 200). The Project roster response is an array, and Fleet forwards the
+upstream total in `X-Total-Count`; CLI JSON output currently shows the array but
+not that header. Request subsequent pages until one returns fewer members than
+the requested page size. Authorization failures are returned directly.
+The older `--limit` / `--offset` flags remain available; the CLI converts them
+to page parameters when the offset is an exact multiple of the page size. With
+`--offset` alone, it explicitly sends the default page size of 50.
+Unaligned offsets fail locally because Fleet does not support partial pages.
 
 ## Discover and execute operations
 
@@ -256,16 +292,56 @@ a lifecycle transition.
 ```bash
 octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "@Alice" --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
+octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
+octo-cli loop task update <task-id> --workspace-id <ws> --assignee-id <actor-id>
+octo-cli loop task list --workspace-id <ws> --assignee "Alice"
+octo-cli loop task list --workspace-id <ws> --assignee-id <fleet-actor-uuid>
+octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid>
+```
+
+These Multica-style selectors infer the member/expert/expert-team type by making
+at most 10 paginated requests per workspace list (`page_size=100`). A larger
+paginated roster stops automatic lookup; use explicit typed assignment fields
+instead. `--to` and `--assignee` match names only, removing a leading `@` or
+`＠` before matching. Names match case-insensitively: an exact name wins over a
+substring; an ambiguous name fails
+with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
+full ID if the stored name itself begins with one of those characters.
+`--to-id` and untyped `--assignee-id` on create/update require a complete, exact
+ID.
+`task list --assignee-id` passes a Fleet actor UUID directly to Fleet, including
+for historical assignees; use `--assignee-octo-uid` to filter by Project member
+UID. Project member UIDs are case-sensitive; native members use their Fleet user
+UUID. Bot members and archived actors are excluded from name/ID resolution for
+writes. A failed or incomplete list stops assignment.
+The selected credential and workspace apply to every lookup and write; Fleet
+continues to enforce authorization. Assignment can start or cancel executions.
+
+`--to`, `--to-id` and `--unassign` are mutually exclusive. `--assignee` cannot be
+mixed with explicit assignee fields or filters. Creating/updating with an
+explicit type keeps the original direct API behavior:
+
+```bash
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <uuid> --assignee-type expert   # or expert_team, member
 octo-cli loop task update <task-id> --workspace-id <ws> \
-  --assignee-octo-uid <member-octo-uid> --assignee-type member
+  --assignee-octo-uid <member-octo-uid> --assignee-type member --suppress-run
+octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assignee
 ```
 
 `assignee_octo_uid` is for member assignment in an authorized Octo Project. The
 backend requires it to be paired with `assignee_type=member` and forbids
 combining it with `assignee_id`; project authorization remains backend-enforced.
 `assignee_id` normally means a Fleet actor UUID.
+
+`task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
+The same body is accepted through
+`task update --data '{"assignee_type":null,"assignee_id":null}'`. Dry-runs perform no
+assignee lookup: use explicit typed fields or `--unassign` for an offline preview.
 
 Task create/update also accept `--parent-task-id`, `--start-date`,
 `--due-date`, and comma-separated `--attachment-ids`. On update, `--position`
@@ -280,7 +356,7 @@ after the work is accepted or no review is required; `done` and `cancelled` are
 terminal. Moving out of `backlog` to an active status can trigger the assigned
 expert to run.
 
-Task update also accepts `--suppress-run`, which suppresses the run created by
+Task update and assign also accept `--suppress-run`, which suppresses the run created by
 that write. It does not stop existing executions from being cancelled when an
 assignee changes. `--handoff-note` supplies optional context to Fleet's handoff
 path. Assignment pairing, authorization, and exact run-trigger semantics remain
@@ -382,7 +458,7 @@ mention:
 ```bash
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
-octo-cli loop workspace member list <ws> --workspace-id <ws>
+octo-cli loop workspace member list <ws>
 ```
 
 Do not mention an expert or expert-team just to say thanks, confirm, or wrap up

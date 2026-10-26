@@ -3118,8 +3118,8 @@
         }
       ],
       "get": {
-        "summary": "List workspace members",
-        "description": "List workspace members in the authenticated workspace.",
+        "summary": "List Octo Project members",
+        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Use page/page_size pagination; CLI JSON exposes the member array as .data[] but does not expose the upstream X-Total-Count header, so continue until a page is shorter than page_size. Legacy limit/offset flags are translated when offset is a multiple of the page size. Legacy workspaces retain their native Fleet member array.",
         "tags": [
           "workspaces"
         ],
@@ -3129,16 +3129,52 @@
             "name": "workspace_id",
             "in": "path",
             "required": true,
+            "description": "Octo Project UUID, shared with the Loop workspace identity.",
+            "x-octo-flag": "workspace-id",
             "schema": {
               "type": "string",
               "format": "uuid"
             }
           },
           {
-            "$ref": "#/components/parameters/Page"
+            "name": "page",
+            "in": "query",
+            "description": "One-based member page number.",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
           },
           {
-            "$ref": "#/components/parameters/PageSize"
+            "name": "page_size",
+            "in": "query",
+            "description": "Maximum Project members returned per page (1-200).",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Compatibility alias for --page-size; translated before the request.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Compatibility offset; must be a multiple of the effective page size (default 50) and cannot be combined with --page. The CLI sends that page size with the translated page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -3161,12 +3197,54 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "$ref": "#/components/responses/Collection"
+            "description": "Member array forwarded by Fleet after authorization. Project member total is in X-Total-Count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "uid": {
+                        "type": "string",
+                        "description": "Opaque, case-sensitive Octo user UID. Use assignee_octo_uid when assigning a human Project member."
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "integer",
+                        "enum": [0, 1, 2],
+                        "description": "Project role: 0 common member, 1 admin, 2 owner."
+                      },
+                      "robot": {
+                        "type": "integer",
+                        "enum": [0, 1],
+                        "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "Legacy workspace membership ID."
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "description": "Legacy Fleet user ID."
+                      },
+                      "octo_uid": {
+                        "type": "string",
+                        "description": "Legacy user's Octo UID when available."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "x-octo-risk": "read"
       }
     },
+
     "/fleet/api/v1/labels": {
       "get": {
         "summary": "List labels",
@@ -7431,16 +7509,23 @@
             "description": "Parent task UUID; explicit null in --data clears the parent."
           },
           "assignee_type": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "enum": [
               "expert",
               "expert_team",
-              "member"
+              "member",
+              null
             ],
-            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid."
+            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid; to clear, pass --data '{\"assignee_type\":null,\"assignee_id\":null}' or use task assign --unassign."
           },
           "assignee_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
             "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
           },

@@ -44,13 +44,13 @@
 
 ## Command Structure (12 active domains, 339 embedded operations)
 
-Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `skills`, `sheet-cell`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`.
+Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `skills`, `sheet-cell`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`. `loop task assign` is a CLI alias for the generated `task.update` operation.
 
 > **`matter` is temporarily withheld** (backend API not yet stable). The spec
 > stays embedded — `octo-cli schema matter.*` still introspects it — but the command
 > subtree and the `octo-matter` skill are hidden via the `x-octo-disabled` spec
 > flag (`internal/registry/specs/matter.json`) and the skill's `disabled: true`
-> frontmatter. Flip both off to re-enable. The tree below shows the full surface.
+> frontmatter. Flip both off to re-enable. The tree below highlights the command families.
 
 ```
 octo-cli matter    create | list | get | update | delete        (withheld)
@@ -122,6 +122,13 @@ octo-cli mail      me
                        attachment download
                draft list|create-agent|update|send|delete
 
+octo-cli loop      workspace list|get
+                         member list
+               task create|list|get|update|assign|delete
+               expert list|get|create|update|archive|restore
+               expert-team list|get|create|update|delete
+               # Additional Fleet resources: run `octo-cli loop --help`.
+
 octo-cli auth      login | status | update | logout | list
 octo-cli schema [--list [domain] | <operation-id>]
 octo-cli api <METHOD> <PATH> [--params ...] [--data ...] [--service ...] [--workspace-id <uuid>]
@@ -139,7 +146,7 @@ without registry access. Upgrade requires no Octo credentials.
 
 `octo-cli auth login` stores a bot token (read from a hidden prompt, `--with-token` stdin, or `--token-file` — never argv) under a profile keyed by `--bot-id`/`--profile`. `update` changes non-secret profile settings such as the API base URL without re-entering or rewriting the token, and `--clear-api-base-url` removes the stored origin so the environment or default applies again. `status`/`list` show metadata only (tokens always masked); `logout` removes a profile.
 
-Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`, `octo-mail`) — keep those in sync when command shapes change.
+Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`, `octo-mail`, `octo-loop`) — keep those in sync when command shapes change.
 
 The hand-written drive leaves (`cmd/drive*.go`) are the exception to "everything is generated": `upload file` / `download file` / `share download` are multi-request transfers, `share create` branches on node type, and `share blob-create` / `share access` / `share download` take an argument shape (positional body field, whole share URL) the engine cannot express. They replace the generated leaf of the same name where one exists, so the spec still documents the endpoint for `octo-cli schema`.
 
