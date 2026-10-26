@@ -80,6 +80,10 @@ func applyTaskAssigneeBody(cmd *cobra.Command, f *cmdutil.Factory, rt *operation
 	if err != nil || !resolve {
 		return err
 	}
+	// Task create has no positional workspace; update/assign take only a task
+	// ID positionally. All three require --workspace-id for X-Workspace-ID, so
+	// the lookup reads the same flag as the task request. The positional Project
+	// ID supported by workspace.member.list does not apply to these commands.
 	headers, verr := buildHeaders(cmd, rt)
 	if verr != nil {
 		return verr
