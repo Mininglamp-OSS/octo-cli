@@ -389,7 +389,16 @@ type OperationDetail struct {
 	// sending it when the credential carries a space).
 	SpaceHeaderSet bool `json:"space_header_set,omitempty"`
 	Multipart      bool `json:"multipart,omitempty"`
-	BinaryResponse bool `json:"binary_response,omitempty"`
+	// RawBody marks an upload whose request body is the file bytes themselves
+	// (x-octo-raw-body), not multipart/form-data and not JSON. The bytes are
+	// read from --file and sent with RawBodyContentType, the single media type
+	// the spec declares for the request body. RawBodyMaxBytes, when positive,
+	// is a local upper bound checked before the request is sent so an
+	// oversized file is refused without buffering it whole.
+	RawBody            bool   `json:"raw_body,omitempty"`
+	RawBodyContentType string `json:"raw_body_content_type,omitempty"`
+	RawBodyMaxBytes    int64  `json:"raw_body_max_bytes,omitempty"`
+	BinaryResponse     bool   `json:"binary_response,omitempty"`
 	// BinaryBody is true only when the operation delivers a binary body inline
 	// on a 2xx success (declared via a 2xx response with a content body), so
 	// the CLI can write those bytes to disk with --output/-o. It is false for
@@ -565,6 +574,13 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	_, d.SpaceHeaderSet = doc["x-octo-space-header"]
 
 	d.Multipart = boolOf(op["x-octo-multipart"])
+	d.RawBody = boolOf(op["x-octo-raw-body"])
+	if d.RawBody {
+		d.RawBodyContentType = rawBodyContentType(doc, op)
+		if n, ok := op["x-octo-raw-body-max-bytes"].(float64); ok && n > 0 {
+			d.RawBodyMaxBytes = int64(n)
+		}
+	}
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
 	d.RetryMode = stringOf(op["x-octo-retry"])
@@ -761,6 +777,30 @@ func operationRequestBody(doc, op map[string]any) (*SchemaInfo, bool) {
 		return &resolved, required
 	}
 	return nil, required
+}
+
+// rawBodyContentType returns the request media type of an x-octo-raw-body
+// operation: the one key under requestBody.content. A raw upload declares
+// exactly one; anything else falls back to application/octet-stream, which
+// every raw-body route at the pinned backends accepts.
+func rawBodyContentType(doc, op map[string]any) string {
+	body, ok := op["requestBody"].(map[string]any)
+	if !ok {
+		return "application/octet-stream"
+	}
+	if ref := stringOf(body["$ref"]); ref != "" {
+		if body = followComponentRef(doc, ref, "requestBodies"); body == nil {
+			return "application/octet-stream"
+		}
+	}
+	content, ok := body["content"].(map[string]any)
+	if !ok || len(content) != 1 {
+		return "application/octet-stream"
+	}
+	for mt := range content {
+		return mt
+	}
+	return "application/octet-stream"
 }
 
 func extractJSONSchema(body map[string]any) map[string]any {

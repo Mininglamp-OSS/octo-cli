@@ -7,7 +7,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,6 +78,13 @@ type Request struct {
 	// historical describe-only behaviour. A 3xx (redirect-to-URL) response is
 	// never written — its URL is surfaced in the envelope as before.
 	OutputPath string
+	// InlineBinaryLimit, when positive and OutputPath is empty, returns a 2xx
+	// binary body INSIDE the envelope (content_text for valid UTF-8 text media
+	// types, content_base64 otherwise) when it is at most this many bytes, so
+	// a caller with no filesystem destination (the MCP server) can still use
+	// the result. A larger body is described with its size and sha256 and
+	// inline:false. Zero keeps the describe-only behaviour.
+	InlineBinaryLimit int64
 	// SuppressSpaceHeader omits the X-Space-Id header even when the active
 	// credential carries a SpaceID. It is set for operations whose spec declares
 	// x-octo-space-header:false (e.g. the docs bot mount resolves the space
@@ -1065,6 +1075,8 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 					)
 				}
 				env["output"] = req.OutputPath
+			} else if req.InlineBinaryLimit > 0 {
+				inlineBinaryBody(env, respBody, req.InlineBinaryLimit)
 			}
 			return json.Marshal(env)
 		}
@@ -1509,4 +1521,42 @@ func loopAPIUnsupported(service string, status int, body []byte) bool {
 		} `json:"error"`
 	}
 	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
+}
+
+// inlineBinaryBody adds a bounded copy of a 2xx binary body to env. Textual
+// media types that decode as UTF-8 are returned as text; everything else is
+// base64. The sha256 is always present so a caller can verify a body it later
+// fetches another way, and a body over limit is never truncated silently — it
+// is omitted with inline:false and the limit that applied.
+func inlineBinaryBody(env map[string]any, body []byte, limit int64) {
+	sum := sha256.Sum256(body)
+	env["sha256"] = hex.EncodeToString(sum[:])
+	if int64(len(body)) > limit {
+		env["inline"] = false
+		env["inline_limit"] = limit
+		return
+	}
+	env["inline"] = true
+	ct, _ := env["content_type"].(string)
+	if isTextMediaType(ct) && utf8.Valid(body) {
+		env["content_text"] = string(body)
+		return
+	}
+	env["content_base64"] = base64.StdEncoding.EncodeToString(body)
+}
+
+// isTextMediaType reports whether a Content-Type names textual content.
+func isTextMediaType(ct string) bool {
+	mt := strings.ToLower(strings.TrimSpace(ct))
+	if i := strings.IndexByte(mt, ';'); i >= 0 {
+		mt = strings.TrimSpace(mt[:i])
+	}
+	switch {
+	case strings.HasPrefix(mt, "text/"):
+		return true
+	case mt == "application/json", mt == "application/xml", mt == "image/svg+xml",
+		mt == "application/javascript", strings.HasSuffix(mt, "+json"), strings.HasSuffix(mt, "+xml"):
+		return true
+	}
+	return false
 }

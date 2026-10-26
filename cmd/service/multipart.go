@@ -21,7 +21,7 @@ import (
 // (backend uses FormFile("file")). Any promoted body flags the user set are
 // included as form text fields. A pinned descriptor is borrowed from the caller
 // and is never reopened or closed here.
-func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *os.File) (body []byte, contentType string, err error) { //nolint:gocyclo // multipart assembly handles borrowed descriptors, typed fields and I/O failures
+func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *os.File) (body []byte, contentType string, err error) {
 	if rt.filePath == nil || *rt.filePath == "" {
 		return nil, "", output.ErrValidation("--file is required for multipart upload", "pass --file <path>")
 	}

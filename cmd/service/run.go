@@ -107,6 +107,9 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
+	if d.BinaryBody {
+		req.InlineBinaryLimit = f.InlineBinaryLimit
+	}
 	if err := attachRequestBody(f, cobraCmd, rt, &req); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
@@ -208,8 +211,16 @@ func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
 	return err
 }
 
-// attachRequestBody selects the multipart or JSON encoder.
+// attachRequestBody selects the multipart, raw-body or JSON encoder.
 func attachRequestBody(f *cmdutil.Factory, cmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
+	if rt.detail.RawBody {
+		raw, err := buildRawBody(rt, f.MultipartFile)
+		if err != nil {
+			return err
+		}
+		req.RawBody, req.ContentType = raw, rt.detail.RawBodyContentType
+		return nil
+	}
 	if !rt.detail.Multipart {
 		return attachJSONBody(f, cmd, rt, req)
 	}
@@ -911,9 +922,9 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if rt.detail == nil || rt.detail.RequestBody == nil {
 		return nil
 	}
-	// Multipart bodies are assembled separately from base. Their required
-	// binary part is validated by buildMultipartBody.
-	if rt.detail.Multipart {
+	// Multipart and raw-body uploads are assembled separately from base. Their
+	// required binary part is validated by buildMultipartBody / buildRawBody.
+	if rt.detail.Multipart || rt.detail.RawBody {
 		return nil
 	}
 	enforcePublicAPIConstraints := rt.detail.Service == "loop" || rt.detail.StrictRequestSchema

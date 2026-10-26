@@ -55,6 +55,18 @@ type Factory struct {
 	// The caller closes it after execution; ordinary CLI calls leave it nil.
 	MultipartFile *os.File
 
+	// InlineBinaryLimit, when positive, asks binary-response operations run
+	// without --output to return bodies up to this many bytes inside the
+	// envelope (see client.Request.InlineBinaryLimit). The MCP server sets it;
+	// ordinary CLI calls leave it zero and keep the describe-only behaviour.
+	InlineBinaryLimit int64
+
+	// GeneratedDriveShareLeaves keeps the spec-generated `drive share
+	// blob-create|access|download` leaves instead of replacing them with the
+	// hand-written composites. The MCP server sets it so those operations are
+	// callable with exactly the schema get_skill/describe_op publishes.
+	GeneratedDriveShareLeaves bool
+
 	ConfigFunc         func() (*config.Config, error)
 	CredentialFunc     func() (*credential.BotCredential, error)
 	ClientFunc         func() (*client.Client, error)
