@@ -1014,12 +1014,31 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
-	// The whole response body is buffered here. Every downstream branch needs
-	// it fully in memory anyway — JSON parsing, backend-error parsing, and the
-	// binary describe envelope (which reports size = len(body)) all consume the
-	// complete payload. Board PNG/SVG exports are bounded and small, so a size
-	// cap / streaming-to-temp path would add complexity without a real payoff
-	// today; deferred until an operation returns genuinely large bodies.
+	// A 2xx binary body returned inline (the MCP server, which has no output
+	// path) is streamed: only up to InlineBinaryLimit+1 bytes are kept, while
+	// the size and sha256 cover the whole body. A large export therefore never
+	// sits in memory just to be reported as inline:false.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && req.BinaryResponse && req.OutputPath == "" && req.InlineBinaryLimit > 0 {
+		head, size, sum, err := readBoundedBody(resp.Body, req.InlineBinaryLimit)
+		if err != nil {
+			return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
+		}
+		c.verbosef("← %d (%d bytes)", resp.StatusCode, size)
+		env := map[string]any{
+			"status":       resp.StatusCode,
+			"content_type": resp.Header.Get("Content-Type"),
+			"size":         size,
+		}
+		inlineBinaryEnvelope(env, head, size, sum, req.InlineBinaryLimit)
+		return json.Marshal(env)
+	}
+
+	// Every other response body is buffered whole. Every downstream branch needs
+	// it fully in memory anyway — JSON parsing, backend-error parsing, the
+	// binary describe envelope (which reports size = len(body)) and the atomic
+	// --output write all consume the complete payload. The CLI --output path
+	// still buffers a large export (docs.ppt.export allows up to 160 MiB);
+	// streaming it to the temp file is a separate change.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
@@ -1075,8 +1094,6 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 					)
 				}
 				env["output"] = req.OutputPath
-			} else if req.InlineBinaryLimit > 0 {
-				inlineBinaryBody(env, respBody, req.InlineBinaryLimit)
 			}
 			return json.Marshal(env)
 		}
@@ -1523,26 +1540,65 @@ func loopAPIUnsupported(service string, status int, body []byte) bool {
 	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
 }
 
-// inlineBinaryBody adds a bounded copy of a 2xx binary body to env. Textual
+// readBoundedBody reads r to EOF, keeping at most limit+1 bytes. It returns
+// the kept prefix, the total size and the sha256 of the whole body, so a
+// caller can tell an over-limit body apart without buffering it.
+func readBoundedBody(r io.Reader, limit int64) (head []byte, size int64, sum []byte, err error) {
+	h := sha256.New()
+	var buf bytes.Buffer
+	n, err := io.Copy(io.MultiWriter(h, &capWriter{buf: &buf, max: limit + 1}), r)
+	if err != nil {
+		return nil, n, nil, err
+	}
+	return buf.Bytes(), n, h.Sum(nil), nil
+}
+
+// capWriter keeps the first max bytes written to it and silently drops the
+// rest, so it never fails the io.MultiWriter it sits in.
+type capWriter struct {
+	buf *bytes.Buffer
+	max int64
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if room := w.max - int64(w.buf.Len()); room > 0 {
+		if int64(len(p)) > room {
+			w.buf.Write(p[:room])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+// InlineBinaryEnvelope adds a bounded copy of body to env under the same rules
+// the client applies to a 2xx binary response (see Request.InlineBinaryLimit).
+// It is shared by composite commands that assemble their result locally.
+func InlineBinaryEnvelope(env map[string]any, body []byte, limit int64) {
+	sum := sha256.Sum256(body)
+	inlineBinaryEnvelope(env, body, int64(len(body)), sum[:], limit)
+}
+
+// inlineBinaryEnvelope adds a bounded copy of a binary body to env. Textual
 // media types that decode as UTF-8 are returned as text; everything else is
 // base64. The sha256 is always present so a caller can verify a body it later
 // fetches another way, and a body over limit is never truncated silently — it
-// is omitted with inline:false and the limit that applied.
-func inlineBinaryBody(env map[string]any, body []byte, limit int64) {
-	sum := sha256.Sum256(body)
-	env["sha256"] = hex.EncodeToString(sum[:])
-	if int64(len(body)) > limit {
+// is omitted with inline:false and the limit that applied. head holds the
+// body, or at least its first limit+1 bytes when size exceeds limit.
+func inlineBinaryEnvelope(env map[string]any, head []byte, size int64, sum []byte, limit int64) {
+	env["sha256"] = hex.EncodeToString(sum)
+	if size > limit {
 		env["inline"] = false
 		env["inline_limit"] = limit
 		return
 	}
 	env["inline"] = true
 	ct, _ := env["content_type"].(string)
-	if isTextMediaType(ct) && utf8.Valid(body) {
-		env["content_text"] = string(body)
+	if isTextMediaType(ct) && utf8.Valid(head) {
+		env["content_text"] = string(head)
 		return
 	}
-	env["content_base64"] = base64.StdEncoding.EncodeToString(body)
+	env["content_base64"] = base64.StdEncoding.EncodeToString(head)
 }
 
 // isTextMediaType reports whether a Content-Type names textual content.

@@ -566,3 +566,85 @@ func mustReadTestFile(t *testing.T, path string) []byte {
 	}
 	return b
 }
+
+// XIN-2432: the MCP server has no output path, so it sets InlineBinaryLimit and
+// the portable Excalidraw file comes back inside the envelope instead of
+// failing on the missing --output.
+func TestDocsExcalidrawExportInlineWithoutOutput(t *testing.T) {
+	scene := `{"elements":[{"id":"a","type":"rectangle"},{"id":"b","type":"rectangle","isDeleted":true}],"files":{},"appState":{"gridSize":20,"theme":"dark"},"baseVersion":"BV"}`
+	var paths []string
+	_, capture := sceneTestFactory(t, func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		serveSceneTest(scene)(w, r)
+	})
+	capture.f.InlineBinaryLimit = 1 << 20
+	out, _, err := execRoot(t, capture.f, "docs", "scene", "export", "d1", "--image-format", "excalidraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(paths) != 1 || paths[0] != "/v1/bot/docs/d1/scene" {
+		t.Fatalf("requests = %v, want only the live scene read", paths)
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	d := env.Data
+	if d["inline"] != true || d["content_type"] != "application/json" || d["elements"] != float64(1) || d["baseVersion"] != "BV" {
+		t.Fatalf("envelope = %v", d)
+	}
+	text, _ := d["content_text"].(string)
+	var file map[string]any
+	if err := json.Unmarshal([]byte(text), &file); err != nil {
+		t.Fatalf("inline content is not the Excalidraw JSON: %v\n%s", err, text)
+	}
+	if file["type"] != "excalidraw" || file["version"] != float64(2) || len(file["elements"].([]any)) != 1 {
+		t.Fatalf("file = %v", file)
+	}
+	if appState := file["appState"].(map[string]any); appState["theme"] != nil || appState["gridSize"] != float64(20) {
+		t.Fatalf("appState = %v", appState)
+	}
+	if d["size"] != float64(len(text)) || d["sha256"] == nil {
+		t.Fatalf("size/sha256 = %v/%v, text %d bytes", d["size"], d["sha256"], len(text))
+	}
+
+	// Over the bound the file is described, never truncated.
+	capture.f.Out.Reset()
+	capture.f.InlineBinaryLimit = 8
+	out, _, err = execRoot(t, capture.f, "docs", "scene", "export", "d1", "--image-format", "excalidraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var over struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &over); err != nil {
+		t.Fatal(err)
+	}
+	if over.Data["inline"] != false || over.Data["content_text"] != nil || over.Data["inline_limit"] != float64(8) {
+		t.Fatalf("over-limit envelope = %v", over.Data)
+	}
+}
+
+func TestDocsExcalidrawExportInlineDryRunMakesNoRequest(t *testing.T) {
+	_, capture := sceneTestFactory(t, serveSceneTest(`{"elements":[],"files":{},"baseVersion":"BV"}`))
+	capture.f.InlineBinaryLimit = 1 << 20
+	out, _, err := execRoot(t, capture.f, "--dry-run", "docs", "scene", "export", "d1", "--image-format", "excalidraw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capture.requests != 0 {
+		t.Fatalf("dry-run made %d requests", capture.requests)
+	}
+	var env struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if env.Data["dry_run"] != true || env.Data["image_format"] != "excalidraw" || env.Data["doc_id"] != "d1" {
+		t.Fatalf("dry-run output = %s", out)
+	}
+}
