@@ -35,10 +35,13 @@ func TestTaskAssignmentMulticaStyle(t *testing.T) {
 		body         map[string]any
 	}{
 		{"assign member by name", "PATCH", []string{"assign", "TASK-1", "--to", "Alice"}, map[string]any{"assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
+		{"assign member by mention", "PATCH", []string{"assign", "TASK-1", "--to", "@Alice"}, map[string]any{"assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
 		{"assign expert by ID", "PATCH", []string{"assign", "TASK-1", "--to-id", assignmentExpertID}, map[string]any{"assignee_type": "expert", "assignee_id": assignmentExpertID}},
 		{"assign team by partial name", "PATCH", []string{"assign", "TASK-1", "--to", "Resear"}, map[string]any{"assignee_type": "expert_team", "assignee_id": assignmentTeamID}},
 		{"create by name", "POST", []string{"create", "--title", "Example", "--assignee", "Alice"}, map[string]any{"title": "Example", "assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
+		{"create by full-width mention", "POST", []string{"create", "--title", "Example", "--assignee", "＠Alice"}, map[string]any{"title": "Example", "assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
 		{"update by name", "PATCH", []string{"update", "TASK-1", "--assignee", "Research"}, map[string]any{"assignee_type": "expert_team", "assignee_id": assignmentTeamID}},
+		{"update by mention", "PATCH", []string{"update", "TASK-1", "--assignee", "@Research"}, map[string]any{"assignee_type": "expert_team", "assignee_id": assignmentTeamID}},
 		{"update untyped ID", "PATCH", []string{"update", "TASK-1", "--assignee-id", "Human/CaseSensitive"}, map[string]any{"assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
 		{"create untyped ID", "POST", []string{"create", "--title", "Example", "--assignee-id", assignmentExpertID}, map[string]any{"title": "Example", "assignee_type": "expert", "assignee_id": assignmentExpertID}},
 		{"unassign", "PATCH", []string{"assign", "TASK-1", "--unassign"}, map[string]any{"assignee_type": nil, "assignee_id": nil}},
@@ -97,7 +100,7 @@ func TestTaskAssignmentListFilters(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, assignmentFixture(r.URL.Path))
 	})
-	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", projectMemberTestID, "--assignee", "Alice"})
+	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", projectMemberTestID, "--assignee", "@Alice"})
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +156,8 @@ func TestTaskAssignmentRejectsConflictsBeforeHTTP(t *testing.T) {
 		{"update", "TASK-1", "--assignee", "Alice", "--assignee-id", assignmentExpertID},
 		{"update", "TASK-1", "--assignee", "Alice", "--data", `{"assignee_type":"member","assignee_octo_uid":"somebody"}`},
 		{"update", "TASK-1", "--assignee", ""},
+		{"assign", "TASK-1", "--to", "@"},
+		{"update", "TASK-1", "--assignee", "＠"},
 		{"list", "--assignee", "Alice", "--assignee-octo-uids", "other"},
 	} {
 		root, _ := rootWithDriveToken(t, "bf_assignment", func(http.ResponseWriter, *http.Request) { t.Error("invalid assignment sent HTTP") })
@@ -402,7 +407,7 @@ func TestTaskAssignmentNameCollisionWritesExactName(t *testing.T) {
 	}
 }
 
-func TestTaskAssignmentLiteralAtName(t *testing.T) {
+func TestTaskAssignmentMentionPrefixBeatsLiteralAtName(t *testing.T) {
 	writes := 0
 	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -412,8 +417,8 @@ func TestTaskAssignmentLiteralAtName(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body["assignee_type"] != "member" || body["assignee_octo_uid"] != "at-alice" {
-				t.Errorf("literal @Alice resolved to %#v", body)
+			if body["assignee_type"] != "member" || body["assignee_octo_uid"] != "alice" {
+				t.Errorf("@Alice must resolve to Alice, got %#v", body)
 			}
 			_, _ = io.WriteString(w, `{"data":{"task_id":"TASK-1"}}`)
 			return
@@ -429,6 +434,6 @@ func TestTaskAssignmentLiteralAtName(t *testing.T) {
 	})
 	root.SetArgs([]string{"loop", "task", "assign", "TASK-1", "--workspace-id", projectMemberTestID, "--to", "@Alice"})
 	if err := root.Execute(); err != nil || writes != 1 {
-		t.Fatalf("assign literal @Alice: err=%v writes=%d", err, writes)
+		t.Fatalf("assign @Alice: err=%v writes=%d", err, writes)
 	}
 }
