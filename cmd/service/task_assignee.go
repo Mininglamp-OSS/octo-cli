@@ -25,7 +25,7 @@ func attachTaskAssignAlias(loop *cobra.Command, f *cmdutil.Factory) {
 	alias := *update
 	alias.ID = "task.assign"
 	alias.Summary = "Assign or unassign a task"
-	alias.Description = "Alias for task.update. Use --to <name> (a leading @ or ＠ is a mention prefix), --to-id <full Project member UID or Fleet actor UUID>, or --unassign. Use --to-id for a literal name beginning with @. Name and ID selectors read workspace members, experts and expert teams before writing; lookup failures stop the assignment. Use --suppress-run when changing the owner without starting a new run."
+	alias.Description = "Alias for task.update. Use --to <name> (a leading @ or ＠ is a mention prefix), --to-id <full Project member UID or Fleet actor UUID>, or --unassign. Use --to-id for a literal name beginning with @. Name and ID selectors read up to 10 pages each of workspace members, experts and expert teams before writing; lookup failures stop the assignment. For larger rosters, use task update with an explicit assignee type and ID. Use --suppress-run when changing the owner without starting a new run."
 	body := *update.RequestBody
 	body.Properties = map[string]registry.SchemaInfo{}
 	for _, name := range []string{"assignee_type", "assignee_id", "assignee_octo_uid", "suppress_run", "handoff_note"} {
@@ -49,13 +49,13 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 		cmd.Flags().String("to-id", "", "Full Project member Octo UID (case-sensitive) or Fleet actor UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
 	case "task.create", "task.update":
-		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists; do not mix with explicit selectors")
+		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from up to 10 pages per workspace list; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
 			flag.Usage += " When type is omitted, resolve the exact ID across workspace members, experts and expert teams."
 		}
 	case "task.list":
-		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists; do not mix with explicit filters")
+		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from up to 10 pages per workspace list; do not mix with explicit filters")
 		if flag := cmd.Flags().Lookup("assignee-id"); flag != nil {
 			flag.Usage += " Sent directly to Fleet without a roster lookup; use --assignee-octo-uid for a Project member UID."
 		}
@@ -328,12 +328,12 @@ func (r *taskAssigneeRecord) assignee(kind string) (taskAssignee, bool, error) {
 }
 
 func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path, workspaceID string, members bool) ([]taskAssigneeRecord, error) {
-	const memberPageSize = 100
+	const pageSize, maxPages = 100, 10
 	var records []taskAssigneeRecord
 	seen := map[string]bool{}
 	expected := -1
-	for page := 1; page <= 1000; page++ {
-		query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(memberPageSize)}}
+	for page := 1; page <= maxPages; page++ {
+		query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(pageSize)}}
 		body, err := cli.Do(cmd.Context(), &client.Request{
 			Service: "loop", Method: "GET", Path: path, Query: query,
 			Headers: map[string]string{"X-Workspace-ID": workspaceID}, SuppressSpaceHeader: true,
@@ -353,7 +353,7 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path, workspa
 			return nil, err
 		}
 		records = append(records, items...)
-		complete, err := taskAssigneePageComplete(len(records), len(items), total, members, memberPageSize)
+		complete, err := taskAssigneePageComplete(len(records), len(items), total, members, pageSize)
 		if err != nil {
 			return nil, err
 		}
@@ -361,7 +361,7 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path, workspa
 			return records, nil
 		}
 	}
-	return nil, assignmentError("assignee list exceeds the lookup page limit; use an explicit type and ID")
+	return nil, assignmentError(fmt.Sprintf("assignee list exceeds the lookup page limit (%d pages of %d); use an explicit type and ID", maxPages, pageSize))
 }
 
 func trackTaskAssigneePage(items []taskAssigneeRecord, total int, expected *int, seen map[string]bool) error {

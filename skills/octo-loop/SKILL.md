@@ -303,10 +303,12 @@ octo-cli loop task list --workspace-id <ws> --assignee-id <fleet-actor-uuid>
 octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid>
 ```
 
-These Multica-style selectors infer the member/expert/expert-team type by reading
-all pages of the three existing workspace lists. `--to` and `--assignee` match
-names only, removing a leading `@` or `＠` before matching. Names match
-case-insensitively: an exact name wins over a substring; an ambiguous name fails
+These Multica-style selectors infer the member/expert/expert-team type by making
+at most 10 paginated requests per workspace list (`page_size=100`). A larger
+paginated roster stops automatic lookup; use explicit typed assignment fields
+instead. `--to` and `--assignee` match names only, removing a leading `@` or
+`＠` before matching. Names match case-insensitively: an exact name wins over a
+substring; an ambiguous name fails
 with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
 full ID if the stored name itself begins with one of those characters.
 `--to-id` and untyped `--assignee-id` on create/update require a complete, exact

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -227,12 +228,46 @@ func TestTaskAssignmentRejectsConflictsBeforeHTTP(t *testing.T) {
 		{"assign", "TASK-1", "--to", "@"},
 		{"update", "TASK-1", "--assignee", "＠"},
 		{"list", "--assignee", "Alice", "--assignee-octo-uids", "other"},
+		{"list", "--assignee", "Alice", "--assignee-types", "expert"},
 	} {
 		root, _ := rootWithDriveToken(t, "bf_assignment", func(http.ResponseWriter, *http.Request) { t.Error("invalid assignment sent HTTP") })
 		root.SetArgs(append(append([]string{"loop", "task"}, args...), "--workspace-id", projectMemberTestID))
 		if err := root.Execute(); err == nil {
 			t.Errorf("invalid selection accepted: %v", args)
 		}
+	}
+}
+
+func TestTaskAssignmentLookupStopsAfterTenPages(t *testing.T) {
+	reads := 0
+	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/members") {
+			t.Errorf("bounded lookup must only read members: %s %s", r.Method, r.URL)
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		reads++
+		page, err := strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil || page > 10 {
+			t.Errorf("lookup exceeded ten pages: %s", r.URL)
+			http.Error(w, "too many pages", http.StatusBadRequest)
+			return
+		}
+		items := make([]map[string]any, 100)
+		for i := range items {
+			items[i] = map[string]any{
+				"uid": fmt.Sprintf("member-%d-%d", page, i), "name": fmt.Sprintf("Member %d-%d", page, i), "robot": 0,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(items); err != nil {
+			t.Error(err)
+		}
+	})
+	root.SetArgs([]string{"loop", "task", "assign", "TASK-1", "--workspace-id", projectMemberTestID, "--to", "Missing"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "lookup page limit") || reads != 10 {
+		t.Fatalf("bounded lookup: err=%v reads=%d", err, reads)
 	}
 }
 

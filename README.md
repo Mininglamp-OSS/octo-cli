@@ -217,6 +217,7 @@ octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
 octo-cli loop task list --workspace-id <workspace-uuid>
 # Multica-style assignment: --to accepts a name with an optional leading @; use --to-id for a complete ID.
+# Automatic name/ID lookup reads at most 10 pages per roster; use explicit typed fields for larger rosters.
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to "@Alice"
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --unassign
