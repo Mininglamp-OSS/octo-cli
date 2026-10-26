@@ -83,7 +83,7 @@
       "delete": {
         "operationId": "thread.delete",
         "summary": "Delete a thread (User Bot only; thread creator or group owner/manager)",
-        "description": "Marks the thread deleted, bans its channel and removes it from every user's pins; it cannot be restored through the API. The bot must be an active (not blacklisted) member of the parent group and either the thread creator or a group owner/manager; the parent group must not be disbanded. App Bot tokens are rejected, as are AI team container groups. Already-deleted threads return success. Permission and not-found failures are reported as a generic store failure.",
+        "description": "Marks the thread deleted, bans its channel and removes it from every user's pins; it cannot be restored through the API. The bot must be an active (not blacklisted) member of the parent group and either the thread creator or a group owner/manager; the parent group must not be disbanded. App Bot tokens are rejected, as are team container groups (purpose aiteam). Already-deleted threads return success. Permission and not-found failures are reported as a generic store failure.",
         "x-octo-risk": "high-risk-write",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -96,7 +96,7 @@
       "post": {
         "operationId": "thread.archive",
         "summary": "Archive a thread (User Bot only; thread creator or group owner/manager)",
-        "description": "Idempotent: archiving an archived thread succeeds. The bot must be an active (not blacklisted) member of the parent group and either the thread creator or a group owner/manager; the parent group must not be disbanded. App Bot tokens are rejected, as are AI team container groups. Permission, not-found and deleted-thread failures are reported as a generic store failure.",
+        "description": "Idempotent: archiving an archived thread succeeds. The bot must be an active (not blacklisted) member of the parent group and either the thread creator or a group owner/manager; the parent group must not be disbanded. App Bot tokens are rejected, as are team container groups (purpose aiteam). Permission, not-found and deleted-thread failures are reported as a generic store failure.",
         "x-octo-risk": "write",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
@@ -208,7 +208,7 @@
       "post": {
         "operationId": "thread.webhook.create",
         "summary": "Create a thread-bound incoming webhook (returns its push token once)",
-        "description": "The bot must be an internal, normal-status member of the parent group (any member may create; App Bot tokens are rejected as non-members). AI team container groups are rejected. The thread must exist, belong to the group and be active (not archived or deleted). Requires the incomingwebhook.enabled system setting (403 when off) and an active group. Only group owners/managers may set avatar. Per-thread, per-creator and total-per-group quotas apply. The backend rejects an empty request body and the CLI never sends a bare {}, so pass at least one field (for example --name). The response carries the push token and push URLs; they are returned only here and on regenerate, and anyone holding them can post into the thread.",
+        "description": "The bot must be an internal, normal-status member of the parent group (any member may create; App Bot tokens are rejected as non-members). team container groups (purpose aiteam) are rejected. The thread must exist, belong to the group and be active (not archived or deleted). Requires the incomingwebhook.enabled system setting (403 when off) and an active group. Only group owners/managers may set avatar. Per-thread, per-creator and total-per-group quotas apply. The backend rejects an empty request body and the CLI never sends a bare {}, so pass at least one field (for example --name). The response carries the push token and push URLs; they are returned only here and on regenerate, and anyone holding them can post into the thread.",
         "x-octo-risk": "high-risk-write",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
