@@ -41,6 +41,8 @@ command entry rather than selecting another copy on PATH. It uses that manager
 to resolve the configured registry's stable `latest` release and install the
 exact version. Equal or newer installed releases are successful no-ops.
 Success requires verification of the resulting package and platform executable.
+Global Bun ownership uses its native global manifest and command entry, so dry
+runs and updates also work when global lockfiles are absent.
 
 During installation, npm/pnpm explicitly enable optional dependencies, and Bun
 installs the matching platform package alongside the main package. The platform

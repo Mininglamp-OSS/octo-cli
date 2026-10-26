@@ -125,24 +125,6 @@ function parseJson(text) {
   }
 }
 
-function listingHasPackage(text, packageName, version) {
-  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const withoutAnsi = text.replace(/\u001b\[[0-9;]*m/g, "");
-  return new RegExp(`(?:^|[\\s├└─*])${escapedName}@${escapedVersion}(?:$|[\\s(])`, "m").test(withoutAnsi);
-}
-
-
-function bunRootFromListing(text) {
-  for (const line of text.replace(/\u001b\[[0-9;]*m/g, "").split(/\r?\n/)) {
-    const candidate = line.trim();
-    const header = candidate.match(/^(.+?)\s+node_modules(?:\s+\(\d+\))?$/i);
-    if (header && pathIsAbsolute(header[1])) return path.resolve(header[1], "node_modules");
-  }
-  return null;
-}
-
-
 function queryLocalState(manager, options) {
   if (manager.name === "npm") {
     const prefixResult = run(manager, ["prefix", "--global"], options);
@@ -161,13 +143,17 @@ function queryLocalState(manager, options) {
 
   if (manager.name === "bun") {
     const binResult = run(manager, ["pm", "bin", "--global"], options);
-    const listResult = run(manager, ["pm", "ls", "--global"], options);
-    if (![binResult, listResult].every(completed)) return null;
+    // In global mode Bun resolves a relative bin path against its global package directory.
+    const rootResult = run(manager, ["pm", "bin", "--global"], {
+      ...options, env: { ...options.env, BUN_INSTALL_BIN: "." },
+    });
+    const packageResult = run(manager, ["pm", "pkg", "get", "--global"], options);
+    if (![binResult, rootResult, packageResult].every(completed)) return null;
     const bin = binResult.stdout.trim();
-    if (!bin || !listResult.stdout.trim()) return null;
-    const root = bunRootFromListing(listResult.stdout);
-    if (!root) return null;
-    return { manager, prefix: null, root, bin, listing: listResult.stdout };
+    const globalDirectory = rootResult.stdout.trim();
+    const listing = parseJson(packageResult.stdout);
+    if (!bin || !globalDirectory || !listing || typeof listing !== "object" || Array.isArray(listing)) return null;
+    return { manager, prefix: null, root: path.join(globalDirectory, "node_modules"), bin, listing };
   }
 
   const rootResult = run(manager, ["root", "--global"], options);
@@ -185,6 +171,12 @@ function packageRecord(state, packageName) {
   if (state.manager.name === "npm") {
     return state.listing.dependencies && state.listing.dependencies[packageName] || null;
   }
+  if (state.manager.name === "bun") {
+    const descriptor = state.listing.dependencies?.[packageName]
+      ?? state.listing.optionalDependencies?.[packageName]
+      ?? state.listing.devDependencies?.[packageName];
+    return typeof descriptor === "string" ? { resolved: descriptor } : null;
+  }
   if (state.manager.name === "pnpm") {
     const roots = Array.isArray(state.listing) ? state.listing : [state.listing];
     for (const root of roots) {
@@ -196,9 +188,8 @@ function packageRecord(state, packageName) {
 }
 
 function managerListsPackage(state, packageName, version) {
-  if (state.manager.name === "bun") return listingHasPackage(state.listing, packageName, version);
   const record = packageRecord(state, packageName);
-  return Boolean(record && String(record.version) === version);
+  return Boolean(record && (state.manager.name === "bun" || String(record.version) === version));
 }
 
 function commandEntryCandidates(state) {
@@ -298,11 +289,10 @@ function samePath(left, right) {
 }
 
 function packageIsLinked(state, packageName) {
-  if (state.manager.name === "bun" && typeof state.listing === "string") {
-    const line = state.listing.split(/\r?\n/).find((item) => item.includes(packageName));
-    return Boolean(line && (/\blink(?:\s|:|$)/i.test(line) || /\s->\s/.test(line)));
-  }
   const record = packageRecord(state, packageName);
+  if (state.manager.name === "bun") {
+    return !record.resolved.startsWith("npm:") && /[:/\\]/.test(record.resolved);
+  }
   if (record && record.link === true) return true;
   const resolved = record && record.resolved;
   if (typeof resolved === "string" && /^file:/i.test(resolved)) return true;

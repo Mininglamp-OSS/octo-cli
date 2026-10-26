@@ -86,14 +86,22 @@ package queries. Examples of existing interfaces are:
 | Manager | Local ownership information | Registry version lookup | Exact release installation |
 | --- | --- | --- | --- |
 | npm | `npm prefix -g`, `npm root -g`, global installed-package metadata | `npm view -g @mininglamp-oss/octo-cli@latest version --json` | `npm install -g @mininglamp-oss/octo-cli@<version>` |
-| Bun | `bun pm bin -g`, `bun pm ls -g`, installed package/lock metadata | `bun info -g @mininglamp-oss/octo-cli@latest version --json` | `bun install -g @mininglamp-oss/octo-cli@<version>` |
+| Bun | `bun pm bin -g`, `bun pm pkg get -g`, installed manifests and command-entry targets | `bun info -g @mininglamp-oss/octo-cli@latest version --json` | `bun install -g @mininglamp-oss/octo-cli@<version>` |
 | pnpm | `pnpm root -g`, `pnpm bin -g`, `pnpm list -g` package metadata | `pnpm view @mininglamp-oss/octo-cli@latest version --json` in the verified project-neutral context | `pnpm add -g @mininglamp-oss/octo-cli@<version>` |
 
 The interfaces above guide implementation; do not infer global roots from the
-presence of `.bun` or `.pnpm` in a path, and do not assume Bun's list output is
-JSON. Use manager-native configuration for custom global directories. Layout
-metadata and launcher paths may narrow the candidates, but the parent shell's
-`npm_config_user_agent` or `npm_execpath` alone cannot prove ownership.
+presence of `.bun` or `.pnpm` in a path. Use manager-native configuration for
+custom global directories. Layout metadata and launcher paths may narrow the
+candidates, but the parent shell's `npm_config_user_agent` or `npm_execpath`
+alone cannot prove ownership.
+
+Bun ownership uses its native global manifest, configured global directories and
+resolved command entry. Its installed package manifest supplies the actual
+version; registry ranges and tags in the global manifest are not installed
+versions. Global lockfiles are not a prerequisite. The read-only root query uses
+`bun pm bin -g` with `BUN_INSTALL_BIN=.` so Bun resolves its own global package
+directory; ordinary bin, registry and installation queries retain their original
+environment.
 
 pnpm 10 delegates `view` to npm; pnpm 11+ implements it natively. The command
 must still use pnpm's effective registry configuration in both cases. Native
@@ -294,6 +302,8 @@ claim rollback or that the old installation is intact.
    parent prefixes and OS-specific command shims work. After pnpm changes the
    versioned store target, verification uses the new logical entry. Linked source
    checkouts and mismatched package/binary versions are refused before networking.
+   Bun global installations remain upgradeable with both `bun.lock` and
+   `bun.lockb` absent.
 4. **Mirrors:** test each manager with its supported user/global mirror,
    environment and scoped-registry configuration. Metadata and package downloads
    use that context. A conflicting project configuration does not affect the

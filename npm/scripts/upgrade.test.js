@@ -467,7 +467,7 @@ test("Windows Bun .bunx sidecar resolves its relative global package target", { 
     manager: { name: "bun" },
     root,
     bin: nativeBin,
-    listing: `${nativeGlobalDirectory} node_modules (7)\n└── ${PACKAGE_NAME}@${VERSION}\n`,
+    listing: { dependencies: { [PACKAGE_NAME]: "^1.2.3" } },
   };
   const owner = managers.stateOwnsInvocation(state, PACKAGE_NAME, VERSION, packagePath, launcherPath);
   assert.ok(owner, "Bun ownership must resolve the actual UTF-16LE .bunx target across native and short paths");

@@ -103,6 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the invoking project.
   Windows executable launches use extended-length paths for deeply nested
   global installations.
+  Bun verifies ownership through native global metadata and installed command
+  entries, including installations whose global lockfiles are absent.
 - **`octo-cli api --workspace-id`** — generic passthrough requests can now send
   explicit workspace context through the `X-Workspace-ID` header.
 - **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and

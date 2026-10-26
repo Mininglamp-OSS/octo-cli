@@ -229,6 +229,7 @@ async function globalInstall(tmp, name, registry, options = {}) {
   } else if (name === "bun") {
     const globalDir = path.join(home, "global & packages");
     const binDir = path.join(home, "custom bin");
+    env.BUN_INSTALL_GLOBAL_DIR = globalDir;
     fs.mkdirSync(env.XDG_CONFIG_HOME, { recursive: true });
     const bunfigPath = path.join(env.XDG_CONFIG_HOME, ".bunfig.toml");
     const bunfig = `[install]\nglobalDir = ${JSON.stringify(globalDir)}\nglobalBinDir = ${JSON.stringify(binDir)}\nregistry = "${registry}"\n[install.scopes]\n"@mininglamp-oss" = { url = "${registry}", token = "fixture-not-a-real-secret" }\n`;
@@ -371,6 +372,53 @@ test("real global installations upgrade through their configured registry", { ti
         assert.ok(!result.stderr.includes("fixture-not-a-real-secret"));
       });
     }
+  }
+  if (selected.includes("bun")) {
+    await t.test("bun proves global ownership and upgrades without a global lockfile", async () => {
+      registry.setLatest(TARGET);
+      const instance = await globalInstall(tmp, "bun", registry.url, { id: "bun-lockless" });
+      const globalDirectory = path.join(instance.home, "global & packages");
+      const lockfiles = ["bun.lock", "bun.lockb"].map((file) => path.join(globalDirectory, file));
+      for (const file of lockfiles) fs.rmSync(file, { force: true });
+      const projectModules = path.join(instance.project, "node_modules");
+      fs.cpSync(path.join(globalDirectory, "node_modules"), projectModules, { recursive: true });
+      const projectLauncher = path.join(projectModules, ...PACKAGE.split("/"), "bin", "octo-cli.js");
+      const beforeDryRun = registry.requests.length;
+
+      const local = await execute(process.execPath, [projectLauncher, "upgrade", "--dry-run"], {
+        cwd: instance.project, env: instance.env,
+      });
+      assert.equal(local.status, 2, `${local.stderr}\n${local.stdout}`);
+      assert.equal(JSON.parse(local.stderr).error.code, "UPGRADE_UNSUPPORTED_INSTALLATION");
+      assert.equal(registry.requests.length, beforeDryRun, "a project-local copy contacted the registry");
+
+      const plan = await instance.run(["upgrade", "--dry-run"]);
+      assert.equal(plan.status, 0, `${plan.stderr}\n${plan.stdout}`);
+      assert.equal(JSON.parse(plan.stdout).data.manager, "bun");
+      assert.equal(JSON.parse(plan.stdout).data.current_version, OLD);
+      assert.equal(registry.requests.length, beforeDryRun, "lockfile-free dry run contacted the registry");
+      for (const file of lockfiles) assert.equal(fs.existsSync(file), false, "dry run recreated a global lockfile");
+
+      const globalManifestPath = path.join(globalDirectory, "package.json");
+      const originalManifest = fs.readFileSync(globalManifestPath, "utf8");
+      const sourceManifest = JSON.parse(originalManifest);
+      sourceManifest.dependencies[PACKAGE] = "file:../project";
+      fs.writeFileSync(globalManifestPath, JSON.stringify(sourceManifest));
+      const linked = await instance.run(["upgrade", "--dry-run"]);
+      assert.equal(linked.status, 2, `${linked.stderr}\n${linked.stdout}`);
+      assert.equal(JSON.parse(linked.stderr).error.code, "UPGRADE_UNSUPPORTED_INSTALLATION");
+      assert.equal(registry.requests.length, beforeDryRun, "a file-sourced global declaration contacted the registry");
+      fs.writeFileSync(globalManifestPath, originalManifest);
+
+      const result = await instance.run(["upgrade"]);
+      assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+      assert.deepEqual(JSON.parse(result.stdout).data, {
+        manager: "bun", previous_version: OLD, target_version: TARGET, current_version: TARGET, updated: true,
+      });
+      const installed = await instance.run(["version"]);
+      assert.equal(installed.status, 0, installed.stderr);
+      assert.equal(JSON.parse(installed.stdout).data.version, TARGET);
+    });
   }
   if (selected.includes("pnpm")) {
     await t.test("pnpm uses the configured scoped registry when TMPDIR is nested under the invoking project", async () => {
