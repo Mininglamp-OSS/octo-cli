@@ -96,10 +96,10 @@ Flags:
 - edit: --message-id*, --message-seq, --channel-id*, --channel-type*, --content-edit*
 - sync: --data (JSON body with channel_id, channel_type, etc.)
 - read-receipt: --channel-id*, --channel-type(default:1), --message-ids*(str[])
-- search / search all / search files: --chat-id (optional; omit → cross-channel `_search_global_*`), --channel-type, --keyword, --sort(time_desc|time_asc|relevance), --page-size, --on-behalf-of; extra `filters` via --data. Paginated (cursor in body; `--page-all`).
-- search media: --chat-id* (required; in-channel only), --channel-type, --sort, --page-size, --on-behalf-of; **no** --keyword. Paginated.
-- search around: --chat-id* (required), --channel-type, --anchor-message-id*, --on-behalf-of; extra `filters` via --data. Not paginated.
-- search groups: --keyword, --on-behalf-of; extra `filters` via --data. **--chat-id not supported** (cross-channel only). Not paginated.
+- search / search all / search files: --chat-id (optional; omit → cross-channel `_search_global_*`), --channel-type (required with --chat-id: 1=DM, 2=group, 5=thread), --keyword, --sort(time_desc|time_asc|relevance), --page-size, --on-behalf-of; extra `filters` via --data. Paginated (cursor in body; `--page-all`). Page size omitted/0 defaults to 20; nonzero range is 1–100. Nonempty keywords are limited to 64 Unicode code points; backend sort defaults to time_desc.
+- search media: --chat-id* (required; in-channel only), --channel-type* (backend-required), --sort, --page-size, --on-behalf-of; **no** --keyword. Paginated; same page-size/default-sort behavior.
+- search around: --chat-id* (required), --channel-type* (backend-required), --anchor-message-id*, --page-size, --on-behalf-of; extra `filters` via --data. Page size controls the context window (omitted/0:20, nonzero:1–100), not cursor pagination.
+- search groups: --keyword, --sequence (int64 response correlation), --on-behalf-of; extra `filters` via --data. **--chat-id not supported** (cross-channel only). Not paginated.
 
 Notes:
 - App Bot sendMessage: checkSendPermission enforces channelType=1 (DM only), requires friend relationship.
@@ -153,7 +153,8 @@ Notes:
 | 38 | `octo-cli thread md-update <group_no> <short_id>` | PUT | .../:short_id/md | **N** | Y |
 
 Flags:
-- create: --name* (thread name), --data (additional fields)
+- create: --name* (thread name), --source-message-id, --on-behalf-of (active OBO grant and grantor's parent-group read access required), --data (additional fields)
+- list: --page-index, --page-size. Neither supplied returns a bare array (page 1, up to 100 threads); either supplied returns `{count,list}`. Paged size defaults to 15 when nonpositive and caps at 100.
 - md-update: --content* (markdown string)
 
 Notes:
@@ -195,9 +196,10 @@ Notes:
 | 48 | `octo-cli bot heartbeat` | POST | /v1/bot/heartbeat | Y | Y |
 
 Flags:
-- register: --data (JSON, registration payload)
+- register: --agent-platform, --agent-version, --plugin-version, --agent-hosting, --data (JSON registration payload). Runtime metadata is persisted only for User Bots; App Bots ignore it.
 - set-commands: --data (JSON, body shape: {"commands":[{"command","description"}]})
 - user-info: --uid* (query, required)
+- space-members: --keyword, --space-id, --page (1-based; default 1, capped at 1,000,000), --limit (default 50, capped at 200). Manual page selection.
 - typing: --channel-id*, --channel-type*, --on-behalf-of
 
 Notes:

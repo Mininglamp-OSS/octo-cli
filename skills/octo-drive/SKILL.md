@@ -157,16 +157,18 @@ octo-cli drive file move   "$FILE" --parent-id "$FOLDER"
 octo-cli drive file copy   "$FILE" --parent-id "$FOLDER" --name "copy-of-file.pdf"
 octo-cli drive folder move "$FOLDER_NODE" --parent-id 0
 
-# Cross-space destinations are optional; on-conflict is forwarded as a string.
-octo-cli drive file move "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
-octo-cli drive file copy "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
-octo-cli drive folder move "$FOLDER_NODE" --target-space-id "$TARGET_SPACE" --parent-id 0 --on-conflict rename
+# Cross-space destinations are optional. The backend accepts on_conflict for
+# wire compatibility but currently ignores it; duplicate sibling names are
+# allowed, so do not rely on automatic renaming.
+octo-cli drive file move "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0
+octo-cli drive file copy "$FILE" --target-space-id "$TARGET_SPACE" --parent-id 0
+octo-cli drive folder move "$FOLDER_NODE" --target-space-id "$TARGET_SPACE" --parent-id 0
 ```
 
 
 `file get` is how you branch: `type` tells you whether an id is a blob, a mounted document, or a folder.
 
-`--target-space-id` is optional; omitting it keeps move/copy in the source space. The three move/copy operations accept `--on-conflict` as a string forwarded to Drive. The handler documents `rename`, but the backend controls conflict handling and outcome; the CLI does not promise that a name will be automatically changed.
+`--target-space-id` is optional; omitting it keeps move/copy in the source space. The three move/copy operations accept `--on-conflict` for wire compatibility, but the current backend ignores it. Duplicate sibling names are allowed; no automatic rename occurs.
 
 
 `browse` returns the complete listing; its `page` object is an envelope, not a database page, so `--page-index` / `--page-size` do not actually narrow the result yet.
@@ -178,10 +180,10 @@ octo-cli drive folder move "$FOLDER_NODE" --target-space-id "$TARGET_SPACE" --pa
 ```bash
 octo-cli drive search --q "报销单"                              # all visible spaces
 octo-cli drive search --q "预算" --scope space --space-id "$SPACE"
-octo-cli drive search --q "合同" --data '{"filters":{"type":"blob","owner_scope":"me"}}'
+octo-cli drive search --q "合同" --data '{"filters":{"types":["blob"],"owner_scope":"me"}}'
 ```
 
-Advanced `filters` (a JSON object passed via `--data`): `type` (folder|doc|blob), `owner_scope` (me|others), `updated_after` (RFC3339), `size_min`/`size_max` (bytes). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
+Advanced filters are the nested `filters` object in request JSON passed with `--data`; there is no `--filters` flag. `filters.types` is an array of `folder`, `doc`, and/or `blob` values (missing or empty means no type restriction); `owner_scope` is `me|others`; `updated_after` is an RFC3339 timestamp; `size_min`/`size_max` are byte bounds (`uint64`, with minimum no greater than maximum). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
 
 ## 4. Upload and download in detail
 
@@ -310,4 +312,4 @@ drive invite      create | list | revoke | accept
 drive im-transfer create
 ```
 
-Per-command flags: `octo-cli drive <group> <verb> --help`, or `octo-cli schema drive.<group>.<verb>` for the wire contract.
+Inspect a command's help before looking up its wire schema: `octo-cli drive <group> <verb> --help` shows the underlying operation ID or IDs. Pass those exact IDs to `octo-cli schema`; do not derive a schema ID from a composite CLI path. For example, `drive download file --help` identifies `drive.download.url`, and `drive share create --help` identifies `drive.file.get` and `drive.share.blob-create`. `drive upload file --help` lists its underlying `drive.upload.*` operations; look up those IDs rather than inventing `drive.upload.file`.

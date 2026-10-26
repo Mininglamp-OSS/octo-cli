@@ -13,7 +13,7 @@
       "post": {
         "operationId": "bot.register",
         "summary": "Register (authenticate) the bot and obtain IM token + URLs",
-        "description": "Routes by token prefix: app_* → App Bot, bf_* → User Bot.",
+        "description": "Routes by token prefix: app_* → App Bot, bf_* → User Bot. Agent runtime metadata is persisted only for User Bots; App Bots ignore it.",
         "x-octo-risk": "write",
         "requestBody": {
           "required": false,
@@ -22,9 +22,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agent_platform": { "type": "string", "description": "Agent platform name reported during registration." },
-                  "agent_version": { "type": "string", "description": "Agent version reported during registration." },
-                  "plugin_version": { "type": "string", "description": "Plugin version reported during registration." }
+                  "agent_platform": { "type": "string", "description": "Agent platform name reported during User Bot registration." },
+                  "agent_version": { "type": "string", "description": "Agent version reported during User Bot registration." },
+                  "plugin_version": { "type": "string", "description": "Plugin version reported during User Bot registration." },
+                  "agent_hosting": {
+                    "type": "string",
+                    "x-octo-flag": "agent-hosting",
+                    "description": "User Bot runtime-hosting metadata, normalized to a lowercase ASCII slug of at most 64 bytes (first character a-z, followed by a-z, digits, or _). Open vocabulary, not an enum. \"none\" retracts the marker; omitted or empty means unchanged. Invalid metadata is ignored without failing registration. App Bots do not persist agent metadata."
+                  }
                 }
               }
             }
@@ -119,7 +124,8 @@
         "parameters": [
           { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "optional LIKE filter on name" },
           { "name": "space_id", "in": "query", "schema": { "type": "string" }, "description": "override space (defaults to bot's space)" },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 }, "description": "Maximum members to return; defaults to 50 and is capped at 200." }
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 200 }, "description": "Maximum members per page; defaults to 50 and the backend caps it at 200." },
+          { "name": "page", "in": "query", "x-octo-flag": "page", "schema": { "type": "integer", "default": 1, "minimum": 1, "maximum": 1000000 }, "description": "1-based page number; defaults to 1. The backend caps page at 1,000,000." }
         ],
         "responses": {
           "200": {

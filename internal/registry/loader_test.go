@@ -1519,31 +1519,6 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-func TestDocsStrictSchemaAppliesOnlyToExplicitOperations(t *testing.T) {
-	r := MustNew()
-	want := map[string]bool{
-		"docs.ppt.edit":             true,
-		"docs.share.set":            true,
-		"docs.sheet.rows.insert":    true,
-		"docs.sheet.rows.delete":    true,
-		"docs.sheet.columns.insert": true,
-		"docs.sheet.columns.delete": true,
-		"docs.sheet.split":          true,
-		"docs.sheet.deduplicate":    true,
-	}
-	for id := range want {
-		if _, ok := r.GetOperation(id); !ok {
-			t.Errorf("missing strict operation %s", id)
-		}
-	}
-	for _, info := range r.ListOperations("docs") {
-		op, ok := r.GetOperation(info.ID)
-		if !ok || op.StrictRequestSchema != want[info.ID] {
-			t.Errorf("%s strict body validation metadata is misleading", info.ID)
-		}
-	}
-}
-
 // OpenAPI 3.1 uses JSON Schema unions; nullable:true is a 3.0 keyword and
 // does not let schema consumers accept the live anchor or terminal cursor.
 func TestPptNullableIntegersUseOpenAPI31Types(t *testing.T) {

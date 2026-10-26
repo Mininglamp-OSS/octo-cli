@@ -115,9 +115,12 @@ tasks involving a workspace user through an expert or expert-team assignment.
 (for example `--metadata '{"source":"automation","reviewed":true}'`).
 Supply `date_field` (`created_at` or `updated_at`), `date_start` and `date_end`
 together; the start is inclusive and the end is exclusive. Task list alone
-also accepts `open_only` and `scheduled`. Sorting accepts `position`, `title`,
-`created_at`, `start_date`, `due_date` or `priority`, with `direction` `asc` or
-`desc` (case-insensitive).
+also accepts `open_only` and `scheduled`: `open_only=true` excludes `done` and
+`cancelled` tasks (so `backlog` remains eligible), while `scheduled=true`
+requires at least one of `start_date` or `due_date`. Sorting defaults to
+`position`; `position` is always ascending and ignores `direction`. Other sort
+keys are `title`, `created_at`, `start_date`, `due_date` or `priority`, with
+`direction` `asc` or `desc` (case-insensitive).
 
 Grouping is by assignee. `group_assignee_type` can be `none`, `member`,
 `expert` or `expert_team`; supply `group_assignee_id` for a specific actor and

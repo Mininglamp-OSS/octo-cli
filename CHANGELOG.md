@@ -24,6 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Nullable search filters** — Drive accepts explicit `null` for optional size
+  boundaries and ownership filtering, while retaining exact non-null uint64 and
+  vocabulary checks and refusing null on non-nullable IDs.
+- **Grouped-search response schema** — correlation `sequence` is declared inside
+  the backend `data` object, matching `.data.data.sequence` in CLI JSON output.
+- **Current service contracts** — expose thread-create OBO, bot hosting metadata,
+  Space-member page selection, around-search window size and grouped-search
+  response correlation through schema and generated flags.
+- **Request preflight** — reject empty group-member arrays, group updates without
+  a recognized non-null field, and nonpositive Docs attachment sizes before HTTP.
+  Explicit empty-string group updates remain supported.
+- **Schema and agent guidance** — correct Drive search filter arrays and composite
+  discovery; document current conflict, search, event, thread, upload-policy,
+  registration and dependency-visibility semantics. Docs search advertises
+  `html_ppt`; member reads describe reader access and nullable grant attribution.
 - **Service help and request metadata** — generated long help retains operation
   descriptions; parameter help and current Docs, HTML, messaging, Marketplace,
   Loop and Drive request fields match the embedded service contracts.

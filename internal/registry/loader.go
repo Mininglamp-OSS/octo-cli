@@ -289,7 +289,10 @@ type ParamInfo struct {
 // references, nullable type unions, and composition constraints while leaving
 // an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
-	Type                 string                `json:"type,omitempty"`
+	Type string `json:"type,omitempty"`
+	// Nullable records whether the schema's type explicitly includes null.
+	// Other constraints, such as enum and const, still apply to null.
+	Nullable             bool                  `json:"nullable,omitempty"`
 	Required             []string              `json:"required,omitempty"`
 	Properties           map[string]SchemaInfo `json:"properties,omitempty"`
 	AdditionalProperties *bool                 `json:"additional_properties,omitempty"`
@@ -953,6 +956,7 @@ func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, 
 func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 	info := SchemaInfo{
 		Type:          schemaType(schema["type"]),
+		Nullable:      schemaIncludesNullType(schema["type"]),
 		Format:        stringOf(schema["format"]),
 		Description:   stringOf(schema["description"]),
 		EnumHint:      stringOf(schema["x-octo-enum-hint"]),
@@ -967,6 +971,7 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		MinProperties: intOf(schema["minProperties"]),
 		Pattern:       stringOf(schema["pattern"]),
 	}
+
 	if bound, ok := schema["minimum"].(float64); ok {
 		info.Minimum = &bound
 	}
@@ -986,6 +991,20 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		info.Enum = enum
 	}
 	return info
+}
+
+func schemaIncludesNullType(value any) bool {
+	switch types := value.(type) {
+	case string:
+		return types == "null"
+	case []any:
+		for _, typ := range types {
+			if name, ok := typ.(string); ok && name == "null" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mergeAllOfSchemas(dst *SchemaInfo, doc map[string]any, value any, depth int) {
@@ -1074,8 +1093,13 @@ func mergeSchemaInfo(dst, src *SchemaInfo) {
 }
 
 func mergeSchemaIdentity(dst, src *SchemaInfo) {
-	if dst.Type == "" {
-		dst.Type = src.Type
+	if src.Type != "" {
+		if dst.Type == "" {
+			dst.Type = src.Type
+			dst.Nullable = src.Nullable
+		} else {
+			dst.Nullable = dst.Nullable && src.Nullable
+		}
 	}
 	if dst.Format == "" {
 		dst.Format = src.Format

@@ -26,7 +26,8 @@
                 "required": ["name"],
                 "properties": {
                   "name": { "type": "string", "maxLength": 100 },
-                  "source_message_id": { "type": "integer", "description": "Optional source message ID to associate with the new thread." }
+                  "source_message_id": { "type": "integer", "description": "Optional source message ID to associate with the new thread." },
+                  "on_behalf_of": { "type": "string", "x-octo-flag": "on-behalf-of", "description": "Optional OBO creator identity. Requires an active grant and the grantor's parent-group read access; the backend checks authorization." }
                 }
               }
             }
@@ -37,13 +38,35 @@
       "get": {
         "operationId": "thread.list",
         "summary": "List threads in a group (User Bot only)",
+        "description": "Without page_index or page_size, returns a bare array for page 1 with up to 100 threads. Supplying either parameter returns {count,list}; paged mode defaults page_index to 1 and page_size to 15, and caps page_size at 100.",
         "x-octo-risk": "read",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "page_index", "in": "query", "schema": { "type": "integer" }, "description": "Page index for the thread list." },
-          { "name": "page_size", "in": "query", "schema": { "type": "integer" }, "description": "Maximum threads to return per page." }
+          { "name": "page_index", "in": "query", "schema": { "type": "integer" }, "description": "Page index; paged mode defaults to 1 and clamps values below 1 to 1." },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer" }, "description": "Page size; with no pagination parameters the unpaged response contains up to 100 items. Paged mode defaults nonpositive values to 15 and caps values at 100." }
         ],
-        "responses": { "200": { "description": "Thread list" } }
+        "responses": {
+          "200": {
+            "description": "Without either page query parameter, returns a bare array (page 1, size 100). Supplying either parameter returns an object with count and list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "type": "array", "items": { "type": "object" } },
+                    {
+                      "type": "object",
+                      "required": ["count", "list"],
+                      "properties": {
+                        "count": { "type": "integer" },
+                        "list": { "type": "array", "items": { "type": "object" } }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/bot/groups/{group_no}/threads/{short_id}": {
@@ -137,7 +160,7 @@
               "schema": {
                 "type": "object",
                 "required": ["content"],
-                "properties": { "content": { "type": "string" } }
+                "properties": { "content": { "type": "string", "description": "Maximum size is the configured GROUP.md byte limit (10,240 bytes in the inspected default configuration; deployments may configure another limit). Whitespace-only content is rejected." } }
               }
             }
           }

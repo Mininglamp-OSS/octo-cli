@@ -158,7 +158,7 @@
       "post": {
         "operationId": "message.search",
         "summary": "Search messages (in-channel or cross-channel)",
-        "description": "Full-text message search. With --chat-id: pure messages within that channel (payload.type in [1,11,14]). Without --chat-id: the CLI routes to cross-channel _search_global_messages, which is a MIXED feed (messages + files), so cross-channel results may include file hits. --on-behalf-of searches as that user (User Bot only, requires an active OBO grant). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "description": "Full-text message search. With --chat-id: pure messages within that channel (payload.type in [1,11,14]); also provide --channel-type (1=DM, 2=group, 5=thread). Without --chat-id: the CLI routes to cross-channel _search_global_messages, which is a MIXED feed (messages + files), so cross-channel results may include file hits. --on-behalf-of searches as that user (User Bot only, requires an active OBO grant). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
         "x-octo-risk": "read",
         "x-octo-pagination": {
           "cursorParam": "cursor",
@@ -173,10 +173,10 @@
                 "type": "object",
                 "properties": {
                   "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search across all reachable channels (cross-channel mixed feed)" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
-                  "keyword": { "type": "string", "description": "full-text keyword" },
-                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
-                  "page_size": { "type": "integer", "description": "page size" },
+                  "channel_type": { "type": "integer", "description": "Required when channel_id scopes the search to one channel. Valid values: 1=DM, 2=group, 5=thread." },
+                  "keyword": { "type": "string", "maxLength": 64, "description": "Full-text keyword; non-empty values are limited to 64 Unicode code points." },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "Sort order; backend default is time_desc. relevance requires a non-empty keyword." },
+                  "page_size": { "type": "integer", "minimum": 0, "maximum": 100, "x-octo-flag": "page-size", "description": "Page size. Omitted or 0 uses the backend default 20; nonzero values must be 1–100." },
                   "cursor": { "type": "string", "description": "opaque pagination cursor" },
                   "filters": { "type": "object", "description": "extra filters (sender_ids, member_uids, channel_ids, channel_types, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
@@ -197,7 +197,7 @@
       "post": {
         "operationId": "message.search.all",
         "summary": "Search messages + files (mixed feed)",
-        "description": "Mixed message+file search (payload.type in [1,8,11,14]; empty keyword also matches media). With --chat-id: within that channel. Without --chat-id: the CLI routes to cross-channel _search_global_messages. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "description": "Mixed message+file search (payload.type in [1,8,11,14]; empty keyword also matches media). With --chat-id: within that channel; also provide --channel-type (1=DM, 2=group, 5=thread). Without --chat-id: the CLI routes to cross-channel _search_global_messages. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
         "x-octo-risk": "read",
         "x-octo-pagination": {
           "cursorParam": "cursor",
@@ -212,10 +212,10 @@
                 "type": "object",
                 "properties": {
                   "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search across all reachable channels" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
-                  "keyword": { "type": "string", "description": "full-text keyword" },
-                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
-                  "page_size": { "type": "integer", "description": "page size" },
+                  "channel_type": { "type": "integer", "description": "Required when channel_id scopes the search to one channel. Valid values: 1=DM, 2=group, 5=thread." },
+                  "keyword": { "type": "string", "maxLength": 64, "description": "Full-text keyword; non-empty values are limited to 64 Unicode code points." },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "Sort order; backend default is time_desc. relevance requires a non-empty keyword." },
+                  "page_size": { "type": "integer", "minimum": 0, "maximum": 100, "x-octo-flag": "page-size", "description": "Page size. Omitted or 0 uses the backend default 20; nonzero values must be 1–100." },
                   "cursor": { "type": "string", "description": "opaque pagination cursor" },
                   "filters": { "type": "object", "description": "extra filters (sender_ids, member_uids, channel_ids, channel_types, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
@@ -236,7 +236,7 @@
       "post": {
         "operationId": "message.search.files",
         "summary": "Search files (by filename / caption)",
-        "description": "File search (payload.type=8). With --chat-id: within that channel. Without --chat-id: the CLI routes to cross-channel _search_global_files. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "description": "File search (payload.type=8). With --chat-id: within that channel; also provide --channel-type (1=DM, 2=group, 5=thread). Without --chat-id: the CLI routes to cross-channel _search_global_files. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
         "x-octo-risk": "read",
         "x-octo-pagination": {
           "cursorParam": "cursor",
@@ -251,10 +251,10 @@
                 "type": "object",
                 "properties": {
                   "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "channel id to scope the search to; omit to search files across all reachable channels" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
-                  "keyword": { "type": "string", "description": "filename / caption keyword" },
-                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "sort order; relevance requires a non-empty keyword" },
-                  "page_size": { "type": "integer", "description": "page size" },
+                  "channel_type": { "type": "integer", "description": "Required when channel_id scopes the search to one channel. Valid values: 1=DM, 2=group, 5=thread." },
+                  "keyword": { "type": "string", "maxLength": 64, "description": "Filename / caption keyword; non-empty values are limited to 64 Unicode code points." },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc", "relevance"], "description": "Sort order; backend default is time_desc. relevance requires a non-empty keyword." },
+                  "page_size": { "type": "integer", "minimum": 0, "maximum": 100, "x-octo-flag": "page-size", "description": "Page size. Omitted or 0 uses the backend default 20; nonzero values must be 1–100." },
                   "cursor": { "type": "string", "description": "opaque pagination cursor" },
                   "filters": { "type": "object", "description": "extra filters (file_exts, file_size_min, file_size_max, sender_ids, ...). Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
@@ -275,7 +275,7 @@
       "post": {
         "operationId": "message.search.media",
         "summary": "Search images + videos (in-channel only)",
-        "description": "Media search (payload.type in [2,5]). --chat-id is REQUIRED (no cross-channel media endpoint); the backend rejects requests without a channel_id. keyword must be empty (the backend rejects a non-empty keyword). --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "description": "Media search (payload.type in [2,5]). --chat-id is REQUIRED (no cross-channel media endpoint); also provide --channel-type (1=DM, 2=group, 5=thread). The backend rejects requests without a channel_id. keyword must be empty (the backend rejects a non-empty keyword). --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
         "x-octo-risk": "read",
         "x-octo-pagination": {
           "cursorParam": "cursor",
@@ -291,9 +291,9 @@
                 "required": ["channel_id"],
                 "properties": {
                   "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "REQUIRED. channel id to search media in (no cross-channel media endpoint)" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
-                  "sort": { "type": "string", "enum": ["time_desc", "time_asc"], "description": "sort order" },
-                  "page_size": { "type": "integer", "description": "page size" },
+                  "channel_type": { "type": "integer", "description": "Required for this in-channel search. Valid values: 1=DM, 2=group, 5=thread." },
+                  "sort": { "type": "string", "enum": ["time_desc", "time_asc"], "description": "Sort order; backend default is time_desc." },
+                  "page_size": { "type": "integer", "minimum": 0, "maximum": 100, "x-octo-flag": "page-size", "description": "Page size. Omitted or 0 uses the backend default 20; nonzero values must be 1–100." },
                   "cursor": { "type": "string", "description": "opaque pagination cursor" },
                   "filters": { "type": "object", "description": "extra filters (sender_ids, content_types, sent_at_from, sent_at_to, ...). Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
@@ -314,7 +314,7 @@
       "post": {
         "operationId": "message.search.around",
         "summary": "Fetch the context window around an anchor message (in-channel only)",
-        "description": "Locates the context window (messages before/after) around an anchor message. --chat-id is REQUIRED (a locate needs a single-channel anchor); the backend rejects requests without a channel_id. No pagination. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_) token; App Bot (app_) tokens are rejected.",
+        "description": "Locates the context window (messages before/after) around an anchor message. --chat-id is REQUIRED (a locate needs a single-channel anchor); also provide --channel-type (1=DM, 2=group, 5=thread). The backend rejects requests without a channel_id. --page-size controls the window: omitted or 0 uses the backend default 20; nonzero values must be 1–100. This is not cursor pagination. --on-behalf-of searches as that user (User Bot only). Requires a User Bot (bf_) or user API key (uk_); App Bot (app_) tokens are rejected.",
         "x-octo-risk": "read",
         "requestBody": {
           "required": true,
@@ -325,8 +325,9 @@
                 "required": ["channel_id", "anchor_message_id"],
                 "properties": {
                   "channel_id": { "type": "string", "x-octo-flag": "chat-id", "description": "REQUIRED. channel id containing the anchor message" },
-                  "channel_type": { "type": "integer", "description": "1=DM, 2=group, 5=thread" },
+                  "channel_type": { "type": "integer", "description": "Required for this in-channel search. Valid values: 1=DM, 2=group, 5=thread." },
                   "anchor_message_id": { "type": "string", "x-octo-flag": "anchor-message-id", "description": "REQUIRED. the message id to center the context window on" },
+                  "page_size": { "type": "integer", "minimum": 0, "maximum": 100, "x-octo-flag": "page-size", "description": "Context-window size. Omitted or 0 uses the backend default 20; nonzero values must be 1–100. Not a cursor page." },
                   "filters": { "type": "object", "description": "extra filters. Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
                 }
@@ -356,6 +357,7 @@
                 "type": "object",
                 "properties": {
                   "keyword": { "type": "string", "description": "full-text keyword" },
+                  "sequence": { "type": "integer", "format": "int64", "x-octo-flag": "sequence", "description": "Optional int64 correlation value; the backend echoes it in this response. Not a pagination cursor." },
                   "filters": { "type": "object", "description": "extra filters (channel_types, member_uids, sent_at_from, sent_at_to, ...). Pass via --data." },
                   "on_behalf_of": { "type": "string", "description": "OBO: search as this user persona; requires an active OBO grant (User Bot only)" }
                 }
@@ -366,7 +368,25 @@
         "responses": {
           "200": {
             "description": "Aggregated group overview",
-            "content": { "application/json": { "schema": { "type": "object" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "sequence": {
+                          "type": "integer",
+                          "format": "int64",
+                          "description": "The request correlation value, echoed by the backend."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

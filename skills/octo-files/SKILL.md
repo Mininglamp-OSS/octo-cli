@@ -28,7 +28,7 @@ octo-cli file presigned   --filename report.pdf --fileSize 1048576   # --fileSiz
 
 Unlike most commands, `file upload` sends a multipart `multipart/form-data` body, not JSON. The `--file` flag is **required** and names a local path. `--type` (default `chat`) and `--path` are query parameters; they are not multipart form fields. The multipart body carries the file and any promoted body fields declared in the spec as text fields.
 
-The maximum size and allowed/blocked extensions follow the current backend file policy. Multipart and presigned uploads use that policy; direct-to-S3 upload is not a way around it, and there is no fixed 100 MB ceiling guaranteed by the CLI.
+The maximum size and allowed/blocked extensions follow the current backend file policy. Multipart uploads and presigned URL issuance check that policy, including the configured file-size cap. The STS `file credentials` endpoint checks the filename/extension but has no size input or size check in the inspected backend; external COS enforcement for those credentials is unverified, so do not assume STS bypasses the file-size policy. There is no fixed 100 MB ceiling guaranteed by the CLI.
 
 The response envelope carries the returned file descriptor under `data` — use it to build attachment references in `message send`.
 
@@ -60,33 +60,35 @@ cdisp=$(jq -r '.data.contentDisposition // empty' <<<"$cred")
 curl -X PUT -T big.zip -H "Content-Type: $ctype" ${cdisp:+-H "Content-Disposition: $cdisp"} "$url"
 ```
 
-`file presigned` **requires `--fileSize` (bytes)** — the size is signed into the PUT Content-Length, so a missing/oversized value is rejected (`HTTP 400` — fileSize is required). It returns `{method, uploadUrl, downloadUrl, contentType, key, expiresIn, expiredTime, maxFileSize, [contentDisposition]}` — a one-shot signed URL (echo `contentDisposition` verbatim on the PUT if present). `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, startTime, expiredTime, cdnBaseUrl}`) for SDK-driven uploads. Pick the shape the backend gives you.
+`file presigned` **requires `--fileSize` (bytes)** — the size is signed into the PUT Content-Length, so the upload must carry exactly that many bytes. A missing or non-positive value is rejected; a value above the current file-size cap is rejected as `file_too_large` (HTTP 400). It returns `{method, uploadUrl, downloadUrl, contentType, [contentDisposition], key, expiresIn, expiredTime, maxFileSize}` — a one-shot signed URL (echo `contentDisposition` verbatim on the PUT if present). `file credentials` returns STS-style temporary credentials (`{bucket, region, key, credentials:{tmpSecretId, tmpSecretKey, sessionToken}, startTime, expiredTime, cdnBaseUrl}`) for SDK-driven uploads; their external COS size enforcement is not established.
 
 ## 2. Bot housekeeping
 
 ```bash
-octo-cli bot register       [--agent-platform <name>] [--agent-version <version>] [--plugin-version <version>]
+octo-cli bot register       [--agent-platform <name>] [--agent-version <version>] [--plugin-version <version>] [--agent-hosting <slug>]
 octo-cli bot set-commands   --data '{"commands":[{"command":"fix","description":"create a matter"}]}'
 octo-cli bot user-info      --uid <uid>         # --uid is REQUIRED; returns {uid,name,avatar} for that user
-octo-cli bot space-members  [--keyword <q>] [--space-id <sid>] [--limit <n>]  # defaults to 50; maximum 200
+octo-cli bot space-members  [--keyword <q>] [--space-id <sid>] [--page <n>] [--limit <n>]
 octo-cli bot typing         --channel-id <cid> --channel-type 1 [--on-behalf-of <uid>]
 octo-cli bot heartbeat
 ```
+
+`bot space-members` uses a one-based `--page` (defaults to 1; capped at 1,000,000) and a `--limit` (defaults to 50; maximum 200). Request later pages by incrementing `--page` yourself; this operation does not provide `--page-all`.
 
 ### `bot register` — special auth
 
 `register` is the **only** operation not behind the `authBot` middleware. The backend routes it by token prefix: `app_*` → `registerAppBot`, `bf_*` → `registerUserBot`. You still supply the normal environment credential (`OCTO_TOKEN`, or legacy alias `OCTO_BOT_TOKEN`); the CLI treats the call like any other.
 
-Use `bot register` exactly once per bot lifecycle (publish), then use `bot set-commands` to advertise slash-command metadata.
+For CLI housekeeping, run `bot register` during publish to capture `owner_uid` for caching; then use `bot set-commands` to advertise slash-command metadata. Registration is repeatable, not an exactly-once backend rule: a runtime may call it again to retrieve current connection information, and User Bots can re-register to recover after disconnection.
 
-The optional agent-platform, agent-version, and plugin-version values report client metadata. Supply them as flags or as the equivalent fields in `--data`; they do not replace the bot token.
+The optional agent-platform, agent-version, plugin-version, and agent-hosting fields report runtime metadata. Only User Bot (`bf_*`) registration persists agent metadata; App Bot (`app_*`) ignores it. `agent-hosting` is normalized by the backend to an open-vocabulary lowercase ASCII slug (starts with a letter, then letters/digits/underscores; at most 64 bytes). `none` retracts the marker, while empty or omitted means unchanged. Invalid metadata is ignored without failing registration. These fields are metadata, not a replacement for the bot token.
 
 ### Get the owner_uid from `bot register`
 
-`bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from the one-time `bot register` at publish; capture it then and cache it (env/config) rather than re-registering:
+`bot user-info` needs `--uid` and returns only `{uid, name, avatar}` — it does **not** carry `owner_uid`. The bot's `owner_uid` comes from `bot register`; cache it as CLI housekeeping (for example, in env/config) when later commands need it. This recommendation does not prevent a runtime from registering again for current connection information or recovery:
 
 ```bash
-registration=$(octo-cli bot register --format json) # capture once at publish
+registration=$(octo-cli bot register --format json) # publish/setup or runtime recovery
 owner=$(jq -r '.data.owner_uid' <<<"$registration") # decode the JSON string to a raw UID
 ```
 
@@ -116,7 +118,8 @@ octo-cli message send --data "$(jq -n \
 
 | Symptom                                          | Fix                                                                |
 |--------------------------------------------------|--------------------------------------------------------------------|
-| `upload` → `PAYLOAD_TOO_LARGE`                   | Use `file presigned` / `file credentials` and upload direct to S3. |
+| `upload` → `file_too_large` (HTTP 400)            | The configured file-size policy was exceeded. Reduce the file or ask an administrator about the policy; presigned URL issuance checks the same cap. |
+| `payload_too_large` / `PAYLOAD_TOO_LARGE` (HTTP 413) | A distinct request-payload-size response, not the file-policy `file_too_large` error. Follow the affected endpoint's limit; do not assume presigned or STS upload bypasses it. |
 | `upload` → `validation` "--file is required"     | Path is empty or unreadable; check permissions and absolute path.  |
 | `download` returns JSON instead of bytes          | Expected; extract `.data.url` and fetch with curl/wget.            |
 | `bot typing` returns 200 but no UI update        | Channel type must be `1` and the DM must exist.                    |
