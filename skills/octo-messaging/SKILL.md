@@ -262,3 +262,7 @@ octo-cli schema group.members
 octo-cli schema thread.create
 octo-cli schema event.list
 ```
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.

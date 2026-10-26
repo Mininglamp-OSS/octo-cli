@@ -42,7 +42,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 339 embedded operations)
+## Command Structure (12 active domains, 423 embedded operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `skills`, `sheet-cell`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`. `loop task assign` is a CLI alias for the generated `task.update` operation.
 
@@ -148,7 +148,7 @@ without registry access. Upgrade requires no Octo credentials.
 
 Bot-type capability and per-command flags are in `docs/octo-cli-design.md`. Agent-facing usage lives under `skills/` (`octo-shared`, `octo-matter` (withheld — see above), `octo-summary` (withheld — see CHANGELOG "Currently withheld" note), `octo-messaging`, `octo-files`, `octo-drive`, `octo-docs`, `octo-html`, `octo-marketplace`, `octo-mail`, `octo-loop`) — keep those in sync when command shapes change.
 
-The hand-written drive leaves (`cmd/drive*.go`) are the exception to "everything is generated": `upload file` / `download file` / `share download` are multi-request transfers, `share create` branches on node type, and `share blob-create` / `share access` / `share download` take an argument shape (positional body field, whole share URL) the engine cannot express. They replace the generated leaf of the same name where one exists, so the spec still documents the endpoint for `octo-cli schema`.
+The hand-written drive leaves (`cmd/drive*.go`) are the exception to "everything is generated": `upload file` / `download file` / `share download` are multi-request transfers, `share create` branches on node type, and `share blob-create` / `share access` / `share download` take an argument shape (positional body field, whole share URL) the engine cannot express. They replace the generated leaf of the same name where one exists, so the spec still documents the endpoint for `octo-cli schema`. The MCP server's per-call factory sets `GeneratedDriveShareLeaves`, so MCP executes the generated `share blob-create|access|download` leaves whose shape matches the schema it publishes.
 
 ## Environment
 

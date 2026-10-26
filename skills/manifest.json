@@ -6,15 +6,61 @@
     },
     "octo-messaging": {
       "summary_short": "Messaging: send/edit/sync, search, groups and threads, event polling; App Bot is DM-only.",
+      "references": {
+        "bot-api.md": {"topics": ["webhook", "incoming webhook", "message by id", "card revisions", "mention", "archive thread", "delete thread"]}
+      },
       "operations": {
         "message.send": {
           "level": "required-before-write",
           "advice": "App Bot can only DM. This op has no idempotency key, so confirm non-delivery before retrying to avoid a duplicate send."
+        },
+        "message.card-revisions-clear": {
+          "level": "required-before-write",
+          "advice": "Permanently erases the revision history of a card the bot sent; confirm the message and channel first.",
+          "section": "bot-api.md#message-lookup-and-card-history"
+        },
+        "thread.delete": {
+          "level": "required-before-write",
+          "advice": "Deletes the thread for everyone and cannot be undone; prefer thread.archive unless deletion was explicitly requested.",
+          "section": "bot-api.md#group-and-thread-lifecycle"
+        },
+        "group.webhook.create": {
+          "level": "required-before-write",
+          "advice": "Returns the push token once. Treat it as a credential: hand it to the requester privately, never post it in a chat.",
+          "section": "bot-api.md#incoming-webhooks"
+        },
+        "group.webhook.delete": {
+          "level": "required-before-write",
+          "advice": "Deletes the webhook and stops all pushes through it; confirm the webhook id with group.webhook.list first.",
+          "section": "bot-api.md#incoming-webhooks"
+        },
+        "group.webhook.regenerate": {
+          "level": "required-before-write",
+          "advice": "Invalidates the current push token immediately; every integration using it stops until updated.",
+          "section": "bot-api.md#incoming-webhooks"
+        },
+        "thread.webhook.create": {
+          "level": "required-before-write",
+          "advice": "Returns the push token once. Treat it as a credential: hand it to the requester privately, never post it in a chat.",
+          "section": "bot-api.md#incoming-webhooks"
+        },
+        "thread.webhook.delete": {
+          "level": "required-before-write",
+          "advice": "Deletes the webhook and stops all pushes through it; confirm the webhook id with thread.webhook.list first.",
+          "section": "bot-api.md#incoming-webhooks"
+        },
+        "thread.webhook.regenerate": {
+          "level": "required-before-write",
+          "advice": "Invalidates the current push token immediately; every integration using it stops until updated.",
+          "section": "bot-api.md#incoming-webhooks"
         }
       }
     },
     "octo-files": {
-      "summary_short": "File upload/download and presigned S3 credentials, plus bot housekeeping (register, user-info, space-members)."
+      "summary_short": "File upload/download and presigned S3 credentials, plus bot housekeeping (register, user-info, space-members).",
+      "references": {
+        "bot-api.md": {"topics": ["card profile", "obo grant", "resolve targets", "principal", "users batch"]}
+      }
     },
     "octo-docs": {
       "summary_short": "Docs, sheets, whiteboards, and PPT: create and govern, members and sharing, comments and versions.",
@@ -23,7 +69,8 @@
         "doc.md": {"topics": ["document", "body", "block", "content"]},
         "board.md": {"topics": ["whiteboard", "scene", "element", "board"]},
         "ppt.md": {"topics": ["ppt", "slide", "presentation"]},
-        "common.md": {"topics": ["member", "sharing", "attachment", "comment", "version"]}
+        "common.md": {"topics": ["member", "sharing", "attachment", "comment", "version"]},
+        "bot-api.md": {"topics": ["invite", "access request", "forward grant", "import", "upload", "media", "export", "comment task", "recent"]}
       },
       "operations": {
         "docs.create": {
@@ -33,20 +80,66 @@
         "docs.versions.restore": {
           "level": "required-before-write",
           "advice": "Restore overwrites the live document with a prior version; confirm the target version id first."
+        },
+        "docs.access-requests.approve": {
+          "level": "required-before-write",
+          "advice": "Grants the requester a document role; confirm the request and the role with a human owner first.",
+          "section": "bot-api.md#access-requests-and-invites"
+        },
+        "docs.invites.create": {
+          "level": "required-before-write",
+          "advice": "Anyone holding the invite token can join with the given role; share it only with the intended people.",
+          "section": "bot-api.md#access-requests-and-invites"
+        },
+        "docs.invites.accept": {
+          "level": "required-before-write",
+          "advice": "Joins the document as the bot itself with the invite role; only accept tokens the bot was explicitly given.",
+          "section": "bot-api.md#access-requests-and-invites"
+        },
+        "docs.forward-grant.batch": {
+          "level": "required-before-write",
+          "advice": "Grants access to many uids at once and never downgrades; double-check the uid list and role.",
+          "section": "bot-api.md#access-requests-and-invites"
+        },
+        "docs.raw-import.docx": {
+          "level": "required-before-write",
+          "advice": "With X-Octo-Import-Apply true the document content is replaced; omit it to preview the parsed result first.",
+          "section": "bot-api.md#raw-uploads-and-imports"
+        },
+        "docs.raw-import.markdown": {
+          "level": "required-before-write",
+          "advice": "With X-Octo-Import-Apply true the document content is replaced; omit it to preview the parsed result first.",
+          "section": "bot-api.md#raw-uploads-and-imports"
+        },
+        "docs.raw-import.xlsx": {
+          "level": "required-before-write",
+          "advice": "Always applies and replaces the sheet content; confirm the target sheet document first.",
+          "section": "bot-api.md#raw-uploads-and-imports"
         }
       }
     },
     "octo-drive": {
       "summary_short": "Octo Drive: spaces, folders, upload/download, doc mounts, share links, invites, IM-attachment transfer.",
+      "references": {
+        "bot-api.md": {"topics": ["trash", "restore", "share transfer", "ancestors", "doc alive", "mount by role"]}
+      },
       "operations": {
         "drive.im-transfer.create": {
           "level": "required-before-write",
           "advice": "The source message is located by the im_group_no/im_channel_type/im_msg_id triple; a wrong value is a lookup miss, not an error."
+        },
+        "drive.trash.delete": {
+          "level": "required-before-write",
+          "advice": "Permanently deletes the recycle-bin entry; there is no restore afterwards.",
+          "section": "bot-api.md#trash-share-transfer-and-lookups"
         }
       }
     },
     "octo-html": {
       "summary_short": "HTML docs (octo-doc): create and govern self-contained interactive HTML, versions, drafts, sharing, comments.",
+      "references": {
+        "bot-api.md": {"topics": ["revert", "diff", "reaction", "reanchor", "rendered page", "asset", "export bundle", "fork"]}
+      },
       "operations": {
         "html.publish": {
           "level": "required-before-write",
@@ -55,11 +148,41 @@
         "html.draft.create": {
           "level": "recommended",
           "advice": "Never invent a slug; the backend derives it. A draft is not visible in the sidebar until promoted."
+        },
+        "html.comment.rm": {
+          "level": "required-before-write",
+          "advice": "all=1 permanently removes every comment on the document; deleting one comment by id is a soft delete.",
+          "section": "bot-api.md#versions-comments-and-reactions"
         }
       }
     },
     "octo-loop": {
-      "summary_short": "Octo Loop control plane: tasks, comments, metadata, projects, labels; dispatch to experts and expert-teams."
+      "summary_short": "Octo Loop control plane: tasks, comments, metadata, projects, labels; dispatch to experts and expert-teams.",
+      "references": {
+        "bot-api.md": {"topics": ["workspace management", "runtime management", "capability install", "workspace member"]}
+      },
+      "operations": {
+        "workspace.delete": {
+          "level": "required-before-write",
+          "advice": "Deletes the whole workspace (owner only); confirm with a human owner before calling.",
+          "section": "bot-api.md#workspace-and-runtime-management"
+        },
+        "workspace.member.add": {
+          "level": "required-before-write",
+          "advice": "Adds a member or sends an invitation with the given role; confirm the principal and role first.",
+          "section": "bot-api.md#workspace-and-runtime-management"
+        },
+        "runtime.delete": {
+          "level": "required-before-write",
+          "advice": "Deletes the runtime; it fails with 409 while active experts are bound to it.",
+          "section": "bot-api.md#workspace-and-runtime-management"
+        },
+        "runtime.archive_and_delete": {
+          "level": "required-before-write",
+          "advice": "Archives every expert bound to the runtime and deletes it; expected_active_agent_ids must match the current set.",
+          "section": "bot-api.md#workspace-and-runtime-management"
+        }
+      }
     },
     "octo-mail": {
       "summary_short": "OCTO Agent Mail: read, search, policy-aware sending, draft preparation, delivery status.",

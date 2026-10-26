@@ -474,3 +474,7 @@ and its parent (if replying), the target workspace, whether writes are allowed,
 and whether mentions / status changes / reruns / dispatch are allowed. If any of
 these is missing and the operation would write state, ask first. For read-only
 investigation, gather context with JSON output and state what is still missing.
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.

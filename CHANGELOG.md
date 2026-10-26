@@ -120,6 +120,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unchanged; no octo-server Project API or command alias is introduced.
 
 ### Added
+- **Bot API coverage for the MCP facades** — 94 operations added or exposed
+  across messaging, bot, docs, HTML docs, drive and Loop, each verified against
+  the pinned backend route, handler and validation code: incoming webhooks for
+  groups and threads, single-message reads, card revision clearing, thread
+  archive/delete, mention preference, target resolution, OBO grant and
+  principal lookups; document invites, access requests, batch forward grants,
+  comment tasks, recent views, attachment copy/ingest, file export and PPT
+  media; HTML version source/revert/diff, comment reanchor/delete/react and
+  rendered pages/assets; drive trash, share transfer/existing copies,
+  ancestors, doc liveness and role-checked mounts; Loop workspace/runtime
+  management, workspace member add and capability install. The row-by-row
+  scope, evidence and tests are in `docs/mcp-bot-api-coverage.json`.
+  `thread delete` returns as a high-risk operation now that `thread archive`
+  gives bots a non-destructive way to close a thread, and the previously
+  hidden Loop workspace/runtime management commands are now listed.
+- **Raw request-body uploads** (`x-octo-raw-body`) — five docs routes that take
+  the file bytes as the body (PPT media, SVG attachments, docx/markdown/xlsx
+  import) are generated operations with `--file`, a declared media type and a
+  local size limit. Over MCP they use the same confined upload descriptor as
+  multipart uploads; a dry-run never opens the file.
+- **Inline binary results over MCP** — a binary-response operation called
+  through MCP returns its body inside the envelope (`content_text` for UTF-8
+  text, otherwise `content_base64`, always with `sha256`) up to 4 MiB; larger
+  bodies report `inline: false` with their size. Nothing is written to the
+  server's filesystem and `--output` stays unavailable to MCP callers.
+- **MCP exposure table** (`internal/mcp/exposure.json`) — MCP discovery,
+  describe and execute are default-deny: an enabled operation must be listed
+  (pre-existing baseline or an approved inventory row) or it is withheld and
+  refused, and CI fails until it is classified.
 - **`octo-cli mcp serve --facade two|both` (two-tool Skill-driven facade)** — an
   opt-in alternative tool surface over the same MCP engine, folding the three
   meta-tools into two verbs. It is off by default (`--facade three`), so the

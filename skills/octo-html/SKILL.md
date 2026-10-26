@@ -346,3 +346,7 @@ octo-cli schema html.publish
 octo-cli schema html.element.replace
 octo-cli schema html.reply
 ```
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.
