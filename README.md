@@ -225,6 +225,9 @@ octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-id 
 octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> \
   --assignee-type member --assignee-octo-uid <member-octo-uid> --suppress-run
 octo-cli loop task list --workspace-id <workspace-uuid> --assignee "Alice"
+# ID filters go directly to Fleet, so historical assignees remain searchable.
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-id <fleet-actor-uuid>
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-octo-uid <member-octo-uid>
 # Project members use Fleet authorization, including its verified Bot-owner fallback.
 octo-cli loop workspace member list <project-uuid>
 # Alternatively select the Project with --workspace-id; results are in .data[].

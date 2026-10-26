@@ -48,11 +48,16 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 		cmd.Flags().String("to", "", "Assignee name; infer type from workspace members, experts and expert teams")
 		cmd.Flags().String("to-id", "", "Exact, case-sensitive Project member Octo UID or Fleet actor UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
-	case "task.create", "task.update", "task.list":
+	case "task.create", "task.update":
 		cmd.Flags().String("assignee", "", "Assignee name; infer type from workspace lists; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
 			flag.Usage += " When type is omitted, resolve the exact ID across workspace members, experts and expert teams."
+		}
+	case "task.list":
+		cmd.Flags().String("assignee", "", "Assignee name; infer type from workspace lists; do not mix with explicit filters")
+		if flag := cmd.Flags().Lookup("assignee-id"); flag != nil {
+			flag.Usage += " Sent directly to Fleet without a roster lookup; use --assignee-octo-uid for a Project member UID."
 		}
 	}
 }
@@ -79,7 +84,7 @@ func applyTaskAssigneeBody(cmd *cobra.Command, f *cmdutil.Factory, rt *operation
 	if verr != nil {
 		return verr
 	}
-	actor, err := resolveTaskAssignee(cmd, f, headers, input, byID)
+	actor, err := resolveTaskAssignee(cmd, f, headers["X-Workspace-ID"], input, byID)
 	if err != nil {
 		return err
 	}
@@ -144,15 +149,14 @@ func applyTaskAssigneeQuery(cmd *cobra.Command, f *cmdutil.Factory, rt *operatio
 	if rt.detail.Service != "loop" || rt.detail.ID != "task.list" {
 		return nil
 	}
-	input, byID, resolve, err := taskQueryAssigneeSelector(cmd, query)
+	input, resolve, err := taskQueryAssigneeSelector(cmd, query)
 	if err != nil || !resolve {
 		return err
 	}
-	actor, err := resolveTaskAssignee(cmd, f, headers, input, byID)
+	actor, err := resolveTaskAssignee(cmd, f, headers["X-Workspace-ID"], input, false)
 	if err != nil {
 		return err
 	}
-	query.Del("assignee_id")
 	if actor.uid != "" {
 		query.Set("assignee_octo_uid", actor.uid)
 	} else {
@@ -162,30 +166,25 @@ func applyTaskAssigneeQuery(cmd *cobra.Command, f *cmdutil.Factory, rt *operatio
 	return nil
 }
 
-func taskQueryAssigneeSelector(cmd *cobra.Command, query url.Values) (input string, byID, resolve bool, err error) {
-	byName, byID := cmd.Flags().Changed("assignee"), cmd.Flags().Changed("assignee-id")
-	if !byName && !byID {
-		return "", false, false, nil
-	}
-	if byID && !byName && (query.Get("assignee_id") == "me" || query.Has("assignee_types")) {
-		return "", false, false, nil
+func taskQueryAssigneeSelector(cmd *cobra.Command, query url.Values) (input string, resolve bool, err error) {
+	// The existing --assignee-id filter belongs to Fleet. Historical assignees
+	// must remain queryable without current roster read access.
+	if !cmd.Flags().Changed("assignee") {
+		return "", false, nil
 	}
 	for key := range query {
-		if strings.HasPrefix(key, "assignee_") && (key != "assignee_id" || !byID || byName) {
-			return "", false, false, assignmentError("--assignee and --assignee-id cannot be combined with other assignee filters")
+		if strings.HasPrefix(key, "assignee_") {
+			return "", false, assignmentError("--assignee cannot be combined with other assignee filters")
 		}
 	}
-	if byID {
-		return cmd.Flags().Lookup("assignee-id").Value.String(), true, true, nil
-	}
-	return cmd.Flags().Lookup("assignee").Value.String(), false, true, nil
+	return cmd.Flags().Lookup("assignee").Value.String(), true, nil
 }
 
 type taskAssignee struct {
 	kind, id, uid, name string
 }
 
-func resolveTaskAssignee(cmd *cobra.Command, f *cmdutil.Factory, headers map[string]string, input string, byID bool) (taskAssignee, error) {
+func resolveTaskAssignee(cmd *cobra.Command, f *cmdutil.Factory, workspaceID, input string, byID bool) (taskAssignee, error) {
 	var empty taskAssignee
 	if !byID {
 		input = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(input), "@＠"))
@@ -194,9 +193,9 @@ func resolveTaskAssignee(cmd *cobra.Command, f *cmdutil.Factory, headers map[str
 		return empty, assignmentError("assignee name or ID must not be empty or space-padded")
 	}
 	if f.Globals != nil && f.Globals.DryRun {
-		return empty, assignmentError("--dry-run cannot resolve an assignee without HTTP; use explicit --assignee-type with --assignee-id or --assignee-octo-uid")
+		return empty, assignmentError("--dry-run cannot resolve an assignee without HTTP; use explicit ID flags instead")
 	}
-	actors, err := readTaskAssignees(cmd, f, headers)
+	actors, err := readTaskAssignees(cmd, f, workspaceID)
 	if err != nil {
 		return empty, err
 	}
@@ -264,9 +263,8 @@ type taskAssigneeRecord struct {
 	ArchivedAt    json.RawMessage `json:"archived_at"`
 }
 
-func readTaskAssignees(cmd *cobra.Command, f *cmdutil.Factory, headers map[string]string) ([]taskAssignee, error) {
-	workspace := headers["X-Workspace-ID"]
-	if workspace == "" {
+func readTaskAssignees(cmd *cobra.Command, f *cmdutil.Factory, workspaceID string) ([]taskAssignee, error) {
+	if workspaceID == "" {
 		return nil, assignmentError("--workspace-id is required to resolve assignees")
 	}
 	cli, err := f.Client()
@@ -281,8 +279,8 @@ func readTaskAssignees(cmd *cobra.Command, f *cmdutil.Factory, headers map[strin
 		if !ok {
 			return nil, assignmentError("assignee list operation is unavailable: " + source.operation)
 		}
-		path := strings.ReplaceAll(op.Path, "{workspace_id}", url.PathEscape(workspace))
-		records, err := readTaskAssigneePages(cmd, cli, path, headers, source.kind == "member")
+		path := strings.ReplaceAll(op.Path, "{workspace_id}", url.PathEscape(workspaceID))
+		records, err := readTaskAssigneePages(cmd, cli, path, workspaceID, source.kind == "member")
 		if err != nil {
 			return nil, fmt.Errorf("read %s assignees: %w", source.kind, err)
 		}
@@ -326,14 +324,17 @@ func (r *taskAssigneeRecord) assignee(kind string) (taskAssignee, bool, error) {
 	return actor, true, nil
 }
 
-func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, headers map[string]string, members bool) ([]taskAssigneeRecord, error) {
+func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path, workspaceID string, members bool) ([]taskAssigneeRecord, error) {
 	const memberPageSize = 100
 	var records []taskAssigneeRecord
 	seen := map[string]bool{}
 	expected := -1
 	for page := 1; page <= 1000; page++ {
 		query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(memberPageSize)}}
-		body, err := cli.Do(cmd.Context(), &client.Request{Service: "loop", Method: "GET", Path: path, Query: query, Headers: headers})
+		body, err := cli.Do(cmd.Context(), &client.Request{
+			Service: "loop", Method: "GET", Path: path, Query: query,
+			Headers: map[string]string{"X-Workspace-ID": workspaceID}, SuppressSpaceHeader: true,
+		})
 		if err != nil {
 			return nil, err
 		}

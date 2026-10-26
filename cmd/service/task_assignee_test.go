@@ -86,23 +86,61 @@ func TestTaskAssignmentMulticaStyle(t *testing.T) {
 }
 
 func TestTaskAssignmentListFilters(t *testing.T) {
-	for _, flags := range [][]string{{"--assignee", "Alice"}, {"--assignee-id", "Human/CaseSensitive"}} {
-		root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Path == "/fleet/api/v1/tasks" {
-				if r.URL.Query().Get("assignee_octo_uid") != "Human/CaseSensitive" || r.URL.Query().Has("assignee_id") {
-					t.Errorf("incorrect member filter: %s", r.URL)
-				}
-				_, _ = io.WriteString(w, `{"data":[],"pagination":{"total":0}}`)
-				return
+	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/fleet/api/v1/tasks" {
+			if r.URL.Query().Get("assignee_octo_uid") != "Human/CaseSensitive" || r.URL.Query().Has("assignee_id") {
+				t.Errorf("incorrect member filter: %s", r.URL)
 			}
-			_, _ = io.WriteString(w, assignmentFixture(r.URL.Path))
-		})
-		args := []string{"loop", "task", "list", "--workspace-id", projectMemberTestID}
-		root.SetArgs(append(args, flags...))
-		if err := root.Execute(); err != nil {
-			t.Fatal(err)
+			_, _ = io.WriteString(w, `{"data":[],"pagination":{"total":0}}`)
+			return
 		}
+		_, _ = io.WriteString(w, assignmentFixture(r.URL.Path))
+	})
+	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", projectMemberTestID, "--assignee", "Alice"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTaskListAssigneeIDPassesThroughWithoutRosterReads(t *testing.T) {
+	taskReads := 0
+	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/tasks" {
+			t.Errorf("task ID filter must not read a roster: %s", r.URL)
+			http.Error(w, "roster denied", http.StatusForbidden)
+			return
+		}
+		taskReads++
+		if r.Method != http.MethodGet || r.URL.Query().Get("assignee_id") != assignmentExpertID || r.URL.Query().Has("assignee_types") {
+			t.Errorf("task filter changed: %s %s", r.Method, r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"data":[],"pagination":{"total":0}}`)
+	})
+	root.SetArgs([]string{"loop", "task", "list", "--workspace-id", projectMemberTestID, "--assignee-id", assignmentExpertID})
+	if err := root.Execute(); err != nil || taskReads != 1 {
+		t.Fatalf("list by historical assignee ID: err=%v task reads=%d", err, taskReads)
+	}
+}
+
+func TestTaskAssignmentLookupSuppressesSpaceHeader(t *testing.T) {
+	lookups := 0
+	root, _, _ := rootWithServiceSpaced(t, "space-from-profile", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Workspace-ID") != projectMemberTestID || r.Header.Get("X-Space-Id") != "" {
+			t.Errorf("Loop request used wrong scope headers: %s %#v", r.URL, r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			lookups++
+			_, _ = io.WriteString(w, assignmentFixture(r.URL.Path))
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":{"task_id":"TASK-1"}}`)
+	})
+	root.SetArgs([]string{"loop", "task", "assign", "TASK-1", "--workspace-id", projectMemberTestID, "--to", "Alice"})
+	if err := root.Execute(); err != nil || lookups != 3 {
+		t.Fatalf("assignment lookups: err=%v count=%d", err, lookups)
 	}
 }
 
