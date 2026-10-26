@@ -80,6 +80,26 @@ var overridableParams = map[string]map[string]overridableField{
 	"group.list": {
 		"space_id": fieldSpaceID,
 	},
+	// XIN-2424 Bot API coverage. Both principal lookups take the Octo space as
+	// a query value (octo-server space_principal.go, obo_generic_self.go:32-36)
+	// and never read X-Space-Id, so the argument is the only space signal.
+	"bot.space-principal": {
+		"space_id": fieldSpaceID,
+	},
+	"bot.obo-grants-self": {
+		"space_id": fieldSpaceID,
+	},
+	// Clearing card revisions addresses one message in one channel.
+	"message.card-revisions-clear": {
+		"channel_id":   fieldChannelID,
+		"channel_type": fieldChannelType,
+	},
+	// drive.doc.mount-by-role takes the caller's Octo space as a declared
+	// X-Space-Id header that octo-drive forwards verbatim to the docs role
+	// check (docref/api.go:40). Its body space_id is a drive resource id.
+	"drive.doc.mount-by-role": {
+		"X-Space-Id": fieldSpaceID,
+	},
 	// thread.create gained an on_behalf_of body field upstream; a configured
 	// --force-on-behalf-of must confine it like every other OBO-capable op.
 	"thread.create": {
@@ -132,6 +152,9 @@ var sessionBoundFields = map[string]bool{
 	"channel_type": true,
 	"on_behalf_of": true,
 	"space_id":     true,
+	// A declared X-Space-Id header parameter carries the same Octo space
+	// context the engine otherwise derives from the credential.
+	"X-Space-Id": true,
 }
 
 // isDriveResourceSpaceID is a documented, service-scoped exclusion: in the drive
@@ -139,33 +162,32 @@ var sessionBoundFields = map[string]bool{
 // shared:<uuid>, drive.json:83), NOT the Octo space context X-Space-Id carries.
 // Forcing the connection's Octo space onto it would break drive entirely (the
 // same-name trap). This is an EXCLUSION (never inject), so it is the safe
-// direction — the coverage guard treats a drive op whose only session-bound
-// field is space_id as classified.
+// direction — the coverage guard treats a drive op's space_id as classified.
+// Any OTHER session-bound field the same op declares (e.g. a declared
+// X-Space-Id header carrying real Octo space context) must still be forced.
 func isDriveResourceSpaceID(op registry.OperationInfo, fields []string) bool { //nolint:gocritic // read-only operation metadata snapshot
-	if op.Service != "drive" || len(fields) == 0 {
+	if op.Service != "drive" {
 		return false
 	}
 	for _, f := range fields {
-		if f != "space_id" {
-			return false
+		if f == "space_id" {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 // divergentMCPOps are operations whose generated OpenAPI schema does NOT
-// describe their actual callable shape, because cmd/drive.go detaches the
-// generated leaf and replaces it with a hand-written composite that takes a
-// different argument shape (a positional body field / a whole share URL). Their
-// generated schema is therefore uncallable via call_op's schema-derived argv,
-// so this version withholds them from MCP discovery (search_ops), refuses to
-// describe them (describe_op), and refuses call_op with a pointer to the CLI.
-// Keep in sync with the RemoveLeaf(share, ...) calls in cmd/drive.go.
-var divergentMCPOps = map[string]string{
-	"drive.share.blob-create": "octo-cli drive share blob-create",
-	"drive.share.access":      "octo-cli drive share access",
-	"drive.share.download":    "octo-cli drive share download",
-}
+// describe their callable shape in the MCP per-call command tree. Such an op is
+// withheld from MCP discovery (search_ops), refused by describe_op, and refused
+// by call_op with a pointer to the CLI form.
+//
+// It is empty today: the drive share composites (cmd/drive.go) used to replace
+// drive.share.blob-create / access / download, but the MCP factory now sets
+// GeneratedDriveShareLeaves so those operations execute through the generated
+// leaves their published schema describes. The mechanism stays so a future
+// composite that cannot keep its generated leaf is withheld, not mis-called.
+var divergentMCPOps = map[string]string{}
 
 func (tc TrustedContext) value(f overridableField) string {
 	switch f {

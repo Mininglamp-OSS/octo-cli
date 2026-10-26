@@ -112,6 +112,17 @@ func TestDrive_RegistryShape(t *testing.T) {
 		"drive.invite.accept": {"POST", "/v1/bot/drive/invites/{invite_token}/accept"},
 		// im-transfer (1)
 		"drive.im-transfer.create": {"POST", "/v1/bot/drive/blobs/transfer-from-im"},
+		// XIN-2424 Bot API coverage
+		"drive.doc.mount-by-role":     {"POST", "/v1/bot/drive/docs/mount"},
+		"drive.file.ancestors":        {"GET", "/v1/bot/drive/files/{file_id}/ancestors"},
+		"drive.file.doc-alive":        {"GET", "/v1/bot/drive/files/{file_id}/doc-alive"},
+		"drive.hello":                 {"GET", "/v1/bot/drive/hello"},
+		"drive.im-transfer.lookup":    {"POST", "/v1/bot/drive/blobs/im-transferred/batch"},
+		"drive.share.existing-copies": {"GET", "/v1/bot/drive/shares/{share_token}/existing-copies"},
+		"drive.share.transfer":        {"POST", "/v1/bot/drive/shares/{share_token}/transfer"},
+		"drive.trash.delete":          {"DELETE", "/v1/bot/drive/trash/{file_id}"},
+		"drive.trash.list":            {"GET", "/v1/bot/drive/trash"},
+		"drive.trash.restore":         {"POST", "/v1/bot/drive/trash/{file_id}/restore"},
 	}
 
 	ops := reg.ListOperations("drive")

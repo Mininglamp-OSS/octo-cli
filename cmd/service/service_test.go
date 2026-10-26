@@ -373,16 +373,29 @@ func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
 	}
 }
 
-func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
-	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
-		t.Fatal("hidden workspace create command must not send a request")
-	})
-	workspace := findCmd(findCmd(root, "loop"), "workspace")
-	if workspace == nil {
-		t.Fatal("loop workspace command not registered")
+// Workspace and runtime management were previously withheld with
+// x-octo-cli-hidden. They are exposed now that the Fleet public routes they
+// address have been verified for Bot callers (XIN-2424); the leaves must exist
+// so both the CLI and the MCP facade can reach them.
+func TestLoopWorkspaceManagementCommandsAreRegistered(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
+	loop := findCmd(root, "loop")
+	if loop == nil {
+		t.Fatal("loop command not registered")
 	}
-	if findCmd(workspace, "create") != nil {
-		t.Fatal("loop workspace create must not be registered")
+	for _, words := range [][]string{
+		{"workspace", "create"}, {"workspace", "update"}, {"workspace", "delete"},
+		{"runtime", "update"}, {"runtime", "delete"}, {"runtime", "archive-and-delete"},
+	} {
+		cmd := loop
+		for _, w := range words {
+			if cmd = findCmd(cmd, w); cmd == nil {
+				break
+			}
+		}
+		if cmd == nil {
+			t.Errorf("loop %s must be registered", strings.Join(words, " "))
+		}
 	}
 }
 
@@ -1648,7 +1661,7 @@ func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"thread + removed leaf (delete)", []string{"thread", "delete", "g", "s"}},
+		{"thread + unknown leaf (destroy)", []string{"thread", "destroy", "g", "s"}},
 		{"thread + bogus", []string{"thread", "bogus"}},
 		{"group + bogus", []string{"group", "nope"}},
 	}

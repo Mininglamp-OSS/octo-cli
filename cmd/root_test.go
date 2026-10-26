@@ -46,8 +46,8 @@ func TestNewRootCmd_ParentCommandSkipAuthAndRejectUnknown(t *testing.T) {
 			wantErrSubstr: "unknown subcommand",
 		},
 		{
-			name:          "thread delete (removed) -> validation, not auth_error",
-			args:          []string{"thread", "delete", "g", "s"},
+			name:          "thread destroy (unknown leaf) -> validation, not auth_error",
+			args:          []string{"thread", "destroy", "g", "s"},
 			wantErr:       true,
 			wantErrType:   "validation",
 			wantErrSubstr: "unknown subcommand",

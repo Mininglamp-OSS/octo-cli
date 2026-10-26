@@ -30,7 +30,17 @@ func TestDescribeOp_DisabledServiceNotDescribable(t *testing.T) {
 	}
 }
 
-func TestDivergentDriveShareOps_NotAdvertisedOrCallable(t *testing.T) {
+// TestDivergentOps_NotAdvertisedOrCallable pins the divergent-op mechanism.
+// No embedded operation is divergent today (the MCP factory keeps the drive
+// share generated leaves), so the entry is injected for the test.
+func TestDivergentOps_NotAdvertisedOrCallable(t *testing.T) {
+	saved := divergentMCPOps
+	divergentMCPOps = map[string]string{
+		"drive.share.access":      "octo-cli drive share access",
+		"drive.share.blob-create": "octo-cli drive share blob-create",
+		"drive.share.download":    "octo-cli drive share download",
+	}
+	defer func() { divergentMCPOps = saved }()
 	s := newTestServer(t)
 
 	// search_ops(domain drive) must not list the divergent hand-written ops.

@@ -54,23 +54,23 @@ func TestGetSpecReturnsNilForUnknown(t *testing.T) {
 func TestAllDomainOperationCounts(t *testing.T) {
 	// Caller-facing operation counts per service. Operations marked
 	// x-octo-cli-hidden remain in an embedded backend spec but are excluded
-	// here; Loop workspace mutations are examples.
+	// here; no embedded spec hides an operation today.
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
-		"message":     10,
-		"group":       9,
-		"thread":      8,
+		"message":     14,
+		"group":       17,
+		"thread":      17,
 		"file":        4,
-		"bot":         6,
+		"bot":         12,
 		"event":       2,
-		"docs":        45,
-		"drive":       46,
-		"html":        22,
+		"docs":        76,
+		"drive":       56,
+		"html":        36,
 		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
-		"loop":        116,
+		"loop":        128,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -151,24 +151,56 @@ func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
 	}
 }
 
-func TestLoopWorkspaceManagementOperationsAreHidden(t *testing.T) {
-	r := MustNew()
-	hidden := []string{"workspace.create", "workspace.update", "workspace.delete"}
-	for _, operationID := range hidden {
+// The x-octo-cli-hidden mechanism keeps an operation in an embedded backend
+// spec while excluding it from GetOperation, ListOperations and
+// ListAllOperations. No embedded spec currently hides an operation, so the
+// mechanism is pinned against an inline fixture spec.
+func TestCLIHiddenOperationsAreExcludedFromRegistry(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(`{
+		"openapi": "3.1.0",
+		"x-octo-service": "fixture",
+		"paths": {
+			"/fixture/items": {
+				"get": {"operationId": "fixture.item.list", "summary": "List items", "x-octo-risk": "read"},
+				"post": {"operationId": "fixture.item.create", "summary": "Create item", "x-octo-risk": "write", "x-octo-cli-hidden": true}
+			},
+			"/fixture/items/{item_id}": {
+				"delete": {"operationId": "fixture.item.delete", "summary": "Delete item", "x-octo-risk": "high-risk-write", "x-octo-cli-hidden": "true"}
+			}
+		}
+	}`), &doc); err != nil {
+		t.Fatalf("fixture spec: %v", err)
+	}
+	r := &Registry{specs: map[string]map[string]any{"fixture": doc}}
+
+	if _, ok := r.GetOperation("fixture.item.list"); !ok {
+		t.Fatal("fixture.item.list: visible operation must be exposed")
+	}
+	for _, operationID := range []string{"fixture.item.create", "fixture.item.delete"} {
 		if _, ok := r.GetOperation(operationID); ok {
 			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
 		}
-		for _, op := range r.ListOperations("loop") {
-			if op.ID == operationID {
-				t.Fatalf("%s must not be listed as a Loop operation", operationID)
-			}
+	}
+	for _, list := range [][]OperationInfo{r.ListOperations("fixture"), r.ListAllOperations()} {
+		if len(list) != 1 || list[0].ID != "fixture.item.list" {
+			t.Fatalf("listed operations = %v, want only fixture.item.list", operationIDs(list))
 		}
 	}
 }
 
-func TestLoopRuntimeMutationOperationsAreHidden(t *testing.T) {
+// The Loop workspace and runtime management operations were previously
+// x-octo-cli-hidden; they are now part of the caller-facing contract.
+func TestLoopWorkspaceAndRuntimeManagementOperationsAreExposed(t *testing.T) {
 	r := MustNew()
-	hidden := []string{
+	listed := map[string]bool{}
+	for _, op := range r.ListOperations("loop") {
+		listed[op.ID] = true
+	}
+	for _, operationID := range []string{
+		"workspace.create",
+		"workspace.update",
+		"workspace.delete",
 		"runtime.update",
 		"runtime.delete",
 		"runtime.archive_and_delete",
@@ -176,15 +208,12 @@ func TestLoopRuntimeMutationOperationsAreHidden(t *testing.T) {
 		"runtime.model_request.create",
 		"runtime.local_skill_request.create",
 		"runtime.local_skill_import.create",
-	}
-	for _, operationID := range hidden {
-		if _, ok := r.GetOperation(operationID); ok {
-			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+	} {
+		if _, ok := r.GetOperation(operationID); !ok {
+			t.Errorf("%s must be exposed by the CLI registry", operationID)
 		}
-		for _, op := range r.ListOperations("loop") {
-			if op.ID == operationID {
-				t.Fatalf("%s must not be listed as a Loop operation", operationID)
-			}
+		if !listed[operationID] {
+			t.Errorf("%s must be listed as a Loop operation", operationID)
 		}
 	}
 }
@@ -489,6 +518,15 @@ func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 		wantHeader := strings.HasPrefix(info.Path, "/fleet/api/v1/") &&
 			info.Path != "/fleet/api/v1/workspaces" &&
 			info.Path != "/fleet/api/v1/runtimes"
+		// workspace.create is Space-scoped for people, but a Bot caller must
+		// bind an existing workspace in the same Space through an OPTIONAL
+		// X-Workspace-ID (octo-fleet loop_device.go:197-200,229-238).
+		if info.ID == "workspace.create" {
+			if workspaceHeaders != 1 || requiredWorkspaceHeaders != 0 {
+				t.Errorf("%s: want one optional workspace header, got %d (required %d)", info.ID, workspaceHeaders, requiredWorkspaceHeaders)
+			}
+			continue
+		}
 		if wantHeader && workspaceHeaders != 1 {
 			t.Errorf("%s: workspace headers = %d, want exactly one", info.ID, workspaceHeaders)
 		}
@@ -562,6 +600,14 @@ func TestGetOperationMatterCreate(t *testing.T) {
 func TestHTMLOperationsUseDocsHTMLGatewayPrefix(t *testing.T) {
 	r := MustNew()
 	for _, op := range r.ListOperations("html") {
+		// The rendered page and asset routes live outside the JSON API under
+		// /docs-html/d/ (octo-docs-html internal/transport/httpx/server.go).
+		if strings.HasPrefix(op.Path, "/docs-html/d/") {
+			if d, ok := r.GetOperation(op.ID); !ok || !d.BinaryResponse {
+				t.Errorf("%s: page route %q must be a binary-response operation", op.ID, op.Path)
+			}
+			continue
+		}
 		if want := "/docs-html/v1/"; !strings.HasPrefix(op.Path, want) {
 			t.Errorf("%s: path = %q, want prefix %q", op.ID, op.Path, want)
 		}

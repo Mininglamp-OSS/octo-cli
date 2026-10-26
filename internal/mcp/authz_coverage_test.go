@@ -79,6 +79,7 @@ func TestAuthzCoverage_ConfiguredForceReachesEverySessionBoundOp(t *testing.T) {
 		"channel_id":   "C-forced",
 		"channel_type": "1",
 		"on_behalf_of": "O-forced",
+		"X-Space-Id":   "S-forced",
 	}
 	for _, op := range reg.EnabledOperations() {
 		fields := sessionBoundFieldsOf(reg, op)
@@ -139,7 +140,11 @@ func TestAuthzCoverage_ForcedOpsForceEveryDeclaredSessionField(t *testing.T) {
 			t.Errorf("overridableParams references unknown op %q", opID)
 			continue
 		}
-		for _, f := range sessionBoundFieldsOf(reg, d.OperationInfo) {
+		fields := sessionBoundFieldsOf(reg, d.OperationInfo)
+		for _, f := range fields {
+			if f == "space_id" && isDriveResourceSpaceID(d.OperationInfo, fields) {
+				continue // documented never-force: drive resource id
+			}
 			if _, ok := table[f]; !ok {
 				t.Errorf("op %q declares session-bound field %q but does not force it", opID, f)
 			}
