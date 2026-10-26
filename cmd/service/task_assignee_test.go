@@ -88,6 +88,74 @@ func TestTaskAssignmentMulticaStyle(t *testing.T) {
 	}
 }
 
+func TestTaskUnassignClearsProjectMemberOnReadback(t *testing.T) {
+	member := map[string]any{
+		"task_id":           "TASK-1",
+		"assignee_type":     "member",
+		"assignee_id":       "55555555-5555-4555-8555-555555555555",
+		"assignee_octo_uid": "Human/CaseSensitive",
+	}
+	cleared := map[string]any{
+		"task_id":           "TASK-1",
+		"assignee_type":     nil,
+		"assignee_id":       nil,
+		"assignee_octo_uid": nil,
+	}
+	current := member
+	root, tf := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/tasks/TASK-1" || r.Header.Get("X-Workspace-ID") != projectMemberTestID {
+			t.Errorf("unexpected task request: %s %s", r.Method, r.URL)
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid body", http.StatusBadRequest)
+				return
+			}
+			want := map[string]any{"assignee_type": nil, "assignee_id": nil}
+			if !reflect.DeepEqual(body, want) {
+				t.Errorf("unassign body = %#v, want %#v", body, want)
+			}
+			current = cleared
+		} else if r.Method != http.MethodGet {
+			t.Errorf("unexpected method: %s", r.Method)
+			http.Error(w, "unexpected method", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{"data": current}); err != nil {
+			t.Error(err)
+		}
+	})
+	run := func(args ...string) map[string]any {
+		t.Helper()
+		tf.Out.Reset()
+		root.SetArgs(append([]string{"loop", "task"}, args...))
+		if err := root.Execute(); err != nil {
+			t.Fatalf("%v: %v; %s", args, err, tf.ErrOut.String())
+		}
+		var result struct {
+			Data map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal(tf.Out.Bytes(), &result); err != nil {
+			t.Fatalf("decode %v output: %v; %s", args, err, tf.Out.String())
+		}
+		return result.Data
+	}
+	if got := run("get", "TASK-1", "--workspace-id", projectMemberTestID); !reflect.DeepEqual(got, member) {
+		t.Fatalf("initial Project member = %#v, want %#v", got, member)
+	}
+	if got := run("assign", "TASK-1", "--unassign", "--workspace-id", projectMemberTestID); !reflect.DeepEqual(got, cleared) {
+		t.Fatalf("unassign response = %#v, want %#v", got, cleared)
+	}
+	if got := run("get", "TASK-1", "--workspace-id", projectMemberTestID); !reflect.DeepEqual(got, cleared) {
+		t.Fatalf("readback = %#v, want %#v", got, cleared)
+	}
+}
+
 func TestTaskAssignmentListFilters(t *testing.T) {
 	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

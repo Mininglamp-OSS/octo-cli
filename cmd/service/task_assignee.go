@@ -115,6 +115,9 @@ func taskAssignSelector(cmd *cobra.Command, body map[string]any) (input string, 
 		return "", false, false, assignmentError("provide exactly one of --to, --to-id or --unassign; do not mix assignment fields")
 	}
 	if unassign {
+		// Fleet clears the stored Project member identity when the assignee
+		// type and ID are null. The CLI schema only accepts a string for
+		// assignee_octo_uid, so sending it as null would reject this request.
 		body["assignee_type"], body["assignee_id"] = nil, nil
 		return "", false, false, nil
 	}
