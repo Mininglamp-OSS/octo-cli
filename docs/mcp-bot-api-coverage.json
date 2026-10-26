@@ -20,7 +20,8 @@
     "implicit_owner_rows": 52,
     "legacy_compatibility_rows": 35,
     "removed_rows": 64,
-    "note": "Not implemented by design: /v1/user user-key rows, implicit-owner rows, legacy /v1/robots and legacy Loop routes, Bot-rejected and non-Octo rows. Out-of-inventory endpoints (e.g. /v1/bot/voice/context) are not included."
+    "note": "Not implemented by design: /v1/user user-key rows, implicit-owner rows, legacy /v1/robots and legacy Loop routes, Bot-rejected and non-Octo rows. Out-of-inventory endpoints (e.g. /v1/bot/voice/context) are not included.",
+    "excluded_by_owner_decision_rows": 13
   },
   "summary": {
     "excluded_rows": 151,
@@ -36,16 +37,24 @@
       "alias_only": 3
     },
     "by_final_status": {
-      "implemented": 83,
-      "documented_config_requirement": 3,
-      "alias_of": 6,
+      "alias_of": 2,
       "already_covered": 2,
+      "already_covered_upstream": 4,
+      "covered_by_equivalent": 2,
+      "discrepancy_not_implemented": 1,
+      "documented_config_requirement": 3,
+      "excluded_by_owner_decision": 13,
       "fixed": 7,
-      "already_covered_upstream": 5,
-      "exposed": 10,
-      "covered_by_equivalent": 1,
-      "discrepancy_not_implemented": 1
-    }
+      "implemented": 83,
+      "not_bot_usable": 1
+    },
+    "bot_usable_covered_rows": 103,
+    "not_covered_rows": {
+      "discrepancy_not_implemented": 1,
+      "excluded_by_owner_decision": 13,
+      "not_bot_usable": 1
+    },
+    "note": "118 approved rows are all accounted for, but not all are covered: 103 are Bot-usable over the CLI and MCP; 13 are excluded by owner decision, 1 is task-credential only and 1 is an open discrepancy (summary#1)."
   },
   "rows": [
     {
@@ -74,10 +83,11 @@
       "auth_and_conditions": "bf_ or app_ (app_ authenticates but resolves to an empty list: only group_member.uid=robotID rows are searched)",
       "request_contract": "GET query name (required, non-blank), kind all|group|thread (default all), limit int (default 20, clamp 50)",
       "response_contract": "200 {candidates:[{kind,channel_id,channel_type,name,group_no,short_id?,parent_name?}], total, truncated}",
-      "notes": "team container groups (purpose aiteam) excluded (g.purpose <> aiteam); threads with status 1/2 only.",
+      "notes": "team container groups (purpose ai_session_container) excluded (g.purpose <> aiteam.GroupPurpose = \"ai_session_container\", octo-server pkg/aiteam/aiteam.go:14); threads with status 1/2 only.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -236,9 +246,15 @@
       "response_contract": "identical to file.upload",
       "notes": "Same handler as file.upload (octo-server bot_api.go:447/448 -> file.go:59).",
       "tests": [
-        "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
+        "cmd/service/xin2424_core_test.go:TestXIN2432AliasRowsUseCanonicalRoute",
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2432AliasAndEquivalentRowsReconcile",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
-      ]
+      ],
+      "alias_target": {
+        "operation_id": "file.upload",
+        "method": "POST",
+        "path": "/v1/bot/file/upload"
+      }
     },
     {
       "row_id": "core#22",
@@ -391,13 +407,14 @@
         }
       ],
       "source_evidence": "octo-server@624f824 modules/message/api.go:450-455 / 476-481 / 494-500 (authtree.TreeBotToken routes) mounted by modules/bot_api/bot_api.go:479 (botAPI group + botActorUID + appBotScopeGuard); modules/bot_api/authtree_guard.go:46-100; handler modules/message/api_message_get.go:108-126 (group_no 32-hex, positive message_id :471-477, requireGroupMember :493), respondSingleMessage :540-628 (response MsgSyncResp api.go:3737-3776)",
-      "auth_and_conditions": "bf_ that is an active group member; app_ rejected by appBotScopeGuard (ErrBotAPIAppBotUnsupported)",
+      "auth_and_conditions": "bf_ that is an active (not blacklisted) group member; normal and disbanded groups are both readable (requireGroupMember api_message_get.go:493-523 lets GroupStatusDisband through, :505); disabled or missing groups -> message_not_found; app_ rejected by appBotScopeGuard (ErrBotAPIAppBotUnsupported)",
       "request_contract": "GET path group_no, message_id (positive int64 as decimal string)",
       "response_contract": "200 MsgSyncResp {message_id, message_idstr, message_seq, from_uid, channel_id, channel_type, timestamp, payload, ...}; hidden/deleted -> message_not_found",
       "notes": "message.json sends X-Space-Id if configured; bot tree has no SpaceMiddleware so it is ignored.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -423,13 +440,14 @@
         }
       ],
       "source_evidence": "octo-server@624f824 modules/message/api.go:450-455 / 476-481 / 494-500 (authtree.TreeBotToken routes) mounted by modules/bot_api/bot_api.go:479 (botAPI group + botActorUID + appBotScopeGuard); modules/bot_api/authtree_guard.go:46-100; handler modules/message/api_message_get.go:197-290 (peer_uid checks :202-218, checkPersonDMAccess :388)",
-      "auth_and_conditions": "bf_ or app_; friend/same-space + bidirectional blacklist gate; scope=space app_ also needs peer in its bound space (authtree_guard.go:64-97); all denials -> message_not_found",
+      "auth_and_conditions": "bf_ or app_. A bot token carries no Space (pkg/authtree/authtree.go:253-254), so the same-space branch (api_message_get.go:420-431) never runs for a Bot: the peer must be a friend, a bot created by the calling bot, or a system bot (personDMAccessDecision :323-359), plus the bidirectional blacklist gate (skipped only for a bot it created). scope=space app_ also needs the peer in its bound space (authtree_guard.go:64-97). All denials -> message_not_found.",
       "request_contract": "GET path peer_uid (not self, no '@'), message_id positive int64",
       "response_contract": "200 MsgSyncResp (same as core#27)",
       "notes": "",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -474,7 +492,7 @@
       "previous_mapping": "无（等价能力：file.download → GET /v1/bot/file/download/{path}）",
       "bot_eligibility": "Bot 自身（真 Bot-self）（BOT_SELF）",
       "effective_identity": "Bot 自身（robot_id / app_bot uid）",
-      "final_status": "alias_of",
+      "final_status": "covered_by_equivalent",
       "operation_ids": [
         "file.download"
       ],
@@ -490,11 +508,18 @@
       "auth_and_conditions": "/v1/botfile group mounts only authBot (no requireBotIdentity, no per-bot limiter)",
       "request_contract": "GET path *path, query filename (optional)",
       "response_contract": "302 redirect to presigned URL (both)",
-      "notes": "Equivalent capability, not a strict alias: botProxyFile (file.go:27-56) vs botFileDownload (file.go:125-152); both 302 to a presigned URL for the same key. /v1/botfile has bot auth only, no per-bot rate limit.",
+      "notes": "Equivalent capability, not a strict alias. botProxyFile (octo-server file.go:28-56) strips a leading file/ segment and only cleans the path, while botFileDownload (file.go:126-166) URL-decodes up to three times through sanitizeBotFilePath before cleaning. Both 302 to a presigned URL for the stored key. /v1/botfile has bot auth only, no per-bot rate limit. Callers use file.download with the stored key.",
       "tests": [
-        "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
+        "cmd/service/xin2424_core_test.go:TestXIN2432AliasRowsUseCanonicalRoute",
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2432AliasAndEquivalentRowsReconcile",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
-      ]
+      ],
+      "previous_final_status": "alias_of",
+      "alias_target": {
+        "operation_id": "file.download",
+        "method": "GET",
+        "path": "/v1/bot/file/download/{path}"
+      }
     },
     {
       "row_id": "core#31",
@@ -524,9 +549,15 @@
       "response_contract": "identical to file.upload",
       "notes": "Same handler as file.upload (bot_api.go:485 -> file.go:59); the /v1/botfile group skips the per-bot rate limit.",
       "tests": [
-        "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
+        "cmd/service/xin2424_core_test.go:TestXIN2432AliasRowsUseCanonicalRoute",
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2432AliasAndEquivalentRowsReconcile",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
-      ]
+      ],
+      "alias_target": {
+        "operation_id": "file.upload",
+        "method": "POST",
+        "path": "/v1/bot/file/upload"
+      }
     },
     {
       "row_id": "core#37",
@@ -618,17 +649,18 @@
           "operation_id": "thread.archive",
           "method": "POST",
           "path": "/v1/bot/groups/{group_no}/threads/{short_id}/archive",
-          "risk": "write"
+          "risk": "high-risk-write"
         }
       ],
       "source_evidence": "octo-server@624f824 modules/bot_api/bot_api.go:400-408 (/v1/bot group: authBot -> requireBotIdentity -> per-bot limiter); modules/bot_api/auth.go:27-43; modules/bot_api/threads.go:22-72 validateBotGroupAccess/validateBotThreadAccess (app_ rejected :25-29, ExistMemberActive :42-53, IsValidShortID :64-66); groups.go:813-819 protectAIContainerMutation; route bot_api.go:442; handler threads.go:210-224; service modules/thread/service.go:849-885 ArchiveThread, :1007-1040 canOperate",
-      "auth_and_conditions": "bf_, active parent-group member, thread creator or group owner/manager, parent not disbanded; app_ rejected; team container groups (purpose aiteam) rejected",
+      "auth_and_conditions": "bf_, active parent-group member, thread creator or group owner/manager, parent not disbanded; app_ rejected; team container groups (purpose ai_session_container) rejected",
       "request_contract": "POST path group_no, short_id; no body",
       "response_contract": "200 ResponseOK; all service failures -> store_failed",
-      "notes": "Idempotent on already-archived threads.",
+      "notes": "Idempotent on already-archived threads. Risk raised to high-risk-write: a Bot has no unarchive route, so an archive is not reversible through the Bot API. The label is descriptive only.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -653,14 +685,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST '' api.go:291 -> create api.go:690-855 (requireActiveGroup, quotas insertWithQuota)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST '' api.go:291 -> create api.go:690-855 (requireActiveGroup, quotas insertWithQuota)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no; JSON body (non-strict BindJSON, model.go:158-164): name string <=64 (trimmed; OPTIONAL, auto-named when empty api.go:788-791), avatar (owner/manager only else 400), mention_uids[] (current internal members, dedup, <=50 default via OCTO_INCOMINGWEBHOOK_MAX_MENTION_UIDS mention.go:35-52), allow_mention_all bool, allow_mention_bots bool",
       "response_contract": "200 createResp {webhookResp..., token, url, urls{}, adapter_examples[]} (model.go:202-213) - token/url/urls are credentials, returned only on create/regenerate",
-      "notes": "Write gated by incomingwebhook.enabled (403 when off). Any internal member may create (not admin-only). Marked high-risk-write because it mints a bearer push credential. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Row says name is required on create; backend makes it optional (auto-named). Spec declares no required body field. CLI never sends an empty {} body (cmd/service/run.go:639-641) and backend BindJSON rejects an empty body, so callers must pass at least one field.",
+      "notes": "Write gated by incomingwebhook.enabled (403 when off). Any internal member may create (not admin-only). Marked high-risk-write because it mints a bearer push credential. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Row says name is required on create; backend makes it optional (auto-named). Spec declares no required body field. CLI never sends an empty {} body (cmd/service/run.go:639-641) and backend BindJSON rejects an empty body, so callers must pass at least one field. Owner decision (2026-10-26): returning the push token/url/urls in the create/regenerate result over MCP is accepted. This covers only these responses; it does not authorize any other secret disclosure, and the values stay out of logs, error messages and audit records.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -685,14 +718,15 @@
           "risk": "read"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; GET '' api.go:292 -> list api.go:861-883 (group scope only)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; GET '' api.go:292 -> list api.go:861-883 (group scope only)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "GET path group_no",
       "response_contract": "200 {list:[webhookResp]} without token/url",
       "notes": "Not gated by the enabled switch; visible to all internal members.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -717,14 +751,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST /:webhook_id/regenerate api.go:295 -> regenerate api.go:1030-1099 (requireActiveGroup, queryManageable, requireOwnership, requireCreatorInGroup)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST /:webhook_id/regenerate api.go:295 -> regenerate api.go:1030-1099 (requireActiveGroup, queryManageable, requireOwnership, requireCreatorInGroup)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no, webhook_id; no body",
       "response_contract": "200 createResp {webhookResp..., token, url, urls{}, adapter_examples[]} (model.go:202-213) - token/url/urls are credentials, returned only on create/regenerate",
-      "notes": "Invalidates the old token. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output.",
+      "notes": "Invalidates the old token. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Owner decision (2026-10-26): returning the push token/url/urls in the create/regenerate result over MCP is accepted. This covers only these responses; it does not authorize any other secret disclosure, and the values stay out of logs, error messages and audit records.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -749,14 +784,15 @@
           "risk": "read"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; GET /:webhook_id/deliveries api.go:297 -> deliveries api.go:1123-1159 (limit default 50, clamp 100, :1103-1106)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; GET /:webhook_id/deliveries api.go:297 -> deliveries api.go:1123-1159 (limit default 50, clamp 100, :1103-1106)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "GET path group_no, webhook_id; query limit int (default 50, clamp 100, non-positive -> 50)",
       "response_contract": "200 {list:[{status,reason,http_status,adapter,byte_size,message_id,created_at}]} (model.go:219-227)",
       "notes": "Owner/manager or webhook creator; not gated by the enabled switch.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -781,14 +817,15 @@
           "risk": "write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST /:webhook_id/test api.go:299 -> testPush api.go:1176-1247",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; POST /:webhook_id/test api.go:299 -> testPush api.go:1176-1247",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no, webhook_id; no body",
       "response_contract": "200 {status:0, message_id:int64}",
       "notes": "Sends a real message into the group as the webhook.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -813,14 +850,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; create api.go:690-855 with :short_id branch api.go:738-770 (IsValidShortID, ExistThread, active thread)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; create api.go:690-855 with :short_id branch api.go:738-770 (IsValidShortID, ExistThread, active thread)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no, short_id; JSON body (non-strict BindJSON, model.go:158-164): name string <=64 (trimmed; OPTIONAL, auto-named when empty api.go:788-791), avatar (owner/manager only else 400), mention_uids[] (current internal members, dedup, <=50 default via OCTO_INCOMINGWEBHOOK_MAX_MENTION_UIDS mention.go:35-52), allow_mention_all bool, allow_mention_bots bool",
       "response_contract": "200 createResp {webhookResp..., token, url, urls{}, adapter_examples[]} (model.go:202-213) - token/url/urls are credentials, returned only on create/regenerate",
-      "notes": "Thread must exist, belong to group and be active; per-thread quota. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Row says name is required on create; backend makes it optional (auto-named). Spec declares no required body field. CLI never sends an empty {} body (cmd/service/run.go:639-641) and backend BindJSON rejects an empty body, so callers must pass at least one field.",
+      "notes": "Thread must exist, belong to group and be active; per-thread quota. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Row says name is required on create; backend makes it optional (auto-named). Spec declares no required body field. CLI never sends an empty {} body (cmd/service/run.go:639-641) and backend BindJSON rejects an empty body, so callers must pass at least one field. Owner decision (2026-10-26): returning the push token/url/urls in the create/regenerate result over MCP is accepted. This covers only these responses; it does not authorize any other secret disclosure, and the values stay out of logs, error messages and audit records.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -845,14 +883,15 @@
           "risk": "read"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; list api.go:861-883 (queryByThreadScope)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; list api.go:861-883 (queryByThreadScope)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "GET path group_no, short_id",
       "response_contract": "200 {list:[webhookResp]}",
       "notes": "Not gated by the enabled switch.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -877,14 +916,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; regenerate api.go:1030-1099",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; regenerate api.go:1030-1099",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no, short_id, webhook_id; no body",
       "response_contract": "200 createResp {webhookResp..., token, url, urls{}, adapter_examples[]} (model.go:202-213) - token/url/urls are credentials, returned only on create/regenerate",
-      "notes": "Scope-isolated: only thread-bound webhook with matching short_id. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output.",
+      "notes": "Scope-isolated: only thread-bound webhook with matching short_id. Response carries token/url/urls (credential). octo-cli has no response-side x-octo-secret support (loader.go:264-268,324-327 only mask request params/body props), so fields are described as credentials in the schema description only; not masked in output. Owner decision (2026-10-26): returning the push token/url/urls in the create/regenerate result over MCP is accepted. This covers only these responses; it does not authorize any other secret disclosure, and the values stay out of logs, error messages and audit records.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -909,14 +949,15 @@
           "risk": "read"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; deliveries api.go:1123-1159",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; deliveries api.go:1123-1159",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "GET path group_no, short_id, webhook_id; query limit (default 50, clamp 100)",
       "response_contract": "200 {list:[delivery]}",
       "notes": "Not gated by the enabled switch.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -941,14 +982,15 @@
           "risk": "write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; testPush api.go:1176-1247 (targetChannel -> thread)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; testPush api.go:1176-1247 (targetChannel -> thread)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "POST path group_no, short_id, webhook_id; no body",
       "response_contract": "200 {status:0, message_id:int64}",
       "notes": "",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -974,13 +1016,15 @@
         }
       ],
       "source_evidence": "octo-server@624f824 modules/bot_api/bot_api.go:400-408 (/v1/bot group: authBot -> requireBotIdentity -> per-bot limiter); modules/bot_api/auth.go:27-43; modules/bot_api/threads.go:22-72 validateBotGroupAccess/validateBotThreadAccess (app_ rejected :25-29, ExistMemberActive :42-53, IsValidShortID :64-66); groups.go:813-819 protectAIContainerMutation; route bot_api.go:438; handler threads.go:190-202; service modules/thread/service.go:927-967 DeleteThread (MarkDeleted, channel ban, pin cleanup), :972-974 CanDelete -> canOperate",
-      "auth_and_conditions": "bf_, active parent-group member, thread creator or group owner/manager, parent not disbanded; app_ rejected; team container groups (purpose aiteam) rejected",
+      "auth_and_conditions": "bf_, active parent-group member, thread creator or group owner/manager, parent not disbanded; app_ rejected; team container groups (purpose ai_session_container) rejected",
       "request_contract": "DELETE path group_no, short_id",
       "response_contract": "200 ResponseOK; failures -> store_failed",
-      "notes": "CONFLICT: octo-cli deliberately removed thread.delete earlier (CHANGELOG.md:665-669, rationale: no bot-accessible archive path). Two existing tests pin the removal and now fail: cmd/root_test.go:45 TestNewRootCmd_ParentCommandSkipAuthAndRejectUnknown/'thread delete (removed)' and cmd/service/service_test.go:1549 TestParentCommand_RejectsUnknownSubcommand/'thread + removed leaf (delete)'. The removal rationale no longer holds because thread.archive (core#41) is now added. Integrator must either update those tests + CHANGELOG or drop the thread.delete block from thread.json.",
+      "notes": "thread.delete is restored. octo-cli had removed it (CHANGELOG.md:665-669) because Bots had no archive path; thread.archive (core#41) now provides one, so the removal tests in cmd/root_test.go and cmd/service/service_test.go were updated to use an unknown leaf instead.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "cmd/root_test.go:TestNewRootCmd_ParentCommandSkipAuthAndRejectUnknown",
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -1005,14 +1049,15 @@
           "risk": "write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; PUT /:webhook_id api.go:293 -> update api.go:885-1003",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; PUT /:webhook_id api.go:293 -> update api.go:885-1003",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "PUT path group_no, webhook_id; JSON body (model.go:169-176): name *string non-blank <=64, avatar (owner/manager only), status 0|1 (2 not settable; enabling needs active group + creator in group), allow_mention_all, allow_mention_bots, mention_uids ([] clears)",
       "response_contract": "200 webhookResp {webhook_id, group_no, thread_short_id?, name, avatar, creator_uid, status, allow_mention_all, allow_mention_bots, mention_uids[], last_used_at, call_count, created_at} (model.go:180-199)",
       "notes": "status enum 0|1 pinned via init() in cmd/service/xin2424_core_test.go into requestSideVocabularies. Empty body rejected by backend; CLI cannot send {}.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -1037,14 +1082,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; DELETE /:webhook_id api.go:294 -> delete api.go:1005-1028 (soft delete, no creator-in-group check)",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; DELETE /:webhook_id api.go:294 -> delete api.go:1005-1028 (soft delete, no creator-in-group check)",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "DELETE path group_no, webhook_id",
       "response_contract": "200 ResponseOK",
       "notes": "Irreversible soft delete; token stops working.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -1069,14 +1115,15 @@
           "risk": "write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; update api.go:885-1003",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; update api.go:885-1003",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "PUT path group_no, short_id, webhook_id; JSON body (model.go:169-176): name *string non-blank <=64, avatar (owner/manager only), status 0|1 (2 not settable; enabling needs active group + creator in group), allow_mention_all, allow_mention_bots, mention_uids ([] clears)",
       "response_contract": "200 webhookResp {webhook_id, group_no, thread_short_id?, name, avatar, creator_uid, status, allow_mention_all, allow_mention_bots, mention_uids[], last_used_at, call_count, created_at} (model.go:180-199)",
       "notes": "Same as core#72, thread-scoped.",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -1101,14 +1148,15 @@
           "risk": "high-risk-write"
         }
       ],
-      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose aiteam) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; delete api.go:1005-1028",
+      "source_evidence": "octo-server@624f824 modules/bot_api/incoming_webhook.go:23-36 (/v1/bot/groups/:group_no[/threads/:short_id]/incoming-webhooks: authBot -> botActorUID -> SharedUIDRateLimiter; mounted from bot_api.go:495); modules/incomingwebhook/api.go:288-300 MountManagementRoutes; api.go:602-628 resolveActor (internal normal-status member via db.go:250-260 queryMemberRole, team container group (purpose ai_session_container) rejected); api.go:635-641 requireOwnership (owner/manager or creator_uid==bot); api.go:672-685 queryManageable (group + thread scope match, not soft-deleted); api.go:318-326 requireMgmtEnabled; thread group incoming_webhook.go:33-35; delete api.go:1005-1028",
       "auth_and_conditions": "bf_ (robot bot_token, status=1) that is an internal normal-status member of the group; app_ passes authBot but has no group_member row so resolveActor returns 403. Bot owner/manager role = admin.",
       "request_contract": "DELETE path group_no, short_id, webhook_id",
       "response_contract": "200 ResponseOK",
       "notes": "Row's original '话题创建者或群管理员' is wrong: permission is group owner/manager OR webhook creator (requireOwnership api.go:635-641); thread creator is irrelevant (as the row's correction says).",
       "tests": [
         "cmd/service/xin2424_core_test.go:TestXIN2424CoreRegistryRows",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -1202,9 +1250,11 @@
       "auth_and_conditions": "Bot token only (Authorization: Bearer bf_ or token header) via verifyBot (src/api/middleware/verifyBot.ts:32-63, octo-server /v1/auth/verify-bot; bot must have an active Space membership); req.uid = bot uid, Space server-resolved; no env gate on the route; reader + html_ppt",
       "request_contract": "GET ?format=html (only value)",
       "response_contract": "200 text/html attachment (binary)",
-      "notes": "Binary response now returned inline over MCP (content_text/content_base64 + sha256, bounded 4 MiB; larger bodies inline:false).",
+      "notes": "Binary response returned inline over MCP (content_text for the text/html export, sha256 always present, bounded 4 MiB). A larger export (the backend allows up to 160 MiB) returns inline:false with its full size and sha256; the MCP path streams the body and keeps at most 4 MiB + 1 byte in memory. Large exports therefore still need the CLI --output path, which buffers the whole body.",
       "tests": [
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424ExecuteReturnsBinaryInline",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432DocsExportsOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
+        "internal/client/inline_binary_test.go:TestInlineBinaryStreamsLargeBodies",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
       ]
     },
@@ -1233,11 +1283,12 @@
       "source_evidence": "octo-docs-backend@64be99c src/api/app.ts:357-380 (botApi = rate limiter + verifyBotMiddleware, mounted at /v1/bot/docs when servePublic); octo-docs-backend@64be99c src/api/routes/invites.ts:140-147 (botAcceptInviteRouter, app.ts:361) -> src/api/services/acceptInvite.ts:91-140 acceptInviteForUid",
       "auth_and_conditions": "Bot token only (Authorization: Bearer bf_ or token header) via verifyBot (src/api/middleware/verifyBot.ts:32-63, octo-server /v1/auth/verify-bot; bot must have an active Space membership); req.uid = bot uid, Space server-resolved; no env gate on the route; no document role required; invite role granted to the bot uid; no requiredHomeSpaceId on the bot path so cross-Space invites are accepted",
       "request_contract": "POST path inviteToken (x-octo-secret; hex token from newInviteToken, util/ids.ts:18-20); no body",
-      "response_contract": "200 {docId, documentName, role, principalSpaceId}; 410 invite_invalid; 404 not_found",
+      "response_contract": "200 {docId, documentName, role, principalSpaceId}; 410 invite_invalid for an invalid, revoked, expired or exhausted invite and for a missing or deleted document. No 404 on the bot route: acceptInviteForUid is called without requiredHomeSpaceId (routes/invites.ts:141), and the only 404 branch needs it (services/acceptInvite.ts:123-124); a missing document falls to decideAcceptBranch 'gone' (acceptDecision.ts:63) -> 410.",
       "notes": "Permission-granting (grants the bot itself a role) so marked high-risk-write.",
       "tests": [
         "cmd/service/xin2424_docs_test.go:TestXIN2424DocsOperationsMatchBackendContract",
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+        "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve",
+        "cmd/service/xin2424_docs_test.go:TestXIN2432ModelFacingDescriptionsMatchBackend"
       ]
     },
     {
@@ -2064,11 +2115,14 @@
       ],
       "source_evidence": "octo-docs-backend@64be99c src/api/app.ts:357-380 (botApi = rate limiter + verifyBotMiddleware, mounted at /v1/bot/docs when servePublic); octo-docs-backend@64be99c src/api/routes/boardExport.ts:186-189",
       "auth_and_conditions": "Bot token only (Authorization: Bearer bf_ or token header) via verifyBot (src/api/middleware/verifyBot.ts:32-63, octo-server /v1/auth/verify-bot; bot must have an active Space membership); req.uid = bot uid, Space server-resolved; no env gate on the route; reader; board only",
-      "request_contract": "GET ?format=png|svg",
+      "request_contract": "GET ?format=png|svg (backend). The CLI's excalidraw format is assembled locally from the live scene (GET /v1/bot/docs/{docId}/scene) plus referenced attachments, not by this route.",
       "response_contract": "200 image/png or image/svg+xml (binary)",
-      "notes": "Binary response now returned inline over MCP (bounded 4 MiB).",
+      "notes": "png and svg are rendered by the backend and returned inline over MCP (bounded 4 MiB, sha256). The excalidraw format previously failed over MCP because it required a local --output; it is now returned inline as application/json under the same bound, and an MCP dry-run of it makes no request.",
       "tests": [
-        "internal/mcp/xin2424_coverage_test.go:TestXIN2424ExecuteReturnsBinaryInline",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432DocsExportsOverMCP",
+        "cmd/docs_excalidraw_export_test.go:TestDocsExcalidrawExportInlineWithoutOutput",
+        "cmd/docs_excalidraw_export_test.go:TestDocsExcalidrawExportInlineDryRunMakesNoRequest",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
       ]
     },
@@ -2091,14 +2145,14 @@
           "operation_id": "docs.scene.import",
           "method": "POST",
           "path": "/v1/bot/docs/{docId}/import/excalidraw",
-          "risk": "write"
+          "risk": "high-risk-write"
         }
       ],
       "source_evidence": "octo-docs-backend@64be99c src/api/app.ts:357-380 (botApi = rate limiter + verifyBotMiddleware, mounted at /v1/bot/docs when servePublic); octo-docs-backend@64be99c src/api/routes/import.ts:65-69 (express.raw type application/json, limit DOCX_IMPORT_MAX_UPLOAD_BYTES), :85-190 importExcalidrawHandler; app.ts:224-228 (global JSON parser skipped for /import/excalidraw); src/import/excalidraw.ts:161-168 envelope checks",
       "auth_and_conditions": "Bot token only (Authorization: Bearer bf_ or token header) via verifyBot (src/api/middleware/verifyBot.ts:32-63, octo-server /v1/auth/verify-bot; bot must have an active Space membership); req.uid = bot uid, Space server-resolved; no env gate on the route; writer; board documents only (409 unsupported_doc_type)",
       "request_contract": "POST ?mode=merge|replace (default merge, single value); body application/json {type:'excalidraw', version:2, elements: object[], files: object} required; body limit config.docxImport.maxUploadBytes (default 200 MiB)",
       "response_contract": "200 {docId, mode, importedElements, importedFiles, elementIdMap, fileIdMap, bytes, baseVersion, newDocVersionSeq}; 400 invalid_mode|invalid_body|invalid_json|invalid_excalidraw; 413 doc_too_large|too_many_elements; 409",
-      "notes": "Wire body is application/json, so the engine's JSON body works. Discrepancies with the row: the excalidraw route does NOT read X-Octo-Import-Apply (always applies), and the backend limit is DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB); 25 MiB is only the composite CLI's client-side limit (cmd/docs_import.go:19). Op id docs.scene.import avoids colliding with the hand-written `docs import` composite leaf.",
+      "notes": "Wire body is application/json, so the engine's JSON body works. Discrepancies with the row: the excalidraw route does NOT read X-Octo-Import-Apply (always applies), and the backend limit is DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB); 25 MiB is only the composite CLI's client-side limit (cmd/docs_import.go:19). Op id docs.scene.import avoids colliding with the hand-written `docs import` composite leaf. Risk raised to high-risk-write because mode=replace overwrites the whole scene (like docs#76-78). The label is descriptive only.",
       "tests": [
         "cmd/service/xin2424_docs_test.go:TestXIN2424DocsOperationsMatchBackendContract",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
@@ -2663,9 +2717,9 @@
       "original_gap": "partial_or_conditional",
       "previous_status": "部分/条件覆盖（部分覆盖-契约路径漂移）",
       "previous_mapping": "get_skill(describe,task.team_evaluation.record) / execute(task.team_evaluation.record)",
-      "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
+      "bot_eligibility": "Not Bot-usable through the CLI or MCP: task credential only (corrected from BOT_CONDITIONAL in review)",
       "effective_identity": "专家(agent)身份: mat_/octo_loop_ agent_task由令牌绑定; bf_ Bot需自带X-Agent-ID+X-Task-ID且经DB校验(handler.go:474-513)",
-      "final_status": "already_covered_upstream",
+      "final_status": "not_bot_usable",
       "operation_ids": [
         "expert_team.evaluate"
       ],
@@ -2678,15 +2732,17 @@
         }
       ],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/facade.go:329-331 (POST /v1/tasks/{task_id}/expert_team_evaluations, mapTaskRequest) in RequireWorkspaceMember group cmd/server/router.go:955-958; handler internal/handler/squad.go:1029-1125 (RecordSquadLeaderEvaluation: lenient json decode :1035-1042, outcome enum :1044-1047, leader check :1064-1071, X-Task-ID execution check :1073-1082, 201 {id,action,created_at} :1121-1125); public contract openapi/public-v1.yaml:610-634 (expert_team.evaluate, additionalProperties false, required [outcome], 201).",
-      "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Caller must resolve to the assigned expert team's leader agent (squad.go:1064-1071); task credentials set X-Task-ID automatically (middleware/auth.go:121, loop_auth.go:149); a bf_ Bot needs X-Agent-ID + X-Task-ID (not modelled by the CLI). Bot allowlist mappedPublicAPIAction; agent_task action expert_team.evaluate (loop_device.go:331-332).",
+      "auth_and_conditions": "Caller must resolve to the assigned expert team's leader agent (octo-fleet squad.go:1064-1071) with a valid X-Task-ID execution (squad.go:1073-1082, handler.go:474-513). Task credentials supply X-Agent-ID/X-Task-ID out of band (middleware/auth.go:121, loop_auth.go:149). The spec declares neither header, so a bf_ Bot call is always rejected (403). Modelling them as caller parameters is refused on purpose: Fleet does not strip client-supplied X-Agent-ID/X-Task-ID for bf_ tokens (auth.go:42-44), so a Bot could claim an agent identity. That gap belongs to a separate Fleet issue.",
       "request_contract": "Path fixed from singular /expert_team_evaluation (never registered in Fleet -> 404) to plural. X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path task_id; body {outcome (required, enum action|no_action|failed), reason (string)}, additionalProperties false per public-v1.yaml (handler decode itself is lenient).",
       "response_contract": "201 {data:{id, action, created_at}} (facade envelope, no renames).",
-      "notes": "Path drift (singular vs plural) fixed upstream in main (merged); op is expert_team.evaluate on /expert_team_evaluations. Caller must be the team leader expert; a Bot token needs X-Agent-ID/X-Task-ID which the CLI does not model (task credentials supply them).",
+      "notes": "Path drift (singular vs plural) was fixed upstream and merged; the operation stays reachable for task credentials only. Counted as not Bot-usable, not as covered.",
       "tests": [
         "internal/registry/loader_test.go:TestLoopExtendedBusinessContract",
         "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432AgentIdentityHeadersAreNeverCallerParameters",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
-      ]
+      ],
+      "previous_final_status": "already_covered_upstream"
     },
     {
       "row_id": "loop#41",
@@ -2795,26 +2851,26 @@
       "previous_mapping": "runtime.update（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.update"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.update",
-          "method": "PATCH",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151-153 (kindRuntime) wired at handler_routes.go:59-60 in RequireWorkspaceMember group router.go:955-958; handler internal/handler/runtime.go:464-601 (UpdateAgentRuntimeRequest :446-456, lenient decode :486-490, visibility enum :496-506, custom_name <=100 runes after trim :458,:508-511, apply_to_machine :543-568, 200 runtimeToResponse :600); canEditRuntime :603-608.",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Workspace owner/admin or runtime owner (canEditRuntime). Bot allowlist daemon.runtime.update (loop_device.go:417-423); Bot needs X-Workspace-ID binding and bot membership.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; body {visibility enum private|workspace, custom_name string maxLength 100, apply_to_machine boolean}; minProperties 1 (handler requires a JSON body; {} is a no-op).",
       "response_contract": "200 {data: WorkspaceRuntime (runtime_id, workspace_id, daemon_id, name, custom_name, runtime_mode, provider, launch_header, status, device_info, metadata, owner_id, visibility, can_bind, profile_id, last_seen_at, created_at, updated_at)}.",
-      "notes": "Unhidden. Previously FlexibleRequest body. minProperties 1 is a CLI-side guard (the handler accepts {} as no-op). CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.update"
       ]
     },
     {
@@ -2827,26 +2883,26 @@
       "previous_mapping": "runtime.delete（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.delete"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.delete",
-          "method": "DELETE",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}",
-          "risk": "high-risk-write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,154; handler internal/handler/runtime.go:669-781 (canEditRuntime :689; 409 runtime_has_active_agents with active_agents :704-707, 409 active squads led by archived agents :716-719; 200 {status:ok} :780).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Workspace owner/admin or runtime owner. Bot allowlist daemon.runtime.update.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; no body.",
       "response_contract": "200 {data:{status:\"ok\"}}; 409 when active experts are bound.",
-      "notes": "Unhidden. Response previously declared as generic Resource. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. Spec risk stays high-risk-write.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.delete"
       ]
     },
     {
@@ -2859,26 +2915,26 @@
       "previous_mapping": "runtime.archive_and_delete（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.archive_and_delete"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.archive_and_delete",
-          "method": "POST",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}/archive_agents_and_delete",
-          "risk": "high-risk-write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,155; handler internal/handler/runtime.go:838-1022 (archiveAgentsAndDeleteRuntimeRequest :814-816, decode requires a JSON body :845-849, uuid check :850-854 via parseExpectedActiveAgentIDs :1030-1040, canEditRuntime :867, 409 runtime_delete_plan_changed :904-915, 200 {status, agents_archived, tasks_cancelled} :1017-1021).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Workspace owner/admin or runtime owner. Bot allowlist daemon.runtime.update.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; body {expected_active_agent_ids: array of uuid} marked required (handler treats absent as empty set, but an empty request body fails decode with 400).",
       "response_contract": "200 {data:{status:\"ok\", agents_archived:int, tasks_cancelled:int}} (spec previously said 201); 409 when the active set changed.",
-      "notes": "Unhidden; risk raised from write to high-risk-write; request body added (was missing). CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. Spec risk stays high-risk-write.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.archive_and_delete"
       ]
     },
     {
@@ -2891,26 +2947,26 @@
       "previous_mapping": "runtime.update_request.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.update_request.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.update_request.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}/updates",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,163-165 (kindRuntimeUpdate); handler internal/handler/runtime_update.go:209-245 (member check only :222, target_version required :226-236, 409 in progress :238-242, 200 UpdateRequest :244; struct :29-39, statuses :20-26).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Any member of the runtime's workspace (no runtime-owner/role check). Bot allowlist daemon.runtime.update.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; body {target_version: string, required, minLength 1}.",
       "response_contract": "200 {data:{runtime_update_id, runtime_id, status pending|running|completed|failed|timeout, target_version, output, error, created_at, updated_at}} (spec previously said 201); 409 if one is in progress.",
-      "notes": "Unhidden. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. Spec risk stays high-risk-write. Risk raised from write to high-risk-write: any workspace member may request an upgrade of a runtime they do not own (octo-fleet runtime_update.go:222). The label is descriptive only.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.update_request.create"
       ]
     },
     {
@@ -2923,26 +2979,26 @@
       "previous_mapping": "runtime.model_request.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.model_request.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.model_request.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}/model_requests",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,170-172 (kindRuntimeModelRequest); handler internal/handler/runtime_models.go:288-314 (no body read; member check :300; 503 runtime offline :303-306; 200 ModelListRequest :313; struct :53-63, ModelEntry :76-82).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Any workspace member; runtime must be online. Bot allowlist daemon.runtime.update.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; no request body (previous spec wrongly required a FlexibleRequest body).",
       "response_contract": "200 {data:{model_request_id, runtime_id, status, models[{id,label,provider,default,thinking}], supported, error, created_at, updated_at}}; 503 when offline.",
-      "notes": "Unhidden; request body removed. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.model_request.create"
       ]
     },
     {
@@ -2955,26 +3011,26 @@
       "previous_mapping": "runtime.local_skill_request.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.local_skill_request.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.local_skill_request.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}/local_skill_requests",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,177-179; handler internal/handler/runtime_local_skills.go:561-578 (no body read; requireRuntimeLocalSkillAccess :523-552 = runtime owner only, 403 otherwise; 503 offline :567-570; 200 :577; struct :183-193).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Runtime owner only (workspace owner/admin not exempt); runtime online.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; no request body (previous spec wrongly required one).",
       "response_contract": "200 {data:{local_skill_request_id, runtime_id, status, skills[{key,name,description,source_path,provider,file_count}], supported, error, created_at, updated_at}}.",
-      "notes": "Unhidden; request body removed. A Bot rarely owns a runtime, so expect 403 unless owner fallback applies. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.local_skill_request.create"
       ]
     },
     {
@@ -2987,26 +3043,26 @@
       "previous_mapping": "runtime.local_skill_import.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "runtime.local_skill_import.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "runtime.local_skill_import.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/runtimes/{runtime_id}/local_skill_imports",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/resources.go:151,184-186; handler internal/handler/runtime_local_skills.go:601-662 (owner only via :523-552; offline 503 :607-610; CreateRuntimeLocalSkillImportRequest :484-496; skill_key required :622-625; action \"\"|overwrite with uuid target_skill_id :627-643; 200 :661; response struct :195-215).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Runtime owner only; runtime online; overwrite only by the target skill's creator (verified at report time).",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path runtime_id; body {skill_key required, name, description, action enum \"\"|overwrite, target_skill_id uuid (required when action=overwrite, described only), supports_conflict boolean}.",
       "response_contract": "200 {data:{local_skill_import_id, runtime_id, skill_key, name, description, action, target_skill_id, supports_conflict, status (+conflict), skill, conflict, error, created_at, updated_at}}.",
-      "notes": "Unhidden. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "runtime.local_skill_import.create"
       ]
     },
     {
@@ -3019,26 +3075,26 @@
       "previous_mapping": "workspace.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户: 以X-User-ID(Bot UUID)创建owner成员行, principal_type取默认值 (handler/workspace.go:323-328); 新工作区octo_space_id=Bot所在Space",
-      "final_status": "exposed",
-      "operation_ids": [
-        "workspace.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/workspaces",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/workspace.go:60-61 (RequireOctoSpaceSelection; legacy handler directly, no facade envelope) registered at router.go:877; handler internal/handler/workspace.go:254-357 (DISABLE_WORKSPACE_CREATION 403 :265-268, CreateWorkspaceRequest :246-252 lenient decode, name/slug required + slug pattern :276-289 with workspaceSlugPattern :26, reserved slugs, 409 duplicate :316-318, caller inserted as owner :324-328, 201 WorkspaceResponse :356).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Any authenticated principal with a selected Space; 403 when DISABLE_WORKSPACE_CREATION=true. Octo Bot: action workspace.manage (loop_device.go:262-263) and octoBotRequiresWorkspaceBinding (loop_device.go:197-200,229-238) -> must send X-Workspace-ID of an existing same-Space workspace (BindOctoBotWorkspaceScope middleware/workspace.go:189-235); membership there not checked.",
       "request_contract": "Optional X-Workspace-ID header (--workspace-id; required for Bot tokens); body {name required, slug required, description, context, issue_prefix}.",
       "response_contract": "201 raw WorkspaceResponse {id, name, slug, description, context, settings, repos, issue_prefix, avatar_url, created_at, updated_at} (no data envelope); 409 duplicate slug.",
-      "notes": "Unhidden. Adding the optional header breaks loader_test.go:413-447 TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag (asserts no workspace header on /fleet/api/v1/workspaces) - integrator should exempt POST. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "workspace.create"
       ]
     },
     {
@@ -3083,26 +3139,26 @@
       "previous_mapping": "workspace.update（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "workspace.update"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.update",
-          "method": "PATCH",
-          "path": "/fleet/api/v1/workspaces/{workspace_id}",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/workspace.go:67-68 (owner/admin :53); handler internal/handler/workspace.go:410-474 (UpdateWorkspaceRequest :359-367 lenient decode, blank name 400 :426-433, repos validation :374-408 and :444-451, blank issue_prefix ignored :452-457, 200 WorkspaceResponse :473).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Workspace owner or admin. X-Workspace-ID optional for Bots (falls back to URL id, middleware/workspace.go:203-206) but must match when sent.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path workspace_id; body {name minLength 1, description, context, settings object, repos [{url required, description}], issue_prefix, avatar_url}.",
       "response_contract": "200 raw WorkspaceResponse (no data envelope).",
-      "notes": "Unhidden. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "workspace.update"
       ]
     },
     {
@@ -3115,26 +3171,26 @@
       "previous_mapping": "workspace.delete（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "exposed",
-      "operation_ids": [
-        "workspace.delete"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.delete",
-          "method": "DELETE",
-          "path": "/fleet/api/v1/workspaces/{workspace_id}",
-          "risk": "high-risk-write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e route internal/publicapi/workspace.go:69-70 (owner :54); handler internal/handler/workspace.go:856-896 (owner re-check :863-870, delete :884, 204 No Content :895).",
       "auth_and_conditions": "Bearer bf_ (Bot own Fleet user) / uk_ / Token header session / octo_pat_ or mul_ PAT / JWT / mat_ task token / octo_loop_ (per grant); app_ unsupported (401). Source: row inventory, auth.go:84-201, loop_auth.go:75-92. Workspace owner only; project-workspace Bot members are always role member (botproject/authorizer.go:109-113) so cannot delete.",
       "request_contract": "X-Workspace-ID header (required in spec, path-level WorkspaceIDHeader like neighbouring Loop ops); path workspace_id; no body.",
       "response_contract": "204 No Content (spec previously declared 200 Resource).",
-      "notes": "Unhidden. CLI transport discrepancy (not fixable in allowed files): octo-cli@1f6b7c2 internal/client/client.go:36 sets loopAcceptMediaType=\"application/json\" (dry-run shows Accept: application/json). Fleet internal/middleware/api_contract.go:35-66 only keeps /v1 on the public contract for Accept application/vnd.octo+json (or POST /v1/capabilities/install, :68-70); any other Accept rewrites /v1/* to legacy /api/*, where Octo Bot tokens are not allowlisted (loop_device.go:192-196) and several public-only paths do not exist. Main (be47d4a) already uses application/vnd.octo+json; the integrator must carry that client change for these ops to reach the public handlers.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. Spec risk stays high-risk-write.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "exposed",
+      "withheld_operation_ids": [
+        "workspace.delete"
       ]
     },
     {
@@ -3179,26 +3235,26 @@
       "previous_mapping": "workspace.create（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户: 以X-User-ID(Bot UUID)创建owner成员行, principal_type取默认值 (handler/workspace.go:323-328); 新工作区octo_space_id=Bot所在Space",
-      "final_status": "alias_of",
-      "operation_ids": [
-        "workspace.create"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.create",
-          "method": "POST",
-          "path": "/fleet/api/v1/workspaces",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e internal/publicapi/workspace.go:56-61: explicit duplicate registration r.With(space).Post(base+\"/\", legacy.CreateWorkspace) next to Post(base, ...) with comment 'Keep the slash variants as compatibility aliases'; no StripSlashes/RedirectSlashes middleware in cmd/server or internal; publicapi/workspace_test.go:33-43 lists both forms.",
       "auth_and_conditions": "Same as row 122.",
       "request_contract": "Same handler as workspace.create.",
       "response_contract": "Same as workspace.create.",
-      "notes": "Trailing-slash route registered to the same handler (octo-fleet publicapi/workspace.go:56-70).",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. This trailing-slash alias row follows its canonical row.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "alias_of",
+      "withheld_operation_ids": [
+        "workspace.create"
       ]
     },
     {
@@ -3211,26 +3267,26 @@
       "previous_mapping": "workspace.update（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "alias_of",
-      "operation_ids": [
-        "workspace.update"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.update",
-          "method": "PATCH",
-          "path": "/fleet/api/v1/workspaces/{workspace_id}",
-          "risk": "write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e internal/publicapi/workspace.go:67-68: r.With(admin).Patch(base+\"/{id}\") and Patch(base+\"/{id}/\") both -> legacy.UpdateWorkspace (explicit duplicate registration, comment :56-57).",
       "auth_and_conditions": "Same as row 126.",
       "request_contract": "Same handler as workspace.update.",
       "response_contract": "Same as workspace.update.",
-      "notes": "Trailing-slash route registered to the same handler.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. This trailing-slash alias row follows its canonical row.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "alias_of",
+      "withheld_operation_ids": [
+        "workspace.update"
       ]
     },
     {
@@ -3243,26 +3299,26 @@
       "previous_mapping": "workspace.delete（x-octo-cli-hidden）",
       "bot_eligibility": "Bot 条件可用（BOT_CONDITIONAL）",
       "effective_identity": "Bot自身Fleet用户(legacy工作区, member.principal_type=bot)；项目型工作区且OCTO_BOT_OWNER_PROJECT_MEMBER_FALLBACK_ENABLED=true并经owner授予时替换为Bot owner (owner_fallback.go:15-36)",
-      "final_status": "alias_of",
-      "operation_ids": [
-        "workspace.delete"
-      ],
-      "registry": [
-        {
-          "operation_id": "workspace.delete",
-          "method": "DELETE",
-          "path": "/fleet/api/v1/workspaces/{workspace_id}",
-          "risk": "high-risk-write"
-        }
-      ],
+      "final_status": "excluded_by_owner_decision",
+      "operation_ids": [],
+      "registry": [],
       "source_evidence": "octo-fleet@064c97e internal/publicapi/workspace.go:69-70: r.With(owner).Delete(base+\"/{id}\") and Delete(base+\"/{id}/\") both -> legacy.DeleteWorkspace (explicit duplicate registration).",
       "auth_and_conditions": "Same as row 127.",
       "request_contract": "Same handler as workspace.delete.",
       "response_contract": "Same as workspace.delete.",
-      "notes": "Trailing-slash route registered to the same handler.",
+      "notes": "Excluded by owner decision (2026-10-26): Loop workspace and runtime management stays x-octo-cli-hidden in the CLI registry and is withheld from every MCP facade (search, describe, execute), including task-credential runs. Not implemented; the operation remains in the embedded spec only as the hidden contract it was before this work. This trailing-slash alias row follows its canonical row. Spec risk stays high-risk-write.",
       "tests": [
-        "cmd/service/xin2424_loop_test.go:TestXIN2424LoopOperationContracts",
+        "internal/registry/loader_test.go:TestLoopWorkspaceManagementOperationsAreHidden",
+        "internal/registry/loader_test.go:TestLoopRuntimeMutationOperationsAreHidden",
+        "cmd/service/service_test.go:TestLoopWorkspaceCreateIsNotRegistered",
+        "cmd/service/xin2424_loop_test.go:TestXIN2432LoopManagementOperationsStayHidden",
+        "internal/mcp/xin2432_rework_test.go:TestXIN2432LoopManagementOperationsDeniedOverMCP",
+        "internal/mcp/xin2432_builtbinary_test.go:TestBuiltBinary_XIN2432HiddenLoopOperationsRefused",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
+      ],
+      "previous_final_status": "alias_of",
+      "withheld_operation_ids": [
+        "workspace.delete"
       ]
     },
     {
@@ -3388,7 +3444,7 @@
       "auth_and_conditions": "bf_ Bearer (Authorization: Bearer or token header) via RequireBotIdentity/verify-bot octo-drive@aad189f internal/router/router.go:307, internal/middleware/auth.go:88-117; app_ rejected 401 by verify-bot (row evidence octo-server@624f824 modules/user/api.go:5216-5223); same handler on /v1/user/drive for uk_ (router.go:324-337) — only the bot mount is in scope; spec routes bf_/app_ to /v1/bot/drive and uk_ to /v1/user/drive via x-octo-mount-by-token-kind; personal space: owner only; shared space: downloader+",
       "request_contract": "JSON {file_id*: uint64, permission?: view|download (omitted -> view), expires_in_seconds?: int64 >=0 (0 -> 7 days), password?: string <=72 bytes (secret)}",
       "response_contract": "201 shareDTO {id, file_id, creator_uid, permission, expires_at, password_set, created_at, updated_at}; spec aliases id->share_id/share_token and file_id->drive_file_id",
-      "notes": "Was refused by MCP (divergent composite). MCP now executes the generated leaf (GeneratedDriveShareLeaves); spec default permission corrected to view, expires_in_seconds minimum 0.",
+      "notes": "Was refused by MCP (divergent composite). MCP now executes the generated leaf (GeneratedDriveShareLeaves); spec default permission corrected to view, expires_in_seconds minimum 0. MCP exposure class: approved (keyed to this row); these operations were refused over MCP before this work, so they are not baseline.",
       "tests": [
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424DriveShareOpsCallableOverMCP",
         "cmd/service/xin2424_drive_test.go:TestXIN2424DriveExistingShareContracts",
@@ -3421,7 +3477,7 @@
       "auth_and_conditions": "bf_ Bearer (Authorization: Bearer or token header) via RequireBotIdentity/verify-bot octo-drive@aad189f internal/router/router.go:307, internal/middleware/auth.go:88-117; app_ rejected 401 by verify-bot (row evidence octo-server@624f824 modules/user/api.go:5216-5223); same handler on /v1/user/drive for uk_ (router.go:324-337) — only the bot mount is in scope; spec routes bf_/app_ to /v1/bot/drive and uk_ to /v1/user/drive via x-octo-mount-by-token-kind; any verified identity, token(+password) is the grant, no space membership check; RequireSpace uses the verified bot space (X-Space-Id optional, must match if sent; drive suppresses it)",
       "request_contract": "path share_token (secret); optional JSON {password?: string (secret)}; bind errors ignored",
       "response_contract": "200 {permission, expires_at?, file_id:uint64, file_name, file_size, content_type?, ref_id, existing_copies?: [{file_id:uint64, space_id, space_name}]}",
-      "notes": "Was refused by MCP; now callable through the generated leaf. share_token and password stay masked. Response schema gained existing_copies.",
+      "notes": "Was refused by MCP; now callable through the generated leaf. share_token and password stay masked. Response schema gained existing_copies. MCP exposure class: approved (keyed to this row); these operations were refused over MCP before this work, so they are not baseline.",
       "tests": [
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424DriveShareOpsCallableOverMCP",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
@@ -3453,7 +3509,7 @@
       "auth_and_conditions": "bf_ Bearer (Authorization: Bearer or token header) via RequireBotIdentity/verify-bot octo-drive@aad189f internal/router/router.go:307, internal/middleware/auth.go:88-117; app_ rejected 401 by verify-bot (row evidence octo-server@624f824 modules/user/api.go:5216-5223); same handler on /v1/user/drive for uk_ (router.go:324-337) — only the bot mount is in scope; spec routes bf_/app_ to /v1/bot/drive and uk_ to /v1/user/drive via x-octo-mount-by-token-kind; any verified identity; share permission must be download",
       "request_contract": "path share_token (secret); optional JSON {password?: string (secret)}",
       "response_contract": "200 {url, filename, content_type?}",
-      "notes": "Was refused by MCP; now callable through the generated leaf. Returns the object URL; nothing is written to the server filesystem.",
+      "notes": "Was refused by MCP; now callable through the generated leaf. Returns the object URL; nothing is written to the server filesystem. MCP exposure class: approved (keyed to this row); these operations were refused over MCP before this work, so they are not baseline.",
       "tests": [
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424DriveShareOpsCallableOverMCP",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
@@ -3709,7 +3765,7 @@
       "auth_and_conditions": "bf_ Bearer (Authorization: Bearer or token header) via RequireBotIdentity/verify-bot octo-drive@aad189f internal/router/router.go:307, internal/middleware/auth.go:88-117; app_ rejected 401 by verify-bot (row evidence octo-server@624f824 modules/user/api.go:5216-5223); same handler on /v1/user/drive for uk_ (router.go:324-337) — only the bot mount is in scope; spec routes bf_/app_ to /v1/bot/drive and uk_ to /v1/user/drive via x-octo-mount-by-token-kind; RequireSpace with the verified bot space; forwards the caller's bot token to octo-server",
       "request_contract": "no query parameters are read by the handler (row's keyword/limit/page are not honoured)",
       "response_contract": "200 {candidates: [{uid, name}], total}",
-      "notes": "octo-drive org/members for a Bot proxies octo-server /v1/bot/space/members and ignores keyword/limit/page; bot.space-members already covers it. Not added because TestDrive_NoOrgCommands pins the deliberate absence of a drive org subtree. Needs PjM confirmation.",
+      "notes": "octo-drive org/members for a Bot proxies octo-server /v1/bot/space/members and ignores keyword/limit/page; bot.space-members covers the capability. Caveats: drive always uses the verify-bot Space, while bot.space-members without space_id uses the Bot's first Space; the response shapes differ ({candidates,total} vs the space-members page). Not added as a drive operation because TestDrive_NoOrgCommands pins the deliberate absence of a drive org subtree.",
       "tests": [
         "cmd/service/drive_test.go:TestDrive_NoOrgCommands",
         "internal/mcp/xin2424_coverage_test.go:TestXIN2424CoverageManifestRowsResolve"
@@ -4892,5 +4948,16 @@
       "disposition": "需核实",
       "bot_eligibility": "Bot token 可用但隐式替换为所有者（IMPLICIT_OWNER）"
     }
-  ]
+  ],
+  "revisions": [
+    {
+      "task": "XIN-2432",
+      "reason": "Independent review CHANGES_REQUESTED on PR #179 (B1-B4) and owner decisions of 2026-10-26."
+    }
+  ],
+  "owner_decisions": {
+    "loop_management_hidden": "Do not open the ten previously hidden Loop workspace/runtime management operations (workspace.create/update/delete, runtime.update/delete/archive_and_delete, runtime.update_request.create, runtime.model_request.create, runtime.local_skill_request.create, runtime.local_skill_import.create). Rows loop#90/91/92/97/99/101/103/122/126/127 and aliases loop#160/162/163 are excluded_by_owner_decision.",
+    "webhook_credential_return": "Accepted: group/thread webhook create and regenerate return the push token and URLs in the MCP result (core#42/44/47/49). Narrow acceptance only: no other secret disclosure, no plaintext owner secrets, no weaker upload/auth isolation, no blanket authorization or confirmation bypass.",
+    "risk_labels": "x-octo-risk is descriptive (shown to the model) and is not an enforced confirmation gate; no new permission system was added."
+  }
 }

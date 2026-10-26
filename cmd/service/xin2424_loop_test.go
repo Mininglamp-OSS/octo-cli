@@ -32,69 +32,10 @@ type xin2424LoopRow struct {
 
 var xin2424LoopRows = []xin2424LoopRow{
 	{
-		rowIDs: []string{"90"}, operationID: "runtime.update", method: "PATCH",
-		path: "/fleet/api/v1/runtimes/{runtime_id}", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		bodyRequired: true, requiredFields: []string{}, successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"91"}, operationID: "runtime.delete", method: "DELETE",
-		path: "/fleet/api/v1/runtimes/{runtime_id}", risk: "high-risk-write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"92"}, operationID: "runtime.archive_and_delete", method: "POST",
-		path: "/fleet/api/v1/runtimes/{runtime_id}/archive_agents_and_delete", risk: "high-risk-write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		bodyRequired: true, requiredFields: []string{"expected_active_agent_ids"}, successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"97"}, operationID: "runtime.update_request.create", method: "POST",
-		path: "/fleet/api/v1/runtimes/{runtime_id}/updates", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		bodyRequired: true, requiredFields: []string{"target_version"}, successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"99"}, operationID: "runtime.model_request.create", method: "POST",
-		path: "/fleet/api/v1/runtimes/{runtime_id}/model_requests", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"101"}, operationID: "runtime.local_skill_request.create", method: "POST",
-		path: "/fleet/api/v1/runtimes/{runtime_id}/local_skill_requests", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"103"}, operationID: "runtime.local_skill_import.create", method: "POST",
-		path: "/fleet/api/v1/runtimes/{runtime_id}/local_skill_imports", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"runtime_id"},
-		bodyRequired: true, requiredFields: []string{"skill_key"}, successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"122", "160"}, operationID: "workspace.create", method: "POST",
-		path: "/fleet/api/v1/workspaces", risk: "write",
-		bodyRequired: true, requiredFields: []string{"name", "slug"}, successStatuses: []string{"201"},
-	},
-	{
 		rowIDs: []string{"125"}, operationID: "workspace.member.add", method: "POST",
 		path: "/fleet/api/v1/workspaces/{workspace_id}/members", risk: "high-risk-write",
 		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"workspace_id"},
 		bodyRequired: true, requiredFields: []string{}, oneOfVariants: 2, successStatuses: []string{"200", "201"},
-	},
-	{
-		rowIDs: []string{"126", "162"}, operationID: "workspace.update", method: "PATCH",
-		path: "/fleet/api/v1/workspaces/{workspace_id}", risk: "write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"workspace_id"},
-		bodyRequired: true, requiredFields: []string{}, successStatuses: []string{"200"},
-	},
-	{
-		rowIDs: []string{"127", "163"}, operationID: "workspace.delete", method: "DELETE",
-		path: "/fleet/api/v1/workspaces/{workspace_id}", risk: "high-risk-write",
-		requiredHeaders: []string{"X-Workspace-ID"}, pathParams: []string{"workspace_id"},
-		successStatuses: []string{"204"},
 	},
 	{
 		rowIDs: []string{"128"}, operationID: "capability.install", method: "POST",
@@ -205,8 +146,6 @@ func TestXIN2424LoopEnumsAndFieldTypes(t *testing.T) {
 		operationID, field string
 		enum               []any
 	}{
-		{"runtime.update", "visibility", []any{"private", "workspace"}},
-		{"runtime.local_skill_import.create", "action", []any{"", "overwrite"}},
 		{"workspace.member.add", "principal_type", []any{"user", "bot"}},
 		{"workspace.member.add", "role", []any{"admin", "member"}},
 		{"expert_team.evaluate", "outcome", []any{"action", "no_action", "failed"}},
@@ -225,19 +164,7 @@ func TestXIN2424LoopEnumsAndFieldTypes(t *testing.T) {
 		}
 	}
 
-	op, _ := r.GetOperation("runtime.update")
-	if got := op.RequestBody.Properties["custom_name"].MaxLength; got != 100 {
-		t.Errorf("runtime.update custom_name maxLength = %d, want 100", got)
-	}
-	if got := op.RequestBody.Properties["apply_to_machine"].Type; got != "boolean" {
-		t.Errorf("runtime.update apply_to_machine type = %q", got)
-	}
-	op, _ = r.GetOperation("runtime.archive_and_delete")
-	ids := op.RequestBody.Properties["expected_active_agent_ids"]
-	if ids.Type != "array" || ids.Items == nil || ids.Items.Format != "uuid" {
-		t.Errorf("expected_active_agent_ids = %+v, want array of uuid", ids)
-	}
-	op, _ = r.GetOperation("capability.install")
+	op, _ := r.GetOperation("capability.install")
 	definition := op.RequestBody.Properties["definition"]
 	if !reflect.DeepEqual(definition.Required, []string{"schema_version", "name"}) || len(definition.AnyOf) != 2 {
 		t.Errorf("definition required=%v anyOf=%d", definition.Required, len(definition.AnyOf))
@@ -255,11 +182,75 @@ func TestXIN2424LoopEnumsAndFieldTypes(t *testing.T) {
 		idempotency.MinLength != 1 || idempotency.MaxLength != 200 || idempotency.FlagName != "idempotency-key" {
 		t.Errorf("Idempotency-Key parameter = %+v", idempotency)
 	}
-	op, _ = r.GetOperation("workspace.create")
-	for _, p := range op.Parameters {
-		if p.Name == "X-Workspace-ID" && (p.Required || p.FlagName != "workspace-id") {
-			t.Errorf("workspace.create X-Workspace-ID must be optional with --workspace-id: %+v", p)
+}
+
+// XIN-2432: the ten Loop workspace and runtime management operations stay in
+// the embedded spec but x-octo-cli-hidden, by owner decision, so no registry
+// lookup, listing or generated command can reach them.
+func TestXIN2432LoopManagementOperationsStayHidden(t *testing.T) {
+	r := registry.MustNew()
+	hidden := map[string]bool{
+		"workspace.create": true, "workspace.update": true, "workspace.delete": true,
+		"runtime.update": true, "runtime.delete": true, "runtime.archive_and_delete": true,
+		"runtime.update_request.create": true, "runtime.model_request.create": true,
+		"runtime.local_skill_request.create": true, "runtime.local_skill_import.create": true,
+	}
+	found := map[string]bool{}
+	for _, item := range r.GetSpec("loop")["paths"].(map[string]any) {
+		for _, raw := range item.(map[string]any) {
+			op, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := op["operationId"].(string)
+			if !hidden[id] {
+				continue
+			}
+			found[id] = true
+			if op["x-octo-cli-hidden"] != true {
+				t.Errorf("%s must carry x-octo-cli-hidden", id)
+			}
 		}
+	}
+	for id := range hidden {
+		if !found[id] {
+			t.Errorf("%s must stay in the embedded spec", id)
+		}
+		if _, ok := r.GetOperation(id); ok {
+			t.Errorf("%s must not be exposed by the registry", id)
+		}
+	}
+	for _, op := range r.ListAllOperations() {
+		if hidden[op.ID] {
+			t.Errorf("%s must not be listed", op.ID)
+		}
+	}
+}
+
+// XIN-2432 (review B1): expert_team.evaluate needs the team leader's agent and
+// task execution, which Fleet reads from X-Agent-ID / X-Task-ID. Fleet does
+// not strip those headers from a bf_ request, so modelling them as caller
+// parameters would let a Bot claim an agent identity. No operation may declare
+// them; task credentials supply them out of band.
+func TestXIN2432AgentIdentityHeadersAreNeverCallerParameters(t *testing.T) {
+	r := registry.MustNew()
+	for _, info := range r.ListAllOperations() {
+		op, ok := r.GetOperation(info.ID)
+		if !ok {
+			continue
+		}
+		for _, p := range op.Parameters {
+			if strings.EqualFold(p.Name, "X-Agent-ID") || strings.EqualFold(p.Name, "X-Task-ID") {
+				t.Errorf("%s declares %s %s as a caller parameter", op.ID, p.In, p.Name)
+			}
+		}
+	}
+	op, ok := r.GetOperation("expert_team.evaluate")
+	if !ok {
+		t.Fatal("expert_team.evaluate missing")
+	}
+	if !strings.Contains(op.Description, "Task-credential only") || !strings.Contains(op.Description, "Bot token cannot use this operation") {
+		t.Errorf("expert_team.evaluate must say it is task-credential only: %q", op.Description)
 	}
 }
 
@@ -296,11 +287,6 @@ func TestXIN2424LoopRequestAssembly(t *testing.T) {
 		response string
 	}{
 		{
-			name: "workspace create", args: []string{"loop", "workspace", "create", "--name", "Demo", "--slug", "demo", "--workspace-id", ws},
-			method: "POST", path: "/fleet/api/v1/workspaces", body: map[string]any{"name": "Demo", "slug": "demo"},
-			response: `{"id":"` + ws + `","name":"Demo","slug":"demo","issue_prefix":"DEM","created_at":"x","updated_at":"x"}`,
-		},
-		{
 			name: "workspace member principal", args: []string{"loop", "workspace", "member", "add", ws, "--workspace-id", ws, "--principal-type", "bot", "--principal-id", "uid-1"},
 			method: "POST", path: "/fleet/api/v1/workspaces/" + ws + "/members", body: map[string]any{"principal_type": "bot", "principal_id": "uid-1"},
 			response: `{"id":"m"}`,
@@ -309,16 +295,6 @@ func TestXIN2424LoopRequestAssembly(t *testing.T) {
 			name: "workspace member invitation", args: []string{"loop", "workspace", "member", "add", ws, "--workspace-id", ws, "--email", "a@example.com", "--role", "admin"},
 			method: "POST", path: "/fleet/api/v1/workspaces/" + ws + "/members", body: map[string]any{"email": "a@example.com", "role": "admin"},
 			response: `{"id":"i"}`,
-		},
-		{
-			name: "runtime archive and delete", args: []string{"loop", "runtime", "archive-and-delete", rt, "--workspace-id", ws, "--data", `{"expected_active_agent_ids":[]}`},
-			method: "POST", path: "/fleet/api/v1/runtimes/" + rt + "/archive_agents_and_delete", body: map[string]any{"expected_active_agent_ids": []any{}},
-			response: `{"data":{"status":"ok","agents_archived":0,"tasks_cancelled":0}}`,
-		},
-		{
-			name: "runtime model request", args: []string{"loop", "runtime", "model-request", "create", rt, "--workspace-id", ws},
-			method: "POST", path: "/fleet/api/v1/runtimes/" + rt + "/model_requests", noBody: true,
-			response: `{"data":{"model_request_id":"m","runtime_id":"` + rt + `","status":"pending","supported":true}}`,
 		},
 		{
 			name: "team evaluation", args: []string{"loop", "expert-team", "evaluate", rt, "--workspace-id", ws, "--outcome", "no_action"},
@@ -388,12 +364,6 @@ func TestXIN2424LoopRejectsInvalidBodiesLocally(t *testing.T) {
 		{"member email with principal field", []string{"loop", "workspace", "member", "add", ws, "--workspace-id", ws, "--email", "a@example.com", "--principal-id", "uid-1"}},
 		{"member principal without type", []string{"loop", "workspace", "member", "add", ws, "--workspace-id", ws, "--principal-id", "uid-1"}},
 		{"member owner role", []string{"loop", "workspace", "member", "add", ws, "--workspace-id", ws, "--email", "a@example.com", "--role", "owner"}},
-		{"runtime update without fields", []string{"loop", "runtime", "update", rt, "--workspace-id", ws}},
-		{"runtime visibility outside enum", []string{"loop", "runtime", "update", rt, "--workspace-id", ws, "--visibility", "public"}},
-		{"archive without snapshot", []string{"loop", "runtime", "archive-and-delete", rt, "--workspace-id", ws}},
-		{"update request without version", []string{"loop", "runtime", "update-request", "create", rt, "--workspace-id", ws}},
-		{"local skill import without key", []string{"loop", "runtime", "local-skill-import", "create", rt, "--workspace-id", ws}},
-		{"workspace create without slug", []string{"loop", "workspace", "create", "--name", "Demo"}},
 		{"evaluation outcome outside enum", []string{"loop", "expert-team", "evaluate", rt, "--workspace-id", ws, "--outcome", "done"}},
 		{"evaluation unknown field", []string{"loop", "expert-team", "evaluate", rt, "--workspace-id", ws, "--data", `{"outcome":"action","extra":1}`}},
 		{"capability unknown field", []string{"loop", "capability", "install", "--workspace-id", ws, "--idempotency-key", "k",

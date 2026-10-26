@@ -365,12 +365,6 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.scene.import", in: "body", field: "version", want: []string{"2"},
 		why: "octo-docs-backend@64be99c src/import/excalidraw.ts prepareExcalidrawImport envelope check"},
 	// --- XIN-2424 Bot API coverage (octo-fleet) ---
-	{op: "runtime.update", in: "body", field: "visibility",
-		want: []string{"private", "workspace"},
-		why:  "octo-fleet@064c97e internal/handler/runtime.go:496-506 rejects any other visibility"},
-	{op: "runtime.local_skill_import.create", in: "body", field: "action",
-		want: []string{"", "overwrite"},
-		why:  "octo-fleet@064c97e internal/handler/runtime_local_skills.go:627-643 accepts an empty action or overwrite"},
 	{op: "workspace.member.add", in: "body", field: "principal_type",
 		want: []string{"user", "bot"},
 		why:  "octo-fleet@064c97e internal/handler/principal_member.go:50-54 (case-insensitive server side; the CLI pins the lower-case spelling)"},

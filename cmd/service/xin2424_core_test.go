@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -39,7 +41,7 @@ var xin2424CoreRows = []xin2424CoreRow{
 	{row: "core#27", op: "message.group-get", method: http.MethodGet, path: "/v1/bot/groups/{group_no}/messages/{message_id}", risk: "read", pathParams: []string{"group_no", "message_id"}, spaceHeader: true},
 	{row: "core#28", op: "message.person-get", method: http.MethodGet, path: "/v1/bot/messages/person/{peer_uid}/{message_id}", risk: "read", pathParams: []string{"message_id", "peer_uid"}, spaceHeader: true},
 	{row: "core#29", op: "message.thread-get", method: http.MethodGet, path: "/v1/bot/groups/{group_no}/threads/{short_id}/messages/{message_id}", risk: "read", pathParams: []string{"group_no", "message_id", "short_id"}, spaceHeader: true},
-	{row: "core#41", op: "thread.archive", method: http.MethodPost, path: "/v1/bot/groups/{group_no}/threads/{short_id}/archive", risk: "write", pathParams: []string{"group_no", "short_id"}},
+	{row: "core#41", op: "thread.archive", method: http.MethodPost, path: "/v1/bot/groups/{group_no}/threads/{short_id}/archive", risk: "high-risk-write", pathParams: []string{"group_no", "short_id"}},
 	{row: "core#42", op: "group.webhook.create", method: http.MethodPost, path: "/v1/bot/groups/{group_no}/incoming-webhooks", risk: "high-risk-write", pathParams: []string{"group_no"}, hasBody: true, bodyNeeded: true},
 	{row: "core#43", op: "group.webhook.list", method: http.MethodGet, path: "/v1/bot/groups/{group_no}/incoming-webhooks", risk: "read", pathParams: []string{"group_no"}},
 	{row: "core#44", op: "group.webhook.regenerate", method: http.MethodPost, path: "/v1/bot/groups/{group_no}/incoming-webhooks/{webhook_id}/regenerate", risk: "high-risk-write", pathParams: []string{"group_no", "webhook_id"}},
@@ -225,6 +227,55 @@ func TestXIN2424CoreRequestAssembly(t *testing.T) {
 			}
 			if tc.want.body != "" && !strings.Contains(got.body, tc.want.body) {
 				t.Errorf("body = %s, want it to contain %s", got.body, tc.want.body)
+			}
+		})
+	}
+}
+
+// TestXIN2432AliasRowsUseCanonicalRoute backs the alias rows with real
+// requests: core#17 (/v1/bot/upload) and core#31 (/v1/botfile/upload) are the
+// same handler as file.upload, and core#30 (/v1/botfile/*path) is covered by
+// file.download. The CLI reaches each capability only through the canonical
+// route, and no separate alias command or operation exists.
+func TestXIN2432AliasRowsUseCanonicalRoute(t *testing.T) {
+	r := registry.MustNew()
+	for _, op := range r.ListAllOperations() {
+		switch op.Path {
+		case "/v1/bot/upload", "/v1/botfile/upload", "/v1/botfile/{path}":
+			t.Errorf("%s declares the alias route %s; aliases reconcile to the canonical operation", op.ID, op.Path)
+		}
+	}
+
+	file := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(file, []byte("alias"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, method, path string
+		args               []string
+	}{
+		{"core#17/core#31 upload", http.MethodPost, "/v1/bot/file/upload", []string{"file", "upload", "--file", file}},
+		{"core#30 download", http.MethodGet, "/v1/bot/file/download/chat/a.png", []string{"file", "download", "chat/a.png"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var method, path string
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				method, path = r.Method, r.URL.Path
+				if r.Method == http.MethodGet {
+					w.Header().Set("Location", "https://storage.example/o")
+					w.WriteHeader(http.StatusFound)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"url":"cos://x","name":"a.txt","size":5}`))
+			})
+			root.SetArgs(tc.args)
+			if err := root.Execute(); err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if method != tc.method || path != tc.path {
+				t.Fatalf("request = %s %s, want the canonical %s %s", method, path, tc.method, tc.path)
 			}
 		})
 	}

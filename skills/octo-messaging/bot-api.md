@@ -15,12 +15,12 @@ Read single messages by id and manage card revision history.
 
 ## Group and thread lifecycle
 
-Mention preference and thread archive/delete. thread.delete is destructive; prefer thread.archive when the goal is to close a thread.
+Mention preference and thread archive/delete. thread.delete is destructive; prefer thread.archive when the goal is to close a thread. A Bot has no unarchive route, so an archive is not reversible through the Bot API.
 
 | Operation | Command | Risk | Purpose |
 | --- | --- | --- | --- |
 | `group.mention-pref` | `octo-cli group mention-pref` | read | Read whether the bot may reply in a group without being @mentioned |
-| `thread.archive` | `octo-cli thread archive` | write | Archive a thread (User Bot only; thread creator or group owner/manager) |
+| `thread.archive` | `octo-cli thread archive` | high-risk-write | Archive a thread (User Bot only; thread creator or group owner/manager) |
 | `thread.delete` | `octo-cli thread delete` | high-risk-write | Delete a thread (User Bot only; thread creator or group owner/manager) |
 
 ## Incoming webhooks

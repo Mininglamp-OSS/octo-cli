@@ -40,9 +40,15 @@ type coverageManifest struct {
 		OriginalGap  string   `json:"original_gap"`
 		FinalStatus  string   `json:"final_status"`
 		OperationIDs []string `json:"operation_ids"`
-		Evidence     string   `json:"source_evidence"`
-		Notes        string   `json:"notes"`
-		Tests        []string `json:"tests"`
+		Withheld     []string `json:"withheld_operation_ids"`
+		AliasTarget  *struct {
+			OperationID string `json:"operation_id"`
+			Method      string `json:"method"`
+			Path        string `json:"path"`
+		} `json:"alias_target"`
+		Evidence string   `json:"source_evidence"`
+		Notes    string   `json:"notes"`
+		Tests    []string `json:"tests"`
 	} `json:"rows"`
 	Excluded []struct {
 		RowID  string `json:"row_id"`
@@ -89,12 +95,17 @@ var xin2424ApprovedRows = map[string][]string{
 }
 
 var routeMatchedStatuses = map[string]bool{
-	"implemented": true, "exposed": true, "fixed": true, "already_covered_upstream": true, "documented_config_requirement": true,
+	"implemented": true, "fixed": true, "already_covered_upstream": true, "documented_config_requirement": true,
+	"not_bot_usable": true,
 }
 
+// excluded_by_owner_decision rows name the hidden operations they would have
+// used in withheld_operation_ids; not_bot_usable rows keep their operation
+// (reachable with task credentials) but are not counted as Bot coverage.
 var knownFinalStatuses = map[string]bool{
-	"implemented": true, "exposed": true, "fixed": true, "already_covered_upstream": true, "documented_config_requirement": true,
+	"implemented": true, "fixed": true, "already_covered_upstream": true, "documented_config_requirement": true,
 	"already_covered": true, "alias_of": true, "covered_by_equivalent": true, "discrepancy_not_implemented": true,
+	"excluded_by_owner_decision": true, "not_bot_usable": true,
 }
 
 // routeMatches compares a report route with a registry path segment by
@@ -159,11 +170,31 @@ func TestXIN2424CoverageManifestRowsResolve(t *testing.T) {
 		if strings.TrimSpace(row.Evidence) == "" {
 			t.Errorf("%s: no source evidence", row.RowID)
 		}
+		for _, ref := range row.Tests {
+			testFuncs[ref] = true
+		}
 		if row.FinalStatus == "discrepancy_not_implemented" {
 			if len(row.OperationIDs) != 0 || row.Notes == "" {
 				t.Errorf("%s: a discrepancy row must carry no operation and explain why", row.RowID)
 			}
 			continue
+		}
+		if row.FinalStatus == "excluded_by_owner_decision" {
+			if len(row.OperationIDs) != 0 || len(row.Withheld) == 0 || !strings.Contains(row.Notes, "owner decision") {
+				t.Errorf("%s: an owner-excluded row must name only withheld operations and cite the decision", row.RowID)
+			}
+			for _, id := range row.Withheld {
+				if _, ok := reg.GetOperation(id); ok {
+					t.Errorf("%s: withheld operation %q is reachable through the registry", row.RowID, id)
+				}
+				if mcpExposed(id) {
+					t.Errorf("%s: withheld operation %q is classified for MCP exposure", row.RowID, id)
+				}
+			}
+			continue
+		}
+		if len(row.Withheld) != 0 {
+			t.Errorf("%s: only owner-excluded rows may list withheld operations", row.RowID)
 		}
 		if len(row.OperationIDs) == 0 {
 			t.Errorf("%s: %s row names no operation", row.RowID, row.FinalStatus)
@@ -191,9 +222,6 @@ func TestXIN2424CoverageManifestRowsResolve(t *testing.T) {
 		if len(row.Tests) == 0 {
 			t.Errorf("%s: no test reference", row.RowID)
 		}
-		for _, ref := range row.Tests {
-			testFuncs[ref] = true
-		}
 	}
 	for id := range want {
 		if !seen[id] {
@@ -216,6 +244,59 @@ func TestXIN2424CoverageManifestRowsResolve(t *testing.T) {
 		if !bytes.Contains(src, []byte("func "+fn+"(")) {
 			t.Errorf("test reference %q: %s has no func %s", ref, file, fn)
 		}
+	}
+}
+
+// TestXIN2432AliasAndEquivalentRowsReconcile checks every alias_of and
+// covered_by_equivalent row against its declared canonical operation: the
+// target exists with exactly that method and path, the row names it, and no
+// registry operation serves the alias route itself (pure aliases get no
+// redundant operation).
+func TestXIN2432AliasAndEquivalentRowsReconcile(t *testing.T) {
+	m := loadCoverageManifest(t)
+	reg := registry.MustNew()
+	want := map[string]string{
+		"core#17": "file.upload", "core#31": "file.upload", "core#30": "file.download", "drive#102": "bot.space-members",
+	}
+	seen := 0
+	for _, row := range m.Rows {
+		if row.FinalStatus != "alias_of" && row.FinalStatus != "covered_by_equivalent" {
+			continue
+		}
+		seen++
+		if want[row.RowID] == "" {
+			t.Errorf("%s: unexpected %s row", row.RowID, row.FinalStatus)
+			continue
+		}
+		if len(row.OperationIDs) != 1 || row.OperationIDs[0] != want[row.RowID] {
+			t.Errorf("%s: operations = %v, want [%s]", row.RowID, row.OperationIDs, want[row.RowID])
+		}
+		d, ok := reg.GetOperation(want[row.RowID])
+		if !ok {
+			t.Errorf("%s: canonical %s missing", row.RowID, want[row.RowID])
+			continue
+		}
+		if row.AliasTarget != nil {
+			if row.AliasTarget.OperationID != d.ID || !strings.EqualFold(row.AliasTarget.Method, d.Method) || row.AliasTarget.Path != d.Path {
+				t.Errorf("%s: alias_target %+v, registry has %s %s %s", row.RowID, *row.AliasTarget, d.ID, d.Method, d.Path)
+			}
+		} else if row.RowID != "drive#102" {
+			t.Errorf("%s: alias row must declare alias_target", row.RowID)
+		}
+		if routeMatches(row.Path, d.Path) {
+			t.Errorf("%s: alias route %s is the canonical route itself", row.RowID, row.Path)
+		}
+		for _, op := range reg.ListAllOperations() {
+			if strings.EqualFold(op.Method, row.Method) && routeMatches(row.Path, op.Path) {
+				t.Errorf("%s: %s serves the alias route %s %s; aliases reconcile to the canonical operation", row.RowID, op.ID, row.Method, row.Path)
+			}
+		}
+		if row.RowID == "core#30" && row.FinalStatus != "covered_by_equivalent" {
+			t.Errorf("core#30 differs from file.download in path decoding and must be covered_by_equivalent, got %s", row.FinalStatus)
+		}
+	}
+	if seen != len(want) {
+		t.Errorf("alias/equivalent rows = %d, want %d", seen, len(want))
 	}
 }
 
@@ -516,8 +597,10 @@ func TestXIN2424ExecuteDryRunAssemblesEveryApprovedOperation(t *testing.T) {
 	reg := registry.MustNew()
 
 	ids := approvedOperations(t)
-	if len(ids) < 90 {
-		t.Fatalf("approved operations = %d, want the full XIN-2424 set", len(ids))
+	// 84 operations added by this work plus the three drive share leaves MCP
+	// used to refuse; the ten Loop management operations stay hidden.
+	if len(ids) != 87 {
+		t.Fatalf("approved operations = %d, want 87", len(ids))
 	}
 	for _, id := range ids {
 		t.Run(id, func(t *testing.T) {

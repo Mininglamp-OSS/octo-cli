@@ -54,7 +54,7 @@ func TestGetSpecReturnsNilForUnknown(t *testing.T) {
 func TestAllDomainOperationCounts(t *testing.T) {
 	// Caller-facing operation counts per service. Operations marked
 	// x-octo-cli-hidden remain in an embedded backend spec but are excluded
-	// here; no embedded spec hides an operation today.
+	// here; Loop workspace and runtime mutations are examples.
 	r := MustNew()
 	expected := map[string]int{
 		"matter":      14,
@@ -70,7 +70,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
-		"loop":        128,
+		"loop":        118,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -153,8 +153,8 @@ func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
 
 // The x-octo-cli-hidden mechanism keeps an operation in an embedded backend
 // spec while excluding it from GetOperation, ListOperations and
-// ListAllOperations. No embedded spec currently hides an operation, so the
-// mechanism is pinned against an inline fixture spec.
+// ListAllOperations. The mechanism is pinned against an inline fixture spec so
+// it does not depend on which embedded operations are hidden today.
 func TestCLIHiddenOperationsAreExcludedFromRegistry(t *testing.T) {
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(`{
@@ -189,18 +189,27 @@ func TestCLIHiddenOperationsAreExcludedFromRegistry(t *testing.T) {
 	}
 }
 
-// The Loop workspace and runtime management operations were previously
-// x-octo-cli-hidden; they are now part of the caller-facing contract.
-func TestLoopWorkspaceAndRuntimeManagementOperationsAreExposed(t *testing.T) {
+// The Loop workspace and runtime management operations stay x-octo-cli-hidden
+// by owner decision: they are withheld from the CLI registry, and therefore
+// from every generated command and MCP facade, including task-credential runs.
+func TestLoopWorkspaceManagementOperationsAreHidden(t *testing.T) {
 	r := MustNew()
-	listed := map[string]bool{}
-	for _, op := range r.ListOperations("loop") {
-		listed[op.ID] = true
+	hidden := []string{"workspace.create", "workspace.update", "workspace.delete"}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
+		}
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
+		}
 	}
-	for _, operationID := range []string{
-		"workspace.create",
-		"workspace.update",
-		"workspace.delete",
+}
+
+func TestLoopRuntimeMutationOperationsAreHidden(t *testing.T) {
+	r := MustNew()
+	hidden := []string{
 		"runtime.update",
 		"runtime.delete",
 		"runtime.archive_and_delete",
@@ -208,12 +217,15 @@ func TestLoopWorkspaceAndRuntimeManagementOperationsAreExposed(t *testing.T) {
 		"runtime.model_request.create",
 		"runtime.local_skill_request.create",
 		"runtime.local_skill_import.create",
-	} {
-		if _, ok := r.GetOperation(operationID); !ok {
-			t.Errorf("%s must be exposed by the CLI registry", operationID)
+	}
+	for _, operationID := range hidden {
+		if _, ok := r.GetOperation(operationID); ok {
+			t.Fatalf("%s must not be exposed by the CLI registry", operationID)
 		}
-		if !listed[operationID] {
-			t.Errorf("%s must be listed as a Loop operation", operationID)
+		for _, op := range r.ListOperations("loop") {
+			if op.ID == operationID {
+				t.Fatalf("%s must not be listed as a Loop operation", operationID)
+			}
 		}
 	}
 }
@@ -518,15 +530,6 @@ func TestLoopWorkspaceScopedOperationsExposeWorkspaceIDFlag(t *testing.T) {
 		wantHeader := strings.HasPrefix(info.Path, "/fleet/api/v1/") &&
 			info.Path != "/fleet/api/v1/workspaces" &&
 			info.Path != "/fleet/api/v1/runtimes"
-		// workspace.create is Space-scoped for people, but a Bot caller must
-		// bind an existing workspace in the same Space through an OPTIONAL
-		// X-Workspace-ID (octo-fleet loop_device.go:197-200,229-238).
-		if info.ID == "workspace.create" {
-			if workspaceHeaders != 1 || requiredWorkspaceHeaders != 0 {
-				t.Errorf("%s: want one optional workspace header, got %d (required %d)", info.ID, workspaceHeaders, requiredWorkspaceHeaders)
-			}
-			continue
-		}
 		if wantHeader && workspaceHeaders != 1 {
 			t.Errorf("%s: workspace headers = %d, want exactly one", info.ID, workspaceHeaders)
 		}

@@ -697,7 +697,7 @@
       "get": {
         "operationId": "docs.scene.export",
         "summary": "Export a whiteboard's live scene as PNG, SVG, or portable Excalidraw (needs reader)",
-        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o. For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
+        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o on the CLI; over MCP the file is returned inline (bounded like any binary result). For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
         "x-octo-risk": "read",
         "x-octo-risk-note": "read reflects the server-side effect: this is a GET that renders and returns the live scene as an image without mutating any doc state. The optional --output/-o writes to a local, user-chosen path (client side, analogous to curl -o) and does not change the API risk class.",
         "x-octo-binary-response": true,
@@ -3531,7 +3531,7 @@
       "post": {
         "operationId": "docs.invites.accept",
         "summary": "Accept a document link invite as the bot itself",
-        "description": "Grants the calling bot the invite's role on the invited document through the same accept transaction as the human flow (doc_member row with source=invite). The bot route does not restrict the document to the bot's own Space. Invalid, revoked, expired or exhausted invites return 410 invite_invalid; a missing or deleted document returns 404 not_found.",
+        "description": "Grants the calling bot the invite's role on the invited document through the same accept transaction as the human flow (doc_member row with source=invite). The bot route does not restrict the document to the bot's own Space. Invalid, revoked, expired or exhausted invites, and invites whose document is missing or deleted, all return 410 invite_invalid. The bot route passes no home Space, so the 404 not_found branch of the shared accept transaction is never reached here.",
         "x-octo-risk": "high-risk-write",
         "parameters": [
           {
@@ -5924,7 +5924,7 @@
         "operationId": "docs.scene.import",
         "summary": "Import an Excalidraw scene into a whiteboard (needs writer)",
         "description": "Board documents only (409 unsupported_doc_type). Send the .excalidraw JSON envelope as the body, for example --data @board.excalidraw. mode=merge (default) keeps existing elements; mode=replace overwrites the board after the backend takes a safety snapshot. Embedded files are validated, sanitized and stored as attachments, and element/file ids are remapped (elementIdMap, fileIdMap). The body is limited by DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB) and the board element limits.",
-        "x-octo-risk": "write",
+        "x-octo-risk": "high-risk-write",
         "parameters": [
           {
             "name": "docId",

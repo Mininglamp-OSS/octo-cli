@@ -185,7 +185,7 @@
       "get": {
         "operationId": "bot.resolve-targets",
         "summary": "Resolve groups and threads the bot belongs to by name",
-        "description": "Substring (SQL LIKE) match on group and thread names, limited to groups where the calling bot is a non-deleted group member (no space filter, so cross-space external groups are included; team container groups (purpose aiteam) are excluded). Threads are returned only when active or archived. An exact name match sorts first. App Bot tokens pass authentication but have no group membership, so they always resolve to an empty list.",
+        "description": "Substring (SQL LIKE) match on group and thread names, limited to groups where the calling bot is a non-deleted group member (no space filter, so cross-space external groups are included; team container groups (purpose ai_session_container) are excluded). Threads are returned only when active or archived. An exact name match sorts first. App Bot tokens pass authentication but have no group membership, so they always resolve to an empty list.",
         "x-octo-risk": "read",
         "parameters": [
           { "name": "name", "in": "query", "required": true, "schema": { "type": "string" }, "description": "name fragment to match (blank is rejected)" },

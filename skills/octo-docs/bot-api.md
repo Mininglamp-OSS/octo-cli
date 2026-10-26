@@ -29,7 +29,7 @@ These routes take the file bytes as the request body: pass file_path (MCP) or --
 | `docs.raw-import.docx` | `octo-cli docs raw-import docx` | high-risk-write | Import a .docx file into a doc document (writer) |
 | `docs.raw-import.markdown` | `octo-cli docs raw-import markdown` | high-risk-write | Import a Markdown file into a doc document (writer) |
 | `docs.raw-import.xlsx` | `octo-cli docs raw-import xlsx` | high-risk-write | Import an .xlsx workbook into a sheet document (writer) |
-| `docs.scene.import` | `octo-cli docs scene import` | write | Import an Excalidraw scene into a whiteboard (needs writer) |
+| `docs.scene.import` | `octo-cli docs scene import` | high-risk-write | Import an Excalidraw scene into a whiteboard (needs writer) |
 
 ## Attachments, exports and media
 

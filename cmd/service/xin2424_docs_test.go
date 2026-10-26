@@ -51,7 +51,7 @@ var xin2424DocsFixtures = []xin2424DocsFixture{
 	{row: "docs#58", op: "docs.summary-source", method: "GET", path: "/v1/bot/docs/{docId}/summary-source", risk: "read", pathParams: []string{"docId"}},
 	{row: "docs#63", op: "docs.sheet.list", method: "GET", path: "/v1/bot/docs/{docId}/sheets", risk: "read", pathParams: []string{"docId"}},
 	{row: "docs#73", op: "docs.file.export", method: "GET", path: "/v1/bot/docs/{docId}/export/file", risk: "read", pathParams: []string{"docId"}, reqQuery: []string{"format"}, binary: true},
-	{row: "docs#75", op: "docs.scene.import", method: "POST", path: "/v1/bot/docs/{docId}/import/excalidraw", risk: "write", pathParams: []string{"docId"}, reqBody: []string{"elements", "files", "type", "version"}},
+	{row: "docs#75", op: "docs.scene.import", method: "POST", path: "/v1/bot/docs/{docId}/import/excalidraw", risk: "high-risk-write", pathParams: []string{"docId"}, reqBody: []string{"elements", "files", "type", "version"}},
 }
 
 func TestXIN2424DocsOperationsMatchBackendContract(t *testing.T) {
@@ -167,5 +167,51 @@ func TestXIN2424DocsSceneImportSendsJSONEnvelope(t *testing.T) {
 	}
 	if body["type"] != "excalidraw" || body["version"] != float64(2) {
 		t.Fatalf("body = %v", body)
+	}
+}
+
+// TestXIN2432ModelFacingDescriptionsMatchBackend pins description text that
+// the MCP get_skill describe intent shows the model, against the pinned
+// backends (review B2/B3).
+func TestXIN2432ModelFacingDescriptionsMatchBackend(t *testing.T) {
+	r := registry.MustNew()
+	desc := func(id string) string {
+		t.Helper()
+		op, ok := r.GetOperation(id)
+		if !ok {
+			t.Fatalf("%s missing", id)
+		}
+		return op.Description
+	}
+
+	// B2: team container groups are group.purpose = aiteam.GroupPurpose,
+	// "ai_session_container" (octo-server@624f824 pkg/aiteam/aiteam.go:14).
+	for _, info := range r.ListAllOperations() {
+		d := desc(info.ID)
+		if strings.Contains(d, "purpose aiteam") {
+			t.Errorf("%s names the container purpose as aiteam: %q", info.ID, d)
+		}
+	}
+	for _, id := range []string{"bot.resolve-targets", "group.webhook.create", "thread.webhook.create", "thread.delete", "thread.archive"} {
+		if !strings.Contains(desc(id), "purpose ai_session_container") {
+			t.Errorf("%s must name the container purpose ai_session_container", id)
+		}
+	}
+
+	// B3 docs#6: the bot accept route passes no requiredHomeSpaceId, so a
+	// missing document is 410 invite_invalid, never 404 (octo-docs-backend
+	// @64be99c routes/invites.ts:141, services/acceptInvite.ts:123-124).
+	if d := desc("docs.invites.accept"); strings.Contains(d, "returns 404") || !strings.Contains(d, "whose document is missing or deleted, all return 410 invite_invalid") {
+		t.Errorf("docs.invites.accept = %q", d)
+	}
+
+	// B3 core#28: a bot token carries no Space, so same-space never applies.
+	if d := desc("message.person-get"); strings.Contains(d, "share a space") || !strings.Contains(d, "same-space branch never applies") {
+		t.Errorf("message.person-get = %q", d)
+	}
+
+	// B3 core#27: requireGroupMember also lets disbanded groups through.
+	if d := desc("message.group-get"); strings.Contains(d, "the group active") || !strings.Contains(d, "disbanded groups keep their history") {
+		t.Errorf("message.group-get = %q", d)
 	}
 }

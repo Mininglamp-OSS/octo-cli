@@ -159,28 +159,13 @@
     "octo-loop": {
       "summary_short": "Octo Loop control plane: tasks, comments, metadata, projects, labels; dispatch to experts and expert-teams.",
       "references": {
-        "bot-api.md": {"topics": ["workspace management", "runtime management", "capability install", "workspace member"]}
+        "bot-api.md": {"topics": ["capability install", "workspace member"]}
       },
       "operations": {
-        "workspace.delete": {
-          "level": "required-before-write",
-          "advice": "Deletes the whole workspace (owner only); confirm with a human owner before calling.",
-          "section": "bot-api.md#workspace-and-runtime-management"
-        },
         "workspace.member.add": {
           "level": "required-before-write",
           "advice": "Adds a member or sends an invitation with the given role; confirm the principal and role first.",
-          "section": "bot-api.md#workspace-and-runtime-management"
-        },
-        "runtime.delete": {
-          "level": "required-before-write",
-          "advice": "Deletes the runtime; it fails with 409 while active experts are bound to it.",
-          "section": "bot-api.md#workspace-and-runtime-management"
-        },
-        "runtime.archive_and_delete": {
-          "level": "required-before-write",
-          "advice": "Archives every expert bound to the runtime and deletes it; expected_active_agent_ids must match the current set.",
-          "section": "bot-api.md#workspace-and-runtime-management"
+          "section": "bot-api.md#workspace-membership-and-capabilities"
         }
       }
     },

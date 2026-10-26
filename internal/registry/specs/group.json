@@ -317,7 +317,7 @@
       "post": {
         "operationId": "group.webhook.create",
         "summary": "Create a group incoming webhook (returns its push token once)",
-        "description": "The bot must be an internal, normal-status member of the group (any member may create; App Bot tokens are rejected as non-members). team container groups (purpose aiteam) are rejected. Requires the incomingwebhook.enabled system setting (403 when off) and an active group. Only group owners/managers may set avatar. Per-group, per-creator and total quotas apply. The backend rejects an empty request body and the CLI never sends a bare {}, so pass at least one field (for example --name). The response carries the push token and push URLs; they are returned only here and on regenerate, and anyone holding them can post into the group.",
+        "description": "The bot must be an internal, normal-status member of the group (any member may create; App Bot tokens are rejected as non-members). team container groups (purpose ai_session_container) are rejected. Requires the incomingwebhook.enabled system setting (403 when off) and an active group. Only group owners/managers may set avatar. Per-group, per-creator and total quotas apply. The backend rejects an empty request body and the CLI never sends a bare {}, so pass at least one field (for example --name). The response carries the push token and push URLs; they are returned only here and on regenerate, and anyone holding them can post into the group.",
         "x-octo-risk": "high-risk-write",
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }

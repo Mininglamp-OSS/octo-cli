@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "MCP exposure classification. An enabled registry operation is callable over MCP only when listed here; anything else is denied. baseline = operations exposed before XIN-2424; approved = operations added or exposed by XIN-2424, each tied to its approved inventory rows (docs/mcp-bot-api-coverage.json).",
+  "note": "MCP exposure classification. An enabled registry operation is callable over MCP only when listed here; anything else is denied. baseline = operations exposed before XIN-2424; approved = operations added or exposed by XIN-2424, each tied to its approved inventory rows (docs/mcp-bot-api-coverage.json). The ten Loop workspace/runtime management operations that the CLI keeps x-octo-cli-hidden are excluded by owner decision and must never be listed here.",
   "baseline": [
     "attachment.content.get",
     "attachment.delete",
@@ -109,9 +109,6 @@
     "drive.member.remove",
     "drive.member.set-role",
     "drive.search",
-    "drive.share.access",
-    "drive.share.blob-create",
-    "drive.share.download",
     "drive.share.list",
     "drive.share.revoke",
     "drive.space.create",
@@ -444,6 +441,15 @@
     "drive.im-transfer.lookup": [
       "drive#98"
     ],
+    "drive.share.access": [
+      "drive#81"
+    ],
+    "drive.share.blob-create": [
+      "drive#75"
+    ],
+    "drive.share.download": [
+      "drive#83"
+    ],
     "drive.share.existing-copies": [
       "drive#100"
     ],
@@ -537,27 +543,6 @@
     "message.thread-get": [
       "core#29"
     ],
-    "runtime.archive_and_delete": [
-      "loop#92"
-    ],
-    "runtime.delete": [
-      "loop#91"
-    ],
-    "runtime.local_skill_import.create": [
-      "loop#103"
-    ],
-    "runtime.local_skill_request.create": [
-      "loop#101"
-    ],
-    "runtime.model_request.create": [
-      "loop#99"
-    ],
-    "runtime.update": [
-      "loop#90"
-    ],
-    "runtime.update_request.create": [
-      "loop#97"
-    ],
     "thread.archive": [
       "core#41"
     ],
@@ -585,20 +570,8 @@
     "thread.webhook.update": [
       "core#74"
     ],
-    "workspace.create": [
-      "loop#122",
-      "loop#160"
-    ],
-    "workspace.delete": [
-      "loop#127",
-      "loop#163"
-    ],
     "workspace.member.add": [
       "loop#125"
-    ],
-    "workspace.update": [
-      "loop#126",
-      "loop#162"
     ]
   }
 }

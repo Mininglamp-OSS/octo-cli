@@ -3041,56 +3041,18 @@
       },
       "post": {
         "summary": "Create workspace",
-        "description": "Create a workspace in the caller's selected Octo Space; the caller becomes its owner. Returns 403 when the server sets DISABLE_WORKSPACE_CREATION=true. The slug is trimmed and lowercased, must match ^[a-z0-9]+(-[a-z0-9]+)*$ and must not be a reserved slug; a duplicate slug returns 409. Octo Bot tokens must also send X-Workspace-ID naming an existing workspace in the same Space (used only to bind the Bot's scope; membership in that workspace is not checked). issue_prefix is uppercased; when omitted it is derived from the name.",
+        "description": "Create workspace in the authenticated workspace.",
         "tags": [
           "workspaces"
         ],
         "operationId": "workspace.create",
-        "parameters": [
-          {
-            "name": "X-Workspace-ID",
-            "in": "header",
-            "required": false,
-            "description": "Existing workspace in the same Space. Required for Octo Bot tokens; optional for human credentials.",
-            "x-octo-flag": "workspace-id",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
+        "x-octo-cli-hidden": true,
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "name",
-                  "slug"
-                ],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Workspace name; surrounding whitespace is trimmed."
-                  },
-                  "slug": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Lowercase letters, digits and single hyphens (trimmed and lowercased by the server)."
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "context": {
-                    "type": "string"
-                  },
-                  "issue_prefix": {
-                    "type": "string",
-                    "description": "Task identifier prefix; uppercased by the server."
-                  }
-                }
+                "$ref": "#/components/schemas/FlexibleRequest"
               }
             }
           }
@@ -3114,25 +3076,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "409": {
-            "description": "CONFLICT - workspace slug already exists.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "201": {
-            "description": "Workspace created; the body is the workspace object without a data envelope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceDetail"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
@@ -3189,11 +3134,12 @@
       },
       "patch": {
         "summary": "Update workspace",
-        "description": "Update workspace fields. Requires the workspace owner or admin role. Only supplied fields change: a blank name is rejected, a blank issue_prefix is ignored, and repos replaces the repository list (each url must be an http(s) or ssh git URL; duplicates are dropped). When sent, X-Workspace-ID must equal workspace_id.",
+        "description": "Update workspace in the authenticated workspace.",
         "tags": [
           "workspaces"
         ],
         "operationId": "workspace.update",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "workspace_id",
@@ -3210,47 +3156,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "context": {
-                    "type": "string"
-                  },
-                  "settings": {
-                    "type": "object",
-                    "additionalProperties": true
-                  },
-                  "repos": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "required": [
-                        "url"
-                      ],
-                      "properties": {
-                        "url": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "description": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  },
-                  "issue_prefix": {
-                    "type": "string"
-                  },
-                  "avatar_url": {
-                    "type": "string"
-                  }
-                }
+                "$ref": "#/components/schemas/FlexibleRequest"
               }
             }
           }
@@ -3275,25 +3181,19 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "description": "Updated workspace without a data envelope.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkspaceDetail"
-                }
-              }
-            }
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete workspace",
-        "description": "Permanently delete the workspace and everything it contains. Requires the workspace owner role (checked by the route and again by the handler). When sent, X-Workspace-ID must equal workspace_id.",
+        "description": "Delete workspace in the authenticated workspace.",
         "tags": [
           "workspaces"
         ],
         "operationId": "workspace.delete",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "workspace_id",
@@ -3324,8 +3224,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "204": {
-            "description": "Workspace deleted; no response body."
+          "200": {
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "high-risk-write"
@@ -5112,11 +5012,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}": {
       "patch": {
         "summary": "Update runtime",
-        "description": "Update runtime visibility or display name. Requires the workspace owner or admin role, or ownership of the runtime. custom_name is trimmed (blank clears it; at most 100 characters). With apply_to_machine and custom_name, every runtime of the same owner on this daemon in the workspace is renamed. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Update runtime in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.update",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -5133,27 +5034,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "minProperties": 1,
-                "properties": {
-                  "visibility": {
-                    "type": "string",
-                    "enum": [
-                      "private",
-                      "workspace"
-                    ],
-                    "description": "private: only the owner and workspace admins can bind experts; workspace: any member can."
-                  },
-                  "custom_name": {
-                    "type": "string",
-                    "maxLength": 100,
-                    "description": "Machine display name; blank clears it."
-                  },
-                  "apply_to_machine": {
-                    "type": "boolean",
-                    "description": "Apply custom_name to every runtime of this owner on the same daemon."
-                  }
-                }
+                "$ref": "#/components/schemas/FlexibleRequest"
               }
             }
           }
@@ -5178,33 +5059,19 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "description": "Updated runtime.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/WorkspaceRuntime"
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
       },
       "delete": {
         "summary": "Delete runtime",
-        "description": "Delete a runtime that has no active experts. Archived experts on it are removed and autopilots assigned to them are paused. Requires the workspace owner or admin role, or ownership of the runtime. Use runtime archive-and-delete to archive bound experts first. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Delete runtime in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.delete",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -5235,42 +5102,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "409": {
-            "description": "CONFLICT - active experts are still bound to the runtime (code runtime_has_active_agents, with active_agents), or active expert teams are led by archived experts on it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
           "200": {
-            "description": "Runtime deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "status"
-                      ],
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "const": "ok"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "high-risk-write"
@@ -5284,11 +5117,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}/archive_agents_and_delete": {
       "post": {
         "summary": "Archive experts and delete runtime",
-        "description": "In one transaction, archive every active expert bound to the runtime, cancel their queued and running executions, pause autopilots assigned to them, remove the archived experts, and delete the runtime. expected_active_agent_ids must list exactly the currently active expert ids (use [] when none); otherwise nothing changes and 409 is returned. Requires the workspace owner or admin role, or ownership of the runtime. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Archive experts and delete runtime in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.archive_and_delete",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -5300,29 +5134,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "expected_active_agent_ids"
-                ],
-                "properties": {
-                  "expected_active_agent_ids": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    },
-                    "description": "Confirmed snapshot of the expert ids currently active on the runtime."
-                  }
-                }
-              }
-            }
-          }
-        },
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -5342,52 +5153,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "409": {
-            "description": "CONFLICT - the active expert set changed (code runtime_delete_plan_changed, with the current active_agents); review and retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Experts archived and runtime deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "required": [
-                        "status",
-                        "agents_archived",
-                        "tasks_cancelled"
-                      ],
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "const": "ok"
-                        },
-                        "agents_archived": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
-                        "tasks_cancelled": {
-                          "type": "integer",
-                          "minimum": 0
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+          "201": {
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "high-risk-write"
@@ -5697,11 +5464,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}/updates": {
       "post": {
         "summary": "Request runtime update",
-        "description": "Ask the runtime's daemon to update its CLI to target_version. Any workspace member may request it; the daemon picks the request up on its next heartbeat and it times out if not handled. Poll runtime update-request get for the result. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Request runtime update in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.update_request.create",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -5718,16 +5486,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "target_version"
-                ],
-                "properties": {
-                  "target_version": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                }
+                "$ref": "#/components/schemas/FlexibleRequest"
               }
             }
           }
@@ -5751,36 +5510,11 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "409": {
-            "description": "CONFLICT - an update is already in progress for this runtime.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Update request queued for the daemon.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/RuntimeUpdateRequest"
-                    }
-                  }
-                }
-              }
-            }
+          "201": {
+            "$ref": "#/components/responses/Resource"
           }
         },
-        "x-octo-risk": "write"
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -5850,11 +5584,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}/model_requests": {
       "post": {
         "summary": "Request runtime models",
-        "description": "Ask the runtime's daemon to report its available models. Any workspace member may request it; the runtime must be online. No request body. Poll runtime model-request get for the result. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Request runtime models in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.model_request.create",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -5866,6 +5601,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -5885,33 +5630,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "503": {
-            "description": "SERVICE_UNAVAILABLE - the runtime is offline.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Model list request queued for the daemon.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/RuntimeModelRequest"
-                    }
-                  }
-                }
-              }
-            }
+          "201": {
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
@@ -5984,11 +5704,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}/local_skill_requests": {
       "post": {
         "summary": "Request local skills",
-        "description": "Ask the runtime's daemon to list the skills installed locally on its machine. Only the runtime owner may request it (workspace admins are not exempt); the runtime must be online. No request body. Poll runtime local-skill-request get for the result. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Request local skills in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.local_skill_request.create",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -6000,6 +5721,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlexibleRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "400": {
             "$ref": "#/components/responses/ValidationError"
@@ -6019,33 +5750,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "503": {
-            "description": "SERVICE_UNAVAILABLE - the runtime is offline.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Local skill inventory request queued for the daemon.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/RuntimeLocalSkillRequest"
-                    }
-                  }
-                }
-              }
-            }
+          "201": {
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
@@ -6118,11 +5824,12 @@
     "/fleet/api/v1/runtimes/{runtime_id}/local_skill_imports": {
       "post": {
         "summary": "Request local skill import",
-        "description": "Import one locally installed skill from the runtime's machine into the workspace. Only the runtime owner may request it (workspace admins are not exempt); the runtime must be online. Omit action to create a new skill; action overwrite requires target_skill_id and re-imports onto that skill (only its creator may overwrite). supports_conflict opts into the conflict terminal status for a same-name collision. Poll runtime local-skill-import get for the result. The runtime must belong to a workspace the caller is a member of.",
+        "description": "Request local skill import in the authenticated workspace.",
         "tags": [
           "runtimes"
         ],
         "operationId": "runtime.local_skill_import.create",
+        "x-octo-cli-hidden": true,
         "parameters": [
           {
             "name": "runtime_id",
@@ -6139,41 +5846,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "skill_key"
-                ],
-                "properties": {
-                  "skill_key": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Key of the local skill from a local skill inventory request."
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Optional new name; blank keeps the local name."
-                  },
-                  "description": {
-                    "type": "string",
-                    "description": "Optional description; blank keeps the local description."
-                  },
-                  "action": {
-                    "type": "string",
-                    "enum": [
-                      "",
-                      "overwrite"
-                    ],
-                    "description": "Omit or empty to create; overwrite re-imports onto target_skill_id."
-                  },
-                  "target_skill_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "description": "Required when action is overwrite."
-                  },
-                  "supports_conflict": {
-                    "type": "boolean"
-                  }
-                }
+                "$ref": "#/components/schemas/FlexibleRequest"
               }
             }
           }
@@ -6197,33 +5870,8 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
-          "503": {
-            "description": "SERVICE_UNAVAILABLE - the runtime is offline.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Local skill import queued for the daemon.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "data"
-                  ],
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/RuntimeLocalSkillImport"
-                    }
-                  }
-                }
-              }
-            }
+          "201": {
+            "$ref": "#/components/responses/Resource"
           }
         },
         "x-octo-risk": "write"
@@ -6925,7 +6573,7 @@
     "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations": {
       "post": {
         "summary": "Record expert team evaluation",
-        "description": "Record the expert team leader's evaluation outcome for the current execution of the task. The task must be assigned to an expert team, the caller must act as that team's leader expert, and the X-Task-ID execution must belong to the task (task credentials supply it automatically; a Bot token needs X-Agent-ID and X-Task-ID).",
+        "description": "Record the expert team leader's evaluation outcome for the current execution of the task. The task must be assigned to an expert team, the caller must act as that team's leader expert, and the X-Task-ID execution must belong to the task (task credentials supply it automatically). Task-credential only: a Bot token cannot use this operation, because the CLI never sends caller-supplied X-Agent-ID or X-Task-ID headers, so a Bot call is rejected with 403.",
         "tags": [
           "tasks"
         ],

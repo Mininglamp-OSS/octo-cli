@@ -120,8 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is unchanged; no octo-server Project API or command alias is introduced.
 
 ### Added
-- **Bot API coverage for the MCP facades** — 94 operations added or exposed
-  across messaging, bot, docs, HTML docs, drive and Loop, each verified against
+- **Bot API coverage for the MCP facades** — 84 operations added, plus the
+  three drive share leaves MCP used to refuse, across messaging, bot, docs,
+  HTML docs, drive and Loop, each verified against
   the pinned backend route, handler and validation code: incoming webhooks for
   groups and threads, single-message reads, card revision clearing, thread
   archive/delete, mention preference, target resolution, OBO grant and
@@ -129,12 +130,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment tasks, recent views, attachment copy/ingest, file export and PPT
   media; HTML version source/revert/diff, comment reanchor/delete/react and
   rendered pages/assets; drive trash, share transfer/existing copies,
-  ancestors, doc liveness and role-checked mounts; Loop workspace/runtime
-  management, workspace member add and capability install. The row-by-row
-  scope, evidence and tests are in `docs/mcp-bot-api-coverage.json`.
-  `thread delete` returns as a high-risk operation now that `thread archive`
-  gives bots a non-destructive way to close a thread, and the previously
-  hidden Loop workspace/runtime management commands are now listed.
+  ancestors, doc liveness and role-checked mounts; Loop workspace member add
+  and capability install. The row-by-row scope, evidence and tests are in
+  `docs/mcp-bot-api-coverage.json`. `thread delete` returns as a high-risk
+  operation now that `thread archive` gives bots a way to close a thread;
+  `thread archive` and `docs scene import` are also high-risk (a Bot cannot
+  unarchive, and `mode=replace` overwrites the scene). Loop workspace and
+  runtime management stays hidden from the CLI and MCP by owner decision.
+  Group and thread webhook create/regenerate return the push token and URLs in
+  the result, as accepted by the owner. Risk labels are descriptive, not an
+  enforced confirmation step.
 - **Raw request-body uploads** (`x-octo-raw-body`) — five docs routes that take
   the file bytes as the body (PPT media, SVG attachments, docx/markdown/xlsx
   import) are generated operations with `--file`, a declared media type and a
@@ -143,8 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Inline binary results over MCP** — a binary-response operation called
   through MCP returns its body inside the envelope (`content_text` for UTF-8
   text, otherwise `content_base64`, always with `sha256`) up to 4 MiB; larger
-  bodies report `inline: false` with their size. Nothing is written to the
-  server's filesystem and `--output` stays unavailable to MCP callers.
+  bodies report `inline: false` with their size and sha256 and are streamed,
+  never held whole in memory. `docs scene export --image-format excalidraw`
+  returns the portable file inline the same way. Nothing is written to the
+  server's filesystem and `--output` stays unavailable to MCP callers. This
+  applies to every binary operation reachable over MCP, including the existing
+  mail raw/attachment, attachment, file and plugin downloads.
 - **MCP exposure table** (`internal/mcp/exposure.json`) — MCP discovery,
   describe and execute are default-deny: an enabled operation must be listed
   (pre-existing baseline or an approved inventory row) or it is withheld and

@@ -373,19 +373,30 @@ func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
 	}
 }
 
-// Workspace and runtime management were previously withheld with
-// x-octo-cli-hidden. They are exposed now that the Fleet public routes they
-// address have been verified for Bot callers (XIN-2424); the leaves must exist
-// so both the CLI and the MCP facade can reach them.
-func TestLoopWorkspaceManagementCommandsAreRegistered(t *testing.T) {
-	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {})
+// Workspace and runtime management stay withheld with x-octo-cli-hidden by
+// owner decision, so none of their leaves may be registered and none may send
+// a request.
+func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
+	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
+		t.Fatal("hidden workspace and runtime management commands must not send a request")
+	})
 	loop := findCmd(root, "loop")
 	if loop == nil {
 		t.Fatal("loop command not registered")
 	}
+	workspace := findCmd(loop, "workspace")
+	if workspace == nil {
+		t.Fatal("loop workspace command not registered")
+	}
+	runtime := findCmd(loop, "runtime")
+	if runtime == nil {
+		t.Fatal("loop runtime command not registered")
+	}
 	for _, words := range [][]string{
 		{"workspace", "create"}, {"workspace", "update"}, {"workspace", "delete"},
 		{"runtime", "update"}, {"runtime", "delete"}, {"runtime", "archive-and-delete"},
+		{"runtime", "update-request", "create"}, {"runtime", "model-request", "create"},
+		{"runtime", "local-skill-request", "create"}, {"runtime", "local-skill-import", "create"},
 	} {
 		cmd := loop
 		for _, w := range words {
@@ -393,8 +404,8 @@ func TestLoopWorkspaceManagementCommandsAreRegistered(t *testing.T) {
 				break
 			}
 		}
-		if cmd == nil {
-			t.Errorf("loop %s must be registered", strings.Join(words, " "))
+		if cmd != nil {
+			t.Errorf("loop %s must not be registered", strings.Join(words, " "))
 		}
 	}
 }
