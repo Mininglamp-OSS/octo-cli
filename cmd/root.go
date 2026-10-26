@@ -1,7 +1,7 @@
 // Package cmd is the command tree. It wires cobra commands with the Factory DI
 // container and holds root-level persistent flags. Service-domain commands are
-// auto-registered from the embedded OpenAPI registry via cmd/service — the
-// hand-written leaves are `schema`, `version`, `api` (generic passthrough),
+// auto-registered from the embedded OpenAPI registry via cmd/service. Handwritten
+// command leaves are `schema`, `version`, `upgrade`, `api` (generic passthrough),
 // `config`, `skills`, `auth`, and `sheet-cell` (offline value→cell helper).
 package cmd
 
@@ -72,6 +72,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	pf.StringVar(&f.Globals.Profile, "profile", "", "select the bot credential by profile name")
 
 	root.AddCommand(newSchemaCmd(f))
+	root.AddCommand(newUpgradeCmd(f))
 	root.AddCommand(newVersionCmd(f))
 	root.AddCommand(newAPICmd(f))
 	root.AddCommand(newConfigCmd(f))
@@ -139,9 +140,10 @@ func withholdDisabledServices(root *cobra.Command, f *cmdutil.Factory) {
 }
 
 // skipValidation is true for commands that must run without a configured
-// credential (e.g. `octo-cli version`, `octo-cli help`, `octo-cli schema`, `octo-cli config`,
-// `octo-cli auth`, and cobra's generated `completion`). Walks the parent chain so
-// leaves like `config show` match through their parent.
+// credential (e.g. `octo-cli version`, `octo-cli upgrade`, `octo-cli help`,
+// `octo-cli schema`, `octo-cli config`, `octo-cli auth`, and cobra's generated
+// `completion`). Walks the parent chain so leaves like `config show` match
+// through their parent.
 func skipValidation(cmd *cobra.Command) bool {
 	// Per-command annotation, deliberately NOT inherited through the parent
 	// chain: service parents (`octo-cli thread`, `octo-cli group`, …) opt out of the
@@ -170,7 +172,7 @@ func skipValidation(cmd *cobra.Command) bool {
 // formatter: built-in help/completion commands and annotated service parents
 // or groups when they have no arguments and render help.
 func skipOutputPreflight(cmd *cobra.Command, args []string) bool {
-	if len(args) == 0 && cmd.Annotations["skipValidation"] == "true" {
+	if len(args) == 0 && cmd.HasSubCommands() && cmd.Annotations["skipValidation"] == "true" {
 		return true
 	}
 	for current := cmd; current != nil; current = current.Parent() {
