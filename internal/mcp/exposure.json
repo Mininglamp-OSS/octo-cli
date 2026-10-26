@@ -1,0 +1,604 @@
+{
+  "version": 1,
+  "note": "MCP exposure classification. An enabled registry operation is callable over MCP only when listed here; anything else is denied. baseline = operations exposed before XIN-2424; approved = operations added or exposed by XIN-2424, each tied to its approved inventory rows (docs/mcp-bot-api-coverage.json).",
+  "baseline": [
+    "attachment.content.get",
+    "attachment.delete",
+    "attachment.download",
+    "attachment.get",
+    "attachment.upload",
+    "autopilot.create",
+    "autopilot.delete",
+    "autopilot.delivery.get",
+    "autopilot.delivery.list",
+    "autopilot.delivery.replay",
+    "autopilot.get",
+    "autopilot.list",
+    "autopilot.run.get",
+    "autopilot.run.list",
+    "autopilot.signing_secret.set",
+    "autopilot.trigger",
+    "autopilot.trigger_config.create",
+    "autopilot.trigger_config.delete",
+    "autopilot.trigger_config.update",
+    "autopilot.update",
+    "autopilot.webhook_token.rotate",
+    "bot.heartbeat",
+    "bot.register",
+    "bot.set-commands",
+    "bot.space-members",
+    "bot.typing",
+    "bot.user-info",
+    "comment.delete",
+    "comment.reaction.add",
+    "comment.reaction.remove",
+    "comment.reopen",
+    "comment.resolve",
+    "comment.update",
+    "docs.attachments.get",
+    "docs.attachments.presign",
+    "docs.attachments.resolve",
+    "docs.comments.add",
+    "docs.comments.delete",
+    "docs.comments.edit",
+    "docs.comments.get",
+    "docs.comments.list",
+    "docs.comments.replies",
+    "docs.content.edit",
+    "docs.content.get",
+    "docs.create",
+    "docs.delete",
+    "docs.forward-grant",
+    "docs.get",
+    "docs.list",
+    "docs.members.list",
+    "docs.members.remove",
+    "docs.members.set",
+    "docs.ppt.edit",
+    "docs.ppt.export",
+    "docs.ppt.get",
+    "docs.rename",
+    "docs.scene.edit",
+    "docs.scene.export",
+    "docs.scene.get",
+    "docs.search",
+    "docs.share.get",
+    "docs.share.set",
+    "docs.sheet.columns.delete",
+    "docs.sheet.columns.insert",
+    "docs.sheet.deduplicate",
+    "docs.sheet.edit",
+    "docs.sheet.get",
+    "docs.sheet.list",
+    "docs.sheet.replace",
+    "docs.sheet.rows.delete",
+    "docs.sheet.rows.insert",
+    "docs.sheet.split",
+    "docs.versions.create",
+    "docs.versions.delete",
+    "docs.versions.list",
+    "docs.versions.rename",
+    "docs.versions.restore",
+    "docs.versions.state",
+    "drive.blob.create",
+    "drive.blob.delete",
+    "drive.blob.get",
+    "drive.blob.list",
+    "drive.browse",
+    "drive.doc.candidates",
+    "drive.doc.list",
+    "drive.doc.mount",
+    "drive.doc.unmount",
+    "drive.download.url",
+    "drive.file.copy",
+    "drive.file.get",
+    "drive.file.move",
+    "drive.file.rename",
+    "drive.folder.create",
+    "drive.folder.delete",
+    "drive.folder.list",
+    "drive.folder.move",
+    "drive.folder.rename",
+    "drive.im-transfer.create",
+    "drive.invite.accept",
+    "drive.invite.create",
+    "drive.invite.list",
+    "drive.invite.revoke",
+    "drive.member.add",
+    "drive.member.list",
+    "drive.member.remove",
+    "drive.member.set-role",
+    "drive.search",
+    "drive.share.access",
+    "drive.share.blob-create",
+    "drive.share.download",
+    "drive.share.list",
+    "drive.share.revoke",
+    "drive.space.create",
+    "drive.space.delete",
+    "drive.space.ensure-personal",
+    "drive.space.get",
+    "drive.space.list",
+    "drive.space.rename",
+    "drive.upload.abort",
+    "drive.upload.cancel",
+    "drive.upload.complete",
+    "drive.upload.confirm",
+    "drive.upload.parts_presign",
+    "drive.upload.prepare",
+    "event.ack",
+    "event.list",
+    "execution.cancel",
+    "execution.message.list",
+    "expert.archive",
+    "expert.create",
+    "expert.create_from_template",
+    "expert.environment.get",
+    "expert.environment.update",
+    "expert.execution.cancel",
+    "expert.execution.list",
+    "expert.get",
+    "expert.list",
+    "expert.restore",
+    "expert.skill.add",
+    "expert.skill.list",
+    "expert.skill.replace",
+    "expert.update",
+    "expert_team.create",
+    "expert_team.delete",
+    "expert_team.evaluate",
+    "expert_team.get",
+    "expert_team.list",
+    "expert_team.member.add",
+    "expert_team.member.list",
+    "expert_team.member.remove",
+    "expert_team.member.update",
+    "expert_team.member_status.list",
+    "expert_team.update",
+    "expert_template.get",
+    "expert_template.list",
+    "file.credentials",
+    "file.download",
+    "file.presigned",
+    "file.upload",
+    "group.create",
+    "group.get",
+    "group.list",
+    "group.md-get",
+    "group.md-update",
+    "group.member-add",
+    "group.member-remove",
+    "group.members",
+    "group.update",
+    "html.asset.add",
+    "html.asset.ls",
+    "html.asset.rm",
+    "html.comment.add",
+    "html.comment.list",
+    "html.draft.create",
+    "html.draft.promote",
+    "html.draft.save",
+    "html.element.get",
+    "html.element.replace",
+    "html.get",
+    "html.grant.add",
+    "html.grant.list",
+    "html.grant.rm",
+    "html.list",
+    "html.publish",
+    "html.reply",
+    "html.rm",
+    "html.share",
+    "html.source",
+    "html.unshare",
+    "html.versions",
+    "label.create",
+    "label.delete",
+    "label.get",
+    "label.list",
+    "label.update",
+    "loop.skill.create",
+    "loop.skill.delete",
+    "loop.skill.get",
+    "loop.skill.import",
+    "loop.skill.list",
+    "loop.skill.search",
+    "loop.skill.update",
+    "loop.skill_file.delete",
+    "loop.skill_file.list",
+    "loop.skill_file.upsert",
+    "mail.address.list",
+    "mail.draft.create_agent",
+    "mail.draft.delete",
+    "mail.draft.list",
+    "mail.draft.send",
+    "mail.draft.update",
+    "mail.mailbox.list",
+    "mail.me",
+    "mail.message.attachment.download",
+    "mail.message.auto_reply_context",
+    "mail.message.delivery",
+    "mail.message.flag",
+    "mail.message.list",
+    "mail.message.raw",
+    "mail.message.read",
+    "mail.message.reply_draft",
+    "mail.message.send_intent",
+    "mail.thread.get",
+    "mcp.probe",
+    "mcp_icon_upload.create",
+    "message.edit",
+    "message.read-receipt",
+    "message.search",
+    "message.search.all",
+    "message.search.around",
+    "message.search.files",
+    "message.search.groups",
+    "message.search.media",
+    "message.send",
+    "message.sync",
+    "plugin.delete",
+    "plugin.delist",
+    "plugin.download",
+    "plugin.get",
+    "plugin.import",
+    "plugin.install",
+    "plugin.list",
+    "plugin.publish",
+    "plugin.review_request.approve",
+    "plugin.review_request.cancel",
+    "plugin.review_request.create",
+    "plugin.review_request.get",
+    "plugin.review_request.list",
+    "plugin.review_request.reject",
+    "plugin.skillmd",
+    "plugin.upsert",
+    "plugin.version.list",
+    "plugin_category.list",
+    "plugin_tag.list",
+    "runtime.activity.list",
+    "runtime.list",
+    "runtime.local_skill_import.get",
+    "runtime.local_skill_request.get",
+    "runtime.model_request.get",
+    "runtime.update_request.get",
+    "runtime.usage.get",
+    "runtime.usage_by_expert.get",
+    "runtime.usage_by_hour.get",
+    "skill_icon_upload.create",
+    "skill_parse_task.get",
+    "skill_upload.create",
+    "skill_upload.parse",
+    "task.active_execution.list",
+    "task.attachment.list",
+    "task.child.list",
+    "task.child_progress",
+    "task.children_by_parent",
+    "task.comment.create",
+    "task.comment.list",
+    "task.comment.preview",
+    "task.create",
+    "task.delete",
+    "task.execution.cancel",
+    "task.execution.list",
+    "task.get",
+    "task.group",
+    "task.label.add",
+    "task.label.list",
+    "task.label.remove",
+    "task.list",
+    "task.metadata.delete",
+    "task.metadata.list",
+    "task.metadata.set",
+    "task.pull_request.list",
+    "task.quick_create",
+    "task.reaction.add",
+    "task.reaction.remove",
+    "task.rerun",
+    "task.search",
+    "task.subscribe",
+    "task.subscriber.list",
+    "task.timeline.list",
+    "task.unsubscribe",
+    "task.update",
+    "task.usage",
+    "thread.create",
+    "thread.get",
+    "thread.join",
+    "thread.leave",
+    "thread.list",
+    "thread.md-get",
+    "thread.md-update",
+    "thread.members",
+    "workspace.get",
+    "workspace.list",
+    "workspace.member.list"
+  ],
+  "approved": {
+    "bot.card-profile": [
+      "core#23"
+    ],
+    "bot.obo-grant": [
+      "core#25"
+    ],
+    "bot.obo-grants-self": [
+      "core#26"
+    ],
+    "bot.resolve-targets": [
+      "core#10"
+    ],
+    "bot.space-principal": [
+      "core#14"
+    ],
+    "bot.users-batch": [
+      "core#11"
+    ],
+    "capability.install": [
+      "loop#128"
+    ],
+    "docs.access-requests.approve": [
+      "docs#28"
+    ],
+    "docs.access-requests.create": [
+      "docs#26"
+    ],
+    "docs.access-requests.deny": [
+      "docs#29"
+    ],
+    "docs.access-requests.list": [
+      "docs#27"
+    ],
+    "docs.attachments.copy": [
+      "docs#37"
+    ],
+    "docs.attachments.ingest": [
+      "docs#38"
+    ],
+    "docs.attachments.svg-upload": [
+      "docs#34"
+    ],
+    "docs.comment-task.events": [
+      "docs#40"
+    ],
+    "docs.comment-task.get": [
+      "docs#41"
+    ],
+    "docs.comment-task.report": [
+      "docs#42"
+    ],
+    "docs.comments.markers": [
+      "docs#43"
+    ],
+    "docs.comments.thread": [
+      "docs#44"
+    ],
+    "docs.file.export": [
+      "docs#73"
+    ],
+    "docs.forward-grant.batch": [
+      "docs#25"
+    ],
+    "docs.invites.accept": [
+      "docs#6"
+    ],
+    "docs.invites.create": [
+      "docs#30"
+    ],
+    "docs.invites.list": [
+      "docs#31"
+    ],
+    "docs.invites.revoke": [
+      "docs#32"
+    ],
+    "docs.link-card": [
+      "docs#39"
+    ],
+    "docs.octo-doc.rename": [
+      "docs#15"
+    ],
+    "docs.ppt.media.get": [
+      "docs#2"
+    ],
+    "docs.ppt.media.upload": [
+      "docs#1"
+    ],
+    "docs.published": [
+      "docs#8"
+    ],
+    "docs.raw-import.docx": [
+      "docs#76"
+    ],
+    "docs.raw-import.markdown": [
+      "docs#77"
+    ],
+    "docs.raw-import.xlsx": [
+      "docs#78"
+    ],
+    "docs.recent.creators": [
+      "docs#13"
+    ],
+    "docs.recent.list": [
+      "docs#12"
+    ],
+    "docs.scene.import": [
+      "docs#75"
+    ],
+    "docs.summary-source": [
+      "docs#58"
+    ],
+    "docs.view": [
+      "docs#11"
+    ],
+    "drive.doc.mount-by-role": [
+      "drive#95"
+    ],
+    "drive.file.ancestors": [
+      "drive#94"
+    ],
+    "drive.file.doc-alive": [
+      "drive#96"
+    ],
+    "drive.hello": [
+      "drive#93"
+    ],
+    "drive.im-transfer.lookup": [
+      "drive#98"
+    ],
+    "drive.share.existing-copies": [
+      "drive#100"
+    ],
+    "drive.share.transfer": [
+      "drive#99"
+    ],
+    "drive.trash.delete": [
+      "drive#105"
+    ],
+    "drive.trash.list": [
+      "drive#103"
+    ],
+    "drive.trash.restore": [
+      "drive#104"
+    ],
+    "group.mention-pref": [
+      "core#12"
+    ],
+    "group.webhook.create": [
+      "core#42"
+    ],
+    "group.webhook.delete": [
+      "core#73"
+    ],
+    "group.webhook.deliveries": [
+      "core#45"
+    ],
+    "group.webhook.list": [
+      "core#43"
+    ],
+    "group.webhook.regenerate": [
+      "core#44"
+    ],
+    "group.webhook.test": [
+      "core#46"
+    ],
+    "group.webhook.update": [
+      "core#72"
+    ],
+    "html.asset.get": [
+      "html#112"
+    ],
+    "html.asset.head": [
+      "html#113"
+    ],
+    "html.comment.react": [
+      "html#103"
+    ],
+    "html.comment.reanchor": [
+      "html#101"
+    ],
+    "html.comment.rm": [
+      "html#102"
+    ],
+    "html.diff": [
+      "html#87"
+    ],
+    "html.page.draft": [
+      "html#107"
+    ],
+    "html.page.draft_head": [
+      "html#108"
+    ],
+    "html.page.export": [
+      "html#111"
+    ],
+    "html.page.fork": [
+      "html#111"
+    ],
+    "html.page.version": [
+      "html#109"
+    ],
+    "html.page.version_head": [
+      "html#110"
+    ],
+    "html.version.revert": [
+      "html#86"
+    ],
+    "html.version.source": [
+      "html#85"
+    ],
+    "message.card-revisions-clear": [
+      "core#22"
+    ],
+    "message.group-get": [
+      "core#27"
+    ],
+    "message.person-get": [
+      "core#28"
+    ],
+    "message.thread-get": [
+      "core#29"
+    ],
+    "runtime.archive_and_delete": [
+      "loop#92"
+    ],
+    "runtime.delete": [
+      "loop#91"
+    ],
+    "runtime.local_skill_import.create": [
+      "loop#103"
+    ],
+    "runtime.local_skill_request.create": [
+      "loop#101"
+    ],
+    "runtime.model_request.create": [
+      "loop#99"
+    ],
+    "runtime.update": [
+      "loop#90"
+    ],
+    "runtime.update_request.create": [
+      "loop#97"
+    ],
+    "thread.archive": [
+      "core#41"
+    ],
+    "thread.delete": [
+      "core#66"
+    ],
+    "thread.webhook.create": [
+      "core#47"
+    ],
+    "thread.webhook.delete": [
+      "core#75"
+    ],
+    "thread.webhook.deliveries": [
+      "core#50"
+    ],
+    "thread.webhook.list": [
+      "core#48"
+    ],
+    "thread.webhook.regenerate": [
+      "core#49"
+    ],
+    "thread.webhook.test": [
+      "core#51"
+    ],
+    "thread.webhook.update": [
+      "core#74"
+    ],
+    "workspace.create": [
+      "loop#122",
+      "loop#160"
+    ],
+    "workspace.delete": [
+      "loop#127",
+      "loop#163"
+    ],
+    "workspace.member.add": [
+      "loop#125"
+    ],
+    "workspace.update": [
+      "loop#126",
+      "loop#162"
+    ]
+  }
+}

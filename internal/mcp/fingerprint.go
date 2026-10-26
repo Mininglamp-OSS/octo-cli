@@ -84,6 +84,9 @@ func constraintEnforcement(d *registry.OperationDetail) map[string]any {
 	// fields and the file binding, but multipart form fields do not flow through
 	// the JSON-body walker, so per-field content constraints (lengths, patterns,
 	// closed-object) on them are backend-enforced — not projected as local here.
+	if d.RawBody {
+		ce["raw_body_note"] = "raw-body upload: the file named by file_path is sent as the whole request body; local checks cover required arguments, the file binding and the declared size limit, and content validation is backend-enforced"
+	}
 	if d.Multipart {
 		ce["multipart_note"] = "multipart operation: local checks cover required fields and the file binding; per-form-field content constraints are backend-enforced, not locally projected"
 	}
@@ -109,7 +112,8 @@ func summaryView(d *registry.OperationDetail) map[string]any {
 	}
 	if len(d.Parameters) > 0 {
 		params := make([]map[string]any, 0, len(d.Parameters))
-		for _, p := range d.Parameters {
+		for i := range d.Parameters {
+			p := &d.Parameters[i]
 			m := map[string]any{"name": p.Name, "in": p.In, "required": p.Required}
 			if p.Type != "" {
 				m["type"] = p.Type

@@ -99,6 +99,13 @@ func (s *Server) describeSkill(operationID, depth string) toolResult {
 			"envelope":     decodeEnvelope(synthErrorEnvelope(divergentOpError(operationID, cli))),
 		}, true)
 	}
+	if !mcpExposed(operationID) {
+		return jsonToolResult(map[string]any{
+			"status":       "validation_error",
+			"operation_id": operationID,
+			"envelope":     decodeEnvelope(synthErrorEnvelope(unclassifiedOpError(operationID))),
+		}, true)
+	}
 
 	if depth != "" && depth != "summary" && depth != "full" {
 		return jsonToolResult(map[string]any{"status": "validation_error", "error": map[string]any{"code": "VALIDATION_ERROR", "message": "depth must be summary or full"}}, true)
@@ -161,6 +168,13 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 			"envelope":     decodeEnvelope(synthErrorEnvelope(divergentOpError(operationID, cli))),
 		}, true)
 	}
+	if !mcpExposed(operationID) {
+		return jsonToolResult(map[string]any{
+			"status":       "validation_error",
+			"operation_id": operationID,
+			"envelope":     decodeEnvelope(synthErrorEnvelope(unclassifiedOpError(operationID))),
+		}, true)
+	}
 
 	// Schema-drift detection (drift only — see schemaFingerprint). Checked before
 	// any side effect so a stale caller never fires a request against a schema it
@@ -187,7 +201,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 	// stream the file bytes into envelope.data.body. Non-multipart dry-run still
 	// goes through the engine (its dry-run reads nothing from disk).
 	dryRun = dryRun || s.baseGlobals.DryRun
-	if dryRun && detail.Multipart {
+	if dryRun && (detail.Multipart || detail.RawBody) {
 		return s.multipartDryRun(detail, arguments, current)
 	}
 
@@ -261,12 +275,34 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 		formFields[k] = args[k]
 	}
 	data := map[string]any{
-		"dry_run":     true,
-		"multipart":   true,
-		"method":      detail.Method,
-		"path":        fillPathParams(detail.Path, args),
-		"form_fields": formFields,
+		"dry_run": true,
+		"method":  detail.Method,
+		"path":    fillPathParams(detail.Path, args),
 	}
+	if detail.RawBody {
+		// The file is the whole body: describe its media type and limit, never
+		// its bytes. Header arguments (e.g. X-Media-Type) are listed as such.
+		data["raw_body"] = true
+		data["content_type"] = detail.RawBodyContentType
+		if detail.RawBodyMaxBytes > 0 {
+			data["max_bytes"] = detail.RawBodyMaxBytes
+		}
+		data["headers"] = formFields
+		if filePath != "" {
+			data["file_path"] = filePath
+		}
+		note := "raw-body dry-run: metadata-only. Required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, identity resolution, and transport are enforced only on a real (non-dry-run) call."
+		return jsonToolResult(map[string]any{
+			"status":             "ok",
+			"operation_id":       detail.ID,
+			"schema_fingerprint": fingerprint,
+			"dry_run":            true,
+			"dry_run_note":       note,
+			"envelope":           map[string]any{"ok": true, "data": data},
+		}, false)
+	}
+	data["multipart"] = true
+	data["form_fields"] = formFields
 	if filePath != "" {
 		data["file_field"] = fileField
 		data["file_path"] = filePath
@@ -295,20 +331,20 @@ func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, p
 	if _, err := buildArgv(d, args, pol); err != nil {
 		return output.ErrValidation(err.Error(), hint)
 	}
-	for i := range d.Parameters {
-		p := &d.Parameters[i]
-		if !p.Required || (p.In != "query" && p.In != "header") {
-			continue
+	if err := requireQueryAndHeaderArgs(d, args, hint); err != nil {
+		return err
+	}
+	filePath, fileProvided := args["file_path"].(string)
+	fileProvided = fileProvided && strings.TrimSpace(filePath) != ""
+	if d.RawBody {
+		if !fileProvided {
+			return output.ErrValidation(fmt.Sprintf("missing required upload binding: provide file_path for %s", d.ID), hint)
 		}
-		if _, ok := args[p.Name]; !ok {
-			return output.ErrValidation(fmt.Sprintf("missing required %s parameter %q for %s", p.In, p.Name, d.ID), hint)
-		}
+		return nil
 	}
 	if d.RequestBody == nil {
 		return nil
 	}
-	filePath, fileProvided := args["file_path"].(string)
-	fileProvided = fileProvided && strings.TrimSpace(filePath) != ""
 	for _, name := range d.RequestBody.Required {
 		prop, isProp := d.RequestBody.Properties[name]
 		if isProp && prop.Type == "string" && prop.Format == "binary" {
@@ -320,6 +356,21 @@ func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, p
 		}
 		if _, ok := args[name]; !ok {
 			return output.ErrValidation(fmt.Sprintf("missing required field %q for %s", name, d.ID), hint)
+		}
+	}
+	return nil
+}
+
+// requireQueryAndHeaderArgs reports the first required query or header
+// parameter the arguments omit, as the engine's pre-flight validator would.
+func requireQueryAndHeaderArgs(d *registry.OperationDetail, args map[string]any, hint string) error {
+	for i := range d.Parameters {
+		p := &d.Parameters[i]
+		if !p.Required || (p.In != "query" && p.In != "header") {
+			continue
+		}
+		if _, ok := args[p.Name]; !ok {
+			return output.ErrValidation(fmt.Sprintf("missing required %s parameter %q for %s", p.In, p.Name, d.ID), hint)
 		}
 	}
 	return nil

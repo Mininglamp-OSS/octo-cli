@@ -39,7 +39,6 @@ var compareOps = []struct {
 // guarantee: the facade is a front-end shape only, not a second engine.
 func TestCompare_BothFacadesProduceSameWire(t *testing.T) {
 	for _, op := range compareOps {
-		op := op
 		t.Run(op.id, func(t *testing.T) {
 			// three-tool call_op
 			beThree := &backend{reply: `{"data":{"doc_id":"d1","slug":"d1"}}`}

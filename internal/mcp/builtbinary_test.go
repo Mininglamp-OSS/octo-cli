@@ -76,16 +76,13 @@ var facadeWant = map[string][]string{
 func TestBuiltBinary_StdioFacadeToolsList(t *testing.T) {
 	bin := buildOctoCLI(t)
 	for _, facade := range []string{"three", "two", "both"} {
-		facade := facade
 		t.Run(facade, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, bin, "mcp", "serve", "--facade", facade)
 			cmd.Env = isolatedEnv(t)
-			cmd.Stdin = strings.NewReader(strings.Join([]string{
-				`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
-				`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-			}, "\n") + "\n")
+			cmd.Stdin = strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" +
+				`{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n")
 			var out bytes.Buffer
 			cmd.Stdout = &out
 			if err := cmd.Run(); err != nil {
@@ -110,7 +107,6 @@ func TestBuiltBinary_StdioFacadeToolsList(t *testing.T) {
 func TestBuiltBinary_HTTPFacadeToolsList(t *testing.T) {
 	bin := buildOctoCLI(t)
 	for _, facade := range []string{"three", "two", "both"} {
-		facade := facade
 		t.Run(facade, func(t *testing.T) {
 			addr := freeAddr(t)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -264,9 +260,9 @@ func waitPostJSON(t *testing.T, url, payload string, timeout time.Duration) []by
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		defer resp.Body.Close()
 		buf := new(bytes.Buffer)
 		_, _ = buf.ReadFrom(resp.Body)
+		_ = resp.Body.Close()
 		return buf.Bytes()
 	}
 	t.Fatalf("server never became ready: %v", lastErr)

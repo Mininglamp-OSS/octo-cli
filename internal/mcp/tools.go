@@ -173,8 +173,8 @@ func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult
 		if err := ctx.Err(); err != nil {
 			return cancelled(err)
 		}
-		if _, div := divergentMCPOps[op.ID]; div {
-			continue // not advertised via MCP; generated schema is uncallable
+		if _, div := divergentMCPOps[op.ID]; div || !mcpExposed(op.ID) {
+			continue // not advertised via MCP: divergent schema or unclassified
 		}
 		if len(terms) > 0 {
 			matched, err := matchOp(ctx, op, terms)
@@ -248,7 +248,7 @@ func (s *Server) moduleMap() map[string]any {
 		samples := make([]string, 0, 3)
 		advertised := 0
 		for i := range ops {
-			if _, div := divergentMCPOps[ops[i].ID]; div {
+			if _, div := divergentMCPOps[ops[i].ID]; div || !mcpExposed(ops[i].ID) {
 				continue // withheld from MCP: exclude from both the count and the samples
 			}
 			advertised++
@@ -366,6 +366,9 @@ func (s *Server) describeOp(operationID string) toolResult {
 	if cli, div := divergentMCPOps[operationID]; div {
 		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
 	}
+	if !mcpExposed(operationID) {
+		return rawToolResult(synthErrorEnvelope(unclassifiedOpError(operationID)), true)
+	}
 	// Marshal the OperationDetail (zero-drift parameter truth) and splice the
 	// skill block + server-managed markers into the same object.
 	raw, err := json.Marshal(detail)
@@ -401,6 +404,9 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if cli, div := divergentMCPOps[operationID]; div {
 		return rawToolResult(synthErrorEnvelope(divergentOpError(operationID, cli)), true)
 	}
+	if !mcpExposed(operationID) {
+		return rawToolResult(synthErrorEnvelope(unclassifiedOpError(operationID)), true)
+	}
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
@@ -415,7 +421,9 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	}
 	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe()}
 	f, outBuf, errBuf := fn(s.trusted)
-	env, okRun, _ := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf)
+	// call_op reports failures through the envelope alone; the structured
+	// error only feeds the two-tool execute classification.
+	env, okRun, _ := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf) //nolint:errcheck // the envelope already carries the failure
 	env = spliceForcedArguments(env, forced)
 	return rawToolResult(env, !okRun)
 }
@@ -499,6 +507,9 @@ func nearestOperations(reg *registry.Registry, query string) []string {
 	}
 	var all []scored
 	for _, op := range reg.EnabledOperations() {
+		if _, div := divergentMCPOps[op.ID]; div || !mcpExposed(op.ID) {
+			continue // never suggest an operation MCP would refuse
+		}
 		id := strings.ToLower(op.ID)
 		d := levenshtein(id, q)
 		if strings.Contains(id, q) || strings.Contains(q, id) {

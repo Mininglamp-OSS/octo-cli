@@ -293,7 +293,7 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
-func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic // request snapshot is immutable during dispatch
+func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic,gocyclo // request snapshot is immutable during dispatch; one branch per tool
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())

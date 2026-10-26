@@ -36,6 +36,11 @@ type execPolicy struct {
 	allowLocalUpload bool // operator --allow-local-upload: unconfined pass-through, stdio only
 }
 
+// maxInlineBinaryBytes bounds a binary response body returned inline by an MCP
+// call (base64 or UTF-8 text). Larger bodies are described by size and sha256
+// with inline:false; nothing is ever written to the server's filesystem.
+const maxInlineBinaryBytes = 4 << 20
+
 // reservedFlagNames are the engine/root flag names a translated argument must
 // never be able to synthesize (identity/scope/output controls + engine flags).
 // A model-supplied key that maps to one of these is refused before cobra sees
@@ -111,7 +116,7 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	if len(globalFlags) > 0 {
 		argv = spliceGlobalFlags(argv, globalFlags)
 	}
-	if detail.Multipart {
+	if detail.Multipart || detail.RawBody {
 		if value, ok := arguments["file_path"]; ok && value != nil && fmt.Sprint(value) != "" {
 			file, err := openUpload(fmt.Sprint(value), pol)
 			if err != nil {
@@ -125,6 +130,14 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 			}()
 		}
 	}
+
+	// MCP callers have no filesystem destination for a binary response (the
+	// reserved --output flag cannot be synthesized), so a bounded copy of the
+	// body is returned inside the envelope instead of only its size and type.
+	f.InlineBinaryLimit = maxInlineBinaryBytes
+	// The drive share composites take a different argument shape than the
+	// spec; MCP executes the generated leaves its published schema describes.
+	f.GeneratedDriveShareLeaves = true
 
 	// Snapshot the operator globals makeFactory set on f BEFORE build(): root's
 	// persistent-flag registration resets *f.Globals to empty defaults, so the
@@ -259,7 +272,7 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 			if b, ok := v.(bool); ok {
 				pageAll = b
 			}
-		case k == "file_path" && d.Multipart:
+		case k == "file_path" && (d.Multipart || d.RawBody):
 			if v != nil {
 				filePath = fmt.Sprint(v)
 			}
@@ -291,6 +304,10 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 				return nil, err
 			}
 			flags = append(flags, vs...)
+		case d.RawBody:
+			// A raw-body upload's request body is the file itself: there is no
+			// JSON body and no form field, so any other key is undeclared.
+			unexpected = append(unexpected, k)
 		case d.Multipart:
 			// Multipart ops take no --data; a declared body field rides as a
 			// form-text flag. An UNDECLARED key is refused, so it can never

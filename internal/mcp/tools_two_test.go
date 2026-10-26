@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -490,5 +491,5 @@ func contains(list []string, want string) bool {
 func jsonEqual(a, b any) bool {
 	ab, _ := json.Marshal(a)
 	bb, _ := json.Marshal(b)
-	return string(ab) == string(bb)
+	return bytes.Equal(ab, bb)
 }
