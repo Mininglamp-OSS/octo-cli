@@ -140,8 +140,8 @@ octo-cli loop task group --workspace-id <ws> --group-by assignee \
 
 Identity selection supports `assignee_id(s)`, `assignee_octo_uid(s)` and
 `assignee_filters`, with the corresponding `creator_id(s)`,
-`creator_octo_uid(s)` and `creator_filters`. Actor ID filters take Fleet actor
-UUIDs; Octo UID filters take exact member UIDs. Typed filters use
+`creator_octo_uid(s)` and `creator_filters`. Actor ID filters take exact UUIDs;
+Octo UID filters take exact member UIDs. Typed filters use
 `<member|expert|expert_team>:<UUID>` entries.
 `label_ids` is a comma-separated scalar union. `include_no_assignee` includes
 unassigned tasks alongside an assignee filter; `involves_user_id` selects
@@ -294,12 +294,12 @@ octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "@Alice" --suppress-run
-octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-expert-or-team-uuid> --suppress-run
 octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
 octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
-octo-cli loop task update <task-id> --workspace-id <ws> --assignee-id <actor-id>
+octo-cli loop task update <task-id> --workspace-id <ws> --assignee-type expert --assignee-id <expert-uuid>
 octo-cli loop task list --workspace-id <ws> --assignee "Alice"
-octo-cli loop task list --workspace-id <ws> --assignee-id <fleet-actor-uuid>
+octo-cli loop task list --workspace-id <ws> --assignee-id <assignee-uuid>
 octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid>
 ```
 
@@ -312,12 +312,13 @@ substring; an ambiguous name fails
 with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
 full ID if the stored name itself begins with one of those characters.
 `--to-id` and untyped `--assignee-id` on create/update require a complete, exact
-ID.
-`task list --assignee-id` passes a Fleet actor UUID directly to Fleet, including
-for historical assignees; use `--assignee-octo-uid` to filter by Project member
-UID. Project member UIDs are case-sensitive; native members use their Fleet user
-UUID. Bot members and archived actors are excluded from name/ID resolution for
-writes. A failed or incomplete list stops assignment.
+Project member Octo UID or expert/expert-team UUID.
+`task list --assignee-id` is a direct filter, not an assignment selector;
+it passes the supplied UUID to the task service, including for historical
+assignees. Use `--assignee-octo-uid` to filter by Project member UID.
+Project member UIDs are case-sensitive. Bot members and archived actors are
+excluded from name/ID resolution for writes. A failed or incomplete list stops
+assignment.
 The selected credential and workspace apply to every lookup and write; Fleet
 continues to enforce authorization. Assignment can start or cancel executions.
 
@@ -327,7 +328,7 @@ explicit type keeps the original direct API behavior:
 
 ```bash
 octo-cli loop task update <task-id> --workspace-id <ws> \
-  --assignee-id <uuid> --assignee-type expert   # or expert_team, member
+  --assignee-id <expert-or-team-uuid> --assignee-type expert   # or expert_team
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-octo-uid <member-octo-uid> --assignee-type member --suppress-run
 octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assignee
@@ -336,7 +337,8 @@ octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assi
 `assignee_octo_uid` is for member assignment in an authorized Octo Project. The
 backend requires it to be paired with `assignee_type=member` and forbids
 combining it with `assignee_id`; project authorization remains backend-enforced.
-`assignee_id` normally means a Fleet actor UUID.
+For assignment, use `assignee_id` for experts or expert teams and
+`assignee_octo_uid` for Project members.
 
 `task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
 The same body is accepted through

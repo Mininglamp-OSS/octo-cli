@@ -3228,7 +3228,7 @@
                       },
                       "user_id": {
                         "type": "string",
-                        "description": "Legacy Fleet user ID."
+                        "description": "Legacy user ID."
                       },
                       "octo_uid": {
                         "type": "string",
@@ -6328,7 +6328,7 @@
       "TaskAssigneeID": {
         "name": "assignee_id",
         "in": "query",
-        "description": "Include tasks assigned to this Fleet actor UUID.",
+        "description": "Include tasks assigned to this assignee UUID.",
         "schema": {
           "type": "string",
           "format": "uuid"
@@ -6337,7 +6337,7 @@
       "TaskAssigneeIDs": {
         "name": "assignee_ids",
         "in": "query",
-        "description": "Comma-separated Fleet actor UUIDs; matching assignees form a union.",
+        "description": "Comma-separated assignee UUIDs; matching assignees form a union.",
         "schema": {
           "type": "string"
         }
@@ -6372,7 +6372,7 @@
       "TaskCreatorID": {
         "name": "creator_id",
         "in": "query",
-        "description": "Include tasks created by this Fleet actor UUID.",
+        "description": "Include tasks created by this creator UUID.",
         "schema": {
           "type": "string",
           "format": "uuid"
@@ -6381,7 +6381,7 @@
       "TaskCreatorIDs": {
         "name": "creator_ids",
         "in": "query",
-        "description": "Comma-separated Fleet actor UUIDs; matching creators form a union.",
+        "description": "Comma-separated creator UUIDs; matching creators form a union.",
         "schema": {
           "type": "string"
         }
@@ -7434,7 +7434,7 @@
           "assignee_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
+            "description": "Expert or expert-team UUID. For Project member assignment, use assignee_octo_uid with assignee_type=member."
           },
           "assignee_octo_uid": {
             "type": "string",
@@ -7527,7 +7527,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
+            "description": "Expert or expert-team UUID. For Project member assignment, use assignee_octo_uid with assignee_type=member."
           },
           "assignee_octo_uid": {
             "type": "string",
@@ -7624,12 +7624,12 @@
           "expert_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet expert UUID; provide this or expert_team_id."
+            "description": "Expert UUID; provide this or expert_team_id."
           },
           "expert_team_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet expert-team UUID; provide this or expert_id."
+            "description": "Expert-team UUID; provide this or expert_id."
           },
           "parent_task_id": {
             "type": "string",
@@ -7695,7 +7695,7 @@
           "user_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet actor UUID."
+            "description": "Subscriber UUID."
           }
         }
       },
