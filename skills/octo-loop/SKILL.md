@@ -76,6 +76,8 @@ positionally or through `--workspace-id`, once:
 octo-cli loop workspace member list <project-id>
 octo-cli loop workspace member list --workspace-id <project-id> --page 2 --page-size 50
 octo-cli loop workspace member list --workspace-id <project-id> --limit 50 --offset 50
+octo-cli loop expert list --workspace-id <project-id>
+octo-cli loop expert-team list --workspace-id <project-id>
 ```
 
 Fleet resolves the Project's Space and verifies the request against that scope.
@@ -94,7 +96,8 @@ upstream total in `X-Total-Count`; CLI JSON output currently shows the array but
 not that header. Request subsequent pages until one returns fewer members than
 the requested page size. Authorization failures are returned directly.
 The older `--limit` / `--offset` flags remain available; the CLI converts them
-to page parameters when the offset is an exact multiple of the page size.
+to page parameters when the offset is an exact multiple of the page size. With
+`--offset` alone, it explicitly sends the default page size of 50.
 Unaligned offsets fail locally because Fleet does not support partial pages.
 
 ## Discover and execute operations
@@ -290,6 +293,7 @@ a lifecycle transition.
 octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "@Alice" --suppress-run
 octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
 octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
 octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
@@ -303,7 +307,8 @@ These Multica-style selectors infer the member/expert/expert-team type by readin
 all pages of the three existing workspace lists. `--to` and `--assignee` match
 names only, removing a leading `@` or `＠` before matching. Names match
 case-insensitively: an exact name wins over a substring; an ambiguous name fails
-with matching IDs. Use the full ID for a literal name that begins with `@`.
+with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
+full ID if the stored name itself begins with one of those characters.
 `--to-id` and untyped `--assignee-id` on create/update require a complete, exact
 ID.
 `task list --assignee-id` passes a Fleet actor UUID directly to Fleet, including

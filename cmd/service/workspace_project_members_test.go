@@ -48,7 +48,7 @@ func TestWorkspaceMemberListReadsOctoProjectMembers(t *testing.T) {
 		{
 			name: "offset uses default page size",
 			args: []string{projectMemberTestID, "--offset", "50"},
-			page: url.Values{"page": {"2"}},
+			page: url.Values{"page": {"2"}, "page_size": {"50"}},
 		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {

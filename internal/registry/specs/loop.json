@@ -3170,7 +3170,7 @@
           {
             "name": "offset",
             "in": "query",
-            "description": "Compatibility offset; must be a multiple of the effective page size and cannot be combined with --page.",
+            "description": "Compatibility offset; must be a multiple of the effective page size (default 50) and cannot be combined with --page. The CLI sends that page size with the translated page.",
             "schema": {
               "type": "integer",
               "minimum": 0

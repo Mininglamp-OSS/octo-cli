@@ -168,6 +168,10 @@ func normalizeWorkspaceMemberPagination(rt *operationRuntime, q url.Values) *out
 	if parseErr != nil || offset < 0 || offset%pageSize != 0 {
 		return output.ErrValidation("--offset must be a nonnegative multiple of the page size", "use --page for arbitrary Project pages")
 	}
+	// Pin the page size used for the offset calculation on the wire too.
+	if !q.Has("page_size") {
+		q.Set("page_size", strconv.Itoa(pageSize))
+	}
 	q.Set("page", strconv.Itoa(offset/pageSize+1))
 	q.Del("offset")
 	return nil

@@ -25,7 +25,7 @@ func attachTaskAssignAlias(loop *cobra.Command, f *cmdutil.Factory) {
 	alias := *update
 	alias.ID = "task.assign"
 	alias.Summary = "Assign or unassign a task"
-	alias.Description = "Alias for task.update. Use --to <name> (optionally prefixed with @), --to-id <Project member UID or Fleet actor UUID>, or --unassign. Name and ID selectors read workspace members, experts and expert teams before writing; lookup failures stop the assignment. Use --suppress-run when changing the owner without starting a new run."
+	alias.Description = "Alias for task.update. Use --to <name> (a leading @ or ＠ is a mention prefix), --to-id <full Project member UID or Fleet actor UUID>, or --unassign. Use --to-id for a literal name beginning with @. Name and ID selectors read workspace members, experts and expert teams before writing; lookup failures stop the assignment. Use --suppress-run when changing the owner without starting a new run."
 	body := *update.RequestBody
 	body.Properties = map[string]registry.SchemaInfo{}
 	for _, name := range []string{"assignee_type", "assignee_id", "assignee_octo_uid", "suppress_run", "handoff_note"} {
@@ -45,17 +45,17 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 	}
 	switch d.ID {
 	case "task.assign":
-		cmd.Flags().String("to", "", "Assignee name (optional leading @, not an ID); infer type from workspace members, experts and expert teams")
-		cmd.Flags().String("to-id", "", "Exact, case-sensitive Project member Octo UID or Fleet actor UUID; infer type")
+		cmd.Flags().String("to", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists")
+		cmd.Flags().String("to-id", "", "Full Project member Octo UID (case-sensitive) or Fleet actor UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
 	case "task.create", "task.update":
-		cmd.Flags().String("assignee", "", "Assignee name (optional leading @, not an ID); infer type from workspace lists; do not mix with explicit selectors")
+		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
 			flag.Usage += " When type is omitted, resolve the exact ID across workspace members, experts and expert teams."
 		}
 	case "task.list":
-		cmd.Flags().String("assignee", "", "Assignee name (optional leading @, not an ID); infer type from workspace lists; do not mix with explicit filters")
+		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists; do not mix with explicit filters")
 		if flag := cmd.Flags().Lookup("assignee-id"); flag != nil {
 			flag.Usage += " Sent directly to Fleet without a roster lookup; use --assignee-octo-uid for a Project member UID."
 		}
