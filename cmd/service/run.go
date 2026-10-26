@@ -135,6 +135,9 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 	if err := addPositionalQueryValues(q, rt, positionalQueryValues); err != nil {
 		return nil, nil, err
 	}
+	if err := normalizeWorkspaceMemberPagination(rt, q); err != nil {
+		return nil, nil, err
+	}
 	headers, err := buildHeaders(cobraCmd, rt)
 	if err != nil {
 		return nil, nil, err
@@ -143,6 +146,46 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 		return nil, nil, err
 	}
 	return q, headers, nil
+}
+
+// Fleet's Project member route accepts page/page_size. Keep the older CLI
+// limit/offset flags only when their offset names an exact page boundary.
+func normalizeWorkspaceMemberPagination(rt *operationRuntime, q url.Values) *output.ExitError {
+	if rt.detail.ID != "workspace.member.list" {
+		return nil
+	}
+	if q.Has("limit") && q.Has("page_size") {
+		return output.ErrValidation("--limit and --page-size cannot be combined", "use one page-size selector")
+	}
+	pageSize := 50
+	if raw := q.Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return output.ErrValidation("--limit must be between 1 and 200", "choose a valid Project member page size")
+		}
+		pageSize = value
+		q.Set("page_size", raw)
+		q.Del("limit")
+	} else if raw := q.Get("page_size"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 200 {
+			return output.ErrValidation("--page-size must be between 1 and 200", "choose a valid Project member page size")
+		}
+		pageSize = value
+	}
+	if !q.Has("offset") {
+		return nil
+	}
+	if q.Has("page") {
+		return output.ErrValidation("--offset and --page cannot be combined", "use one page selector")
+	}
+	offset, err := strconv.Atoi(q.Get("offset"))
+	if err != nil || offset < 0 || offset%pageSize != 0 {
+		return output.ErrValidation("--offset must be a nonnegative multiple of the page size", "use --page for arbitrary Project pages")
+	}
+	q.Set("page", strconv.Itoa(offset/pageSize+1))
+	q.Del("offset")
+	return nil
 }
 
 // emitAndReturn emits a validation failure and returns it, which is the shape every

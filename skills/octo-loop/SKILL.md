@@ -74,6 +74,7 @@ positionally or through `--workspace-id`, once:
 
 ```bash
 octo-cli loop workspace member list <project-id>
+octo-cli loop workspace member list --workspace-id <project-id> --page 2 --page-size 50
 octo-cli loop workspace member list --workspace-id <project-id> --limit 50 --offset 50
 ```
 
@@ -81,17 +82,20 @@ Fleet resolves the Project's Space and verifies the request against that scope.
 Its configured owner fallback uses the authenticated Bot owner's identity;
 callers cannot select another human identity. No `--obo` flag is needed.
 
-Read members from `.data.items[]`. Each member contains `uid`, `name`, `role`
+Read Project members from `.data[]`. Each member contains `uid`, `name`, `role`
 (`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
 `uid` as opaque, case-sensitive text; pass a person's UID as `task assign --to-id`
 or use the explicit `--assignee-octo-uid` field. Member listings include Bot
 seats; consumers choosing a human assignee must check `robot == 0`.
 
-Pagination uses `--limit` (default 50, maximum 200) and `--offset` (default 0).
-Read `.data.total`, `.data.limit`, and `.data.offset` to request subsequent
-pages, advancing offset by limit until it reaches total. These replace the old
-`--page` / `--page-size` parameters for Project member listing. Authorization
-failures are returned directly.
+Pagination uses `--page` (one-based, default 1) and `--page-size` (default 50,
+maximum 200). The Project roster response is an array, and Fleet forwards the
+upstream total in `X-Total-Count`; CLI JSON output currently shows the array but
+not that header. Request subsequent pages until one returns fewer members than
+the requested page size. Authorization failures are returned directly.
+The older `--limit` / `--offset` flags remain available; the CLI converts them
+to page parameters when the offset is an exact multiple of the page size.
+Unaligned offsets fail locally because Fleet does not support partial pages.
 
 ## Discover and execute operations
 

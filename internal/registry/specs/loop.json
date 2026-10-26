@@ -3119,7 +3119,7 @@
       ],
       "get": {
         "summary": "List Octo Project members",
-        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Uses limit/offset pagination and returns items containing Octo uid, name, role and robot, plus total, limit and offset. Legacy workspaces retain their native Fleet member response.",
+        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Uses page/page_size pagination and returns an array of members; the upstream total is carried in X-Total-Count. Legacy limit/offset flags are translated when offset is a multiple of the page size. Legacy workspaces retain their native Fleet member array.",
         "tags": [
           "workspaces"
         ],
@@ -3137,9 +3137,19 @@
             }
           },
           {
-            "name": "limit",
+            "name": "page",
             "in": "query",
-            "description": "Maximum members returned per request (1-200).",
+            "description": "One-based member page number.",
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "description": "Maximum Project members returned per page (1-200).",
             "schema": {
               "type": "integer",
               "default": 50,
@@ -3148,12 +3158,21 @@
             }
           },
           {
-            "name": "offset",
+            "name": "limit",
             "in": "query",
-            "description": "Number of members to skip. Advance by limit to read the next page while offset is below total.",
+            "description": "Compatibility alias for --page-size; translated before the request.",
             "schema": {
               "type": "integer",
-              "default": 0,
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Compatibility offset; must be a multiple of the effective page size and cannot be combined with --page.",
+            "schema": {
+              "type": "integer",
               "minimum": 0
             }
           }
@@ -3178,68 +3197,43 @@
             "$ref": "#/components/responses/InternalError"
           },
           "200": {
-            "description": "Project members and offset pagination metadata, forwarded by Fleet after authorization.",
+            "description": "Member array forwarded by Fleet after authorization. Project member total is in X-Total-Count.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "required": [
-                    "items",
-                    "total",
-                    "limit",
-                    "offset"
-                  ],
-                  "properties": {
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "uid",
-                          "name",
-                          "role",
-                          "robot"
-                        ],
-                        "properties": {
-                          "uid": {
-                            "type": "string",
-                            "description": "Opaque, case-sensitive Octo user UID. Use assignee_octo_uid when assigning a human Project member."
-                          },
-                          "name": {
-                            "type": "string"
-                          },
-                          "role": {
-                            "type": "integer",
-                            "enum": [
-                              0,
-                              1,
-                              2
-                            ],
-                            "description": "Project role: 0 common member, 1 admin, 2 owner."
-                          },
-                          "robot": {
-                            "type": "integer",
-                            "enum": [
-                              0,
-                              1
-                            ],
-                            "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
-                          }
-                        }
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "uid": {
+                        "type": "string",
+                        "description": "Opaque, case-sensitive Octo user UID. Use assignee_octo_uid when assigning a human Project member."
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "integer",
+                        "enum": [0, 1, 2],
+                        "description": "Project role: 0 common member, 1 admin, 2 owner."
+                      },
+                      "robot": {
+                        "type": "integer",
+                        "enum": [0, 1],
+                        "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "Legacy workspace membership ID."
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "description": "Legacy Fleet user ID."
+                      },
+                      "octo_uid": {
+                        "type": "string",
+                        "description": "Legacy user's Octo UID when available."
                       }
-                    },
-                    "total": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "limit": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "maximum": 200
-                    },
-                    "offset": {
-                      "type": "integer",
-                      "minimum": 0
                     }
                   }
                 }

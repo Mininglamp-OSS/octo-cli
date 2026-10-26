@@ -16,7 +16,7 @@ func TestWorkspaceMemberListUsesFleetProjectContract(t *testing.T) {
 	if !reflect.DeepEqual(op.AllowedTokenKinds, []string(nil)) {
 		t.Errorf("allowed token kinds = %v, want Fleet credential policy", op.AllowedTokenKinds)
 	}
-	wantRequired := map[string]bool{"workspace_id": true, "X-Workspace-ID": true, "limit": false, "offset": false}
+	wantRequired := map[string]bool{"workspace_id": true, "X-Workspace-ID": true, "page": false, "page_size": false, "limit": false, "offset": false}
 	for _, parameter := range op.Parameters {
 		want, exists := wantRequired[parameter.Name]
 		if !exists {
@@ -34,18 +34,12 @@ func TestWorkspaceMemberListUsesFleetProjectContract(t *testing.T) {
 	if op.ResponseSchema == nil {
 		t.Fatal("Project member response schema is missing")
 	}
-	items := op.ResponseSchema.Properties["items"]
-	if items.Type != "array" || items.Items == nil {
-		t.Fatal("Project member response must expose items")
+	if op.ResponseSchema.Type != "array" || op.ResponseSchema.Items == nil {
+		t.Fatal("Project member response must be the forwarded member array")
 	}
 	for _, name := range []string{"uid", "name", "role", "robot"} {
-		if _, exists := items.Items.Properties[name]; !exists {
+		if _, exists := op.ResponseSchema.Items.Properties[name]; !exists {
 			t.Errorf("Project member response is missing %s", name)
-		}
-	}
-	for _, name := range []string{"total", "limit", "offset"} {
-		if _, exists := op.ResponseSchema.Properties[name]; !exists {
-			t.Errorf("Project member page is missing %s", name)
 		}
 	}
 }

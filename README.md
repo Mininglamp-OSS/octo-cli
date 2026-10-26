@@ -225,7 +225,9 @@ octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-id 
 octo-cli loop task list --workspace-id <workspace-uuid> --assignee "Alice"
 # Project members use Fleet authorization, including its verified Bot-owner fallback.
 octo-cli loop workspace member list <project-uuid>
-# Alternatively select the Project with --workspace-id; results are in .data.items[].
+# Alternatively select the Project with --workspace-id; results are in .data[].
+octo-cli loop workspace member list --workspace-id <project-uuid> --page 2 --page-size 50
+# Existing flags still work for offsets aligned to the page size.
 octo-cli loop workspace member list --workspace-id <project-uuid> --limit 50 --offset 50
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 

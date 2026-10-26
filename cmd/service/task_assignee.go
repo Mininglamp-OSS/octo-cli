@@ -327,14 +327,12 @@ func (r *taskAssigneeRecord) assignee(kind string) (taskAssignee, bool, error) {
 }
 
 func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, headers map[string]string, members bool) ([]taskAssigneeRecord, error) {
+	const memberPageSize = 100
 	var records []taskAssigneeRecord
 	seen := map[string]bool{}
 	expected := -1
 	for page := 1; page <= 1000; page++ {
-		query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {"100"}}
-		if members {
-			query = url.Values{"limit": {"100"}, "offset": {strconv.Itoa(len(records))}}
-		}
+		query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(memberPageSize)}}
 		body, err := cli.Do(cmd.Context(), &client.Request{Service: "loop", Method: "GET", Path: path, Query: query, Headers: headers})
 		if err != nil {
 			return nil, err
@@ -343,10 +341,16 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, 
 		if err != nil {
 			return nil, err
 		}
-		if expected >= 0 && total != expected {
+		if total >= 0 && expected >= 0 && total != expected {
 			return nil, assignmentError("assignee list changed during pagination; retry the lookup")
 		}
-		expected = total
+		if total >= 0 {
+			expected = total
+		}
+		if members && total < 0 && len(items) > 0 && items[0].UID == "" && items[0].UserID != "" {
+			// Native Fleet workspaces return one unpaginated member array.
+			return items, nil
+		}
 		fingerprint, err := json.Marshal(items)
 		if err != nil {
 			return nil, fmt.Errorf("encode assignee page: %w", err)
@@ -356,6 +360,17 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, 
 		}
 		seen[string(fingerprint)] = true
 		records = append(records, items...)
+		if members && total < 0 {
+			// Project rosters are arrays. Fleet forwards X-Total-Count as a header,
+			// so the body alone signals the last page by returning fewer rows.
+			if len(items) > memberPageSize {
+				return nil, assignmentError("member page exceeded the requested page size")
+			}
+			if len(items) < memberPageSize {
+				return records, nil
+			}
+			continue
+		}
 		if len(records) == total {
 			return records, nil
 		}
@@ -369,7 +384,7 @@ func readTaskAssigneePages(cmd *cobra.Command, cli *client.Client, path string, 
 func decodeTaskAssigneePage(body []byte) ([]taskAssigneeRecord, int, error) {
 	var array []taskAssigneeRecord
 	if json.Unmarshal(body, &array) == nil && strings.HasPrefix(strings.TrimSpace(string(body)), "[") {
-		return array, len(array), nil
+		return array, -1, nil
 	}
 	var envelope struct {
 		Items      []taskAssigneeRecord `json:"items"`

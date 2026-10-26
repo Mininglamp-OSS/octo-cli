@@ -18,7 +18,7 @@ const assignmentTeamID = "33333333-3333-4333-8333-333333333333"
 func assignmentFixture(path string) string {
 	switch {
 	case strings.HasSuffix(path, "/members"):
-		return `{"items":[{"uid":"Human/CaseSensitive","name":"Alice","robot":0},{"uid":"bot-uid","name":"Bot","robot":1}],"total":2,"limit":100,"offset":0}`
+		return `[{"uid":"Human/CaseSensitive","name":"Alice","robot":0},{"uid":"bot-uid","name":"Bot","robot":1}]`
 	case strings.HasSuffix(path, "/experts"):
 		return `{"data":[{"expert_id":"` + assignmentExpertID + `","name":"Engineer"}],"pagination":{"total":1,"page":1,"page_size":100}}`
 	case strings.HasSuffix(path, "/expert_teams"):
@@ -172,10 +172,21 @@ func TestTaskAssignmentReadsEveryMemberPage(t *testing.T) {
 		}
 		if strings.HasSuffix(r.URL.Path, "/members") {
 			memberReads++
-			if r.URL.Query().Get("offset") == "0" {
-				_, _ = io.WriteString(w, `{"items":[{"uid":"first","name":"First","robot":0}],"total":2,"limit":1,"offset":0}`)
-			} else {
-				_, _ = io.WriteString(w, `{"items":[{"uid":"last","name":"Last","robot":0}],"total":2,"limit":1,"offset":1}`)
+			if r.URL.Query().Get("page_size") != "100" || r.URL.Query().Has("offset") {
+				t.Errorf("member lookup used unsupported pagination: %s", r.URL)
+			}
+			switch r.URL.Query().Get("page") {
+			case "1":
+				items := make([]map[string]any, 100)
+				for i := range items {
+					items[i] = map[string]any{"uid": fmt.Sprintf("member-%d", i), "name": fmt.Sprintf("Member %d", i), "robot": 0}
+				}
+				_ = json.NewEncoder(w).Encode(items)
+			case "2":
+				_, _ = io.WriteString(w, `[{"uid":"last","name":"Last","robot":0}]`)
+			default:
+				t.Errorf("unexpected member page: %s", r.URL)
+				http.Error(w, "unexpected page", http.StatusBadRequest)
 			}
 			return
 		}
@@ -268,9 +279,10 @@ func TestTaskAssignmentRefusesBrokenPaginationAndIdentity(t *testing.T) {
 	for _, fixture := range []string{
 		`{"items":[{"uid":"Human/CaseSensitive","name":"Alice","robot":0}],"total":2}`,
 		`{"items":[],"total":2}`,
-		`{"items":[{"uid":"Human/CaseSensitive","name":"Alice"}],"total":1}`,
+		`[{"uid":"Human/CaseSensitive","name":"Alice"}]`,
 		`{"items":[{"uid":"Human/CaseSensitive","name":"Alice","robot":0}]}`,
 		`{"data":null,"pagination":{"total":0}}`,
+		`null`,
 		`{"items":`,
 	} {
 		root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {

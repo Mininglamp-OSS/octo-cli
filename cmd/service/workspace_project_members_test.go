@@ -36,9 +36,19 @@ func TestWorkspaceMemberListReadsOctoProjectMembers(t *testing.T) {
 		{name: "positional project with backend pagination defaults", args: []string{projectMemberTestID}},
 		{name: "workspace flag selects project", args: []string{"--workspace-id", projectMemberTestID}},
 		{
-			name: "explicit offset pagination",
+			name: "explicit page pagination",
+			args: []string{projectMemberTestID, "--page", "3", "--page-size", "2"},
+			page: url.Values{"page": {"3"}, "page_size": {"2"}},
+		},
+		{
+			name: "old offset pagination maps to a page",
 			args: []string{projectMemberTestID, "--limit", "2", "--offset", "4"},
-			page: url.Values{"limit": {"2"}, "offset": {"4"}},
+			page: url.Values{"page": {"3"}, "page_size": {"2"}},
+		},
+		{
+			name: "offset uses default page size",
+			args: []string{projectMemberTestID, "--offset", "50"},
+			page: url.Values{"page": {"2"}},
 		},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -62,7 +72,7 @@ func TestWorkspaceMemberListReadsOctoProjectMembers(t *testing.T) {
 					t.Error("Fleet binding header must match the single Project selector")
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, `{"items":[{"uid":"Human/CaseSensitive","name":"Alice","role":0,"robot":0},{"uid":"22222222-2222-4222-8222-222222222222","name":"Bot","role":1,"robot":1}],"total":6,"limit":2,"offset":4}`)
+				_, _ = io.WriteString(w, `[{"uid":"Human/CaseSensitive","name":"Alice","role":0,"robot":0},{"uid":"22222222-2222-4222-8222-222222222222","name":"Bot","role":1,"robot":1}]`)
 			})
 			args := append([]string{"loop", "workspace", "member", "list"}, scenario.args...)
 			root.SetArgs(args)
@@ -74,36 +84,43 @@ func TestWorkspaceMemberListReadsOctoProjectMembers(t *testing.T) {
 			}
 			var response struct {
 				OK   bool `json:"ok"`
-				Data struct {
-					Items []struct {
-						UID   string `json:"uid"`
-						Robot int    `json:"robot"`
-					} `json:"items"`
-					Total  int `json:"total"`
-					Limit  int `json:"limit"`
-					Offset int `json:"offset"`
+				Data []struct {
+					UID   string `json:"uid"`
+					Robot int    `json:"robot"`
 				} `json:"data"`
 			}
 			if err := json.Unmarshal(tf.Out.Bytes(), &response); err != nil {
 				t.Fatalf("decode member envelope: %v", err)
 			}
-			if !response.OK || len(response.Data.Items) != 2 || response.Data.Items[0].UID != "Human/CaseSensitive" ||
-				response.Data.Items[1].UID != "22222222-2222-4222-8222-222222222222" || response.Data.Items[1].Robot != 1 {
+			if !response.OK || len(response.Data) != 2 || response.Data[0].UID != "Human/CaseSensitive" ||
+				response.Data[1].UID != "22222222-2222-4222-8222-222222222222" || response.Data[1].Robot != 1 {
 				t.Errorf("member identities must be returned unchanged, including Bot seats: %s", tf.Out.String())
-			}
-			if response.Data.Total != 6 || response.Data.Limit != 2 || response.Data.Offset != 4 {
-				t.Errorf("Project page metadata was lost: %s", tf.Out.String())
 			}
 		})
 	}
 }
 
 func TestWorkspaceMemberListRejectsObsoleteOBOArguments(t *testing.T) {
-	for _, flag := range []string{"--obo", "--space-id", "--page", "--page-size"} {
+	for _, flag := range []string{"--obo", "--space-id"} {
 		root, _ := rootWithDriveToken(t, "bf_project_test", func(http.ResponseWriter, *http.Request) { t.Error("invalid flag must fail before HTTP") })
 		root.SetArgs([]string{"loop", "workspace", "member", "list", projectMemberTestID, flag, "1"})
 		if err := root.Execute(); err == nil {
 			t.Fatalf("obsolete flag accepted: %s", flag)
+		}
+	}
+}
+
+func TestWorkspaceMemberListRejectsInexactOffsetBeforeHTTP(t *testing.T) {
+	for _, args := range [][]string{
+		{"--limit", "50", "--offset", "1"},
+		{"--limit", "0", "--offset", "0"},
+		{"--page", "2", "--offset", "50"},
+		{"--page-size", "50", "--limit", "50"},
+	} {
+		root, _ := rootWithDriveToken(t, "bf_project_test", func(http.ResponseWriter, *http.Request) { t.Error("invalid pagination sent HTTP") })
+		root.SetArgs(append([]string{"loop", "workspace", "member", "list", projectMemberTestID}, args...))
+		if err := root.Execute(); err == nil {
+			t.Errorf("accepted invalid pagination: %v", args)
 		}
 	}
 }
