@@ -98,9 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/fleet/api/v1/workspaces/{workspace_id}/members`. Fleet verifies Project
   access using its Bot/verified-owner policy and forwards the internally
   authenticated Server response. Supply the Project ID positionally or with
-  `--workspace-id`; pagination uses `--limit` / `--offset`. Project records in
-  `.data.items[]` retain Octo `uid`, `name`, numeric `role` and `robot`, plus
-  JSON page metadata. This read no longer requires `--obo`, an explicit
+  `--workspace-id`; pagination uses `--page` / `--page-size`, with aligned
+  `--limit` / `--offset` compatibility aliases. Project records in `.data[]`
+  retain Octo `uid`, `name`, numeric `role` and `robot`; no total count is
+  exposed in the CLI output. This read no longer requires `--obo`, an explicit
   `--space-id`, or a Server OBO grant.
 - **Loop task token isolation (breaking)** — task mode now consumes only
   `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or

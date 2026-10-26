@@ -34,7 +34,7 @@ func TestTaskAssignmentMulticaStyle(t *testing.T) {
 		args         []string
 		body         map[string]any
 	}{
-		{"assign member by name", "PATCH", []string{"assign", "TASK-1", "--to", "@alice"}, map[string]any{"assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
+		{"assign member by name", "PATCH", []string{"assign", "TASK-1", "--to", "Alice"}, map[string]any{"assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
 		{"assign expert by ID", "PATCH", []string{"assign", "TASK-1", "--to-id", assignmentExpertID}, map[string]any{"assignee_type": "expert", "assignee_id": assignmentExpertID}},
 		{"assign team by partial name", "PATCH", []string{"assign", "TASK-1", "--to", "Resear"}, map[string]any{"assignee_type": "expert_team", "assignee_id": assignmentTeamID}},
 		{"create by name", "POST", []string{"create", "--title", "Example", "--assignee", "Alice"}, map[string]any{"title": "Example", "assignee_type": "member", "assignee_octo_uid": "Human/CaseSensitive"}},
@@ -341,17 +341,94 @@ func TestTaskAssignmentNamePriority(t *testing.T) {
 	actors := []taskAssignee{
 		{kind: "member", id: "uid-1", uid: "uid-1", name: "Alice"},
 		{kind: "expert", id: assignmentExpertID, name: "Alice Extended"},
+		{kind: "expert", id: "deadbeef-2222-4222-8222-222222222222", name: "Unrelated Expert"},
+		{kind: "expert_team", id: assignmentTeamID, name: "deadbeef"},
 	}
 	actor, err := chooseTaskAssignee(actors, "alice", false)
 	if err != nil || actor.uid != "uid-1" {
 		t.Fatalf("exact name must beat substring: %#v %v", actor, err)
 	}
-	actor, err = chooseTaskAssignee(actors, assignmentExpertID[:8], false)
+	actor, err = chooseTaskAssignee(actors, "deadbeef", false)
+	if err != nil || actor.id != assignmentTeamID {
+		t.Fatalf("name selector must select the exact name, not a UUID prefix: %#v %v", actor, err)
+	}
+	if _, err := chooseTaskAssignee(actors, assignmentExpertID[:8], false); err == nil {
+		t.Fatal("name selector accepted a UUID prefix")
+	}
+	if _, err := chooseTaskAssignee(actors, assignmentExpertID, false); err == nil {
+		t.Fatal("name selector accepted a full ID")
+	}
+	actor, err = chooseTaskAssignee(actors, assignmentExpertID, true)
 	if err != nil || actor.id != assignmentExpertID {
-		t.Fatalf("name selector supports the original short UUID: %#v %v", actor, err)
+		t.Fatalf("ID selector must accept the full ID: %#v %v", actor, err)
 	}
 	archived := taskAssigneeRecord{TeamID: assignmentTeamID, Name: "Archived", ArchivedAt: json.RawMessage(`"2026-10-23"`)}
 	if _, include, err := archived.assignee("expert_team"); err != nil || include {
 		t.Fatalf("archived team must be excluded: %v %v", include, err)
+	}
+}
+
+func TestTaskAssignmentNameCollisionWritesExactName(t *testing.T) {
+	writes := 0
+	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPatch {
+			writes++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+				return
+			}
+			if body["assignee_type"] != "expert_team" || body["assignee_id"] != assignmentTeamID {
+				t.Errorf("name collision assigned the wrong actor: %#v", body)
+			}
+			_, _ = io.WriteString(w, `{"data":{"task_id":"TASK-1"}}`)
+			return
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/members"):
+			_, _ = io.WriteString(w, `[]`)
+		case strings.HasSuffix(r.URL.Path, "/experts"):
+			_, _ = io.WriteString(w, `{"data":[{"expert_id":"deadbeef-2222-4222-8222-222222222222","name":"Unrelated Expert"}],"pagination":{"total":1}}`)
+		case strings.HasSuffix(r.URL.Path, "/expert_teams"):
+			_, _ = io.WriteString(w, `{"data":[{"expert_team_id":"`+assignmentTeamID+`","name":"deadbeef"}],"pagination":{"total":1}}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	root.SetArgs([]string{"loop", "task", "assign", "TASK-1", "--workspace-id", projectMemberTestID, "--to", "deadbeef"})
+	if err := root.Execute(); err != nil || writes != 1 {
+		t.Fatalf("assign exact name: err=%v writes=%d", err, writes)
+	}
+}
+
+func TestTaskAssignmentLiteralAtName(t *testing.T) {
+	writes := 0
+	root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPatch {
+			writes++
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["assignee_type"] != "member" || body["assignee_octo_uid"] != "at-alice" {
+				t.Errorf("literal @Alice resolved to %#v", body)
+			}
+			_, _ = io.WriteString(w, `{"data":{"task_id":"TASK-1"}}`)
+			return
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/members"):
+			_, _ = io.WriteString(w, `[{"uid":"alice","name":"Alice","robot":0},{"uid":"at-alice","name":"@Alice","robot":0}]`)
+		case strings.HasSuffix(r.URL.Path, "/experts"), strings.HasSuffix(r.URL.Path, "/expert_teams"):
+			_, _ = io.WriteString(w, `{"data":[],"pagination":{"total":0}}`)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+		}
+	})
+	root.SetArgs([]string{"loop", "task", "assign", "TASK-1", "--workspace-id", projectMemberTestID, "--to", "@Alice"})
+	if err := root.Execute(); err != nil || writes != 1 {
+		t.Fatalf("assign literal @Alice: err=%v writes=%d", err, writes)
 	}
 }

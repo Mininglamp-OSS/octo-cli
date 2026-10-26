@@ -45,17 +45,17 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 	}
 	switch d.ID {
 	case "task.assign":
-		cmd.Flags().String("to", "", "Assignee name; infer type from workspace members, experts and expert teams")
+		cmd.Flags().String("to", "", "Assignee name (not an ID); infer type from workspace members, experts and expert teams")
 		cmd.Flags().String("to-id", "", "Exact, case-sensitive Project member Octo UID or Fleet actor UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
 	case "task.create", "task.update":
-		cmd.Flags().String("assignee", "", "Assignee name; infer type from workspace lists; do not mix with explicit selectors")
+		cmd.Flags().String("assignee", "", "Assignee name (not an ID); infer type from workspace lists; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
 			flag.Usage += " When type is omitted, resolve the exact ID across workspace members, experts and expert teams."
 		}
 	case "task.list":
-		cmd.Flags().String("assignee", "", "Assignee name; infer type from workspace lists; do not mix with explicit filters")
+		cmd.Flags().String("assignee", "", "Assignee name (not an ID); infer type from workspace lists; do not mix with explicit filters")
 		if flag := cmd.Flags().Lookup("assignee-id"); flag != nil {
 			flag.Usage += " Sent directly to Fleet without a roster lookup; use --assignee-octo-uid for a Project member UID."
 		}
@@ -187,7 +187,7 @@ type taskAssignee struct {
 func resolveTaskAssignee(cmd *cobra.Command, f *cmdutil.Factory, workspaceID, input string, byID bool) (taskAssignee, error) {
 	var empty taskAssignee
 	if !byID {
-		input = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(input), "@＠"))
+		input = strings.TrimSpace(input)
 	}
 	if input == "" || input != strings.TrimSpace(input) {
 		return empty, assignmentError("assignee name or ID must not be empty or space-padded")
@@ -225,18 +225,14 @@ func chooseTaskAssignee(actors []taskAssignee, input string, byID bool) (taskAss
 }
 
 func (a taskAssignee) matchRank(input string, byID bool) int {
-	match := strings.EqualFold(a.id, input)
-	if a.uid != "" {
-		match = a.uid == input
-	}
-	if match {
-		return 0
-	}
 	if byID {
+		if a.uid != "" && a.uid == input {
+			return 0
+		}
+		if a.uid == "" && strings.EqualFold(a.id, input) {
+			return 0
+		}
 		return -1
-	}
-	if a.uid == "" && len(input) == 8 && strings.EqualFold(a.id[:min(8, len(a.id))], input) {
-		return 0
 	}
 	if strings.EqualFold(a.name, input) {
 		return 1

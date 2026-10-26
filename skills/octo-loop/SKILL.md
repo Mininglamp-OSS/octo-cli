@@ -300,9 +300,11 @@ octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid
 ```
 
 These Multica-style selectors infer the member/expert/expert-team type by reading
-all pages of the three existing workspace lists. Names match case-insensitively:
-an exact name wins over a substring; an ambiguous name fails with matching IDs.
-`--to-id` and untyped `--assignee-id` on create/update match exact IDs only.
+all pages of the three existing workspace lists. `--to` and `--assignee` match
+names only, without interpreting IDs or removing a leading `@`. Names match
+case-insensitively: an exact name wins over a substring; an ambiguous name fails
+with matching IDs. `--to-id` and untyped `--assignee-id` on create/update require
+a complete, exact ID.
 `task list --assignee-id` passes a Fleet actor UUID directly to Fleet, including
 for historical assignees; use `--assignee-octo-uid` to filter by Project member
 UID. Project member UIDs are case-sensitive; native members use their Fleet user
