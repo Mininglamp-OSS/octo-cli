@@ -3119,7 +3119,7 @@
       ],
       "get": {
         "summary": "List Octo Project members",
-        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Uses page/page_size pagination and returns an array of members; the upstream total is carried in X-Total-Count. Legacy limit/offset flags are translated when offset is a multiple of the page size. Legacy workspaces retain their native Fleet member array.",
+        "description": "Read workspace members through Fleet. For Octo Project workspaces Fleet verifies the caller's Project access, including its configured verified Bot-owner fallback, then forwards the internally authenticated Server member-list response. The caller remains the Bot. Supply the Project UUID positionally or with --workspace-id. Use page/page_size pagination; CLI JSON exposes the member array as .data[] but does not expose the upstream X-Total-Count header, so continue until a page is shorter than page_size. Legacy limit/offset flags are translated when offset is a multiple of the page size. Legacy workspaces retain their native Fleet member array.",
         "tags": [
           "workspaces"
         ],
@@ -7519,7 +7519,7 @@
               "member",
               null
             ],
-            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid; explicit null with assignee_id:null clears the assignee."
+            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid; to clear, pass --data '{\"assignee_type\":null,\"assignee_id\":null}' or use task assign --unassign."
           },
           "assignee_id": {
             "type": [

@@ -290,7 +290,7 @@ a lifecycle transition.
 octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
-octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <actor-id>
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
 octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
 octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
 octo-cli loop task update <task-id> --workspace-id <ws> --assignee-id <actor-id>
@@ -314,7 +314,8 @@ explicit type keeps the original direct API behavior:
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <uuid> --assignee-type expert   # or expert_team, member
 octo-cli loop task update <task-id> --workspace-id <ws> \
-  --assignee-octo-uid <member-octo-uid> --assignee-type member
+  --assignee-octo-uid <member-octo-uid> --assignee-type member --suppress-run
+octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assignee
 ```
 
 `assignee_octo_uid` is for member assignment in an authorized Octo Project. The
@@ -323,7 +324,8 @@ combining it with `assignee_id`; project authorization remains backend-enforced.
 `assignee_id` normally means a Fleet actor UUID.
 
 `task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
-The same body is accepted through `task update --data`. Dry-runs perform no
+The same body is accepted through
+`task update --data '{"assignee_type":null,"assignee_id":null}'`. Dry-runs perform no
 assignee lookup: use explicit typed fields or `--unassign` for an offline preview.
 
 Task create/update also accept `--parent-task-id`, `--start-date`,
@@ -339,7 +341,7 @@ after the work is accepted or no review is required; `done` and `cancelled` are
 terminal. Moving out of `backlog` to an active status can trigger the assigned
 expert to run.
 
-Task update also accepts `--suppress-run`, which suppresses the run created by
+Task update and assign also accept `--suppress-run`, which suppresses the run created by
 that write. It does not stop existing executions from being cancelled when an
 assignee changes. `--handoff-note` supplies optional context to Fleet's handoff
 path. Assignment pairing, authorization, and exact run-trigger semantics remain

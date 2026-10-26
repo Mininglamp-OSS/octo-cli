@@ -25,7 +25,7 @@ func attachTaskAssignAlias(loop *cobra.Command, f *cmdutil.Factory) {
 	alias := *update
 	alias.ID = "task.assign"
 	alias.Summary = "Assign or unassign a task"
-	alias.Description = "Alias for task.update. Use --to <name>, --to-id <id>, or --unassign. The CLI resolves members, experts and expert teams in the selected workspace."
+	alias.Description = "Alias for task.update. Use --to <name>, --to-id <Project member UID or Fleet actor UUID>, or --unassign. Name and ID selectors read workspace members, experts and expert teams before writing; lookup failures stop the assignment. Use --suppress-run when changing the owner without starting a new run."
 	body := *update.RequestBody
 	body.Properties = map[string]registry.SchemaInfo{}
 	for _, name := range []string{"assignee_type", "assignee_id", "assignee_octo_uid", "suppress_run", "handoff_note"} {
@@ -45,11 +45,11 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 	}
 	switch d.ID {
 	case "task.assign":
-		cmd.Flags().String("to", "", "Assignee name; type is inferred across members, experts and expert teams")
-		cmd.Flags().String("to-id", "", "Exact member Octo UID or Fleet actor UUID; type is inferred")
+		cmd.Flags().String("to", "", "Assignee name; infer type from workspace members, experts and expert teams")
+		cmd.Flags().String("to-id", "", "Exact, case-sensitive Project member Octo UID or Fleet actor UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
 	case "task.create", "task.update", "task.list":
-		cmd.Flags().String("assignee", "", "Assignee name; mutually exclusive with explicit assignee selectors")
+		cmd.Flags().String("assignee", "", "Assignee name; infer type from workspace lists; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
 			flag.Usage += " When type is omitted, resolve the exact ID across workspace members, experts and expert teams."

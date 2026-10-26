@@ -48,7 +48,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
-| `loop`    | 116 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, skills, automations, attachments, and related resources |
+| `loop`    | 116 | Fleet control plane — tasks and assignees, Project member rosters, experts, expert teams, workspaces, runtimes, skills, automations, attachments, and related resources |
 
 ## Installation
 
@@ -218,10 +218,12 @@ octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 octo-cli loop task list --workspace-id <workspace-uuid>
 # Multica-style assignment: infer member/expert/expert-team from a name or exact ID.
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to "Alice"
-octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <actor-id>
+octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --unassign
 octo-cli loop task create --workspace-id <workspace-uuid> --title "Example" --assignee "Alice"
 octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-id <actor-id>
+octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> \
+  --assignee-type member --assignee-octo-uid <member-octo-uid> --suppress-run
 octo-cli loop task list --workspace-id <workspace-uuid> --assignee "Alice"
 # Project members use Fleet authorization, including its verified Bot-owner fallback.
 octo-cli loop workspace member list <project-uuid>
