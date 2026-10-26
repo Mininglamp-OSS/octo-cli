@@ -98,6 +98,17 @@ func ErrNetwork(msg, hint string) *ExitError {
 	return &ExitError{Type: "network", Code: "NETWORK_ERROR", Message: msg, Hint: hint}
 }
 
+// ErrLoopAPIUnsupported reports that the configured Octo server does not
+// expose the Fleet public API required by Loop commands.
+func ErrLoopAPIUnsupported() *ExitError {
+	return &ExitError{
+		Type:    "api_error",
+		Code:    "LOOP_API_UNSUPPORTED",
+		Message: "this Octo server version does not support Loop",
+		Hint:    "upgrade the Octo backend or use an environment where Fleet /fleet/api/v1 is enabled",
+	}
+}
+
 // --- backend error mapping ---
 
 // backendErrorMapping maps backend error codes to CLI taxonomy + hint. See
@@ -118,13 +129,16 @@ var backendErrorMapping = map[string]struct {
 	"AUTH_REQUIRED":                        {"auth_error", "provide a valid Octo or Loop bearer credential"},
 	"AUTH_UNAVAILABLE":                     {"network", "auth service unreachable; retry later"},
 	"VALIDATION_ERROR":                     {"validation", "check params with `octo-cli schema <op>`"},
-	"MATTER_NOT_FOUND":                     {"api_error", "verify ID with `octo-cli matters list`"},
+	"MATTER_NOT_FOUND":                     {"api_error", "inspect the operation schema with `octo-cli schema matter.get`; matter commands are currently withheld"},
 	"NOT_FOUND":                            {"api_error", "resource not found"},
 	"ASSIGNEE_NOT_FOUND":                   {"api_error", "assignee not in space or invalid UID"},
 	"FORBIDDEN":                            {"permission", "bot lacks permission; check space membership"},
 	"BOT_WORKSPACE_MEMBERSHIP_REQUIRED":    {"permission", "ask a Workspace owner or admin to add this Bot in Workspace Members"},
 	"SPACE_FORBIDDEN":                      {"permission", "bot not a member of this space"},
 	"bot_delete_forbidden":                 {"permission", "bots cannot delete documents, even as owner/admin; do not retry or switch identities/routes; ask a human with document admin permission to delete it in Octo"},
+	"sheet_not_found":                      {"api_error", "run docs sheet list for current worksheet IDs and names; do not fall back to reading every worksheet"},
+	"ambiguous_sheet_name":                 {"validation", "inspect the candidate worksheet IDs and ask the user to disambiguate; retry with --sheet-id"},
+	"invalid_sheet_selector":               {"validation", "use exactly one nonempty --sheet-id or --sheet-name from docs sheet list"},
 	"cleaning_overwrite_required":          {"validation", "inspect the split preview and overwrittenCells; only after approval retry the same version with --preview=false --overwrite"},
 	"cleaning_filtered_sheet":              {"validation", "cleaning refuses active shared filters; copy the data as values to a plain worksheet instead of changing another user's filter"},
 	"cleaning_complex_sheet":               {"validation", "copy the data as values to a plain worksheet without drawings, links, validations or comments before cleaning"},
@@ -152,18 +166,25 @@ var backendErrorMapping = map[string]struct {
 	// invalid_argument/VALIDATION_ERROR are both validation (exit 2),
 	// not_found/NOT_FOUND both api_error, unauthorized/UNAUTHORIZED both
 	// auth_error (exit 3).
-	"unauthorized":              {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
-	"auth_unavailable":          {"network", "auth service unreachable; retry later"},
-	"permission_denied":         {"permission", "caller lacks the required drive space role"},
-	"password_required":         {"permission", "pass --password for this share"},
-	"wrong_password":            {"permission", "verify the share password"},
-	"share_expired":             {"permission", "request a new share"},
-	"not_found":                 {"api_error", "verify the id/token and that the space is accessible"},
-	"conflict":                  {"validation", "drive state conflicts; re-read and retry"},
-	"invalid_argument":          {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
-	"too_many_data_validations": {"validation", "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"},
-	"too_many_sheet_resources":  {"validation", "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"},
-	"internal":                  {"api_error", "internal server error; retry or report"},
+	"unauthorized":               {"auth_error", "token invalid, revoked, or the user/bot is inactive; re-check the credential"},
+	"auth_unavailable":           {"network", "auth service unreachable; retry later"},
+	"permission_denied":          {"permission", "caller lacks the required drive space role"},
+	"password_required":          {"permission", "pass --password for this share"},
+	"wrong_password":             {"permission", "verify the share password"},
+	"share_expired":              {"permission", "request a new share"},
+	"not_found":                  {"api_error", "verify the id/token and that the space is accessible"},
+	"conflict":                   {"validation", "drive state conflicts; re-read and retry"},
+	"invalid_argument":           {"validation", "inspect the operation schema with `octo-cli schema <op>`"},
+	"file_too_large":             {"validation", "compare max_size_kb with size, then choose a smaller file or a multipart-capable upload path"},
+	"upload_mode_conflict":       {"validation", "the server owns the upload mode; follow the response upload_mode and use the matching single or multipart flow"},
+	"client_capability_required": {"validation", "declare X-Drive-Upload-Capabilities: multipart-v1 for multipart uploads; small single-part uploads remain compatible without it"},
+	"object_size_mismatch":       {"validation", "compare actual_size with declared_size and restart the upload with the complete file"},
+	"upload_session_not_active":  {"validation", "read status: start a new session when aborted or treat confirmed as success; never retry the same upload_id"},
+	"upload_policy_unavailable":  {"api_error", "wait for retry_after_seconds, then retry with bounded backoff"},
+	"too_many_upload_sessions":   {"rate_limited", "finish or abort existing sessions until below limit, then retry"},
+	"too_many_data_validations":  {"validation", "send fewer rules per sheet; each sheet array replaces the whole rule set, so splitting one sheet across retries drops rules"},
+	"too_many_sheet_resources":   {"validation", "send fewer freeze or filter sheet entries per edit; split only those top-level sheet keys across batches"},
+	"internal":                   {"api_error", "internal server error; retry or report"},
 }
 
 // ParseBackendError converts an HTTP response body (and status) to an *ExitError.

@@ -144,7 +144,7 @@
               "schema": {
                 "type": "object",
                 "required": ["content"],
-                "properties": { "content": { "type": "string" } }
+                "properties": { "content": { "type": "string", "description": "Maximum size is the configured GROUP.md byte limit (10,240 bytes in the inspected default configuration; deployments may configure another limit)." } }
               }
             }
           }
@@ -177,10 +177,10 @@
                 "type": "object",
                 "required": ["members"],
                 "properties": {
-                  "name": { "type": "string" },
-                  "members": { "type": "array", "maxItems": 200, "items": { "type": "string" } },
-                  "creator": { "type": "string" },
-                  "space_id": { "type": "string" }
+                  "name": { "type": "string", "description": "Optional group name. Names longer than 50 Unicode code points are truncated by the backend, not rejected." },
+                  "members": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } },
+                  "creator": { "type": "string", "description": "UID of the human creator; defaults to the first human member." },
+                  "space_id": { "type": "string", "description": "Space for the new group; defaults to the bot's space." }
                 }
               }
             }
@@ -210,6 +210,7 @@
         "operationId": "group.update",
         "summary": "Update group name/notice (bot must be bot_admin; App Bot rejected)",
         "x-octo-risk": "write",
+        "x-octo-strict-request-schema": true,
         "parameters": [
           { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
         ],
@@ -219,9 +220,13 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "anyOf": [
+                  { "required": ["name"] },
+                  { "required": ["notice"] }
+                ],
                 "properties": {
-                  "name": { "type": "string" },
-                  "notice": { "type": "string" }
+                  "name": { "type": "string", "description": "New group name; supply this or notice. An explicit empty string is accepted. Names longer than 50 Unicode code points are truncated by the backend, not rejected." },
+                  "notice": { "type": "string", "description": "New group notice; supply this or name. An explicit empty string is accepted." }
                 }
               }
             }
@@ -246,7 +251,7 @@
                 "type": "object",
                 "required": ["members"],
                 "properties": {
-                  "members": { "type": "array", "maxItems": 200, "items": { "type": "string" } }
+                  "members": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
                 }
               }
             }
@@ -271,7 +276,7 @@
                 "type": "object",
                 "required": ["members"],
                 "properties": {
-                  "members": { "type": "array", "items": { "type": "string" } }
+                  "members": { "type": "array", "minItems": 1, "items": { "type": "string" } }
                 }
               }
             }

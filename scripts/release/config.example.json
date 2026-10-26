@@ -1,0 +1,9 @@
+{
+  "bucket": "replace-me-1234567890",
+  "region": "ap-replace-me",
+  "cdnOrigin": "https://cdn.example.com",
+  "prefixes": {
+    "test": "static/octo-loop-test",
+    "main": "static/octo-loop"
+  }
+}

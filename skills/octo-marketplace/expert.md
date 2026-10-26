@@ -27,10 +27,13 @@ records of any visibility. Use the immutable `plugin_id`, never a name.
 
 ## Read member skills
 
-`plugin get --include-relations` returns the relations. For an expert_team, each
-member is an `expert_team_expert` relation; a member/expert's skills are
-`expert_skill` relations whose target is a skill plugin. Read a skill's document
-by its own plugin id:
+`plugin get --include-relations` returns only the selected plugin's directly
+connected live relations whose targets are visible to the caller; it is not a
+transitive graph read. For an expert_team, these are its
+`expert_team_expert` member relations, not each member expert's own
+`expert_skill` relations. Fetch a member expert by its `plugin_id` with
+`--include-relations` to inspect those skill links. Read a skill's document by
+its own plugin id:
 
 ```bash
 octo-cli marketplace plugin skillmd --plugin-id <skill-plugin-id>
@@ -43,8 +46,9 @@ Create or edit an **unpublished** draft through the unified write path. Every
 save records a version snapshot but does not publish the expert or team. An
 already-published Space expert/team cannot be changed with upsert; submit its
 new manifest/package/relations through `plugin review-request create --data
-@submission.json` so approval atomically applies the frozen upgrade. Show the
-target and intended change, then continue only after explicit confirmation:
+@submission.json` so the Space policy can apply the frozen upgrade immediately
+or queue it for owner/admin review. Show the target and intended change, then
+continue only after explicit confirmation:
 
 ```bash
 octo-cli marketplace plugin upsert --data @plugin.json
@@ -124,12 +128,38 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 > verbatim.
 
 After saving, publish with `plugin publish --plugin-id <id> --version <x.y.z>
---changelog "…"`. A Space-visible expert/team enters review; follow the
-applicant or reviewer flow in `SKILL.md`. `plugin import` is skill-only and must
-never be used to release an expert or expert_team. To review changed declared
-content directly, use `plugin review-request create --data @submission.json`.
+--changelog "<matching release notes>"`. A private expert/team publishes
+immediately. A Space-visible plugin follows the authenticated Space's
+automatic-review policy: automatic approval is enabled by default when no
+override is stored and publishes immediately; when disabled, it stays pending
+for owner/admin approval. Follow the applicant or reviewer flow in `SKILL.md`
+only for a pending request.
+
+For an already-published Space expert/team upgrade, do not send the upsert
+wrapper as the review body. `plugin review-request create --data
+@submission.json` takes top-level `plugin_id` and `version`, plus the full
+`manifest_json` and `plugin_json` objects together for the frozen replacement.
+`changelog` is optional. Omit `relations` to inherit the live graph; when
+supplied, include the complete replacement relation set. Use a strictly
+forward-moving version label.
+
+The review submission follows the same Space policy: when automatic approval
+is enabled it can publish immediately; when disabled, it remains pending for
+owner/admin approval.
+
+`plugin import` is skill-only and must never be used to release an expert or
+expert_team.
 
 ## Install into a Loop workspace
+
+Before installing, ensure the active Marketplace caller can see every declared
+dependency used by the install: an expert's skill plugins, or an expert_team's
+member experts and each member's skill plugins. A visible root plugin does not
+guarantee that its dependencies are visible. Install refuses a hidden declared
+relation target rather than silently provisioning an incomplete expert/team.
+The root's `plugin get --include-relations` output is only a one-level,
+visibility-filtered view; it does not prove the whole install graph is
+accessible.
 
 Provision an expert or expert_team into a Loop workspace/runtime (creates the
 agent or squad, acting as the caller against octo-fleet, with rollback):
@@ -140,6 +170,12 @@ octo-cli marketplace plugin install --plugin-id <id> --workspace-id <ws> --runti
 
 The response carries exactly one of `agent_id` (expert) or `squad_id`
 (expert_team), depending on the plugin's type.
+
+Optional runtime-specific environment is supplied as the `custom_env` string
+map in `--data`, for example `--data @install.json` with
+`{"custom_env":{"VARIABLE":"<value>"}}`. Treat values as secrets: the install
+schema marks them for verbose/dry-run redaction, but redaction does not protect
+the local body file or shell history.
 
 ## Delete (owner only, confirmed)
 

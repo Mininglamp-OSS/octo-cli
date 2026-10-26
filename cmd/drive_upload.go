@@ -25,7 +25,12 @@ import (
 // needs. file_id stays a json.Number so a uint64 above 2^53 is never rounded.
 type prepareUploadResponse struct {
 	FileID             json.Number `json:"file_id"`
+	UploadMode         string      `json:"upload_mode"`
 	UploadURL          string      `json:"upload_url"`
+	UploadID           string      `json:"upload_id"`
+	PartSize           uint64      `json:"part_size"`
+	PartCount          uint64      `json:"part_count"`
+	MaxConcurrentParts uint64      `json:"max_concurrent_parts"`
 	ObjectPath         string      `json:"object_path"`
 	ContentType        string      `json:"content_type"`
 	ContentDisposition string      `json:"content_disposition"`
@@ -48,10 +53,16 @@ presigned URL is its own authorisation. If the PUT or the confirm fails, the
 pending file is cancelled on a best-effort basis and the error reports both the
 file id and the cancel outcome, so no half-uploaded row is left behind silently.
 
+When the server selects multipart, the same command splits the file at the
+server-provided part size, uploads at most max_concurrent_parts at once, and
+completes or aborts the multipart session. Multipart retries re-sign only the
+part whose URL was rejected. Progress is written to stderr only.
+
 --dry-run stops after describing the prepare request and the local file: no URL
 is fetched, nothing is uploaded, and no pending row is created.
 
-Underlying operations: drive.upload.prepare, drive.upload.confirm, drive.upload.cancel.`,
+Underlying operations: drive.upload.prepare, drive.upload.confirm, drive.upload.cancel,
+drive.upload.parts_presign, drive.upload.complete, drive.upload.abort.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDriveUploadFile(cmd, f, args[0], driveUploadOpts{
@@ -178,17 +189,24 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 		})
 	}
 
+	prepareService, prepareResponseSecrets, err := responseSecretMetadataForOperation(f, "drive.upload.prepare")
+	if err != nil {
+		return failErr(f, err)
+	}
 	cli, err := f.Client()
 	if err != nil {
 		return failErr(f, err)
 	}
 
-	raw, err := cli.Do(cmd.Context(), &client.Request{
-		Method:              http.MethodPost,
-		Path:                mount + "/files/prepare-upload",
-		Body:                prepareBody,
-		SuppressSpaceHeader: true,
-	})
+	raw, err := prepareDriveUploadRequest(
+		cmd.Context(),
+		cli,
+		mount,
+		prepareService,
+		prepareResponseSecrets,
+		prepareBody,
+		size,
+	)
 	if err != nil {
 		return failErr(f, err)
 	}
@@ -212,6 +230,38 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 			"prepare-upload did not return a file_id", "report the backend response"))
 	}
 
+	switch prepared.UploadMode {
+	case "multipart":
+		completed, uerr := uploadMultipart(cmd, f, cli, mount, file, size, &prepared)
+		if uerr != nil {
+			return failErr(f, uerr)
+		}
+		normalized, nerr := output.NormalizeResponse(completed, nil, []string{"file.id", "file.parent_id"})
+		if nerr != nil {
+			return failErr(f, output.ErrWithHint("internal", "RESPONSE_NORMALIZE", nerr.Error(), ""))
+		}
+		notice, merr := json.Marshal(map[string]any{
+			"uploaded_bytes": fmt.Sprintf("%d", size),
+			"object_path":    prepared.ObjectPath,
+			"upload_mode":    "multipart",
+			"part_count":     prepared.PartCount,
+		})
+		if merr != nil {
+			return failErr(f, merr)
+		}
+		return f.EmitSuccessWithMeta(normalized, output.EnvelopeMeta{Notice: notice})
+	case "single", "":
+	default:
+		// Unknown modes deliberately use the legacy single path. Only when the
+		// response has no usable single-part content is this a mode conflict.
+		if strings.TrimSpace(prepared.UploadURL) == "" {
+			cause := output.ErrWithHint("validation", "UPLOAD_MODE_CONFLICT",
+				fmt.Sprintf("server returned upload_mode %q, which is neither single nor multipart, and did not include upload_url", prepared.UploadMode),
+				"retry with a server that returns either a single upload_url or a complete multipart snapshot")
+			return failErr(f, withCancel(cmd, f, cli, mount, fileID, cause))
+		}
+	}
+
 	// From here on every failure path must try to cancel the pending row.
 	loopbackAPI := apiOriginIsLoopback(f)
 	uploadURL, uerr := assertSafeTransferURL("upload_url", prepared.UploadURL, loopbackAPI)
@@ -224,11 +274,17 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 	}
 	progressf(f, "upload complete; confirming file %s", fileID)
 
+	confirmService, confirmResponseSecrets, err := responseSecretMetadataForOperation(f, "drive.upload.confirm")
+	if err != nil {
+		return failErr(f, withCancel(cmd, f, cli, mount, fileID, err))
+	}
 	confirmed, err := cli.Do(cmd.Context(), &client.Request{
-		Method:              http.MethodPost,
-		Path:                mount + "/files/" + fileID + "/confirm-upload",
-		Body:                map[string]any{"actual_size": output.Uint64JSONNumber(size)},
-		SuppressSpaceHeader: true,
+		Service:              confirmService,
+		Method:               http.MethodPost,
+		Path:                 mount + "/files/" + fileID + "/confirm-upload",
+		Body:                 map[string]any{"actual_size": output.Uint64JSONNumber(size)},
+		ResponseSecretFields: confirmResponseSecrets,
+		SuppressSpaceHeader:  true,
 	})
 	if err != nil {
 		return failErr(f, withCancel(cmd, f, cli, mount, fileID, err))
@@ -338,10 +394,15 @@ func withCancel(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, moun
 	defer stop()
 
 	cancelResult := "cancelled"
-	if _, err := cli.Do(cancelCtx, &client.Request{
-		Method:              http.MethodPost,
-		Path:                mount + "/files/" + fileID + "/cancel-upload",
-		SuppressSpaceHeader: true,
+	cancelService, cancelResponseSecrets, metadataErr := responseSecretMetadataForOperation(f, "drive.upload.cancel")
+	if metadataErr != nil {
+		cancelResult = "cancel_failed: " + metadataErr.Error()
+	} else if _, err := cli.Do(cancelCtx, &client.Request{
+		Service:              cancelService,
+		Method:               http.MethodPost,
+		Path:                 mount + "/files/" + fileID + "/cancel-upload",
+		ResponseSecretFields: cancelResponseSecrets,
+		SuppressSpaceHeader:  true,
 	}); err != nil {
 		cancelResult = "cancel_failed: " + err.Error()
 	}
@@ -361,6 +422,24 @@ func withCancel(cmd *cobra.Command, f *cmdutil.Factory, cli *client.Client, moun
 		ee.Hint = strings.TrimSpace(ee.Hint + " The pending file could not be cancelled — run `octo-cli drive upload cancel " + fileID + "`.")
 	}
 	return ee
+}
+
+func responseSecretMetadataForOperation(
+	f *cmdutil.Factory,
+	operationID string,
+) (serviceName string, responseSecretFields []string, err error) {
+	reg := f.Registry()
+	if reg == nil {
+		return "", nil, output.ErrWithHint("internal", "REGISTRY_UNAVAILABLE",
+			"operation registry is not available", "")
+	}
+	op, ok := reg.GetOperation(operationID)
+	if !ok {
+		return "", nil, output.ErrWithHint("internal", "OPERATION_UNKNOWN",
+			fmt.Sprintf("operation %q is not in the embedded registry", operationID),
+			"CLI build bug: the composite command references a missing spec operation")
+	}
+	return op.Service, op.ResponseSecretFields, nil
 }
 
 func rawJSONOrNull(raw json.RawMessage) any {

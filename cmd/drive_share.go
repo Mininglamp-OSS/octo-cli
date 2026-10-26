@@ -307,11 +307,9 @@ func runDriveShareCreate(cmd *cobra.Command, f *cmdutil.Factory, fileID string, 
 // emitDocShareBranch is the document arm of `share create`: refuse the flags a document
 // cannot carry, then emit the link.
 //
-// Refuse rather than drop. prepareBlobShare has already loaded the password and built the
-// whole share body by this point, and this arm makes no request at all — so a supplied
-// --password / --password-file / --expires-in-seconds was silently discarded, and
-// `share create <doc-mount-id> --password-file pw` exited 0 with a share_url the operator then
-// handed over believing it was password-gated. It was not, and nothing in the envelope said so.
+// Refuse rather than drop. prepareBlobShare has already built the full blob-share body by this
+// point, and this arm makes no share request — so a supplied password, expiry, or permission
+// would otherwise be silently discarded while the command still emitted a document link.
 //
 // The Long help does say "(blob shares only)", but help text is not a runtime control: once
 // the caller has actually passed the flag, the choices are refuse or warn, and the
@@ -330,15 +328,14 @@ func emitDocShareBranch(cmd *cobra.Command, f *cmdutil.Factory, origin *url.URL,
 // blobOnlyShareFlags are the share-create flags only a blob share can carry. A document link
 // is an entrance into the docs permission system, not a grant this command parameterises, so
 // there is nowhere for these to be applied.
-var blobOnlyShareFlags = []string{"password", "password-file", "expires-in-seconds"}
+var blobOnlyShareFlags = []string{"password", "password-file", "expires-in-seconds", "permission"}
 
 // assertNoBlobOnlyFlags refuses a document share that was given a blob-only flag.
 //
 // The decision is on Changed, not on the value: `--expires-in-seconds 0` means "use the
-// backend default" and is a different statement from not passing the flag at all, so a
-// zero-value test would wave through a caller who said something explicit. --permission is
-// deliberately not on the list: it has a non-zero default so every invocation would trip it,
-// and the Long help already states that a document link is never downloadable.
+// backend default", and explicitly passing `--permission download` is still different from
+// omitting the flag. The permission flag's non-zero default does not cause an implicit refusal
+// because only explicitly changed flags are checked.
 //
 // The flag names are reported, never their values — a refusal that exists to protect a
 // password must not echo it.
@@ -355,8 +352,9 @@ func assertNoBlobOnlyFlags(cmd *cobra.Command) *output.ExitError {
 	return output.ErrWithHint("validation", "SHARE_FLAG_NOT_APPLICABLE",
 		fmt.Sprintf("this node is an online document, so %s cannot be applied", strings.Join(set, ", ")),
 		"a document link is an entrance, not a grant: access is decided by the docs permission "+
-			"system, not by a share password or an expiry. Re-run without those flags to get the "+
-			"document link, or share an uploaded file if you need a password-protected, expiring share")
+			"system, not by blob permission, a share password, or an expiry. Re-run without those "+
+			"flags to get the document link, or share an uploaded file if you need blob permission, "+
+			"a password, or an expiry")
 }
 
 // emitDocShareTarget renders the document branch of `share create`. A document

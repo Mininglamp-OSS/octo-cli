@@ -221,12 +221,13 @@ func (r *Registry) EnabledOperations() []OperationInfo {
 // needed to route to and describe the operation without loading its full
 // parameter / schema detail. Use GetOperation for the expanded view.
 type OperationInfo struct {
-	ID      string `json:"id"`
-	Service string `json:"service"`
-	Method  string `json:"method"`
-	Path    string `json:"path"`
-	Summary string `json:"summary,omitempty"`
-	Risk    string `json:"risk,omitempty"`
+	ID          string `json:"id"`
+	Service     string `json:"service"`
+	Method      string `json:"method"`
+	Path        string `json:"path"`
+	Summary     string `json:"summary,omitempty"`
+	Description string `json:"description,omitempty"`
+	Risk        string `json:"risk,omitempty"`
 }
 
 // ConditionalQueryRequirement describes x-octo-required-unless-query: the
@@ -278,6 +279,9 @@ type ParamInfo struct {
 	// positionally at all — a base64url id starting with "-" is parsed as a flag
 	// before the command runs (see cmd/service.pathFlag).
 	FlagName string `json:"flag_name,omitempty"`
+	// PositionalName is the CLI operand label from x-octo-positional. The
+	// parameter's Name remains its wire key.
+	PositionalName string `json:"positional_name,omitempty"`
 }
 
 // SchemaInfo is a trimmed projection of an OpenAPI schema — just enough for
@@ -285,7 +289,10 @@ type ParamInfo struct {
 // references, nullable type unions, and composition constraints while leaving
 // an unresolved `$ref` visible when the depth guard is reached.
 type SchemaInfo struct {
-	Type                 string                `json:"type,omitempty"`
+	Type string `json:"type,omitempty"`
+	// Nullable records whether the schema's type explicitly includes null.
+	// Other constraints, such as enum and const, still apply to null.
+	Nullable             bool                  `json:"nullable,omitempty"`
 	Required             []string              `json:"required,omitempty"`
 	Properties           map[string]SchemaInfo `json:"properties,omitempty"`
 	AdditionalProperties *bool                 `json:"additional_properties,omitempty"`
@@ -424,8 +431,15 @@ type OperationDetail struct {
 	// uint64 ids are emitted as decimal strings so values above 2^53 survive an
 	// Agent's JSON parser. Applied after ResponseFieldAliases, so paths name
 	// post-alias keys.
-	LosslessIDFields []string      `json:"lossless_id_fields,omitempty"`
-	BodyVariants     []BodyVariant `json:"body_variants,omitempty"`
+	LosslessIDFields []string `json:"lossless_id_fields,omitempty"`
+	// ResponseSecretFields lists response-schema paths marked x-octo-secret.
+	// The client uses these paths to collect actual secret values from a
+	// backend error body before parsing or rendering it.
+	ResponseSecretFields []string      `json:"response_secret_fields,omitempty"`
+	BodyVariants         []BodyVariant `json:"body_variants,omitempty"`
+	// BodyVariantsHint is the operation-specific recovery guidance returned
+	// when no declared request-body variant matches.
+	BodyVariantsHint string `json:"body_variants_hint,omitempty"`
 	// AutoIdempotencyKey names a request field generated once per command run when absent.
 	AutoIdempotencyKey string `json:"auto_idempotency_key,omitempty"`
 	// ResponseUnwrap selects a dot-separated field from successful JSON responses.
@@ -453,12 +467,13 @@ func (r *Registry) ListOperations(service string) []OperationInfo {
 			return
 		}
 		out = append(out, OperationInfo{
-			ID:      id,
-			Service: service,
-			Method:  strings.ToUpper(method),
-			Path:    pathStr,
-			Summary: stringOf(op["summary"]),
-			Risk:    stringOf(op["x-octo-risk"]),
+			ID:          id,
+			Service:     service,
+			Method:      strings.ToUpper(method),
+			Path:        pathStr,
+			Summary:     stringOf(op["summary"]),
+			Description: stringOf(op["description"]),
+			Risk:        stringOf(op["x-octo-risk"]),
 		})
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -533,12 +548,13 @@ func walkOperations(doc map[string]any, fn func(path, method string, op map[stri
 func buildDetail(service string, doc map[string]any, pathStr, method string, op map[string]any) *OperationDetail {
 	d := &OperationDetail{
 		OperationInfo: OperationInfo{
-			ID:      stringOf(op["operationId"]),
-			Service: service,
-			Method:  strings.ToUpper(method),
-			Path:    pathStr,
-			Summary: stringOf(op["summary"]),
-			Risk:    stringOf(op["x-octo-risk"]),
+			ID:          stringOf(op["operationId"]),
+			Service:     service,
+			Method:      strings.ToUpper(method),
+			Path:        pathStr,
+			Summary:     stringOf(op["summary"]),
+			Description: stringOf(op["description"]),
+			Risk:        stringOf(op["x-octo-risk"]),
 		},
 		BaseURLEnv:           stringOf(doc["x-octo-base-url"]),
 		Credential:           stringOf(doc["x-octo-credential"]),
@@ -571,6 +587,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 		d.UnwrapRequiredFields = unwrapRequiredFields(doc, op, d.ResponseUnwrap)
 	}
 	d.AutoIdempotencyKey = stringOf(op["x-octo-auto-idempotency-key"])
+	d.BodyVariantsHint = stringOf(op["x-octo-body-variants-hint"])
 	if variants, ok := op["x-octo-body-variants"].([]any); ok {
 		for _, raw := range variants {
 			variant, ok := raw.(map[string]any)
@@ -593,6 +610,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 
 	if resps, ok := op["responses"].(map[string]any); ok {
 		d.ResponseSchema = firstSuccessSchema(doc, resps)
+		d.ResponseSecretFields = responseSecretFields(d.ResponseSchema)
 	}
 
 	if pag, ok := op["x-octo-pagination"].(map[string]any); ok {
@@ -608,6 +626,47 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 
 	return d
+}
+
+func responseSecretFields(schema *SchemaInfo) []string {
+	if schema == nil {
+		return nil
+	}
+	var fields []string
+	collectResponseSecretFields(schema, "", &fields)
+	sort.Strings(fields)
+	return fields
+}
+
+func collectResponseSecretFields(schema *SchemaInfo, path string, fields *[]string) {
+	if schema == nil {
+		return
+	}
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		child := schema.Properties[name]
+		childPath := name
+		if path != "" {
+			childPath = path + "." + name
+		}
+		if child.Secret {
+			*fields = append(*fields, childPath)
+		}
+		collectResponseSecretFields(&child, childPath, fields)
+	}
+	if schema.Items != nil {
+		collectResponseSecretFields(schema.Items, path+"[]", fields)
+	}
+	for i := range schema.OneOf {
+		collectResponseSecretFields(&schema.OneOf[i], path, fields)
+	}
+	for i := range schema.AnyOf {
+		collectResponseSecretFields(&schema.AnyOf[i], path, fields)
+	}
 }
 
 func operationParameters(doc map[string]any, pathStr string, op map[string]any) []ParamInfo {
@@ -638,12 +697,13 @@ func operationParameters(doc map[string]any, pathStr string, op map[string]any) 
 				}
 			}
 			parameter := ParamInfo{
-				Name:        stringOf(pm["name"]),
-				In:          stringOf(pm["in"]),
-				Required:    boolOf(pm["required"]),
-				Description: stringOf(pm["description"]),
-				FlagName:    stringOf(pm["x-octo-flag"]),
-				Secret:      truthy(pm["x-octo-secret"]),
+				Name:           stringOf(pm["name"]),
+				In:             stringOf(pm["in"]),
+				Required:       boolOf(pm["required"]),
+				Description:    stringOf(pm["description"]),
+				FlagName:       stringOf(pm["x-octo-flag"]),
+				PositionalName: stringOf(pm["x-octo-positional"]),
+				Secret:         truthy(pm["x-octo-secret"]),
 			}
 			if conditional, ok := pm["x-octo-required-unless-query"].(map[string]any); ok {
 				name, value := stringOf(conditional["name"]), stringOf(conditional["value"])
@@ -896,6 +956,7 @@ func resolveSchemaReference(doc, schema map[string]any, depth int) (SchemaInfo, 
 func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 	info := SchemaInfo{
 		Type:          schemaType(schema["type"]),
+		Nullable:      schemaIncludesNullType(schema["type"]),
 		Format:        stringOf(schema["format"]),
 		Description:   stringOf(schema["description"]),
 		EnumHint:      stringOf(schema["x-octo-enum-hint"]),
@@ -910,6 +971,7 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		MinProperties: intOf(schema["minProperties"]),
 		Pattern:       stringOf(schema["pattern"]),
 	}
+
 	if bound, ok := schema["minimum"].(float64); ok {
 		info.Minimum = &bound
 	}
@@ -929,6 +991,20 @@ func schemaInfoFromNode(schema map[string]any) SchemaInfo {
 		info.Enum = enum
 	}
 	return info
+}
+
+func schemaIncludesNullType(value any) bool {
+	switch types := value.(type) {
+	case string:
+		return types == "null"
+	case []any:
+		for _, typ := range types {
+			if name, ok := typ.(string); ok && name == "null" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mergeAllOfSchemas(dst *SchemaInfo, doc map[string]any, value any, depth int) {
@@ -1017,8 +1093,13 @@ func mergeSchemaInfo(dst, src *SchemaInfo) {
 }
 
 func mergeSchemaIdentity(dst, src *SchemaInfo) {
-	if dst.Type == "" {
-		dst.Type = src.Type
+	if src.Type != "" {
+		if dst.Type == "" {
+			dst.Type = src.Type
+			dst.Nullable = src.Nullable
+		} else {
+			dst.Nullable = dst.Nullable && src.Nullable
+		}
 	}
 	if dst.Format == "" {
 		dst.Format = src.Format

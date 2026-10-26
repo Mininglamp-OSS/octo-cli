@@ -54,10 +54,6 @@ func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *o
 		}
 		var value string
 		switch bf.kind {
-		case kindInt:
-			value = strconv.Itoa(*bf.intVal)
-		case kindBool:
-			value = strconv.FormatBool(*bf.boolVal)
 		case kindStringSlice:
 			// Flatten slice: one form field per value.
 			for _, v := range *bf.strSlc {
@@ -67,7 +63,7 @@ func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *o
 			}
 			continue
 		default:
-			value = *bf.strVal
+			value = multipartScalarValue(bf)
 		}
 		if err := w.WriteField(bf.apiName, value); err != nil {
 			return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
@@ -78,4 +74,17 @@ func buildMultipartBody(cobraCmd *cobra.Command, rt *operationRuntime, pinned *o
 		return nil, "", output.ErrWithHint("internal", "MULTIPART_FAILED", err.Error(), "")
 	}
 	return buf.Bytes(), w.FormDataContentType(), nil
+}
+
+func multipartScalarValue(bf *bodyFlag) string {
+	switch bf.kind {
+	case kindInt:
+		return strconv.Itoa(*bf.intVal)
+	case kindFloat64:
+		return strconv.FormatFloat(*bf.floatVal, 'f', -1, 64)
+	case kindBool:
+		return strconv.FormatBool(*bf.boolVal)
+	default:
+		return *bf.strVal
+	}
 }

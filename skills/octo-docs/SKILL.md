@@ -18,6 +18,10 @@ reference files sit next to this file in the skill directory.
 
 All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`.
 
+For a named spreadsheet tab, use `docs sheet list <docId>` to discover IDs and
+names, then `docs sheet get <docId> --sheet-id <sheetId> --limit 1000`.
+See `sheet.md` for exact-name selection, scoped pagination and deployment checks.
+
 ## When to read which reference
 
 | Your task | Read |
@@ -48,7 +52,8 @@ slug for old documents; callers do not infer the distinction from mount state.
 ## Auth & space
 
 - Authenticate with a bot token via a stored profile (`--profile` / `--bot-id`)
-  or `OCTO_BOT_TOKEN`; both `app_*` and `bf_*` tokens work. Confirm with
+  or `OCTO_TOKEN` (legacy alias `OCTO_BOT_TOKEN`); both `app_*` and `bf_*`
+  tokens work. Confirm with
   `octo-cli config show`.
 - **Do not pass a space flag for docs.** The bot mount resolves the space
   server-side from the token and deliberately ignores any client-supplied space
@@ -85,14 +90,19 @@ octo-cli docs create --docType html_ppt --title "Quarterly Review" --templateId 
 # Native gallery choices: signal, terra, orbital, picnic (requires the matching backend).
 # Read ppt.md for style selection and the create -> read -> edit -> verify workflow.
 
-# List docs you own or are a member of. Page-based (see the pagination note below).
-octo-cli docs list [--folderId f_123] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
-
+# List docs you own or are a member of. owner=me narrows to docs owned by this bot.
+# q searches filenames by substring. Repeat --type from doc|sheet|board|html|html_ppt
+# to combine types; the CLI sends repeated type query keys (not a CSV value).
+octo-cli docs list [--folderId f_123] [--owner me] [--q "quarterly"] [--type doc] [--type sheet] [--page 1] [--pageSize 20] [--sort updatedAt:desc]
 # Full-text search every doc the bot may read. Repeat --doc-type to combine kinds.
 # Search is cursor-based; --page-all follows nextCursor automatically.
-octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html] [--page-size 20] [--page-all]
+octo-cli docs search --keyword "quarterly plan" [--doc-type doc|sheet|board|html|html_ppt] [--page-size 20] [--page-all]
 
 octo-cli docs get    <docId>                 # metadata + doc_type + your role
+
+# WARNING: Doc (.md/.markdown/.docx) and sheet (.xlsx) imports atomically replace
+# existing content; they do not append or merge. Board .excalidraw imports default
+# to merge; --mode replace overwrites the board. See board.md before choosing it.
 
 # Import a local file into an existing target. .md/.markdown/.docx require a doc;
 # .xlsx requires a sheet and imports its first visible worksheet.
@@ -115,9 +125,11 @@ Pagination depends on the endpoint's response contract:
 - `docs search` is **cursor-based** — response is `{total, items, nextCursor}`.
   Pass `nextCursor` back via `--cursor`, or use `--page-all` to follow it
   automatically; `--page-limit` caps automatic requests (default 10).
-- `docs comments list` and `docs versions list` are **cursor-based** — response is
-  `{items, nextCursor}`. Pass the returned `nextCursor` back via `--cursor` to get
-  the next page; stop when `nextCursor` is null.
+- `docs comments list` and `docs versions list` are cursor-based — pass the
+  returned `nextCursor` via `--cursor` to get the next page; stop when it is null.
+- `docs comments replies` returns up to 25 replies with `nextCursor`; pass it
+  via `--cursor` or use `--page-all` to collect pages (`--page-limit` caps
+  automatic requests, default 10).
 
 ## Not in this version
 

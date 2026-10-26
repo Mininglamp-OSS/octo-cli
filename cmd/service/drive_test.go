@@ -86,11 +86,14 @@ func TestDrive_RegistryShape(t *testing.T) {
 		"drive.blob.get":    {"GET", "/v1/bot/drive/blobs/{blob_id}"},
 		"drive.blob.list":   {"GET", "/v1/bot/drive/blobs"},
 		"drive.blob.delete": {"DELETE", "/v1/bot/drive/blobs/{blob_id}"},
-		// upload + download (4)
-		"drive.upload.prepare": {"POST", "/v1/bot/drive/files/prepare-upload"},
-		"drive.upload.confirm": {"POST", "/v1/bot/drive/files/{file_id}/confirm-upload"},
-		"drive.upload.cancel":  {"POST", "/v1/bot/drive/files/{file_id}/cancel-upload"},
-		"drive.download.url":   {"GET", "/v1/bot/drive/files/{file_id}/download"},
+		// upload + download (7)
+		"drive.upload.prepare":       {"POST", "/v1/bot/drive/files/prepare-upload"},
+		"drive.upload.confirm":       {"POST", "/v1/bot/drive/files/{file_id}/confirm-upload"},
+		"drive.upload.cancel":        {"POST", "/v1/bot/drive/files/{file_id}/cancel-upload"},
+		"drive.upload.parts_presign": {"POST", "/v1/bot/drive/files/{file_id}/upload/parts-presign"},
+		"drive.upload.complete":      {"POST", "/v1/bot/drive/files/{file_id}/upload/complete"},
+		"drive.upload.abort":         {"POST", "/v1/bot/drive/files/{file_id}/upload/abort"},
+		"drive.download.url":         {"GET", "/v1/bot/drive/files/{file_id}/download"},
 		// docs (4)
 		"drive.doc.mount":      {"POST", "/v1/bot/drive/docs"},
 		"drive.doc.unmount":    {"DELETE", "/v1/bot/drive/docs/{file_id}"},
@@ -392,6 +395,24 @@ func TestDrive_RequestShapes(t *testing.T) {
 			wantBody: `{"content_type":"application/pdf","name":"a.pdf","size":1048576,"space_id":"shared:s1"}`,
 		},
 		{
+			name:     "upload parts presign sends upload id and part numbers",
+			args:     []string{"drive", "upload", "parts-presign", "18446744073709551615", "--data", `{"upload_id":"upload-1","part_numbers":[1,20,10000]}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/parts-presign",
+			wantBody: `{"part_numbers":[1,20,10000],"upload_id":"upload-1"}`,
+		},
+		{
+			name:     "upload complete sends ascending part etags",
+			args:     []string{"drive", "upload", "complete", "18446744073709551615", "--data", `{"upload_id":"upload-1","parts":[{"part_number":1,"etag":"etag-1"},{"part_number":2,"etag":"etag-2"}]}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/complete",
+			wantBody: `{"parts":[{"etag":"etag-1","part_number":1},{"etag":"etag-2","part_number":2}],"upload_id":"upload-1"}`,
+		},
+		{
+			name:     "upload abort sends only upload id",
+			args:     []string{"drive", "upload", "abort", "18446744073709551615", "--data", `{"upload_id":"upload-1"}`},
+			wantPath: "/v1/bot/drive/files/18446744073709551615/upload/abort",
+			wantBody: `{"upload_id":"upload-1"}`,
+		},
+		{
 			name:     "im-transfer keeps the message id a string",
 			args:     []string{"drive", "im-transfer", "create", "--im-group-no", "g1", "--im-channel-type", "2", "--im-msg-id", "9007199254740993", "--target-space-id", "shared:s1"},
 			wantPath: "/v1/bot/drive/blobs/transfer-from-im",
@@ -435,6 +456,163 @@ func TestDrive_RequestShapes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDriveSearch_NullFiltersAreForwarded(t *testing.T) {
+	const requestBody = `{"q":"audit","filters":{"size_min":null,"size_max":null,"owner_scope":null}}`
+	var gotMethod, gotPath, gotBody string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.SetArgs([]string{"drive", "search", "--data", requestBody})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("drive.search with null filters: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/bot/drive/search" {
+		t.Fatalf("request = %s %s, want POST /v1/bot/drive/search", gotMethod, gotPath)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("decode request body %q: %v", gotBody, err)
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(body["filters"], &filters); err != nil {
+		t.Fatalf("decode filters from request body %q: %v", gotBody, err)
+	}
+	for _, field := range []string{"size_min", "size_max", "owner_scope"} {
+		if value, ok := filters[field]; !ok || string(value) != "null" {
+			t.Errorf("filters.%s = %q (present: %t), want JSON null in request body %s",
+				field, value, ok, gotBody)
+		}
+	}
+}
+
+func TestDriveSearch_Uint64FilterBoundariesRemainLossless(t *testing.T) {
+	const maxUint64 = "18446744073709551615"
+	const requestBody = `{"q":"audit","filters":{"size_min":0,"size_max":` + maxUint64 + `}}`
+	var gotBody string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.SetArgs([]string{"drive", "search", "--data", requestBody})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("drive.search with uint64 boundary filters: %v", err)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("decode request body %q: %v", gotBody, err)
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(body["filters"], &filters); err != nil {
+		t.Fatalf("decode filters from request body %q: %v", gotBody, err)
+	}
+	if got := string(filters["size_min"]); got != "0" {
+		t.Errorf("filters.size_min = %s, want exact lower bound 0", got)
+	}
+	if got := string(filters["size_max"]); got != maxUint64 {
+		t.Errorf("filters.size_max = %s, want exact uint64 maximum %s", got, maxUint64)
+	}
+}
+
+func TestDriveSearch_InvalidFiltersAreRejectedLocally(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"negative size", `{"q":"audit","filters":{"size_min":-1}}`},
+		{"size exceeds uint64", `{"q":"audit","filters":{"size_max":18446744073709551616}}`},
+		{"fractional size", `{"q":"audit","filters":{"size_min":1.5}}`},
+		{"unknown owner scope", `{"q":"audit","filters":{"owner_scope":"everyone"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestSent bool
+			root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				requestSent = true
+			})
+			root.SetArgs([]string{"drive", "search", "--data", tc.data})
+			err := root.Execute()
+			if err == nil {
+				t.Fatal("invalid Drive search filters must be rejected before HTTP")
+			}
+			if requestSent {
+				t.Error("invalid Drive search filters must not be sent to the backend")
+			}
+			if ee := output.AsExitError(err); ee == nil || ee.Type != "validation" {
+				t.Errorf("error = %v, want a validation error", err)
+			}
+		})
+	}
+}
+
+// TestDrive_UploadCapabilityHeader proves the low-level prepare command exposes
+// the capability declaration required by the frozen multipart contract. The
+// header is optional so legacy single-part calls remain byte-identical.
+func TestDrive_UploadCapabilityHeader(t *testing.T) {
+	var gotCapability string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		gotCapability = r.Header.Get("X-Drive-Upload-Capabilities")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"file_id":7,"upload_url":"https://storage.example/put"}`))
+	})
+	root.SetArgs([]string{
+		"drive", "upload", "prepare",
+		"--space-id", "shared:s1",
+		"--name", "large.bin",
+		"--size", "134217728",
+		"--content-type", "application/octet-stream",
+		"--upload-capabilities", "multipart-v1",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if gotCapability != "multipart-v1" {
+		t.Errorf("X-Drive-Upload-Capabilities = %q, want multipart-v1", gotCapability)
+	}
+}
+
+// TestDrive_CompleteNestedIDsStayLossless drives the generated complete leaf
+// through the real response normalizer. Both nested Blob ids above 2^53 must
+// leave as decimal strings, not JSON numbers an Agent could round.
+func TestDrive_CompleteNestedIDsStayLossless(t *testing.T) {
+	const id = "9007199254740993"
+	const parentID = "9007199254740995"
+
+	root, tf := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"file":{"id":` + id + `,"parent_id":` + parentID + `,"name":"large.bin"},"size":134217728}`))
+	})
+	root.SetArgs([]string{
+		"drive", "upload", "complete", "7",
+		"--data", `{"upload_id":"upload-1","parts":[{"part_number":1,"etag":"etag-1"}]}`,
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var env struct {
+		Data struct {
+			File struct {
+				ID       any `json:"id"`
+				ParentID any `json:"parent_id"`
+			} `json:"file"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(tf.Out.Bytes(), &env); err != nil {
+		t.Fatalf("parse envelope: %v (%s)", err, tf.Out.String())
+	}
+	if env.Data.File.ID != id {
+		t.Errorf("data.file.id = %#v, want decimal string %q", env.Data.File.ID, id)
+	}
+	if env.Data.File.ParentID != parentID {
+		t.Errorf("data.file.parent_id = %#v, want decimal string %q", env.Data.File.ParentID, parentID)
 	}
 }
 

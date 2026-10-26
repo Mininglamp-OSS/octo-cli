@@ -37,9 +37,9 @@ Key properties:
 
 | Domain    | Ops | Purpose                                                        |
 |-----------|-----|----------------------------------------------------------------|
-| `docs`    | 44  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, sheet cells (paged read, atomic replace, conditional formats, split/deduplication), board scenes, members, comments, versions, attachments |
+| `docs`    | 45  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, worksheet discovery and scoped/paged reads, sheet edits (atomic replace, conditional formats, split/deduplication), board scenes, members, comments, versions, attachments |
 | `html`    | 22  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — read source with its version, publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
-| `drive`   | 43  | Network drive — spaces & members, folder/file tree, full-text search, two-phase blob upload & signed download, online-document mounts, share links, invites, IM-attachment transfer. Plus 3 composite commands (`upload file`, `download file`, `share create`) for 46 leaves total |
+| `drive`   | 46  | Network drive — spaces & members, folder/file tree, full-text search, single-part and resumable-style multipart blob upload, signed download, online-document mounts, share links, invites, IM-attachment transfer. Six hand-written composites bring the command tree to 49 leaves |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|
@@ -48,16 +48,20 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
-| `loop`    | 126 | Fleet control plane — tasks, executions, experts, expert teams, workspaces, runtimes, projects, skills, automations, attachments, comments, labels, and related resources |
+| `loop`    | 116 | Fleet control plane — tasks and assignees, Project member rosters, experts, expert teams, workspaces, runtimes, skills, automations, attachments, and related resources |
 
 ## Installation
 
-### npm
+### npm, Bun or pnpm
 
 For Node-based agent runtimes (OpenClaw, etc.):
 
 ```bash
 npm install -g @mininglamp-oss/octo-cli
+
+# Or use the global package manager for your runtime:
+bun install -g @mininglamp-oss/octo-cli
+pnpm add -g @mininglamp-oss/octo-cli
 ```
 
 The npm package resolves the matching platform sub-package, which already
@@ -97,11 +101,38 @@ Windows release archives are `.tar.gz` as well; Windows 10+ includes `tar.exe`.
 curl -fsSL https://raw.githubusercontent.com/Mininglamp-OSS/octo-cli/main/install.sh | sh
 ```
 
+### Upgrade a global package installation
+
+```bash
+octo-cli upgrade --dry-run
+octo-cli upgrade
+```
+
+`upgrade` identifies the npm, Bun or pnpm installation that owns the invoked
+command and updates it to the configured registry's stable `latest` release.
+An equal or newer installed version is a successful no-op. It verifies the
+installed package, platform binary and command before reporting success.
+
+Updates enable optional dependencies for npm/pnpm and explicitly install Bun's
+matching platform package, because its executable is required to run the CLI.
+
+Registry mirrors, scoped registries and authentication use the owning manager's
+native settings: npm's user/global `.npmrc` and environment, Bun's supported
+`.npmrc` and global `.bunfig.toml`, or pnpm's native configuration. The invoking
+project's registry settings do not redirect the upgrade.
+
+Dry run checks local ownership without contacting a registry or installing.
+Upgrade requires no Octo credentials and preserves `--format` / `--jq`.
+Use the original installation method for raw binaries, `go install`, project-local
+or temporary installs. Loop task mode does not allow upgrades. Package-manager
+failures stop the command; an installation failure can leave partially changed
+files, so inspect the structured error before retrying.
+
 ## Quick Start
 
 ```bash
-# Authenticate as a bot.
-export OCTO_BOT_TOKEN="bf_your_user_bot_token"
+# Authenticate as a bot (`OCTO_BOT_TOKEN` remains a compatible alias).
+export OCTO_TOKEN="bf_your_user_bot_token"
 # Optional for test or self-hosted deployments; production is the default.
 # export OCTO_API_BASE_URL="https://im-test.deepminer.com.cn"
 
@@ -127,6 +158,12 @@ octo-cli thread create group-abc --name "design review"
 # Files
 octo-cli file upload --file ./report.pdf
 octo-cli file download abc123 --jq '.data.url'
+
+# Drive — the server chooses single-part or multipart upload; the same command
+# handles both. Its single prepare request declares multipart-v1; the server
+# returns `single` below its threshold or a multipart snapshot above it.
+# Multipart progress goes to stderr.
+octo-cli drive upload file ./large.bin --space-id <drive-space-id>
 
 # Agent Mail — policy-aware send; the server may accept it or save a Draft
 # depending on the mailbox's current outbound mode.
@@ -178,7 +215,26 @@ octo-cli docs members set doc-123 --uid u-1 --role writer --principal-space-id s
 octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
-octo-cli loop task list --workspace-id <workspace-id>
+octo-cli loop task list --workspace-id <workspace-uuid>
+# Multica-style assignment: --to accepts a name with an optional leading @; use --to-id for a complete ID.
+# Automatic name/ID lookup reads at most 10 pages per roster; use explicit typed fields for larger rosters.
+octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to "@Alice"
+octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
+octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --unassign
+octo-cli loop task create --workspace-id <workspace-uuid> --title "Example" --assignee "Alice"
+octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-id <actor-id>
+octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> \
+  --assignee-type member --assignee-octo-uid <member-octo-uid> --suppress-run
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee "Alice"
+# ID filters go directly to Fleet, so historical assignees remain searchable.
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-id <fleet-actor-uuid>
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-octo-uid <member-octo-uid>
+# Project members use Fleet authorization, including its verified Bot-owner fallback.
+octo-cli loop workspace member list <project-uuid>
+# Alternatively select the Project with --workspace-id; results are in .data[].
+octo-cli loop workspace member list --workspace-id <project-uuid> --page 2 --page-size 50
+# Existing flags still work for offsets aligned to the page size.
+octo-cli loop workspace member list --workspace-id <project-uuid> --limit 50 --offset 50
 octo-cli docs comments add doc-123 --data '{"body":"looks good"}'
 
 # HTML documents registered in docs-backend use the same search endpoint.
@@ -189,6 +245,10 @@ octo-cli html get <octoDocSlug>
 
 # Spreadsheets — read the live cells + base version, then batch-edit under If-Match.
 octo-cli docs sheet get sheet-9                      # whole sheet + rules + base version token
+octo-cli docs sheet list sheet-9
+octo-cli docs sheet get sheet-9 --sheet-name "Sales" --limit 500
+octo-cli docs sheet get sheet-9 --sheet-id sales --limit 500
+octo-cli docs sheet get sheet-9 --cursor '<nextCursor>' --limit 500
 octo-cli docs sheet split sheet-9 --base-version '<token>' --data '{"logicalId":"default","delimiter":",","range":{"startRow":0,"endRow":9,"startColumn":0,"endColumn":0}}'
 octo-cli docs sheet deduplicate sheet-9 --base-version '<token>' --header --data '{"logicalId":"default","range":{"startRow":0,"endRow":9,"startColumn":0,"endColumn":3}}'
 octo-cli docs import sheet-9 --file ./report.xlsx    # imports the first visible worksheet
@@ -259,11 +319,13 @@ octo-cli schema --list              # all operations across all domains
 octo-cli schema --list message      # operations in one domain
 octo-cli schema message.send        # request/response schema for one op
 octo-cli config show                # resolved config (token masked)
-octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile
+octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile (wins over OCTO_API_BASE_URL)
+octo-cli auth update --clear-api-base-url                # remove the stored endpoint; env or default applies
 
 # Generic passthrough for ops that aren't auto-registered.
 octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
 octo-cli api POST /v1/messages --data @body.json
+octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
 
 ## Authentication
@@ -294,19 +356,22 @@ a real person with `--on-behalf-of <uid>` (OBO, requires an active grant).
 
 ### Token variables
 
-Two variables supply the token, in this order:
+Outside task mode, explicit CLI profile selectors win first. Otherwise,
+environment credentials override implicit stored profiles; the two environment names have identical
+semantics and differ only in priority:
 
 | Priority | Source | Notes |
 |---|---|---|
-| 1 | stored profile | `octo-cli auth login`; select with `--bot-id` / `--profile` |
-| 2 | `OCTO_TOKEN` | preferred variable; any of the three token kinds |
-| 3 | `OCTO_BOT_TOKEN` | long-standing variable, fully supported |
+| 1 | `--bot-id` / `--profile` | Explicit stored-profile selector; fails closed if it does not match |
+| 2 | `OCTO_TOKEN` | Canonical environment variable; accepts every supported credential kind |
+| 3 | `OCTO_BOT_TOKEN` | Fully compatible legacy alias |
+| 4 | stored profile | Selected by `OCTO_BOT_ID`, or selected implicitly when it is the only profile |
 
 `OCTO_TOKEN` lets you run a single command as a different identity without
 disturbing an existing setup:
 
 ```bash
-OCTO_TOKEN="$UK_KEY" octo-cli drive space list      # acts as the real person
+OCTO_TOKEN="$BOT_TOKEN" octo-cli message sync
 ```
 
 The success envelope's `identity.source` names the variable actually used
@@ -317,24 +382,56 @@ The success envelope's `identity.source` names the variable actually used
 All backend services are accessed through a single API base URL.
 The value is a gateway origin (`http(s)://host[:port]`) rather than a
 service-specific path; query strings, fragments, credentials, and API paths are
-rejected.
+rejected. Precedence is the active profile's `api_base_url`, then
+`OCTO_API_BASE_URL`, then `https://im.deepminer.com.cn`; `config show` and
+`auth status` report the winning layer as `api_base_url_source`
+(`profile`, `env`, or `default`).
 
 | Var                 | Purpose                                                  |
 |---------------------|----------------------------------------------------------|
-| `OCTO_TOKEN`        | Token (`app_*`, `bf_*`, or `uk_*`). Preferred; wins over `OCTO_BOT_TOKEN`. |
-| `OCTO_BOT_TOKEN`    | Token (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`). Used when `OCTO_TOKEN` is unset. |
-| `OCTO_CREDENTIAL_MODE` | Credential policy; set to `task` only for daemon-launched Loop tasks. |
-| `OCTO_API_BASE_URL`  | Optional API base URL override; defaults to `https://im.deepminer.com.cn`. |
-| `OCTO_BOT_ID`       | Select/assert the bot credential by robot id (see `--bot-id`). |
+| `OCTO_TOKEN`        | Canonical token variable (`app_*`, `bf_*`, `uk_*`, or `octo_loop_*`); wins over `OCTO_BOT_TOKEN`. |
+| `OCTO_BOT_TOKEN`    | Fully compatible legacy alias; used when `OCTO_TOKEN` is unset. |
+| `OCTO_TASK_TOKEN`   | Dedicated daemon-issued task credential; read only when task mode is explicitly selected. |
+| `OCTO_CREDENTIAL_MODE` | Set to `task` for one task-workflow invocation; unset for ordinary authentication. |
+| `OCTO_API_BASE_URL`  | API base URL for environment credentials or profiles that record none; defaults to `https://im.deepminer.com.cn`. |
+| `OCTO_BOT_ID`       | Select a stored profile by robot id when no environment credential is set. |
 | `OCTO_CONFIG_DIR`   | Override the config/credential directory (default `~/.octo-cli`). |
 | `OCTO_SPACE_ID`     | Space context for platform-scoped bots.                  |
 | `OCTO_FORMAT`       | Default output format (`json` \| `table` \| `csv` \| `ndjson`). |
 
-Daemon-launched tasks set `OCTO_CREDENTIAL_MODE=task` and must also run with an
-isolated `OCTO_CONFIG_DIR` that contains no host profiles. The mode flag selects
-the restricted CLI policy but is not a security boundary against a process that
-can rewrite its own environment. In task mode, use the injected
-`OCTO_BOT_TOKEN`; `auth` and `config` diagnostics are intentionally unavailable.
+The daemon provides `OCTO_TASK_TOKEN` to its task process without selecting a
+default credential mode or placing the task credential in `OCTO_TOKEN` /
+`OCTO_BOT_TOKEN`. The agent selects task mode for each task-workflow call:
+
+```bash
+# Task workflow and collaboration use the identity of this execution.
+OCTO_CREDENTIAL_MODE=task "$OCTO_CLI_PATH" loop task get <task-id> --workspace-id <workspace-id>
+
+# Independent business operations keep ordinary authentication.
+"$OCTO_CLI_PATH" docs list
+```
+
+Task mode reads **only `OCTO_TASK_TOKEN`**. A missing or blank task token fails
+without falling back to other environment variables or stored profiles.
+The CLI does not infer the authenticated principal from the token's prefix;
+Fleet verifies the bearer and enforces its bindings and actions. Ordinary mode
+ignores `OCTO_TASK_TOKEN` and preserves the existing credential precedence.
+
+Task mode retains its existing Loop command boundary and offline discovery
+commands. `auth`, `config`, `api`, native services, `--profile`, `--bot-id`,
+`OCTO_BOT_ID`, and `--space` remain unavailable in task mode. It discards native
+`OCTO_SPACE_ID`; workspace-scoped Loop calls use `--workspace-id`.
+
+The daemon's task prompts explain when to use each identity and include
+per-invocation task mode in workflow examples. Do not export mode for an entire
+session or switch identities to retry an authentication failure. Independent
+business calls use their ordinary, separately authorized credentials.
+On Windows, the generated PowerShell task examples restore the previous mode
+in `finally` after the invocation.
+
+Upgrade the CLI and daemon together: older task-token aliases are not accepted
+by the updated task mode. Credential mode is a selection policy, not a
+filesystem sandbox; host-file access remains a separate isolation concern.
 
 ## Output
 
@@ -462,3 +559,9 @@ by editing a spec in `internal/registry/specs/`, not Go code.
 ## License
 
 [Apache-2.0](./LICENSE)
+
+## Optional COS distribution
+
+Local release tooling and example-only configuration are documented in
+[Optional COS publishing](docs/cos-publishing.md). COS uploads are opt-in;
+existing release channels remain unchanged.

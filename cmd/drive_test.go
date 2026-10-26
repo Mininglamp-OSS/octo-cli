@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -41,6 +43,7 @@ type driveTestEnv struct {
 	// assert what was (and was not) sent to it.
 	storeRequests []*http.Request
 	storeBodies   []string
+	storeMu       sync.Mutex
 }
 
 // newDriveTestEnv builds the environment. apiHandler serves the drive API;
@@ -51,8 +54,11 @@ func newDriveTestEnv(t *testing.T, token string, apiHandler, storeHandler http.H
 
 	env.store = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
+		env.storeMu.Lock()
 		env.storeRequests = append(env.storeRequests, r.Clone(r.Context()))
 		env.storeBodies = append(env.storeBodies, string(body))
+		env.storeMu.Unlock()
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		if storeHandler != nil {
 			storeHandler(w, r)
 			return
@@ -95,9 +101,10 @@ func (e *driveTestEnv) data(t *testing.T) map[string]any {
 
 // --- command tree ---
 
-// TestDrive_CommandCount pins the 45-command surface: 39 generated leaves plus
-// the six composites. A drift here means either a spec op was added without a
-// decision or a composite stopped registering.
+// TestDrive_CommandCount pins the 49-command surface: 43 generated leaves plus
+// six composites (three of which replace generated leaves). A drift here means
+// either a spec op was added without a decision or a composite stopped
+// registering.
 func TestDrive_CommandCount(t *testing.T) {
 	tf := cmdutil.NewTestFactory()
 	tf.RegistryFunc = registry.MustNew
@@ -114,7 +121,7 @@ func TestDrive_CommandCount(t *testing.T) {
 		"folder":      {"create", "list", "rename", "move", "delete"},
 		"file":        {"get", "move", "copy", "rename"},
 		"blob":        {"create", "get", "list", "delete"},
-		"upload":      {"file", "prepare", "confirm", "cancel"},
+		"upload":      {"file", "prepare", "confirm", "cancel", "parts-presign", "complete", "abort"},
 		"download":    {"file", "url"},
 		"doc":         {"mount", "unmount", "list", "candidates"},
 		"share":       {"create", "blob-create", "list", "revoke", "access", "download"},
@@ -138,8 +145,8 @@ func TestDrive_CommandCount(t *testing.T) {
 			}
 		}
 	}
-	if total != 46 {
-		t.Errorf("expected 46 drive commands, the table lists %d", total)
+	if total != 49 {
+		t.Errorf("expected 49 drive commands, the table lists %d", total)
 	}
 	// Nothing beyond the table: a stray leaf (e.g. a duplicate generated
 	// `share access`) would otherwise pass unnoticed.

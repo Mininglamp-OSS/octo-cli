@@ -13,7 +13,7 @@
       "post": {
         "operationId": "file.upload",
         "summary": "Upload a file via multipart form",
-        "description": "multipart/form-data: file=<binary>. Max 100MB.",
+        "description": "multipart/form-data: file=<binary>. File size and allowed extensions follow the current backend upload policy.",
         "x-octo-risk": "write",
         "x-octo-multipart": true,
         "parameters": [
@@ -61,7 +61,7 @@
         "x-octo-binary-response": true,
         "parameters": [
           { "name": "path", "in": "path", "required": true, "schema": { "type": "string" }, "description": "storage key path (URL-encoded)" },
-          { "name": "filename", "in": "query", "schema": { "type": "string" }, "description": "override download filename" }
+          { "name": "filename", "in": "query", "schema": { "type": "string" }, "description": "Override the filename used to generate the download URL." }
         ],
         "responses": { "302": { "description": "Redirect to presigned URL" } }
       }

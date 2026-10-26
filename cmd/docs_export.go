@@ -53,6 +53,9 @@ envelope). The destination extension must match the selected export format.`,
 
 func validateDocsExport(format, outputPath string) (string, error) {
 	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		return "", output.ErrValidation("--export-format is required", "pass --export-format with md, docx, pdf, xlsx, png, or svg")
+	}
 	if !docsExportFormats[format] {
 		return "", output.ErrValidation("unsupported --export-format", "use md, docx, pdf, xlsx, png, or svg")
 	}
@@ -68,13 +71,19 @@ func validateDocsExport(format, outputPath string) (string, error) {
 }
 
 func runDocsExport(cmd *cobra.Command, f *cmdutil.Factory, docID, format, outputPath string) error {
-	format, err := validateDocsExport(format, outputPath)
+	docSegment, err := opaquePathSegment(docID, "docId")
+	if err != nil {
+		ee := output.ErrValidation(err.Error(), "use a non-empty document ID other than '.' or '..'")
+		_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning the structured input error
+		return ee
+	}
+	format, err = validateDocsExport(format, outputPath)
 	if err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort structured error
 		return err
 	}
 
-	path := "/v1/bot/docs/" + url.PathEscape(docID) + "/export"
+	path := "/v1/bot/docs/" + docSegment + "/export"
 	if format == "md" || format == "docx" || format == "pdf" || format == "xlsx" {
 		path += "/file"
 	}

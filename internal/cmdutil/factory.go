@@ -73,6 +73,9 @@ type Factory struct {
 	cli      *client.Client
 	mailCred *credential.MailCredential
 	mailCLI  *client.Client
+	// Compiled output query, paired with its expression for safe Factory reuse.
+	jqExpression string
+	jqProgram    *output.JQProgram
 	// botIdentityVerified records that the active Bot id is trusted: either it
 	// was obtained from the authoritative registration endpoint or recovered
 	// from an exact local Mail binding for the active Bot-token fingerprint.
@@ -227,8 +230,9 @@ func configureMailProviders(f *Factory) {
 // buildConfig loads the env config and reflects the resolved credential into it
 // so cfg.Validate (the auth gate in root's PersistentPreRunE) passes for
 // profile-based use and config show reports the active token. Only the "no
-// credential found" case is swallowed (so cfg.Validate reports the familiar
-// OCTO_BOT_TOKEN hint for the zero-config case); structured resolution errors
+// credential found" case outside task mode is swallowed (so cfg.Validate
+// reports the familiar OCTO_BOT_TOKEN hint for the zero-config case); task-mode
+// resolution errors retain their task-specific guidance. Structured errors
 // (ambiguous / missing profile) AND real IO errors (home dir, salt read) both
 // surface rather than masquerading as a missing token.
 func (f *Factory) buildConfig() (*config.Config, error) {
@@ -238,7 +242,7 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	}
 	cred, err := f.CredentialFunc()
 	if err != nil {
-		if errors.Is(err, credential.ErrNoCredential) {
+		if errors.Is(err, credential.ErrNoCredential) && cfg.CredentialMode != config.CredentialModeTask {
 			return cfg, nil
 		}
 		return nil, err
@@ -257,8 +261,8 @@ func (f *Factory) buildConfig() (*config.Config, error) {
 	return cfg, nil
 }
 
-// buildCredential resolves the credential through the file→env chain, applying
-// the --bot-id (or OCTO_BOT_ID) / --profile selectors and the --space override.
+// buildCredential selects explicit profiles first, then normalized environment
+// credentials, then implicit stored profiles. Mail uses the same resolved identity.
 func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)))
 	if mode == config.CredentialModeTask {
@@ -268,36 +272,41 @@ func (f *Factory) buildCredential() (*credential.BotCredential, error) {
 		return nil, fmt.Errorf("unsupported %s %q", config.EnvCredentialMode, mode)
 	}
 
+	hasExplicitSelector := f.Globals.Profile != "" || f.Globals.BotID != ""
+	if !hasExplicitSelector {
+		cred, err := credential.NewEnvProvider().Resolve()
+		if err != nil {
+			return nil, err
+		}
+		if cred != nil {
+			return f.finalizeCredential(cred), nil
+		}
+	}
+
 	store, err := f.AuthStore()
 	if err != nil {
 		return nil, err
 	}
 	botID := f.Globals.BotID
-	allowEmptyStoreBotIDFallback := false
 	if botID == "" {
-		botID = os.Getenv(config.EnvBotID)
-		allowEmptyStoreBotIDFallback = strings.TrimSpace(botID) != ""
+		botID = strings.TrimSpace(os.Getenv(config.EnvBotID))
 	}
-	fileProvider := credential.NewFileProvider(store, f.Globals.Profile, botID)
-	fileProvider.AllowEmptyStoreBotIDFallback = allowEmptyStoreBotIDFallback
-	chain := credential.NewChain(
-		fileProvider,
-		credential.NewEnvProvider(),
-	)
+	chain := credential.NewChain(credential.NewFileProvider(store, f.Globals.Profile, botID))
 	cred, err := chain.Resolve()
 	if err != nil {
 		return nil, err
 	}
+	return f.finalizeCredential(cred), nil
+}
+
+func (f *Factory) finalizeCredential(cred *credential.BotCredential) *credential.BotCredential {
 	if f.Globals.Space != "" {
 		cred.SpaceID = f.Globals.Space
-	}
-	if cred.Profile == "" && botID != "" {
-		cred.RobotID = botID
 	}
 	if cred.BotKind == "" {
 		cred.BotKind = credential.TokenKind(cred.Token)
 	}
-	return cred, nil
+	return cred
 }
 
 func storedMailCredential(store *authstore.Store, bot *credential.BotCredential, apiOrigin string) (string, authstore.MailBinding, error) {
@@ -332,11 +341,9 @@ func MailBindingKeyForBot(bot *credential.BotCredential, apiOrigin string) (stri
 	return authstore.MailBindingKey(bot.RobotID, bot.SpaceID, bot.Token, apiOrigin)
 }
 
-// buildTaskCredential is deliberately separate from the normal provider
-// chain when OCTO_CREDENTIAL_MODE=task is present. The daemon is responsible
-// for preserving that marker and isolating OCTO_CONFIG_DIR for task processes;
-// the CLI cannot make a caller-controlled environment tamper-proof. Fleet
-// verifies the opaque bearer and enforces its bindings/actions.
+// buildTaskCredential consumes only the dedicated credential for an explicitly
+// selected task invocation. The daemon provides its value; Fleet verifies the
+// opaque bearer and enforces its principal, bindings and actions.
 func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Profile != "" || f.Globals.BotID != "" ||
 		strings.TrimSpace(os.Getenv(config.EnvBotID)) != "" {
@@ -345,27 +352,11 @@ func (f *Factory) buildTaskCredential() (*credential.BotCredential, error) {
 	if f.Globals.Space != "" {
 		return nil, fmt.Errorf("%s=task does not allow --space; use the Loop command's --workspace-id", config.EnvCredentialMode)
 	}
-	if strings.TrimSpace(os.Getenv(config.EnvToken)) != "" {
-		return nil, fmt.Errorf("%s=task does not allow %s; use the daemon-injected %s", config.EnvCredentialMode, config.EnvToken, config.EnvBotToken)
+	resolved := config.ResolveEnvToken()
+	if resolved.Token == "" {
+		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvTaskToken)
 	}
-
-	provider := credential.NewEnvProvider()
-	provider.TokenVar = config.EnvBotToken
-	cred, err := provider.Resolve()
-	if err != nil {
-		return nil, err
-	}
-	if cred == nil {
-		return nil, fmt.Errorf("%w: %s=task requires %s", credential.ErrNoCredential, config.EnvCredentialMode, config.EnvBotToken)
-	}
-	if credential.TokenKind(cred.Token) != "loop_credential" {
-		return nil, fmt.Errorf("%s=task requires a Loop task credential in %s", config.EnvCredentialMode, config.EnvBotToken)
-	}
-	// Task credentials are server-bound; never forward a caller-selected Space
-	// context alongside them.
-	cred.SpaceID = ""
-	cred.BotKind = "agent_task"
-	return cred, nil
+	return &credential.BotCredential{Token: resolved.Token, Source: resolved.Source, BotKind: "agent_task"}, nil
 }
 
 // AuthStore lazily constructs and caches the credential store.
@@ -381,10 +372,11 @@ func (f *Factory) AuthStore() (*authstore.Store, error) {
 	return s, nil
 }
 
-// overlayProfileBaseURL fills cfg.APIBaseURL from the active profile's metadata,
-// but only when OCTO_API_BASE_URL is not explicitly set (env wins for the URL).
+// overlayProfileBaseURL applies the active profile's stored API base URL.
+// Precedence is profile > OCTO_API_BASE_URL > default: a profile that records
+// an origin routes there even when the environment variable names another one.
 func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) error {
-	if profile == "" || os.Getenv(config.EnvAPIBaseURL) != "" {
+	if profile == "" {
 		return nil
 	}
 	store, err := f.AuthStore()
@@ -398,9 +390,13 @@ func (f *Factory) overlayProfileBaseURL(cfg *config.Config, profile string) erro
 	if m, ok := profiles[profile]; ok && m.APIBaseURL != "" {
 		normalized, err := config.NormalizeAPIBaseURL(m.APIBaseURL)
 		if err != nil {
-			return fmt.Errorf("profile %q has an invalid API base URL: %w; update it with `octo-cli auth login --profile %s`", profile, err, profile)
+			return output.ErrValidation(
+				fmt.Sprintf("profile %q has an invalid API base URL: %v", profile, err),
+				fmt.Sprintf("repair it with `octo-cli --profile %s auth update --api-base-url <origin>` or remove it with `octo-cli --profile %s auth update --clear-api-base-url`", profile, profile),
+			)
 		}
 		cfg.APIBaseURL = normalized
+		cfg.APIBaseURLSource = "profile"
 	}
 	return nil
 }
@@ -560,6 +556,29 @@ func (f *Factory) Format() string {
 	return output.FormatJSON
 }
 
+// PreflightOutput validates the already-resolved output format and compiles
+// --jq before a command performs any work. The compiled program is reused by
+// emit and keyed by its source expression so factories can safely run more
+// than one root command.
+func (f *Factory) PreflightOutput(format string) error {
+	expr := ""
+	if f.Globals != nil {
+		expr = f.Globals.JQ
+	}
+	if expr == "" {
+		f.jqExpression = ""
+		f.jqProgram = nil
+	} else if f.jqProgram == nil || f.jqExpression != expr {
+		program, err := output.CompileJQ(expr)
+		if err != nil {
+			return err
+		}
+		f.jqExpression = expr
+		f.jqProgram = program
+	}
+	return output.ValidateFormat(format)
+}
+
 // EmitSuccess renders a success envelope, applying --jq first (if set) and
 // then the configured output format. Non-nil raw is placed inside the envelope.
 func (f *Factory) EmitSuccess(raw []byte) error {
@@ -633,7 +652,13 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 	}
 
 	if f.Globals != nil && f.Globals.JQ != "" {
-		results, err := output.ApplyJQ(envelope, f.Globals.JQ)
+		var results []any
+		var err error
+		if f.jqProgram != nil && f.jqExpression == f.Globals.JQ {
+			results, err = f.jqProgram.Apply(envelope)
+		} else {
+			results, err = output.ApplyJQ(envelope, f.Globals.JQ)
+		}
 		if err != nil {
 			return err
 		}
@@ -644,7 +669,6 @@ func (f *Factory) emit(raw []byte, meta output.EnvelopeMeta) error {
 			envelope = results
 		}
 	}
-
 	return output.Format(f.IOStreams.Out, f.Format(), envelope)
 }
 
@@ -734,6 +758,8 @@ func WrapCLIError(err error) error {
 	msg := err.Error()
 	lower := strings.ToLower(msg)
 	switch {
+	case strings.Contains(lower, "octo_task_token"):
+		return output.ErrAuth(msg, "the daemon must provide OCTO_TASK_TOKEN for this task invocation")
 	case strings.Contains(lower, "octo_token"),
 		strings.Contains(lower, "octo_bot_token"),
 		strings.Contains(lower, "bot token"),

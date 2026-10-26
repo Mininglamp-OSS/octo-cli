@@ -14,8 +14,8 @@ client extraction was cancelled and is not part of this branch.
 
 ## Scope
 
-The CLI exposes 14 Fleet public control-plane groups: attachments, autopilots,
-comments, executions, experts, expert teams, expert templates, labels, projects,
+The CLI exposes 13 Fleet public control-plane groups: attachments, autopilots,
+comments, executions, experts, expert teams, expert templates, labels,
 runtimes, skills, skill files, tasks, and workspaces.
 
 Repository operations, daemon device enrollment, task claim/heartbeat, and
@@ -77,9 +77,9 @@ send `X-Space-Id`. Loop public operations declare
 
 ### 1. Discovery and routing
 
-- `octo-cli schema --list loop` returns all 126 registered public operations
-  (the embedded contract contains 136 operation IDs; 10 are CLI-hidden).
-- `octo-cli loop --help` contains the 14 expected resource groups.
+- `octo-cli schema --list loop` returns all 116 registered public operations
+  (the embedded contract contains 126 operation IDs; 10 are CLI-hidden).
+- `octo-cli loop --help` contains the 13 expected resource groups.
 - Loop requests use `OCTO_API_BASE_URL/fleet/api/v1/*`.
 - Non-Loop requests continue to use their module-qualified gateway paths.
 - Authorization is sent as Bearer; tokens are masked in dry-run and verbose
@@ -150,7 +150,7 @@ and active executions when fixtures are available.
 ## Exit criteria
 
 - All local checks remain green.
-- All 136 embedded operation IDs match Fleet `openapi/public-v1.yaml`; 126 are
+- All 126 embedded operation IDs match Fleet `openapi/public-v1.yaml`; 116 are
   registered and 10 are intentionally CLI-hidden.
 - Read-only smoke tests pass for every supported identity.
 - The three write lifecycles pass and clean up their fixtures.

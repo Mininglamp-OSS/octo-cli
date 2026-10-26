@@ -40,12 +40,13 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 	if len(allowed) == 0 {
 		return nil
 	}
+	if value == nil && enumAllowsNull(allowed) {
+		return nil
+	}
 	got, ok := canonicalEnumValue(value)
 	if !ok {
-		// An object / array / null where the schema declares a scalar vocabulary
-		// cannot match any member, so reject rather than forward. Forwarding is
-		// what let `--data '{"im_channel_type":[1]}'` reach the backend and come
-		// back as an internal decode error naming a server struct.
+		// An object or array cannot match a scalar vocabulary. Null matches only
+		// the explicit null enum member handled above; otherwise reject it.
 		return output.ErrWithHint("validation", enumNotAllowed,
 			fmt.Sprintf("%s must be a single value from the accepted set, got %s", label, jsonKindName(value)),
 			fmt.Sprintf("pass one of: %s", formatEnum(allowed)))
@@ -56,6 +57,15 @@ func checkEnum(label string, value any, allowed []any) *output.ExitError {
 		}
 	}
 	return enumError(label, value, allowed)
+}
+
+func enumAllowsNull(allowed []any) bool {
+	for _, value := range allowed {
+		if value == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // jsonKindName names the JSON kind of a rejected value, so the message an agent reads talks
@@ -131,6 +141,9 @@ func specNumberText(f float64) string {
 // formatEnumValue renders the rejected value for the error message: strings
 // quoted so an empty or space-padded value is visible, everything else bare.
 func formatEnumValue(v any) string {
+	if v == nil {
+		return "null"
+	}
 	if s, ok := v.(string); ok {
 		return strconv.Quote(s)
 	}

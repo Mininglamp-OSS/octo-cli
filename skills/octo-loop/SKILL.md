@@ -2,7 +2,7 @@
 name: octo-loop
 version: 0.1.0
 services: ["loop"]
-description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, projects, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
+description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -21,7 +21,7 @@ Terminology (legacy → current): **agent → expert**, **squad → expert-team*
 ## When to use / not use
 
 Use this skill when the request targets a specific Loop workspace or task:
-reading or writing tasks, comments, projects, or metadata; working with experts
+reading or writing tasks, comments, or metadata; working with experts
 or expert-teams (dispatch, schedule, trigger a run); replying to a comment,
 creating or triaging a task, updating status, or reading progress.
 
@@ -30,7 +30,7 @@ Do not use it for chat unrelated to Loop, for pure local file work, or when
 
 ## Authentication
 
-Set `OCTO_BOT_TOKEN` to a bearer credential Fleet accepts directly, such as
+Set `OCTO_TOKEN` (compatible alias `OCTO_BOT_TOKEN`) to a bearer credential Fleet accepts directly, such as
 `bf_`, `uk_`, or `octo_loop_`. The CLI does not infer a
 human, device, or execution principal from a token prefix. Fleet verifies the
 credential and constructs the principal.
@@ -39,24 +39,67 @@ Outside daemon task mode, if a command fails with an auth error, check
 `octo-cli auth status` and let the user run `octo-cli auth login`. In
 `OCTO_CREDENTIAL_MODE=task`, those profile diagnostics are unavailable: report
 the auth failure so the daemon can refresh or replace the injected credential.
+For task workflow and collaboration in a daemon execution, select task mode
+for each invocation: `OCTO_CREDENTIAL_MODE=task "$OCTO_CLI_PATH" loop ...`.
+Task mode reads only `OCTO_TASK_TOKEN`; missing task credentials never fall
+back to ordinary token aliases or host profiles. Independent business calls
+keep ordinary authentication. Do not export mode for the session or switch
+identity to retry an authentication failure. The standalone examples below
+use ordinary mode; follow the daemon's scoped examples during its workflow.
 Do not fabricate credentials. Never leak or
 store tokens, config keys, or API base URLs, and do not bypass workspace
 permissions with direct HTTP calls.
 
-All Loop commands use the same gateway as every other domain. The embedded
-paths include the Fleet module namespace, so requests resolve under
-`$OCTO_API_BASE_URL/fleet/api/v1/*`.
+All Loop commands use the same gateway as every other domain. Fleet operations
+resolve under `$OCTO_API_BASE_URL/fleet/api/v1/*`. Project member listing also
+uses Fleet: its existing authorization checks the Bot's Project membership,
+then its verified owner's current membership when owner fallback is enabled.
+Fleet reads the Server internal member list with a service credential and
+forwards the response. Callers do not supply an owner UID or an OBO grant.
 
 ## Workspace selector
 
-Workspace-scoped Loop commands require the `--workspace-id <id>` flag (sent as
-the `X-Workspace-ID` header). There is no environment fallback for it — pass it
+Workspace-scoped Fleet commands require the `--workspace-id <uuid>` flag (sent as
+the `X-Workspace-ID` header). Use the Workspace UUID, not its Web slug. There is no environment fallback for it — pass it
 explicitly. Discover available workspaces first:
 
 ```bash
 octo-cli loop workspace list
-octo-cli loop workspace member list <workspace-id> --workspace-id <workspace-id>
 ```
+
+### Project members
+
+The existing member-list command reads the Octo Project roster. Its Project
+UUID is the same identity used by Loop as the workspace ID. Supply it either
+positionally or through `--workspace-id`, once:
+
+```bash
+octo-cli loop workspace member list <project-id>
+octo-cli loop workspace member list --workspace-id <project-id> --page 2 --page-size 50
+octo-cli loop workspace member list --workspace-id <project-id> --limit 50 --offset 50
+octo-cli loop expert list --workspace-id <project-id>
+octo-cli loop expert-team list --workspace-id <project-id>
+```
+
+Fleet resolves the Project's Space and verifies the request against that scope.
+Its configured owner fallback uses the authenticated Bot owner's identity;
+callers cannot select another human identity. No `--obo` flag is needed.
+
+Read Project members from `.data[]`. Each member contains `uid`, `name`, `role`
+(`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
+`uid` as opaque, case-sensitive text; pass a person's UID as `task assign --to-id`
+or use the explicit `--assignee-octo-uid` field. Member listings include Bot
+seats; consumers choosing a human assignee must check `robot == 0`.
+
+Pagination uses `--page` (one-based, default 1) and `--page-size` (default 50,
+maximum 200). The Project roster response is an array, and Fleet forwards the
+upstream total in `X-Total-Count`; CLI JSON output currently shows the array but
+not that header. Request subsequent pages until one returns fewer members than
+the requested page size. Authorization failures are returned directly.
+The older `--limit` / `--offset` flags remain available; the CLI converts them
+to page parameters when the offset is an exact multiple of the page size. With
+`--offset` alone, it explicitly sends the default page size of 50.
+Unaligned offsets fail locally because Fleet does not support partial pages.
 
 ## Discover and execute operations
 
@@ -65,11 +108,61 @@ tables.
 
 ```bash
 octo-cli loop task list --workspace-id <ws>
+octo-cli loop task search "oauth timeout" --workspace-id <ws>
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
 octo-cli loop execution message list <execution-id> --workspace-id <ws>
 ```
+
+Task search takes one required query argument; quote queries containing spaces.
+`--workspace-id`, `--page`, and `--page-size` remain flags. For a query that
+starts with `-`, put flags before the `--` end-of-options marker:
+
+```bash
+octo-cli loop task search --workspace-id <ws> -- "-draft"
+```
+
+### Task selection and grouping
+
+Task list and group accept common filters. Comma-separated query unions are
+single scalar flag values, so quote them as one shell argument; a nonempty
+`--statuses` takes precedence over `--status`, and a nonempty `--priorities`
+takes precedence over `--priority`.
+
+```bash
+octo-cli loop task list --workspace-id <ws> \
+  --statuses "in_progress,blocked" --assignee-types "expert,expert_team" \
+  --assignee-filters "expert:<expert-uuid>,expert_team:<team-uuid>" \
+  --label-ids "<label-uuid>" --sort due_date --direction asc
+octo-cli loop task group --workspace-id <ws> --group-by assignee \
+  --group-assignee-type expert --group-assignee-id <expert-uuid>
+```
+
+Identity selection supports `assignee_id(s)`, `assignee_octo_uid(s)` and
+`assignee_filters`, with the corresponding `creator_id(s)`,
+`creator_octo_uid(s)` and `creator_filters`. Actor ID filters take Fleet actor
+UUIDs; Octo UID filters take exact member UIDs. Typed filters use
+`<member|expert|expert_team>:<UUID>` entries.
+`label_ids` is a comma-separated scalar union. `include_no_assignee` includes
+unassigned tasks alongside an assignee filter; `involves_user_id` selects
+tasks involving a workspace user through an expert or expert-team assignment.
+
+`metadata` is one JSON string containing a flat object of primitive values
+(for example `--metadata '{"source":"automation","reviewed":true}'`).
+Supply `date_field` (`created_at` or `updated_at`), `date_start` and `date_end`
+together; the start is inclusive and the end is exclusive. Task list alone
+also accepts `open_only` and `scheduled`: `open_only=true` excludes `done` and
+`cancelled` tasks (so `backlog` remains eligible), while `scheduled=true`
+requires at least one of `start_date` or `due_date`. Sorting defaults to
+`position`; `position` is always ascending and ignores `direction`. Other sort
+keys are `title`, `created_at`, `start_date`, `due_date` or `priority`, with
+`direction` `asc` or `desc` (case-insensitive).
+
+Grouping is by assignee. `group_assignee_type` can be `none`, `member`,
+`expert` or `expert_team`; supply `group_assignee_id` for a specific actor and
+omit it when the type is `none`. These filters are backend-validated. Do not
+use retired project selectors or assume a task belongs to a project.
 
 Inspect the current contract before constructing a write:
 
@@ -91,12 +184,40 @@ Read before you write.
 octo-cli loop task get <task-id> --workspace-id <ws>
 octo-cli loop task comment list <task-id> --workspace-id <ws>
 octo-cli loop task metadata list <task-id> --workspace-id <ws>
-octo-cli loop task children-by-parent --workspace-id <ws>
+octo-cli loop task timeline list <task-id> --workspace-id <ws>
+octo-cli loop task active-execution list <task-id> --workspace-id <ws>
+octo-cli loop task execution list <task-id> --workspace-id <ws>
+octo-cli loop task usage <task-id> --workspace-id <ws>
+octo-cli loop task pull-request list <task-id> --workspace-id <ws>
+octo-cli loop task label list <task-id> --workspace-id <ws>
+octo-cli loop task child list <task-id> --workspace-id <ws>
+octo-cli loop task child-progress --workspace-id <ws>
+octo-cli loop expert execution list <expert-id> --workspace-id <ws>
+# Batch child selection uses comma-separated parent UUIDs. Omitting this flag
+# preserves the API's existing empty-collection response.
+octo-cli loop task children-by-parent --workspace-id <ws> --parent-task-ids "<uuid-1>,<uuid-2>"
 ```
 
-Comment history is paginated with `--page` / `--page-size`.
+Comment history, timelines, execution lists, pull requests, labels, and children
+are paginated with `--page` / `--page-size`. The child-progress operation's
+current CLI schema does not describe a parent selector; check its help rather
+than assuming one can be supplied.
 
-Explore other namespaces (`project`, `expert`, `expert-team`,
+## Attachment bytes
+
+To save actual attachment bytes, pass `--output` (or `-o`) to either binary
+content command:
+
+```bash
+octo-cli loop attachment content get <attachment-id> --workspace-id <ws> --output ./attachment.bin
+octo-cli loop attachment download <attachment-id> --workspace-id <ws> --output ./attachment.bin
+```
+
+With `--output`, JSON stdout reports response metadata and the output path.
+Without it, the CLI describes the binary response but saves no file. The flag
+does not bypass workspace or attachment permissions.
+
+Explore other namespaces (`expert`, `expert-team`,
 `expert-template`, `execution`, `runtime`, `skill`, `skill-file`, `autopilot`,
 `attachment`, `label`, top-level `comment`) with `--help` — their shapes vary.
 
@@ -109,13 +230,8 @@ for a write, confirm before executing.
 
 ### Comment and description bodies go through a file
 
-There is **no `--content-file` flag**. Body text is a request-body field, so
-pass it via `--data`, which accepts `@file` (or `@-` for stdin). Do not build
-the body inline with `--content "$(cat ...)"`: the shell rewrites backticks,
-`$()`, variables, quotes, and newlines before the CLI sees them.
-
-Write the body to a private temp file, wrap it as valid JSON (use `jq -Rs .` to
-escape the text safely), and clean up:
+There is **no `--content-file` flag**. Pass comment text through `--data`
+using `@file` (or `@-` for stdin), then clean up the temporary files:
 
 ```bash
 body_dir="$(mktemp -d)"
@@ -126,16 +242,30 @@ printf '{"content": %s}' "$(jq -Rs . < "$body_dir/reply.md")" > "$body_dir/body.
 octo-cli loop task comment create <task-id> --workspace-id <ws> --data "@$body_dir/body.json"
 ```
 
+Quoting a command substitution such as `"$(cat "$body_dir/reply.md")"` passes
+its output as one argument. The shell does not recursively evaluate `$()`,
+backticks, quotes, variable-looking text, or other shell syntax in that output;
+embedded newlines remain. Command substitution removes trailing newlines, so
+use the JSON-file route when exact body text matters. JSON escaping with
+`jq -Rs .` also avoids constructing a fragile inline JSON string.
+
 Use `mktemp -d`, never a fixed path like `./reply.md` (it can clobber a user
 file). To reply within a thread, add `--parent-comment-id <comment-id>`;
-individual flags override same-named fields in `--data`.
+`--attachment-ids` and `--suppress-expert-ids` accept comma-separated UUIDs.
+Individual flags override same-named fields in `--data`.
 
-Task descriptions follow the same pattern — `--description` is a plain string
-flag with the same shell hazards, so prefer a JSON body from a file:
+String arrays such as `attachment_ids` and `suppress_expert_ids` are promoted
+to comma-separated flags. Object inputs such as `runtime_ref`, and arrays of
+objects such as webhook `event_filters`, are not promoted and must stay inside
+the JSON body passed through `--data`.
+
+Task descriptions are available as the `--description` scalar flag. For
+multiline or exact text, use a JSON body from a file; `printf '%s'` avoids the
+extra newline added by a Bash here-string:
 
 ```bash
 printf '{"title": %s, "description": %s}' \
-  "$(jq -Rs . <<< 'Fix login redirect')" \
+  "$(printf '%s' 'Fix login redirect' | jq -Rs .)" \
   "$(jq -Rs . < "$body_dir/description.md")" > "$body_dir/task.json"
 octo-cli loop task create --workspace-id <ws> --data "@$body_dir/task.json"
 ```
@@ -145,7 +275,8 @@ octo-cli loop task create --workspace-id <ws> --data "@$body_dir/task.json"
 Metadata is persistent task state, not a log. Read it on entry and write only
 high-value facts that will be read again (for example `pr_url`,
 `pipeline_status`, `blocked_reason`). Inspect the contract first — the set path
-is keyed by a metadata id:
+is keyed by the persistent metadata key (for example, `pr_url`), not a separate
+metadata-record ID; the request body supplies its `value`:
 
 ```bash
 octo-cli schema task.metadata.set
@@ -154,56 +285,181 @@ octo-cli loop task metadata list <task-id> --workspace-id <ws>
 
 ## Status and assignment side effects
 
-Status and assignment are done through `task update`, not a dedicated command:
+Task create/update accepts these priorities: `urgent`, `high`, `medium`, `low`,
+and `none`. Status values are `backlog`, `todo`, `in_progress`, `in_review`,
+`done`, `blocked`, and `cancelled`; inspect workspace guidance before choosing
+a lifecycle transition.
 
 ```bash
+octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
+octo-cli loop task assign <task-id> --workspace-id <ws> --to "@Alice" --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
+octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
+octo-cli loop task update <task-id> --workspace-id <ws> --assignee-id <actor-id>
+octo-cli loop task list --workspace-id <ws> --assignee "Alice"
+octo-cli loop task list --workspace-id <ws> --assignee-id <fleet-actor-uuid>
+octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid>
+```
+
+These Multica-style selectors infer the member/expert/expert-team type by making
+at most 10 paginated requests per workspace list (`page_size=100`). A larger
+paginated roster stops automatic lookup; use explicit typed assignment fields
+instead. `--to` and `--assignee` match names only, removing a leading `@` or
+`＠` before matching. Names match case-insensitively: an exact name wins over a
+substring; an ambiguous name fails
+with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
+full ID if the stored name itself begins with one of those characters.
+`--to-id` and untyped `--assignee-id` on create/update require a complete, exact
+ID.
+`task list --assignee-id` passes a Fleet actor UUID directly to Fleet, including
+for historical assignees; use `--assignee-octo-uid` to filter by Project member
+UID. Project member UIDs are case-sensitive; native members use their Fleet user
+UUID. Bot members and archived actors are excluded from name/ID resolution for
+writes. A failed or incomplete list stops assignment.
+The selected credential and workspace apply to every lookup and write; Fleet
+continues to enforce authorization. Assignment can start or cancel executions.
+
+`--to`, `--to-id` and `--unassign` are mutually exclusive. `--assignee` cannot be
+mixed with explicit assignee fields or filters. Creating/updating with an
+explicit type keeps the original direct API behavior:
+
+```bash
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <uuid> --assignee-type expert   # or expert_team, member
+octo-cli loop task update <task-id> --workspace-id <ws> \
+  --assignee-octo-uid <member-octo-uid> --assignee-type member --suppress-run
+octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assignee
 ```
+
+`assignee_octo_uid` is for member assignment in an authorized Octo Project. The
+backend requires it to be paired with `assignee_type=member` and forbids
+combining it with `assignee_id`; project authorization remains backend-enforced.
+`assignee_id` normally means a Fleet actor UUID.
+
+`task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
+The same body is accepted through
+`task update --data '{"assignee_type":null,"assignee_id":null}'`. Dry-runs perform no
+assignee lookup: use explicit typed fields or `--unassign` for an offline preview.
+
+Task create/update also accept `--parent-task-id`, `--start-date`,
+`--due-date`, and comma-separated `--attachment-ids`. On update, `--position`
+sets manual task ordering and accepts fractional values. Explicit `null` in
+`--data` clears a parent or date field, for example
+`--data '{"start_date":null}'`.
 
 Changing status is not cosmetic — it can start or stop work. In the standard
 Fleet workflow `backlog` parks an assigned task, `in_progress` means work is in
 progress, and `in_review` means the work is awaiting review. Use `done` only
 after the work is accepted or no review is required; `done` and `cancelled` are
 terminal. Moving out of `backlog` to an active status can trigger the assigned
-expert to run. Confirm the exact status values accepted by your workspace via
-the schema.
+expert to run.
+
+Task update and assign also accept `--suppress-run`, which suppresses the run created by
+that write. It does not stop existing executions from being cancelled when an
+assignee changes. `--handoff-note` supplies optional context to Fleet's handoff
+path. Assignment pairing, authorization, and exact run-trigger semantics remain
+backend contracts.
 
 ## Dispatch and executions
 
 To create a task and dispatch it to an expert or expert-team in one call, use
-`quick-create` with a `prompt` and an assignee id:
+`quick-create` with a `prompt` and exactly one assignee id. A parent and existing
+attachments are optional:
 
 ```bash
 octo-cli loop task quick-create --workspace-id <ws> \
-  --prompt "Investigate the login redirect bug" --expert-id <uuid>
+  --prompt "Investigate the login redirect bug" --expert-id <uuid> \
+  --parent-task-id <parent-task-uuid> --attachment-ids "<attachment-uuid>"
 # or --expert-team-id <uuid>
 ```
 
-Each dispatch produces an execution. Read run state and stop a runaway run
-rather than guessing:
+Each dispatch produces an execution. Inspect active/all task executions before
+stopping or rerunning work:
 
 ```bash
+octo-cli loop task active-execution list <task-id> --workspace-id <ws>
 octo-cli loop task execution list <task-id> --workspace-id <ws>
 octo-cli loop task execution cancel <task-id> <execution-id> --workspace-id <ws>
 octo-cli loop task rerun <task-id> --workspace-id <ws> --execution-id <execution-id>
+octo-cli loop expert execution list <expert-id> --workspace-id <ws>
+octo-cli loop expert execution cancel <expert-id> --workspace-id <ws>
 ```
 
+Expert execution cancellation requests cancellation for active executions
+owned by that expert; it is not a substitute for selecting one task execution.
 Cancelling and rerunning are writes with side effects — confirm before running
 them unless the user asked.
 
-## Mention side effects
+## Autopilot mode and delivery controls
+
+Autopilot creation requires an explicit `--dispatch-mode`: `create_task` creates
+a Fleet task for a dispatch, while `direct_execution` dispatches without
+creating a task. Do not choose a mode on the user's behalf:
+
+```bash
+octo-cli loop autopilot create --workspace-id <ws> --title "Daily review" \
+  --assignee-id <expert-uuid> --dispatch-mode create_task
+# For an expert-team, add --assignee-type expert_team and use its UUID.
+```
+
+Inspect the mode and trigger contracts before writing:
+
+```bash
+octo-cli schema autopilot.create
+octo-cli schema autopilot.trigger_config.create
+octo-cli loop autopilot trigger-config create <autopilot-id> --help
+```
+
+Trigger configuration supports `schedule` and `webhook` kinds; schedule
+expressions use `cron_expression` and `timezone`. A task title template is only
+used in `create_task` mode; `direct_execution` does not create a task. Updates
+can change the mode, so review that effect before applying one. Webhook
+`event_filters` contain objects and must be passed through `--data`, not
+promoted scalar flags.
+
+The existing controls include manual trigger, run and delivery inspection, and
+delivery replay:
+
+```bash
+octo-cli loop autopilot trigger <autopilot-id> --workspace-id <ws>
+octo-cli loop autopilot run list <autopilot-id> --workspace-id <ws>
+octo-cli loop autopilot delivery list <autopilot-id> --workspace-id <ws>
+octo-cli loop autopilot delivery replay <autopilot-id> <delivery-id> --workspace-id <ws>
+octo-cli loop autopilot webhook-token rotate <autopilot-id> <trigger-id> --workspace-id <ws>
+octo-cli loop autopilot signing-secret set <autopilot-id> <trigger-id> --help
+```
+
+Configuration changes, delivery replay, token rotation, and signing-secret
+changes are sensitive writes; confirm before performing them. Use command help
+for secret inputs, and never echo webhook secrets or tokens into logs or task
+comments.
+
+
+## Comment triggers and mentions
 
 Comment bodies can contain mention links that Fleet interprets as actions, not
-decoration. Mentioning an **expert** or **expert-team** triggers a run;
+decoration. The comment preview resolves mentions and automation triggers
+without creating the comment; inspect it before posting an action-triggering
+body:
+
+```bash
+octo-cli loop task comment preview <task-id> --workspace-id <ws> --data "@$body_dir/body.json"
+```
+
+Comment create/preview accept `--parent-comment-id`, `--attachment-ids`, and
+`--suppress-expert-ids`. Suppression asks Fleet not to trigger the selected
+experts from that comment; it is not a blanket cancellation of existing or
+other executions. Mentioning an **expert** or **expert-team** triggers a run;
 mentioning a person is a notification only. Look up real ids before composing a
 mention:
 
 ```bash
 octo-cli loop expert list --workspace-id <ws>
 octo-cli loop expert-team list --workspace-id <ws>
-octo-cli loop workspace member list <ws> --workspace-id <ws>
+octo-cli loop workspace member list <ws>
 ```
 
 Do not mention an expert or expert-team just to say thanks, confirm, or wrap up

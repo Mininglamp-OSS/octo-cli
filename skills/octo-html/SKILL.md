@@ -63,10 +63,14 @@ as described below.
 ## Auth & space
 
 - Authenticate with a stored bot profile (`--profile` / `--bot-id`) or
-  `OCTO_BOT_TOKEN`; confirm the selected identity with `octo-cli config show`.
+  `OCTO_TOKEN` (compatible alias `OCTO_BOT_TOKEN`); confirm the selected identity with `octo-cli config show`.
 - Do not pass `--space`. octo-doc resolves identity and space server-side.
-- Write operations require author/write capability. Reads need at least reader
-  capability; backend failures are normalized into the CLI's
+- Reads need at least reader capability.
+- Posting comments requires commenter (CapComment) or higher; read-only share-code
+  access is insufficient. Other mutations retain their endpoint-specific
+  edit/manage requirements.
+
+- Backend failures are normalized into the CLI's
   `{ok:false,error:{type,code,message,hint,detail}}` envelope.
 
 ## 1. Create and publish
@@ -143,12 +147,15 @@ octo-cli html publish --version 2 --data '{"slug":"<doc-ref>","html":"<html><bod
 
 # List, inspect, and list versions.
 octo-cli html list
+octo-cli html list --page 2 --page-size 50
 octo-cli html get <doc-ref>
 octo-cli html versions <doc-ref>
 ```
 
 `html list` returns the backend's offset envelope as `data` plus `_pagination`
-(`total`, `page`, `page_size`). It has no cursor flags or `--page-all` support.
+(`total`, `page`, `page_size`). Use `--page` and `--page-size` to request a page;
+when omitted, the backend defaults to page 1 with 20 items and clamps page sizes
+above 100. It has no cursor flags or `--page-all` support.
 
 Mounts (`group`, `space`, or `thread`) control placement/registration only. For
 `group`, pass `group_no`; for `thread`, pass `thread_id`. They do not choose the
@@ -261,10 +268,23 @@ The wire parameter remains `slug`; pass the saved document reference.
 ```bash
 octo-cli html comment list --slug <doc-ref> [--version all]
 octo-cli html comment add --data '{"slug":"<doc-ref>","text":"Please clarify this","anchor":{"kind":"element","aid":"<content-hash>"}}'
+octo-cli html comment add --slug <doc-ref> --text "Please clarify this" --version latest
+octo-cli html comment add --slug <doc-ref> --text "Reply" --parent-id <root-id> --version 3
 ```
 
-`html comment list` likewise preserves offset metadata in `_pagination`; it has
-no cursor flags or `--page-all` support.
+`html comment add` requires at least commenter capability (CapComment); reader-only
+share-code access cannot post a comment, and insufficient capability is reported
+as a hidden 404. `--parent-id` names the thread root and creates a reply; omit it
+for a root comment, where the `anchor` JSON property may be supplied in `--data`.
+
+The optional `--version` selects the version associated with the comment. It
+accepts a non-negative number or decimal text, a `v`-prefixed decimal string, or
+the literal `latest`; for example, `--version latest` or `--version 3`. The flag
+sends text, while `--data` also accepts a JSON integer.
+
+`html comment list` currently returns all comments in a single response with
+offset metadata in `_pagination`. It is not a paginated interface and has no
+`--page`, `--page-size`, cursor flags, or `--page-all` support.
 
 ## 6. Agent element edit and reply
 
@@ -276,8 +296,12 @@ octo-cli html element get --data '{"slug":"<doc-ref>","aid":"<content-hash>"}'
 octo-cli html element replace --data '{"slug":"<doc-ref>","aid":"<content-hash>","new_html":"<section>updated body</section>"}'
 
 # Reply to a comment thread with an optional applied/partial/question verdict.
-octo-cli html reply --data '{"slug":"<doc-ref>","parent_id":"<comment-root-id>","text":"Done.","status":"applied"}'
+octo-cli html reply --data '{"slug":"<doc-ref>","parent_id":"<comment-root-id>","text":"Done.","status":"applied","applied_in":4}'
 ```
+
+`--applied-in` (`applied_in` in `--data`) is an optional association recording
+the version where the change was applied. It is distinct from the `--version`
+selector for creating a comment.
 
 To preserve comment anchors, prefer narrow element replacements; avoid changing
 an element's tag or nearby heading unless necessary.

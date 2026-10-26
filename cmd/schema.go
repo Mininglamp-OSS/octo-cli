@@ -21,7 +21,7 @@ func newSchemaCmd(f *cmdutil.Factory) *cobra.Command {
 	var list bool
 
 	cmd := &cobra.Command{
-		Use:   "schema [operation-id | domain]",
+		Use:   "schema [--list [domain] | operation-id]",
 		Short: "Inspect operation parameters and response schema from the registry",
 		Long: `Print the request parameters, request body, and response schema for an
 operation (e.g. "octo-cli schema matter.create"), or list available operations

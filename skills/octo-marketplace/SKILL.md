@@ -58,8 +58,11 @@ octo-cli marketplace plugin publish --plugin-id <plugin-id> \
 
 - A `private` plugin's listing state becomes published immediately, but it stays
   owner-only and is not exposed in the Space catalog.
-- A `space` plugin opens a review request and remains a draft until a Space
-  owner/admin approves it. Save the returned `review_id`.
+- A `space` plugin follows the authenticated Space's review policy. Automatic
+  approval is enabled by default when no override is stored, so publication
+  completes immediately. When automatic approval is disabled, the plugin remains
+  a draft with `pending_review`; save the returned `review_id` for the owner/admin
+  decision flow.
 - Read `display_status` as the user-facing state: `draft`, `pending_review`,
   `published`, `rejected`, or `delisted`. `listing_state` is the lower-level
   listing axis.
@@ -102,8 +105,20 @@ Marketplace mutations are not transport-retried. A gateway failure may mean the
 server committed the operation, so `RESULT_UNKNOWN` must be resolved by reading
 state before retrying:
 
-- create: walk `plugin list --scene-code default --mode mine --q "<name>"`
-  through every page;
+- create: for Skills, walk `plugin list --scene-code default --plugin-type skill
+  --mode mine --page 1 --page-size 100` through the complete owned Skill list,
+  re-passing `--page-size 100` on every page, and compare `manifest_json.name`
+  against the stable machine name. Follow the detailed procedure in `skills.md`.
+  For experts, expert teams, and connectors, walk `plugin list --scene-code
+  default --plugin-type <type> --mode mine --page 1 --page-size 100` until a
+  short page is returned, re-passing `--page-size 100` on every page, and
+  compare each row's `plugin_name` exactly with the title submitted by the
+  create request.
+  Do not assume `manifest_json.name` is a machine identity for those non-Skill
+  types. For every asset type, if multiple rows match exactly, stop as
+  ambiguous and ask the user which `plugin_id` is authoritative; never pick a
+  row automatically. Retry the create only after the relevant scan reaches a
+  short page with zero exact matches;
 - update/import of an existing id: `plugin get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
@@ -111,8 +126,11 @@ state before retrying:
 - review decisions: re-read the review request;
 - delist/delete: re-read the plugin.
 
-`--q` matches `plugin_name` substrings only and a page defaults to 20 rows. Stop
-only after an exact match or a short page.
+`--q` matches human-facing `plugin_name` and manifest-description substrings,
+not the stable `manifest_json.name`; a page defaults to 20 rows. Keep the same
+explicit `--page-size` on every request, and continue through a short page even
+after finding an exact match. Only then decide whether the match is unique;
+never stop at the first exact match.
 
 ## Pagination and filtering
 
@@ -120,6 +138,11 @@ only after an exact match or a short page.
 `--page-all`. Filters are `--category-id`, `--q`, repeatable `--tag`, `--mode
 mine`, and `--sort` (`newest`, `oldest`, `updated`, `name`, `placement`, `views`,
 `installs`, `downloads`, `comprehensive`).
+
+`plugin review-request list` and `plugin version list` are offset-paged with
+`--page` / `--page-size` (default 20, max 100); neither supports `--page-all`.
+To inspect a complete review queue or version history, keep the same page size
+and continue through a short page.
 
 `plugin-category list` requires `--scene-code` and `--plugin-type`.
 `plugin-tag list` accepts optional `--scene-code`, `--plugin-type`, `--q`,

@@ -10,7 +10,7 @@ This skill can read summaries and create an owner-only asynchronous summary. It 
 
 ## Authentication and scope
 
-Authenticate with the owner's `bf_*` personal Agent token through a stored profile or `OCTO_BOT_TOKEN`. Do not pass or rely on `--space`: the Summary service resolves both the human owner and Space from the bot token and applies the owner's existing Summary permissions.
+Authenticate with the owner's `bf_*` personal Agent token through a stored profile or `OCTO_TOKEN` (legacy alias `OCTO_BOT_TOKEN`). Do not pass or rely on `--space`: the Summary service resolves both the human owner and Space from the bot token and applies the owner's existing Summary permissions.
 
 ## Create a summary
 

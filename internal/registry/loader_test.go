@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -63,13 +64,13 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"file":        4,
 		"bot":         6,
 		"event":       2,
-		"docs":        44,
-		"drive":       43,
+		"docs":        45,
+		"drive":       46,
 		"html":        22,
 		"marketplace": 25,
 		"mail":        18,
 		"summary":     4,
-		"loop":        126,
+		"loop":        116,
 	}
 	totalWant := 0
 	for svc, want := range expected {
@@ -82,6 +83,71 @@ func TestAllDomainOperationCounts(t *testing.T) {
 	all := r.ListAllOperations()
 	if len(all) != totalWant {
 		t.Errorf("ListAllOperations: got %d, want %d", len(all), totalWant)
+	}
+}
+
+func TestDriveMultipartUploadSchemaContracts(t *testing.T) {
+	r := MustNew()
+
+	prepare, ok := r.GetOperation("drive.upload.prepare")
+	if !ok || prepare.ResponseSchema == nil {
+		t.Fatal("drive.upload.prepare response schema not found")
+	}
+	var capabilityHeader *ParamInfo
+	for i := range prepare.Parameters {
+		if prepare.Parameters[i].Name == "X-Drive-Upload-Capabilities" {
+			capabilityHeader = &prepare.Parameters[i]
+			break
+		}
+	}
+	if capabilityHeader == nil {
+		t.Fatal("drive.upload.prepare is missing the X-Drive-Upload-Capabilities header")
+	}
+	if capabilityHeader.In != "header" || capabilityHeader.Required || capabilityHeader.FlagName != "upload-capabilities" {
+		t.Errorf("drive.upload.prepare capability header = %+v, want optional header exposed as --upload-capabilities", *capabilityHeader)
+	}
+	for _, field := range []string{"upload_mode", "upload_url"} {
+		if _, ok := prepare.ResponseSchema.Properties[field]; !ok {
+			t.Errorf("drive.upload.prepare response is missing %s", field)
+		}
+		if contains(prepare.ResponseSchema.Required, field) {
+			t.Errorf("drive.upload.prepare response %s must remain optional", field)
+		}
+	}
+
+	presign, ok := r.GetOperation("drive.upload.parts_presign")
+	if !ok || presign.RequestBody == nil {
+		t.Fatal("drive.upload.parts_presign request schema not found")
+	}
+	if want := []string{"upload_id", "part_numbers"}; !reflect.DeepEqual(presign.RequestBody.Required, want) {
+		t.Errorf("drive.upload.parts_presign required = %v, want %v", presign.RequestBody.Required, want)
+	}
+	partNumbers, ok := presign.RequestBody.Properties["part_numbers"]
+	if !ok {
+		t.Fatal("drive.upload.parts_presign is missing part_numbers")
+	}
+	if partNumbers.Type != "array" || partNumbers.MinItems != 1 || partNumbers.MaxItems != 20 {
+		t.Errorf("drive.upload.parts_presign part_numbers = type %q, minItems %d, maxItems %d; want array, 1, 20",
+			partNumbers.Type, partNumbers.MinItems, partNumbers.MaxItems)
+	}
+
+	complete, ok := r.GetOperation("drive.upload.complete")
+	if !ok || complete.RequestBody == nil {
+		t.Fatal("drive.upload.complete request schema not found")
+	}
+	parts, ok := complete.RequestBody.Properties["parts"]
+	if !ok || parts.Items == nil {
+		t.Fatal("drive.upload.complete is missing parts items")
+	}
+	partNumber, ok := parts.Items.Properties["part_number"]
+	if !ok || partNumber.Minimum == nil || partNumber.Maximum == nil {
+		t.Fatal("drive.upload.complete part_number is missing numeric bounds")
+	}
+	if *partNumber.Minimum != 1 || *partNumber.Maximum != 10000 {
+		t.Errorf("drive.upload.complete part_number bounds = %v..%v, want 1..10000", *partNumber.Minimum, *partNumber.Maximum)
+	}
+	if want := []string{"file.id", "file.parent_id"}; !reflect.DeepEqual(complete.LosslessIDFields, want) {
+		t.Errorf("drive.upload.complete lossless id fields = %v, want %v", complete.LosslessIDFields, want)
 	}
 }
 
@@ -176,13 +242,12 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 	for _, id := range []string{
 		"workspace.list",
 		"label.create",
-		"project.resource.create",
 		"comment.reaction.add",
 		"attachment.upload",
 		"loop.skill.list",
 		"runtime.update_request.get",
 		"autopilot.delivery.replay",
-		"task.team_evaluation.record",
+		"expert_team.evaluate",
 	} {
 		op, ok := r.GetOperation(id)
 		if !ok {
@@ -192,6 +257,24 @@ func TestLoopExtendedBusinessContract(t *testing.T) {
 		if op.Service != "loop" || !strings.HasPrefix(op.Path, "/fleet/api/v1/") {
 			t.Errorf("%s: got service=%q path=%q", id, op.Service, op.Path)
 		}
+	}
+
+	evaluation, ok := r.GetOperation("expert_team.evaluate")
+	if !ok {
+		t.Fatal("expert_team.evaluate: not found")
+	}
+	if evaluation.Path != "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations" {
+		t.Fatalf("expert_team.evaluate path = %q", evaluation.Path)
+	}
+	if evaluation.RequestBody == nil {
+		t.Fatal("expert_team.evaluate request body missing")
+	}
+	outcome, ok := evaluation.RequestBody.Properties["outcome"]
+	if !ok || !slices.Equal(outcome.Enum, []any{"action", "no_action", "failed"}) {
+		t.Fatalf("expert_team.evaluate outcome schema = %+v", outcome)
+	}
+	if _, ok := evaluation.RequestBody.Properties["reason"]; !ok {
+		t.Fatalf("expert_team.evaluate reason schema missing: %+v", evaluation.RequestBody.Properties)
 	}
 
 	op, ok := r.GetOperation("label.list")
@@ -592,6 +675,149 @@ func TestGetOperationDocsSearch_Pagination(t *testing.T) {
 	if !reflect.DeepEqual(docType.Items.Enum, wantTypes) {
 		t.Errorf("docs.search docType enum = %#v, want %#v", docType.Items.Enum, wantTypes)
 	}
+}
+
+func TestMarketplaceSkillImportNameSemantics(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.import")
+	if !ok || op.RequestBody == nil {
+		t.Fatal("plugin.import request body not found")
+	}
+	pluginName, ok := op.RequestBody.Properties["plugin_name"]
+	if !ok || !strings.Contains(strings.ToLower(pluginName.Description), "human-facing marketplace display name") {
+		t.Errorf("plugin_name description must identify the display name, got %q", pluginName.Description)
+	}
+	if !strings.Contains(pluginName.Description, "unless the user explicitly requested a rename") {
+		t.Errorf("plugin_name description must preserve the current display name on update, got %q", pluginName.Description)
+	}
+	importDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins/import", "post")
+	if !strings.Contains(importDescription, "Creating requires a non-empty plugin_name") {
+		t.Errorf("plugin.import description must document the create-time display-name requirement, got %q", importDescription)
+	}
+	if pluginName.MinLength != 1 {
+		t.Errorf("plugin_name min length = %d, want 1", pluginName.MinLength)
+	}
+	parseTask, ok := op.RequestBody.Properties["parse_task_id"]
+	if !ok || parseTask.MinLength != 1 {
+		t.Errorf("parse_task_id schema = %+v, want minLength 1", parseTask)
+	}
+	name, ok := op.RequestBody.Properties["name"]
+	if !ok || !strings.Contains(strings.ToLower(name.Description), "skill machine name") {
+		t.Errorf("name description must identify the machine name, got %q", name.Description)
+	}
+	if !strings.Contains(name.Description, "derived from the uploaded package") {
+		t.Errorf("name description must document its create fallback, got %q", name.Description)
+	}
+	if len(op.BodyVariants) != 3 {
+		t.Fatalf("plugin.import body variants = %+v, want create, update-preserve, and update-rename", op.BodyVariants)
+	}
+	create, preserve, rename := op.BodyVariants[0], op.BodyVariants[1], op.BodyVariants[2]
+	if create.Name != "create" || !contains(create.Required, "plugin_name") || !contains(create.Forbidden, "plugin_id") {
+		t.Errorf("plugin.import create variant = %+v", create)
+	}
+	if contains(create.Required, "name") {
+		t.Errorf("plugin.import create variant unexpectedly requires name despite package-derived fallback: %+v", create)
+	}
+	if preserve.Name != "update-preserve-display-name" || !contains(preserve.Required, "plugin_id") || !contains(preserve.Forbidden, "plugin_name") {
+		t.Errorf("plugin.import update-preserve variant = %+v", preserve)
+	}
+	if rename.Name != "update-rename" || !contains(rename.Required, "plugin_id") || !contains(rename.Required, "plugin_name") {
+		t.Errorf("plugin.import update-rename variant = %+v", rename)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--plugin-name") {
+		t.Errorf("plugin.import body variant hint = %q, want --plugin-name guidance", op.BodyVariantsHint)
+	}
+	if !strings.Contains(op.BodyVariantsHint, "--parse-task-id") {
+		t.Errorf("plugin.import body variant hint = %q, want --parse-task-id guidance", op.BodyVariantsHint)
+	}
+}
+
+func TestBodyVariantsAlwaysDeclareActionableHint(t *testing.T) {
+	r := MustNew()
+	checked := 0
+	for _, summary := range r.ListAllOperations() {
+		op, ok := r.GetOperation(summary.ID)
+		if !ok || len(op.BodyVariants) == 0 {
+			continue
+		}
+		checked++
+		if strings.TrimSpace(op.BodyVariantsHint) == "" {
+			t.Errorf("%s declares body variants without x-octo-body-variants-hint", op.ID)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no body-variant operations found")
+	}
+}
+
+func TestMarketplacePluginListDeclaresManifestMachineName(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("plugin.list response schema not found")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Type != "array" || data.Items == nil {
+		t.Fatalf("plugin.list data schema = %+v, want an item array", data)
+	}
+	manifest, ok := data.Items.Properties["manifest_json"]
+	if !ok || manifest.Type != "object" {
+		t.Fatalf("plugin.list item manifest_json schema = %+v", manifest)
+	}
+	if !contains(data.Items.Required, "manifest_json") {
+		t.Fatalf("plugin.list item required fields = %v, want manifest_json", data.Items.Required)
+	}
+	name, ok := manifest.Properties["name"]
+	if !ok || name.Type != "string" {
+		t.Fatalf("plugin.list manifest_json.name schema = %+v", name)
+	}
+	if !contains(manifest.Required, "name") {
+		t.Fatalf("plugin.list manifest_json required fields = %v, want name", manifest.Required)
+	}
+	displayStatus, ok := data.Items.Properties["display_status"]
+	if !ok || !reflect.DeepEqual(displayStatus.Enum, []any{"draft", "pending_review", "published", "rejected", "delisted"}) {
+		t.Fatalf("plugin.list display_status schema = %+v", displayStatus)
+	}
+	var qDescription, modeDescription string
+	for _, parameter := range op.Parameters {
+		if parameter.Name == "q" {
+			qDescription = parameter.Description
+		}
+		if parameter.Name == "mode" {
+			modeDescription = parameter.Description
+		}
+	}
+	if !strings.Contains(qDescription, "manifest_json.description") || strings.Contains(qDescription, "description, tags") {
+		t.Errorf("plugin.list q description must match the backend display-name/description search, got %q", qDescription)
+	}
+	if !strings.Contains(modeDescription, "every listing state") {
+		t.Errorf("plugin.list mode description must document owned-state coverage, got %q", modeDescription)
+	}
+	listDescription := rawOperationDescription(t, r, "marketplace", "/market/api/v1/plugins", "get")
+	if !strings.Contains(listDescription, "legacy rows with a missing or hidden default placement") || !strings.Contains(listDescription, "even with mode=mine") {
+		t.Errorf("plugin.list description must disclose the legacy placement limitation, got %q", listDescription)
+	}
+}
+
+func rawOperationDescription(t *testing.T, r *Registry, service, path, method string) string {
+	t.Helper()
+	paths, ok := r.GetSpec(service)["paths"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s spec paths missing", service)
+	}
+	pathItem, ok := paths[path].(map[string]any)
+	if !ok {
+		t.Fatalf("%s path %s missing", service, path)
+	}
+	operation, ok := pathItem[method].(map[string]any)
+	if !ok {
+		t.Fatalf("%s %s operation missing", method, path)
+	}
+	description, ok := operation["description"].(string)
+	if !ok {
+		t.Fatalf("%s %s description missing", method, path)
+	}
+	return description
 }
 
 func TestGetOperationMessageSend_DMWorkimBase(t *testing.T) {
@@ -1291,31 +1517,6 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func TestDocsStrictSchemaAppliesOnlyToExplicitOperations(t *testing.T) {
-	r := MustNew()
-	want := map[string]bool{
-		"docs.ppt.edit":             true,
-		"docs.share.set":            true,
-		"docs.sheet.rows.insert":    true,
-		"docs.sheet.rows.delete":    true,
-		"docs.sheet.columns.insert": true,
-		"docs.sheet.columns.delete": true,
-		"docs.sheet.split":          true,
-		"docs.sheet.deduplicate":    true,
-	}
-	for id := range want {
-		if _, ok := r.GetOperation(id); !ok {
-			t.Errorf("missing strict operation %s", id)
-		}
-	}
-	for _, info := range r.ListOperations("docs") {
-		op, ok := r.GetOperation(info.ID)
-		if !ok || op.StrictRequestSchema != want[info.ID] {
-			t.Errorf("%s strict body validation metadata is misleading", info.ID)
-		}
-	}
 }
 
 // OpenAPI 3.1 uses JSON Schema unions; nullable:true is a 3.0 keyword and

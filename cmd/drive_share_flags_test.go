@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -32,7 +33,8 @@ import (
 // closing.
 //
 // The decision is on whether the caller *set* the flag, not on the value: --expires-in-seconds 0
-// means "use the backend default" and is a different statement from not passing it at all.
+// means "use the backend default", and explicitly passing the default --permission download
+// is still different from not passing --permission at all.
 func TestDriveShareCreate_DocBranchRefusesBlobOnlyFlags(t *testing.T) {
 	const docEntry = `{"id":5,"type":"doc","ref_id":"d_1","doc_space_id":"space-9","space_id":"shared:drive-1","name":"Spec"}`
 
@@ -45,6 +47,8 @@ func TestDriveShareCreate_DocBranchRefusesBlobOnlyFlags(t *testing.T) {
 		{"password-file", nil, []string{"--password-file"}}, // args filled in below
 		{"expires-in-seconds", []string{"--expires-in-seconds", "3600"}, []string{"--expires-in-seconds"}},
 		{"expires-in-seconds explicitly zero", []string{"--expires-in-seconds", "0"}, []string{"--expires-in-seconds"}},
+		{"permission explicitly default", []string{"--permission", "download"}, []string{"--permission"}},
+		{"permission explicitly changed", []string{"--permission", "view"}, []string{"--permission"}},
 		{"password and expires together", []string{"--password", "hunter2hunter2", "--expires-in-seconds", "60"},
 			[]string{"--password", "--expires-in-seconds"}},
 	} {
@@ -132,8 +136,15 @@ func TestDriveShareCreate_BlobBranchStillAppliesTheFlags(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":5,"type":"blob","space_id":"shared:drive-1","name":"c.pdf"}`))
 	}, nil)
 
-	if err := env.run("drive", "share", "create", "5", "--password", password, "--expires-in-seconds", "3600"); err != nil {
+	if err := env.run("drive", "share", "create", "5", "--permission", "view", "--password", password, "--expires-in-seconds", "3600"); err != nil {
 		t.Fatalf("blob share: %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(shareBody), &body); err != nil {
+		t.Fatalf("parse share body: %v", err)
+	}
+	if body["permission"] != "view" {
+		t.Errorf("permission = %v, want view", body["permission"])
 	}
 	if !strings.Contains(shareBody, password) {
 		t.Errorf("the password must still reach the blob share request: %s", shareBody)

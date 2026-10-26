@@ -102,6 +102,7 @@ func TestDocs_RegistryShape(t *testing.T) {
 		"docs.comments.get":         {"GET", "/v1/bot/docs/{docId}/comments/{id}"},
 		"docs.comments.replies":     {"GET", "/v1/bot/docs/{docId}/comments/{id}/replies"},
 		"docs.comments.list":        {"GET", "/v1/bot/docs/{docId}/comments"},
+		"docs.sheet.list":           {"GET", "/v1/bot/docs/{docId}/sheets"},
 		"docs.comments.add":         {"POST", "/v1/bot/docs/{docId}/comments"},
 		"docs.comments.edit":        {"PATCH", "/v1/bot/docs/{docId}/comments/{id}"},
 		"docs.comments.delete":      {"DELETE", "/v1/bot/docs/{docId}/comments/{id}"},

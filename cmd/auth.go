@@ -38,28 +38,55 @@ func newAuthCmd(f *cmdutil.Factory) *cobra.Command {
 	return cmd
 }
 
+func authMutationPreRun(f *cmdutil.Factory, hint string) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, _ []string) error {
+		if !f.Globals.DryRun {
+			return nil
+		}
+		return failErr(f, output.ErrValidation(
+			"--dry-run is not supported for auth "+cmd.Name(),
+			hint,
+		))
+	}
+}
+
 func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
-	var apiBaseURL string
+	var (
+		apiBaseURL      string
+		clearAPIBaseURL bool
+	)
 
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update non-secret settings for a stored bot profile",
-		Args:  cobra.NoArgs,
+		Use:     "update",
+		Short:   "Update non-secret settings for a stored bot profile",
+		Long:    "Updates the selected profile's API base URL, or clears it with --clear-api-base-url. This local mutation rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to update the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if strings.TrimSpace(apiBaseURL) == "" {
+			if clearAPIBaseURL && cmd.Flags().Changed("api-base-url") {
 				return failErr(f, output.ErrValidation(
-					"--api-base-url is required",
-					"pass the public OCTO API origin for this Bot profile",
+					"--api-base-url and --clear-api-base-url are mutually exclusive",
+					"pass exactly one of them",
 				))
 			}
-			normalized, err := config.NormalizeAPIBaseURL(apiBaseURL)
-			if err != nil {
-				return failErr(f, output.ErrValidation(
-					err.Error(),
-					"pass only the Octo gateway base URL, without a service path",
-				))
+			if clearAPIBaseURL {
+				apiBaseURL = ""
+			} else {
+				if strings.TrimSpace(apiBaseURL) == "" {
+					return failErr(f, output.ErrValidation(
+						"--api-base-url or --clear-api-base-url is required",
+						"pass the public OCTO API origin for this Bot profile, or clear the stored origin",
+					))
+				}
+				normalized, err := config.NormalizeAPIBaseURL(apiBaseURL)
+				if err != nil {
+					return failErr(f, output.ErrValidation(
+						err.Error(),
+						"pass only the Octo gateway base URL, without a service path",
+					))
+				}
+				apiBaseURL = normalized
 			}
-			apiBaseURL = normalized
 
 			store, err := f.AuthStore()
 			if err != nil {
@@ -95,7 +122,8 @@ func newAuthUpdateCmd(f *cmdutil.Factory) *cobra.Command {
 			}
 		},
 	}
-	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set OCTO API base URL for this profile")
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "set this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
+	cmd.Flags().BoolVar(&clearAPIBaseURL, "clear-api-base-url", false, "remove the stored API base URL so OCTO_API_BASE_URL or the default applies")
 	return cmd
 }
 
@@ -110,8 +138,10 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 		Long: "Store an Octo or Loop bearer credential under a profile. Identify a bot with --bot-id " +
 			"(its robot id, recommended) and/or --profile (a friendly name). The " +
 			"token is read from a hidden prompt on a terminal, or from stdin with " +
-			"--with-token, or from --token-file — never from the command line.",
-		Args: cobra.NoArgs,
+			"--with-token, or from --token-file — never from the command line. " +
+			"This local credential write rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to store the credential locally"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			botID := f.Globals.BotID
 			name := f.Globals.Profile
@@ -185,7 +215,7 @@ func newAuthLoginCmd(f *cmdutil.Factory) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&withToken, "with-token", false, "read the token from stdin instead of a prompt")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "read the token from this file")
-	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "override OCTO_API_BASE_URL for this profile")
+	cmd.Flags().StringVar(&apiBaseURL, "api-base-url", "", "store this profile's API base URL (takes precedence over OCTO_API_BASE_URL)")
 	cmd.MarkFlagsMutuallyExclusive("with-token", "token-file")
 	return cmd
 }
@@ -196,11 +226,41 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 		Short: "Show the single active bot identity (whoami); use `auth list` to enumerate",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Report the same credential an ordinary request would use. In
+			// particular, environment credentials must bypass the local store.
+			cred, resolveErr := f.Credential()
+			if resolveErr == nil {
+				cfg, err := f.Config()
+				if err != nil {
+					return failErr(f, err)
+				}
+				active := map[string]any{
+					"bot_token": credential.MaskToken(cred.Token),
+					"source":    cred.Source,
+				}
+				putIfSet(active, "profile", cred.Profile)
+				if cred.Profile != "" {
+					putIfSet(active, "robot_id", cred.RobotID)
+				} else {
+					putIfSet(active, "robot_id_claimed", cred.RobotID)
+				}
+				putIfSet(active, "bot_kind", cred.BotKind)
+				putIfSet(active, "api_base_url", cfg.APIBaseURL)
+				putIfSet(active, "api_base_url_source", cfg.APIBaseURLSource)
+				putIfSet(active, "space_id", cfg.SpaceID)
+				return emitJSON(f, map[string]any{"active": active})
+			}
+			// Preserve informational output for an empty or ambiguous store,
+			// but never hide invalid selectors, configuration, or I/O errors.
+			ee := output.AsExitError(resolveErr)
+			if !errors.Is(resolveErr, credential.ErrNoCredential) && (ee == nil || ee.Type != "validation") {
+				return failErr(f, resolveErr)
+			}
 			store, err := f.AuthStore()
 			if err != nil {
 				return failErr(f, err)
 			}
-			name, meta, status, err := store.ActiveProfile(f.Globals.Profile, selectorBotID(f))
+			_, _, status, err := store.ActiveProfile(f.Globals.Profile, selectorBotID(f))
 			if err != nil {
 				return failErr(f, err)
 			}
@@ -208,21 +268,6 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 			// It never enumerates profiles (that is `auth list`): the active
 			// identity, or null with a pointer when nothing is selected.
 			switch status {
-			case authstore.StatusFound:
-				token, terr := store.GetToken(name)
-				if terr != nil {
-					return failErr(f, terr)
-				}
-				active := map[string]any{
-					"profile":   name,
-					"bot_token": credential.MaskToken(token),
-					"source":    "profile:" + name,
-				}
-				putIfSet(active, "robot_id", meta.RobotID)
-				putIfSet(active, "bot_kind", meta.BotKind)
-				putIfSet(active, "api_base_url", meta.APIBaseURL)
-				putIfSet(active, "space_id", meta.SpaceID)
-				return emitJSON(f, map[string]any{"active": active})
 			case authstore.StatusAmbiguous:
 				count, _ := store.Count() //nolint:errcheck // advisory count for the hint only
 				return emitJSON(f, map[string]any{
@@ -230,16 +275,15 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 					"profile_count": count,
 					"hint":          "no bot selected; pass --bot-id <id> or --profile <name> (or set OCTO_BOT_ID), or run `octo-cli auth list`",
 				})
-			case authstore.StatusMissing:
-				return failErr(f, output.ErrAuth(
-					"no matching profile", "check `octo-cli auth list`"))
-			default: // none
+			case authstore.StatusNone:
 				return emitJSON(f, map[string]any{
 					"active":        nil,
 					"profile_count": 0,
-					"env_token_set": os.Getenv(config.EnvBotToken) != "",
+					"env_token_set": config.ResolveEnvToken().Token != "",
 					"hint":          "no stored profiles; run `octo-cli auth login`",
 				})
+			default:
+				return failErr(f, resolveErr)
 			}
 		},
 	}
@@ -247,9 +291,11 @@ func newAuthStatusCmd(f *cmdutil.Factory) *cobra.Command {
 
 func newAuthLogoutCmd(f *cmdutil.Factory) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout",
-		Short: "Remove a stored bot credential",
-		Args:  cobra.NoArgs,
+		Use:     "logout",
+		Short:   "Remove a stored bot credential",
+		Long:    "Removes the selected local profile. This local mutation rejects --dry-run.",
+		Args:    cobra.NoArgs,
+		PreRunE: authMutationPreRun(f, "omit --dry-run to remove the stored profile"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := f.AuthStore()
 			if err != nil {

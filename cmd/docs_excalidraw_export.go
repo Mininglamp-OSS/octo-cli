@@ -17,6 +17,7 @@ import (
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 const (
@@ -36,10 +37,10 @@ Pass --image-format excalidraw with --output/-o to save a round-trippable
 version-2 Excalidraw file. Referenced attachments are embedded as dataURL values.
 This format reads the live scene even during --dry-run.`
 	if imageFormat := export.Flags().Lookup("image-format"); imageFormat != nil {
-		imageFormat.Usage = "image format (one of: png, svg, excalidraw); default png"
+		imageFormat.Usage = "image format (one of: png, svg, excalidraw)"
 	}
-	if output := export.Flags().Lookup("output"); output != nil {
-		output.Usage = "write PNG, SVG, or portable Excalidraw output to this file path"
+	if outputFlag := export.Flags().Lookup("output"); outputFlag != nil {
+		outputFlag.Usage = "write PNG, SVG, or portable Excalidraw output to this file path"
 	}
 	export.RunE = func(cmd *cobra.Command, args []string) error {
 		imageFormat, err := cmd.Flags().GetString("image-format")
@@ -54,7 +55,7 @@ This format reads the live scene even during --dry-run.`
 			return err
 		}
 		if strings.TrimSpace(outputPath) == "" {
-			return errors.New("--output is required when --image-format is excalidraw")
+			return output.ErrValidation("--output is required when --image-format is excalidraw", "pass --output/-o with a .excalidraw destination")
 		}
 		return runDocsExcalidrawExport(cmd, f, args[0], outputPath)
 	}
@@ -62,7 +63,7 @@ This format reads the live scene even during --dry-run.`
 
 func runDocsExcalidrawExport(cmd *cobra.Command, f *cmdutil.Factory, docID, outputPath string) error {
 	if strings.ToLower(filepath.Ext(outputPath)) != ".excalidraw" {
-		return errors.New("--output must have the .excalidraw extension")
+		return output.ErrValidation("--output must have the .excalidraw extension", "choose a destination path ending in .excalidraw")
 	}
 	s, err := getScene(cmd, f, docID)
 	if err != nil {

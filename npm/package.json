@@ -6,10 +6,11 @@
     "octo-cli": "bin/octo-cli.js"
   },
   "scripts": {
-    "test": "node --test scripts/prepare-packages.test.js"
+    "test": "node --test scripts/prepare-packages.test.js scripts/upgrade.test.js scripts/upgrade-launcher-review.test.js scripts/upgrade-managers-review.test.js"
   },
   "files": [
     "bin/octo-cli.js",
+    "lib/",
     "README.md",
     "LICENSE"
   ],

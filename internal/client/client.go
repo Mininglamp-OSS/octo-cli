@@ -33,7 +33,7 @@ const (
 	defaultBaseDelay    = 500 * time.Millisecond
 	defaultMaxDelay     = 10 * time.Second
 	defaultTimeout      = 30 * time.Second
-	loopAcceptMediaType = "application/json"
+	loopAcceptMediaType = "application/vnd.octo+json"
 )
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
@@ -98,6 +98,12 @@ type Request struct {
 	// traces and --dry-run output, whether it appears in the URL path or the
 	// request body. The values still go on the wire unchanged.
 	SecretValues []string
+	// ResponseSecretFields lists response-schema paths marked x-octo-secret.
+	// On a non-2xx response, the client extracts the actual values at these
+	// paths (at any envelope depth) and treats them as secrets for error
+	// redaction. Opaque non-JSON bodies fail closed because there is no
+	// structure to bound the redaction to.
+	ResponseSecretFields []string
 	// SensitiveJSONFields lists top-level writeOnly request properties that
 	// must be redacted from dry-run and verbose diagnostic output.
 	SensitiveJSONFields []string
@@ -111,6 +117,16 @@ type Request struct {
 // secretMask replaces a redacted value in verbose / dry-run output. It is a
 // fixed string so the secret's length is not revealed either.
 const secretMask = "***REDACTED***"
+
+func redactRedirectLocation(location string, requestSecrets, responseSecretFields []string) string {
+	if location == "" {
+		return ""
+	}
+	if len(responseSecretFields) > 0 {
+		return secretMask
+	}
+	return redactSecrets(location, requestSecrets)
+}
 
 // redactSecrets masks every non-empty SecretValues entry found in s. Values are
 // masked longest-first so a secret that contains another as a substring cannot
@@ -872,11 +888,11 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		contentType = "application/json"
 	}
 
-	if req.Service == "loop" && headerValue(req.Headers, "Accept") == "" {
-		if req.Headers == nil {
-			req.Headers = make(map[string]string)
-		}
-		req.Headers["Accept"] = loopAcceptMediaType
+	if req.Service == "loop" {
+		copyReq := *req
+		copyReq.Headers = cloneHeaders(req.Headers)
+		setHeader(copyReq.Headers, "Accept", loopAcceptMediaType)
+		req = &copyReq
 	}
 
 	if c.options.DryRun {
@@ -888,15 +904,6 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return nil, markResultUnknown(err)
 	}
 	return result, err
-}
-
-func headerValue(headers map[string]string, name string) string {
-	for key, value := range headers {
-		if strings.EqualFold(key, name) {
-			return value
-		}
-	}
-	return ""
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
@@ -979,6 +986,15 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		// path parameter (invite / share token) would otherwise reach the default
 		// stderr error envelope — no --verbose needed to leak it.
 		msg := redactSecrets(err.Error(), req.SecretValues)
+		if len(req.ResponseSecretFields) > 0 {
+			// Go parses Location before CheckRedirect runs. A malformed redirect
+			// therefore surfaces here as a *url.Error containing the raw signed
+			// URL, before the response can reach redactRedirectLocation. There is
+			// no structured field to isolate, so fail closed rather than echo an
+			// arbitrary transport error from an operation that can return a
+			// response secret.
+			msg = "transport error"
+		}
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}
@@ -1000,18 +1016,13 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 
 	c.verbosef("← %d (%d bytes)", resp.StatusCode, len(respBody))
-
 	// Redirects (3xx) are not followed automatically — surface the Location
 	// header as a JSON envelope when the caller opted into binary/redirect
 	// handling (file.download). Any other endpoint returning 3xx is treated
 	// as an unexpected error.
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		if req.BinaryResponse {
-			// Redacted like the sibling 3xx error path below. No secret-bearing
-			// operation declares a binary response today, so this does not fire —
-			// but the two renderings of the same header disagreeing is the kind of
-			// asymmetry that becomes a finding a round later.
-			loc := redactSecrets(resp.Header.Get("Location"), req.SecretValues)
+			loc := redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, req.ResponseSecretFields)
 			env := map[string]any{
 				"url":    loc,
 				"status": resp.StatusCode,
@@ -1023,7 +1034,7 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		}
 		return nil, output.ErrAPI(
 			fmt.Sprintf("HTTP_%d", resp.StatusCode),
-			fmt.Sprintf("unexpected redirect to %q", redactSecrets(resp.Header.Get("Location"), req.SecretValues)),
+			fmt.Sprintf("unexpected redirect to %q", redactRedirectLocation(resp.Header.Get("Location"), req.SecretValues, req.ResponseSecretFields)),
 			"",
 		)
 	}
@@ -1069,7 +1080,11 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// not a --verbose surface: it is the structured error on stderr, emitted
 	// unconditionally. The mask contains no quote or backslash, so Detail stays
 	// valid JSON.
-	redactedBody := redactResponseBody(respBody, req.SecretValues)
+	if loopAPIUnsupported(req.Service, resp.StatusCode, respBody) {
+		return nil, output.ErrLoopAPIUnsupported()
+	}
+
+	redactedBody := redactBackendErrorBody(respBody, req.SecretValues, req.ResponseSecretFields)
 	parseError := output.ParseBackendError
 	if req.Service == "loop" {
 		parseError = output.ParsePublicAPIError
@@ -1084,6 +1099,111 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		return nil, re
 	}
 	return nil, ee
+}
+
+// redactBackendErrorBody extends the historical request-secret redaction with
+// values named by write-only response schema secrets. A schema path may be
+// wrapped by a backend error envelope (for example under "details"), so exact
+// path values are collected at any depth. URL-shaped strings are also treated
+// as secret for these operations: a proxy may move the URL from its declared
+// field into a free-form message. Non-JSON bodies fail closed.
+func redactBackendErrorBody(body []byte, requestSecrets, responseSecretFields []string) []byte {
+	if len(body) == 0 || len(responseSecretFields) == 0 {
+		return redactResponseBody(body, requestSecrets)
+	}
+	if !json.Valid(body) {
+		return []byte(secretMask)
+	}
+
+	var parsed any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if err := dec.Decode(&parsed); err != nil {
+		return []byte(secretMask)
+	}
+
+	secrets := append([]string(nil), requestSecrets...)
+	for _, field := range responseSecretFields {
+		secrets = append(secrets, responseSecretValues(parsed, field)...)
+	}
+	collectURLValues(parsed, &secrets)
+	return redactResponseBody(body, secrets)
+}
+
+// responseSecretValues finds a schema path starting at every object/array node,
+// so an error envelope wrapping the normal response payload does not evade
+// redaction. Path segments are dot-separated; an array segment ends in [].
+func responseSecretValues(root any, path string) []string {
+	segments := strings.Split(path, ".")
+	var values []string
+	var visit func(any)
+	visit = func(node any) {
+		values = append(values, valuesAtResponsePath(node, segments)...)
+		switch typed := node.(type) {
+		case map[string]any:
+			for _, child := range typed {
+				visit(child)
+			}
+		case []any:
+			for _, child := range typed {
+				visit(child)
+			}
+		}
+	}
+	visit(root)
+	return values
+}
+
+func valuesAtResponsePath(node any, segments []string) []string {
+	if len(segments) == 0 {
+		if value, ok := node.(string); ok && value != "" {
+			return []string{value}
+		}
+		return nil
+	}
+	object, ok := node.(map[string]any)
+	if !ok {
+		return nil
+	}
+	segment := segments[0]
+	array := strings.HasSuffix(segment, "[]")
+	name := strings.TrimSuffix(segment, "[]")
+	child, ok := object[name]
+	if !ok {
+		return nil
+	}
+	if array {
+		items, ok := child.([]any)
+		if !ok {
+			return nil
+		}
+		var values []string
+		for _, item := range items {
+			values = append(values, valuesAtResponsePath(item, segments[1:])...)
+		}
+		return values
+	}
+	return valuesAtResponsePath(child, segments[1:])
+}
+
+func collectURLValues(node any, values *[]string) {
+	switch typed := node.(type) {
+	case string:
+		if strings.Contains(typed, "://") {
+			*values = append(*values, typed)
+		}
+	case map[string]any:
+		for key, child := range typed {
+			if strings.Contains(key, "://") {
+				*values = append(*values, key)
+			}
+			collectURLValues(child, values)
+		}
+	case []any:
+		for _, child := range typed {
+			collectURLValues(child, values)
+		}
+	}
 }
 
 // WriteFileAtomic exposes the client's all-or-nothing local file writer for
@@ -1359,4 +1479,34 @@ func parseRetryAfter(h string) time.Duration {
 		}
 	}
 	return 0
+}
+
+func cloneHeaders(headers map[string]string) map[string]string {
+	cloned := make(map[string]string, len(headers)+1)
+	for key, value := range headers {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func setHeader(headers map[string]string, name, value string) {
+	for key := range headers {
+		if strings.EqualFold(key, name) {
+			delete(headers, key)
+		}
+	}
+	headers[name] = value
+}
+
+func loopAPIUnsupported(service string, status int, body []byte) bool {
+	if service != "loop" || status != http.StatusNotFound {
+		return false
+	}
+
+	var envelope struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
 }

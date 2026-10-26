@@ -2,10 +2,19 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/fracindex"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
+
+// ValidateIdempotencyKey rejects an explicitly supplied blank idempotency key.
+func ValidateIdempotencyKey(label, value string) *output.ExitError {
+	if strings.TrimSpace(value) == "" {
+		return output.ErrValidation(label+" must not be blank", "supply a stable key and preserve it with the same body on retry")
+	}
+	return nil
+}
 
 // indexHint is the guidance attached to every fractional-index validation
 // error so a caller (typically an agent) learns the correct way to produce a

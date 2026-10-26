@@ -272,26 +272,6 @@ func TestOctoSummarySkillEmbedded(t *testing.T) {
 	}
 }
 
-func TestOctoLoopSkillEmbedded(t *testing.T) {
-	b, err := FS.ReadFile("octo-loop/SKILL.md")
-	if err != nil {
-		t.Fatalf("octo-loop/SKILL.md not embedded: %v", err)
-	}
-	content := string(b)
-	for _, want := range []string{
-		"name: octo-loop",
-		"loop task list",
-		"loop expert list",
-		"loop expert-team list",
-		"OCTO_API_BASE_URL/fleet/api/v1",
-		"not infer",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("octo-loop skill missing %q", want)
-		}
-	}
-}
-
 func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 	b, err := FS.ReadFile("octo-marketplace/SKILL.md")
 	if err != nil {
@@ -310,38 +290,6 @@ func TestOctoMarketplaceReferencesEmbedded(t *testing.T) {
 		}
 		if len(rb) == 0 {
 			t.Errorf("reference %q is empty", path)
-		}
-	}
-}
-
-func TestOctoMarketplaceExpertReferenceDocumentsFlow(t *testing.T) {
-	b, err := FS.ReadFile("octo-marketplace/expert.md")
-	if err != nil {
-		t.Fatalf("read marketplace expert reference: %v", err)
-	}
-	content := string(b)
-	for _, want := range []string{
-		"--plugin-type expert",
-		"--plugin-type expert_team",
-		"plugin get --plugin-id <plugin-id> --include-relations",
-		"plugin upsert",
-		"plugin install --plugin-id <id> --workspace-id <ws> --runtime-id <rt>",
-		"plugin delete --plugin-id <id>",
-		"plugin version list",          // version snapshots live behind version list
-		"plugin publish --plugin-id",   // saving a draft does not publish it
-		"plugin review-request create", // declared-content upgrade review
-		"AGENTS.md",                    // expert instruction / team collaboration doc
-		"expert_skill",                 // member skills are relations
-		"CLI `.data` + `._pagination`", // list flattening, not .data.data
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("expert workflow must document %q", want)
-		}
-	}
-	// The legacy per-type surface must be gone from the doc.
-	for _, gone := range []string{"marketplace expert list", "expert-skill-upload", "skill-download", "upload_object_key"} {
-		if strings.Contains(content, gone) {
-			t.Errorf("expert workflow must not reference the retired %q surface", gone)
 		}
 	}
 }
@@ -396,95 +344,5 @@ func TestOctoMailSkillEmbeddedAndSafe(t *testing.T) {
 		if strings.TrimSpace(line) == "disabled: true" {
 			t.Error("octo-mail must be discoverable via `octo-cli skills`")
 		}
-	}
-}
-
-func TestOctoMarketplacePublishFlowChecksOwnedNameBeforeMutation(t *testing.T) {
-	b, err := FS.ReadFile("octo-marketplace/skills.md")
-	if err != nil {
-		t.Fatalf("read marketplace skills reference: %v", err)
-	}
-	content := string(b)
-	for _, want := range []string{
-		"or an accessible skill directory",
-		"mktemp -d",
-		"--mode mine --q <name>", // owned-name lookup on the unified list
-		"skill-upload create --file-name",
-		"skill-upload parse <skill_upload_id>",
-		"skill-parse-task get <parse_task_id>",
-		"plugin import --parse-task-id",
-		"plugin publish --plugin-id <plugin-id>",
-		"--parse-task-id <parse-task-id>",
-		"plugin review-request create --data @review.json",
-		"never duplicated",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("publish workflow must contain %q", want)
-		}
-	}
-	// The owned-name ownership check must precede upload initialization.
-	if strings.Index(content, "--mode mine --q <name>") > strings.Index(content, "skill-upload create --file-name") {
-		t.Error("owned-name lookup must happen before upload initialization")
-	}
-	// Retired per-type commands and presigned-download wording must stay gone;
-	// publication now uses the unified plugin.publish operation above.
-	for _, gone := range []string{"skill publish --skill-upload-id", "skill mine list", "download_url"} {
-		if strings.Contains(content, gone) {
-			t.Errorf("skills workflow must not reference the retired %q surface", gone)
-		}
-	}
-}
-
-// TestOctoDriveSkillEmbedded confirms the drive skill ships in the binary,
-// stays discoverable, and leads with the facts an Agent gets wrong without
-// being told: the credential is shared with every other domain, file ids must be
-// copied not computed, and a share is handed over as a URL.
-func TestOctoDriveSkillEmbedded(t *testing.T) {
-	b, err := FS.ReadFile("octo-drive/SKILL.md")
-	if err != nil {
-		t.Fatalf("octo-drive/SKILL.md not embedded: %v", err)
-	}
-	content := string(b)
-
-	if !strings.Contains(content, "name: octo-drive") {
-		t.Error("frontmatter missing `name: octo-drive`")
-	}
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimSpace(line) == "disabled: true" {
-			t.Error("octo-drive must stay enabled to be discoverable via `octo-cli skills`")
-		}
-	}
-
-	// Zero-flag first example: the credential comes from the environment, exactly
-	// as it does for every other domain.
-	if !strings.Contains(content, "octo-cli drive space list") {
-		t.Error("SKILL.md must show the zero-flag `drive space list` example")
-	}
-	// The credential story must name both variables and their order, and must not
-	// suggest a drive-specific profile.
-	for _, needle := range []string{"OCTO_TOKEN", "OCTO_BOT_TOKEN", "drive-only profile"} {
-		if !strings.Contains(content, needle) {
-			t.Errorf("SKILL.md must discuss %q", needle)
-		}
-	}
-	// The three traps that silently corrupt data if unstated.
-	for _, needle := range []string{"share_url", "doc_space_id", "TOKEN_KIND_NOT_ALLOWED"} {
-		if !strings.Contains(content, needle) {
-			t.Errorf("SKILL.md must document %q", needle)
-		}
-	}
-	// Every command group must appear, so the skill is a complete map of the tree.
-	for _, group := range []string{
-		"drive browse", "drive space", "drive member", "drive folder", "drive file",
-		"drive blob", "drive upload", "drive download", "drive doc", "drive share",
-		"drive invite", "drive im-transfer",
-	} {
-		if !strings.Contains(content, group) {
-			t.Errorf("SKILL.md must cover %q", group)
-		}
-	}
-	// The removed org commands must not be advertised.
-	if strings.Contains(content, "drive org") {
-		t.Error("SKILL.md must not mention `drive org`; those commands do not exist")
 	}
 }

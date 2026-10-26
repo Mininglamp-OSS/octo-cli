@@ -1,10 +1,12 @@
 # octo-docs — Common features (comments, versions, members, attachments)
 
-Read this for shared document management and document/sheet/board comments and
-versions. For PPT comments, versions, export and media usage, read `ppt.md`.
+Read this for shared document management, versions, and document/sheet/board
+comments. Comment anchors vary by type: document text range, sheet cell, board
+point or element(s), or PPT document/slide/element/normalized position. Read
+`ppt.md` for PPT comment commands/details, versions, export, and media.
 Jump to the section you need:
 
-- [Comments](#comments) — add/list/reply/resolve, on a doc text range or a sheet cell
+- [Comments](#comments) — add/list/reply/resolve; anchors vary by type: doc text range, sheet cell, board point/elements, or PPT document/slide/element/position
 - [Versions](#versions) — snapshot / preview / rename / delete / restore
 - [Members & sharing](#members--sharing) — roles, forward-grant
 - [Attachments](#attachments) — presign/upload local bytes and ingest external images
@@ -16,12 +18,19 @@ All commands call `$OCTO_API_BASE_URL/v1/bot/docs/*`. Auth & space rules are in
 
 ## Comments
 
-Comments live out-of-band from the body and are anchored to a text range (docs)
-or a cell (sheets).
+Comments live out-of-band from the body and use type-specific anchors: a text
+range (docs), a cell (sheets), a canvas point or element(s) (boards), or the
+document, slide, element, or normalized point (PPT; see `ppt.md`).
 
 ```bash
 # List thread roots + replies. --includeResolved 1 also returns resolved threads.
 octo-cli docs comments list <docId> [--includeResolved 1] [--cursor <id>] [--limit 50]
+
+# Read a comment and its authoritative root anchor (replies inherit root.anchor).
+octo-cli docs comments get <docId> <commentId>
+
+# Replies return up to 25 items with nextCursor; pass it as --cursor or use --page-all.
+octo-cli docs comments replies <docId> <rootId> [--cursor <id>] [--page-all]
 
 # Root comment: needs an anchor. With a live editor selection, pass the opaque
 # base64 Yjs positions. Without one (a bot), pass --anchorText and the backend
@@ -47,6 +56,14 @@ octo-cli docs comments edit   <docId> <id> --resolved=true      # writer; false 
 octo-cli docs comments delete <docId> <id>          # soft delete (author)
 octo-cli docs comments delete <docId> <id> --hard 1 # hard delete (admin)
 ```
+
+`docs comments list` is cursor-based; pass its returned `nextCursor` via
+`--cursor` for the next page. It does not support `--page-all`. `docs comments
+replies` returns up to 25 items per page and a `nextCursor`; pass that cursor
+manually or use `--page-all` to fetch all pages (bounded by `--page-limit`,
+default 10). Stop when `nextCursor` is null. `docs comments get` returns both
+the requested comment and its authoritative root; for a reply, use
+`root.anchor` as the thread's anchor.
 
 Anchors are opaque base64-encoded Yjs positions produced by the editor — the
 backend never parses base64 anchors. A bot with no live editor selection can
@@ -116,12 +133,12 @@ Schema: `octo-cli schema docs.versions.restore`.
 ## Members & sharing
 
 ```bash
-octo-cli docs members list   <docId>                             # admin; items include principalSpaceId
+octo-cli docs members list   <docId>                             # reader or higher; items include principalSpaceId
 octo-cli docs members set    <docId> --uid <uid> --role writer   # authenticated Bot Space; role: reader|commenter|writer|admin
 octo-cli docs members set    <docId> --uid <uid> --role writer --principal-space-id <spaceId>
 octo-cli docs members remove <docId> <uid> --principal-space-id <spaceId> # required; owner cannot be removed
 
-# Grant-only forward access (never downgrades). Only reader|writer are grantable.
+# Grant-only forward access (never downgrades). Only reader|commenter|writer are grantable.
 octo-cli docs forward-grant  <docId> --uid <uid> --role reader
 
 # Space-level share scope — read/set who in the space can reach the doc.
@@ -170,6 +187,9 @@ binary through these commands. PPT also has a direct authenticated binary-media
 endpoint used by a runtime HTTP client; see `ppt.md` for that distinct flow. Uploading
 is a two-step flow — presign to register the row and get a signed PUT URL, then PUT
 the bytes yourself directly to object storage.
+The size must be a positive integer (at least 1 byte). The backend applies its
+configured cap by MIME tier: `image/` types use the image cap; other types use
+the file cap.
 
 ```bash
 # Step 1: register + get a presigned PUT target.

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func TestClearElementsForExport(t *testing.T) {
@@ -138,16 +140,24 @@ func TestDocsSceneExportKeepsPNGAndRemovesTopLevelAlias(t *testing.T) {
 func TestDocsExcalidrawExportRejectsBadExtension(t *testing.T) {
 	_, capture := sceneTestFactory(t, serveSceneTest(`{"elements":[],"files":{},"baseVersion":"BV"}`))
 	_, _, err := execRoot(t, capture.f, "docs", "scene", "export", "d1", "--image-format", "excalidraw", "-o", "board.json")
-	if err == nil {
-		t.Fatal("expected rejection for non-.excalidraw extension")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" || ee.Code != "VALIDATION_ERROR" {
+		t.Fatalf("error = %v, want structured validation", err)
+	}
+	if capture.requests != 0 {
+		t.Fatalf("invalid portable output requirement made %d requests", capture.requests)
 	}
 }
 
 func TestDocsExcalidrawExportRequiresOutput(t *testing.T) {
 	_, capture := sceneTestFactory(t, serveSceneTest(`{"elements":[],"files":{},"baseVersion":"BV"}`))
 	_, _, err := execRoot(t, capture.f, "docs", "scene", "export", "d1", "--image-format", "excalidraw")
-	if err == nil || !strings.Contains(err.Error(), `--output is required`) {
-		t.Fatalf("err=%v", err)
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" || ee.Code != "VALIDATION_ERROR" {
+		t.Fatalf("error = %v, want structured validation", err)
+	}
+	if capture.requests != 0 {
+		t.Fatalf("missing portable output requirement made %d requests", capture.requests)
 	}
 }
 

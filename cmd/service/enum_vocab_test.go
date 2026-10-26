@@ -54,6 +54,9 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.comments.add", in: "body", field: "anchor.kind", want: []string{"document", "slide", "element", "point"}, why: "Same local PPT continuation; src/ppt/comments.ts anchor validation (new routes not yet submitted)"},
 	{op: "docs.ppt.export", in: "query", field: "format", want: []string{"html"}, why: "Same local PPT continuation; src/api/ppt/export.ts export format guard"},
 	// --- loop ---
+	{op: "expert_team.evaluate", in: "body", field: "outcome",
+		want: []string{"action", "no_action", "failed"},
+		why:  "Fleet expert_team_evaluations Public API contract carried by octo-cli PR #151; development schema and command regression tests pin the same three outcomes"},
 	{op: "autopilot.create", in: "body", field: "dispatch_mode",
 		want: []string{"create_task", "direct_execution"},
 		why:  "octo-fleet openapi/public-v1.yaml AutopilotDispatchMode; internal/publicapi/normalize.go validates the same public values"},
@@ -88,8 +91,8 @@ var requestSideVocabularies = []vocabulary{
 		want: []string{"expert", "expert_team", "member"},
 		why:  "octo-fleet openapi/public-v1.yaml TaskCreateRequest; internal/publicapi normalization maps public expert terminology to legacy storage values"},
 	{op: "task.update", in: "body", field: "assignee_type",
-		want: []string{"expert", "expert_team", "member"},
-		why:  "octo-fleet openapi/public-v1.yaml TaskUpdateRequest"},
+		want: []string{"expert", "expert_team", "member", "null"},
+		why:  "octo-fleet@bf45f60 internal/handler/issue.go UpdateIssue accepts explicit null to clear the assignee; the Public API maps task fields without removing null"},
 	{op: "task.update", in: "body", field: "status",
 		want: []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"},
 		why:  "octo-fleet openapi/public-v1.yaml TaskUpdateRequest and internal/publicapi/normalize.go validateTaskStatus"},
@@ -99,6 +102,49 @@ var requestSideVocabularies = []vocabulary{
 	{op: "task.unsubscribe", in: "body", field: "user_type",
 		want: []string{"expert", "expert_team", "member"},
 		why:  "same TaskSubscriptionRequest schema as task.subscribe"},
+
+	{op: "task.create", in: "body", field: "status",
+		want: []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssueStatuses; " +
+			"CreateIssue calls validateIssueEnum with this set at issue.go:2089; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.create", in: "body", field: "priority",
+		want: []string{"urgent", "high", "medium", "low", "none"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssuePriorities; " +
+			"CreateIssue validates this set at issue.go:2092; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.update", in: "body", field: "priority",
+		want: []string{"urgent", "high", "medium", "low", "none"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:72-85 validIssuePriorities; " +
+			"UpdateIssue validates this set at issue.go:2353-2355; " +
+			"public task fields pass through internal/publicapi/normalize.go:245-255."},
+	{op: "task.list", in: "query", field: "date_field",
+		want: []string{"created_at", "updated_at"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1113-1134 parseIssueDateFilter " +
+			"allows these fields; ListIssues uses it at issue.go:937 and the public query " +
+			"adapter copies query values in internal/publicapi/normalize.go:423-449."},
+	{op: "task.list", in: "query", field: "sort",
+		want: []string{"position", "title", "created_at", "start_date", "due_date", "priority"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:959-973 ListIssues sort switch; " +
+			"unknown values return 400."},
+	{op: "task.group", in: "query", field: "date_field",
+		want: []string{"created_at", "updated_at"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1113-1134 parseIssueDateFilter " +
+			"allows these fields; ListGroupedIssues uses it at issue.go:1356 and the public " +
+			"query adapter copies query values in internal/publicapi/normalize.go:423-449."},
+	{op: "task.group", in: "query", field: "sort",
+		want: []string{"position", "title", "created_at", "start_date", "due_date", "priority"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1387-1396 ListGroupedIssues " +
+			"sort switch; unknown values return 400."},
+	{op: "task.group", in: "query", field: "group_by",
+		want: []string{"assignee"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1234-1240 defaults to and " +
+			"accepts only assignee grouping."},
+	{op: "task.group", in: "query", field: "group_assignee_type",
+		want: []string{"none", "member", "expert", "expert_team"},
+		why: "octo-fleet@6785154 internal/handler/issue.go:1362-1377 handles none or " +
+			"isIssueActorType (issue.go:1183-1185 accepts member/agent/squad); " +
+			"internal/publicapi/normalize.go:423-439 maps public expert/expert_team before validation."},
 
 	// --- drive (this PR's domain) ---
 	{op: "drive.member.add", in: "body", field: "role",
@@ -125,6 +171,12 @@ var requestSideVocabularies = []vocabulary{
 	{op: "drive.search", in: "body", field: "scope",
 		want: []string{"all", "space"},
 		why:  "octo-drive internal/search/query.go ScopeAll/ScopeSpace; service.go validate() rejects anything else with ErrInvalidArgument"},
+	{op: "drive.search", in: "body[]", field: "filters.types",
+		want: []string{"folder", "doc", "blob"},
+		why:  "octo-drive origin/main@2db4df5 internal/search/service.go:431-447, read from the remote repository API; validate rejects all other node types"},
+	{op: "drive.search", in: "body", field: "filters.owner_scope",
+		want: []string{"", "me", "others", "null"},
+		why:  "octo-drive origin/main@2db4df5 internal/search/service.go:449-452 explicitly accepts the empty no-filter value as well as me and others; JSON null is also declared as an allowed value"},
 	{op: "drive.browse", in: "query", field: "source",
 		want: []string{"all", "user-upload", "im-transfer", "user-mount", "docs-sync"},
 		why:  "octo-drive browse filter: the blob and mount source sets unioned, plus all"},
@@ -152,6 +204,18 @@ var requestSideVocabularies = []vocabulary{
 	{op: "docs.list", in: "query", field: "sort",
 		want: []string{"updatedAt:asc", "updatedAt:desc"},
 		why:  "octo-docs-backend list route sort whitelist; an unknown value is coerced rather than rejected server-side, so the local gate is at worst equally strict"},
+	{op: "docs.list", in: "query", field: "owner",
+		want: []string{"me"},
+		why: "octo-docs-backend@ae11631 src/api/routes/docs.ts:428-440 recognizes owner=me; " +
+			"other values do not select an owner. The human-only discoverable path at " +
+			"docs.ts:445-448 is intentionally not exposed by the bot CLI."},
+	{op: "docs.list", in: "query[]", field: "type",
+		want: []string{"doc", "sheet", "board", "html", "html_ppt"},
+		why: "octo-docs-backend@ae11631 src/api/routes/docs.ts:449-451 passes repeated " +
+			"?type= values to normalizeTypeFilter; src/db/docType.ts:54-68 filters against " +
+			"DOC_TYPES. Repeated values are not CSV; human-only discoverable remains excluded " +
+			"per docs.ts:445-448."},
+
 	{op: "docs.scene.export", in: "query", field: "format",
 		want: []string{"png", "svg", "excalidraw"},
 		why:  "PNG/SVG are backend renderers; the CLI intercepts excalidraw to assemble a portable local export"},
@@ -411,6 +475,8 @@ func enumStrings(t *testing.T, opID, field string, values []any) []string {
 	out := make([]string, 0, len(values))
 	for _, v := range values {
 		switch val := v.(type) {
+		case nil:
+			out = append(out, "null")
 		case string:
 			out = append(out, val)
 		case json.Number:

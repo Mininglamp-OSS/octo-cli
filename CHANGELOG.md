@@ -8,13 +8,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **PPT native media guidance** distinguishes direct binary uploads of authorized
-  local task assets from ingestion of existing public URLs. Signed URLs use stdin
-  and private response handling; native references are inserted with a fresh
-  revision. **Minimum rollout dependency:** use this media workflow only with a
-  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
-  document-owned media. Older image-only attachment responses are not compatible.
-  No new CLI command, publishing gate or size-limit change is introduced.
+
+- **API base URL precedence** — the active profile's stored `api_base_url` now
+  outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored
+  profile is routed to the origin it was created against even when the
+  environment names another one; environment credentials and profiles without a
+  URL still use the environment value. To move a profile to another gateway, use
+  `octo-cli auth update --api-base-url <origin>`; `--clear-api-base-url` removes
+  the stored origin so the environment or default applies again and reports
+  `api_base_url` as an empty string, keeping the field's string type. `config
+  show` and `auth status` expose the winning layer as `api_base_url_source`;
+  an invalid stored origin returns a structured validation error naming the
+  full `--profile <name> auth update` recovery commands, and conflicting update
+  actions are refused with the same taxonomy.
+
+### Fixed
+
+- **Nullable search filters** — Drive accepts explicit `null` for optional size
+  boundaries and ownership filtering, while retaining exact non-null uint64 and
+  vocabulary checks and refusing null on non-nullable IDs.
+- **Grouped-search response schema** — correlation `sequence` is declared inside
+  the backend `data` object, matching `.data.data.sequence` in CLI JSON output.
+- **Current service contracts** — expose thread-create OBO, bot hosting metadata,
+  Space-member page selection, around-search window size and grouped-search
+  response correlation through schema and generated flags.
+- **Request preflight** — reject empty group-member arrays, group updates without
+  a recognized non-null field, and nonpositive Docs attachment sizes before HTTP.
+  Explicit empty-string group updates remain supported.
+- **Schema and agent guidance** — correct Drive search filter arrays and composite
+  discovery; document current conflict, search, event, thread, upload-policy,
+  registration and dependency-visibility semantics. Docs search advertises
+  `html_ppt`; member reads describe reader access and nullable grant attribution.
+- **Loop task assignment** — restore Multica-style `task assign --to/--to-id/--unassign`
+  and `--assignee` on task create/update/list. Infer actor types from complete
+  workspace member, expert and expert-team lists; preserve Project member UIDs,
+  reject ambiguous/incomplete lookups, and allow explicit JSON null to clear an
+  assignee. Existing typed flags remain available for offline dry-runs.
+- **Service help and request metadata** — generated long help retains operation
+  descriptions; parameter help and current Docs, HTML, messaging, Marketplace,
+  Loop and Drive request fields match the embedded service contracts.
+- **Registry card edits** — `message edit` supports raw and Registry body modes,
+  requires their respective fields and rejects mixed-mode input before HTTP.
+- **Marketplace install diagnostics** — optional `custom_env` string maps are
+  accepted and their values are masked in generated and generic API diagnostics,
+  including configured Marketplace mount prefixes and equivalent unreserved path
+  escapes, without changing outbound paths or wire values.
+- **Loop task inputs** — list/group filters, task fields and priority vocabularies
+  are exposed; numeric flags preserve fractional values such as task position.
+- **Numeric text fields** — query flags and multipart scalar fields use plain
+  decimal notation for large and small values while preserving fractions.
+- **Multipart retry controls** — `--no-retry` applies to part PUTs, failure-triggered
+  re-signing and completion requests while preserving initial attempts and cleanup.
+  Global help states these boundaries and the initial expired-URL signing step.
+- **Embedded agent guides** — routing, token selection, operator maintenance,
+  dry-run boundaries, paging, prerequisites and domain workflows match current CLI
+  behavior and inspected service contracts.
+- **Output preflight** — invalid effective output formats and jq parse/compile
+  errors are rejected before requests or local mutations. Compiled jq programs
+  are reused for output; help-only service parents, help and shell completion
+  retain their text output independently of output options. Jq parse and compile
+  failures use static diagnostics without caller-provided identifiers.
+- **Local mutation dry-runs** — `auth login/update/logout` and `skills --install`
+  reject `--dry-run` before reading credentials or changing local files.
+- **Document command consistency** — board comments forward `Idempotency-Key`
+  and reject explicitly blank keys before scene reads or writes;
+  import/export refuse empty and dot-segment IDs; handwritten input errors use
+  validation envelopes; missing export format has a required-option diagnosis.
+  Document share creation refuses explicitly supplied blob-only permissions.
+- **Skills and command help** — repair shell/attachment recipes and align
+  credential precedence, input shapes, import replacement warnings, role
+  vocabularies, required markers, parameter types and service/timeout guidance.
+- **Loop query contracts** — task search takes one required positional query
+  and sends it as HTTP query `q`; `--workspace-id`, `--page`, and `--page-size`
+  remain flags. Batch child lookup exposes comma-separated `--parent-task-ids`.
+- **HTML document pagination** — `html list` exposes `--page` and `--page-size`.
+  Omitting them still uses the backend's first page of 20 documents; comment
+  listing continues to return its complete single-response result.
+- **`auth status` credential selection** — reports the same credential source,
+  masked token, and effective API origin as ordinary requests, including when
+  environment credentials override stored profiles. Explicit selectors still
+  fail closed; unverified environment Bot IDs remain `robot_id_claimed`.
+- **COS publish lock diagnostics** — cleanup warnings include a safe HTTP
+  status without exposing SDK messages, signed URLs, or credentials. Cleanup
+  failures still preserve the original publication result.
+
+### Changed
+
+- **Project member listing (breaking)** — `loop workspace member list` reads
+  `/fleet/api/v1/workspaces/{workspace_id}/members`. Fleet verifies Project
+  access using its Bot/verified-owner policy and forwards the internally
+  authenticated Server response. Supply the Project ID positionally or with
+  `--workspace-id`; pagination uses `--page` / `--page-size`, with aligned
+  `--limit` / `--offset` compatibility aliases. Project records in `.data[]`
+  retain Octo `uid`, `name`, numeric `role` and `robot`; no total count is
+  exposed in the CLI output. This read no longer requires `--obo`, an explicit
+  `--space-id`, or a Server OBO grant.
+- **Loop task token isolation (breaking)** — task mode now consumes only
+  `OCTO_TASK_TOKEN`; it no longer reads `OCTO_TOKEN` or `OCTO_BOT_TOKEN`, or
+  falls back to profiles. Pair daemon-launched tasks with daemon v1.2.1 or later,
+  and set `OCTO_CREDENTIAL_MODE=task` per Loop invocation. Ordinary commands
+  ignore the task token and continue using independent bot credentials.
+
+### Removed
+
+- **Legacy Fleet Project commands** — removed `loop project`
+  `list/search/get/create/update/delete` and `resource list/create/update/delete`
+  from the command tree, completion, and schema discovery. Removed retired
+  `project_id` fields from quick-create and autopilot request/response schemas,
+  including the quick-create `--project-id` flag. Existing scripts must stop
+  using these retired operations and fields. Workspace scope (`--workspace-id`)
+  is unchanged; no octo-server Project API or command alias is introduced.
 
 ### Added
 - **`octo-cli mcp serve --facade two|both` (two-tool Skill-driven facade)** — an
@@ -101,6 +204,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exit codes are unchanged — the MCP server is a new front end over the same
   engine.
 
+- **`octo-cli upgrade`** — update an npm, Bun or pnpm global installation through
+  its owning package manager and native registry/mirror configuration. Resolve
+  stable `latest`, install the exact version and verify the resulting command
+  and platform binary; equal/newer versions are no-ops. Offline `--dry-run`
+  reports verified local ownership. The credential-free command preserves
+  format/jq output and remains unavailable in Loop task mode.
+  Reporter execution is preflighted in the verified global command directory,
+  supporting `noexec` handoff filesystems. pnpm registry/authentication selection
+  remains project-independent when temporary and global directories lie beneath
+  the invoking project.
+  Windows executable launches use extended-length paths for deeply nested
+  global installations.
+  Bun verifies ownership through native global metadata and installed command
+  entries, including installations whose global lockfiles are absent.
+- **`octo-cli api --workspace-id`** — generic passthrough requests can now send
+  explicit workspace context through the `X-Workspace-ID` header.
+- **Unified environment credential aliases** — `OCTO_TOKEN` is canonical and
+  `OCTO_BOT_TOKEN` is a fully compatible lower-priority alias. Both accept every
+  supported credential kind, override implicit stored profiles, and are
+  normalized once for ordinary credential resolution. Task mode uses only
+  the separate `OCTO_TASK_TOKEN`. Explicit
+  `--bot-id` / `--profile` selectors still win. The success envelope's
+  `identity.source` names the alias that supplied the value.
 - **`octo-cli html source <doc-ref> [--version N]`** returns stored HTML and its
   matching version in one JSON response. Bot updates read this pair, edit the
   HTML, and publish with the existing `--version` set to the read version + 1.
@@ -182,26 +308,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unified API. This exposes the install-to-Loop capability that the retired
   per-type surface deliberately withheld; it is gated backend-side and
   provisions through octo-fleet.
-- **`octo-cli loop` domain** — 126 registered commands generated from Fleet's
+- **`octo-cli loop` domain** — 116 registered commands generated from Fleet's
   Public API contract across tasks, executions, experts, expert teams,
-  workspaces, runtimes, projects, skills, autopilots, attachments, comments,
+  workspaces, runtimes, skills, autopilots, attachments, comments,
   and labels. Loop uses explicit Workspace selectors, typed Autopilot dispatch
   fields, task lifecycle status including `in_review`, and a daemon-oriented
   task credential policy. The shared OpenAPI registry now resolves referenced
   parameters, request bodies, responses, nullable unions, and composed schemas.
-- **`octo-cli drive` domain** (46 commands) — network drive over octo-drive:
+- **`octo-cli drive` domain** (49 commands) — network drive over octo-drive:
   spaces and members, folder/file tree and `browse`, full-text `search`, blob registration,
-  two-phase upload and signed download, online-document mounts, share links,
-  invites, and IM-attachment transfer. 40 leaves are generated from the new
-  `drive.json` spec (43 operations); six are hand-written because they are not a
+  single-part and multipart upload plus signed download, online-document mounts,
+  share links, invites, and IM-attachment transfer. 43 leaves are generated from
+  the `drive.json` spec (46 operations); six are hand-written because they are not a
   single request or take an argument shape the engine cannot express:
-  `upload file` (prepare → presigned PUT → confirm, with best-effort cancel on
-  failure), `download file` and `share download` (signed URL → atomic local
+  `upload file` (prepare → single PUT/confirm or multipart parts → complete,
+  with best-effort cancel/abort on incomplete failure), `download file` and
+  `share download` (signed URL → atomic local
   write), `share create` (branches on blob vs mounted document),
   `share blob-create` (positional file id), and `share access`. Ships with the
   `octo-drive` Skill. There is deliberately no `drive org` subtree — the
   product's member picker is a frontend filter over the space roster, not a
   backend search.
+  - **Server-owned multipart scheduling.** `upload file` sends one prepare
+    request that always declares `X-Drive-Upload-Capabilities: multipart-v1`;
+    the server ignores it below the multipart threshold and otherwise returns a
+    complete multipart snapshot. `single`, missing, and unknown `upload_mode`
+    values keep the legacy path; unknown without `upload_url` is
+    `UPLOAD_MODE_CONFLICT`. A `multipart` response enters the scheduler directly.
+    Multipart streams parts with
+    `io.NewSectionReader`, respects `max_concurrent_parts`, groups presign
+    requests at 20 parts or fewer, retries individual parts, re-signs only a
+    rejected 403 part, reads each ETag, and writes progress to stderr. Completion
+    retries explicit HTTP 5xx responses a bounded number of times, sends a
+    connection interruption or timeout only once, and treats `RESULT_UNKNOWN` as
+    ambiguous by neither retrying nor aborting it. Incomplete sessions get a
+    detached five-second best-effort abort.
   - **Dual identity, one command surface.** A `uk_*` user API key acts as the
     real person and routes to `/v1/user/drive/*`; `bf_*` / `app_*` act as the bot
     and route to `/v1/bot/drive/*`. The routing is spec metadata, not code, so the
@@ -218,12 +359,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     piped verbatim from one command into the next.
   - Presigned object-storage transfers run on a separate HTTP client that carries
     no Octo credential and no space header.
-- **`OCTO_TOKEN`** — a preferred token variable accepting any of the three token
-  kinds (`app_*`, `bf_*`, `uk_*`). Resolution order is now stored profile →
-  `OCTO_TOKEN` → `OCTO_BOT_TOKEN`; `OCTO_BOT_TOKEN` keeps working exactly as
-  before, so a setup that never sets `OCTO_TOKEN` is unaffected. The success
-  envelope's `identity.source` names the variable actually used
-  (`env:OCTO_TOKEN` or `env:OCTO_BOT_TOKEN`).
 - **Generic spec extensions**, all opt-in with omit-means-unchanged semantics:
   `x-octo-allowed-token-kinds` (local credential-kind gate →
   `TOKEN_KIND_NOT_ALLOWED`, `validation`/exit 2, matching the existing
@@ -292,6 +427,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--role` flags front the `shareScope` / `shareRole` wire keys.
 
 ### Changed
+- **PPT native media guidance** distinguishes direct binary uploads of authorized
+  local task assets from ingestion of existing public URLs. Signed URLs use stdin
+  and private response handling; native references are inserted with a fresh
+  revision. **Minimum rollout dependency:** use this media workflow only with a
+  Docs backend supporting PPT URL ingestion and an editor/exporter resolving
+  document-owned media. Older image-only attachment responses are not compatible.
+  No new CLI command, publishing gate or size-limit change is introduced.
+
+- **Loop workspace flag terminology** — generated `--workspace-id` help and the
+  bundled Loop skill now state that the value is a workspace UUID, not a slug
+  or generic selector. The architecture guide records the separate Web slug,
+  Public API UUID, and credential-bound task conventions.
+
+- **BREAKING (marketplace): Marketplace Skill imports no longer conflate the
+  visible title with the machine name.** The CLI contract now correctly
+  describes `plugin_name` as the human-facing Marketplace name and `name` as
+  the stable `SKILL.md` machine name. The bundled create workflow supplies both
+  fields explicitly and checks existing ownership against `manifest_json.name`,
+  preventing newly imported cards from displaying a machine slug and avoiding
+  duplicate imports hidden by a search filter that does not cover machine
+  names. New imports are also rejected locally when `plugin_name` is missing or
+  blank, and a create must omit `plugin_id` entirely rather than pass it as
+  blank or `null`; updates may still omit `plugin_name` to preserve the existing
+  display name, but an explicitly supplied update value must be non-blank.
 - **BREAKING (docs): sharing updates require `permissionEpoch`.** Read the
   current value with `docs share get`, then pass it unchanged to `docs share set`.
   A stale epoch returns HTTP 409; re-read permissions and reconsider the intended
@@ -332,8 +491,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected with 400 rather than clamped) and does not advertise the cursor
   extension, so `--page-all` is not registered. Callers that relied on it must
   walk `--page` until a short page. This matters most for the owned-name
-  duplicate check: `--q` is a substring match against `plugin_name` only, so a
-  single unpaged probe can report a false "not found".
+  duplicate check: `--q` is a substring match against `plugin_name` or
+  `manifest_json.description`, but never the machine identity in
+  `manifest_json.name`, so a single unpaged probe can report a false "not
+  found".
 - **BREAKING (marketplace): `plugin upsert` replaces the plugin row; it does not
   patch it.** There is no metadata-only PATCH on the unified API. The backend
   rebuilds the whole plugin from the submitted document, preserving only

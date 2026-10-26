@@ -1,0 +1,82 @@
+name: Upgrade acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'npm/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'skills/**'
+      - '.github/workflows/upgrade-acceptance.yml'
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'npm/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'skills/**'
+      - '.github/workflows/upgrade-acceptance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-acceptance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upgrade:
+    name: upgrade (${{ matrix.os }}, pnpm ${{ matrix.pnpm }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        pnpm: ['10.32.0', '12.15.0']
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.24.x'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.0'
+      - name: Install isolated test manager
+        run: npm install -g pnpm@${{ matrix.pnpm }}
+      - name: Fast launcher and packaging tests
+        working-directory: npm
+        run: npm test
+      - name: Mount non-executable handoff filesystem
+        id: noexec
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/octo-upgrade-noexec"
+          sudo mount -t tmpfs -o noexec,nosuid,nodev,mode=1777 tmpfs "$RUNNER_TEMP/octo-upgrade-noexec"
+      - name: Verify handoff filesystem refuses execution
+        if: runner.os == 'Linux'
+        run: |
+          cp /bin/true "$RUNNER_TEMP/octo-upgrade-noexec/exec-probe"
+          if "$RUNNER_TEMP/octo-upgrade-noexec/exec-probe"; then
+            echo "::error::handoff filesystem allowed execution"
+            exit 1
+          fi
+          rm "$RUNNER_TEMP/octo-upgrade-noexec/exec-probe"
+      - name: Execute installed-command upgrades against a local registry
+        env:
+          OCTO_UPGRADE_TEST_MANAGERS: ${{ matrix.pnpm == '10.32.0' && 'npm,bun,pnpm' || 'pnpm' }}
+          OCTO_UPGRADE_TEST_HANDOFF_TMPDIR: ${{ runner.os == 'Linux' && format('{0}/octo-upgrade-noexec', runner.temp) || '' }}
+        run: node --test npm/scripts/upgrade-e2e.test.js
+      - name: Unmount handoff filesystem
+        if: ${{ always() && steps.noexec.outcome == 'success' }}
+        run: |
+          sudo umount "$RUNNER_TEMP/octo-upgrade-noexec"
+          rmdir "$RUNNER_TEMP/octo-upgrade-noexec"

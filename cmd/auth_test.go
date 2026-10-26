@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/authstore"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
@@ -63,7 +64,7 @@ func TestAuth_LoginListStatusLogout(t *testing.T) {
 	}
 
 	// status (whoami) for the sole profile.
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status")
 	if err != nil {
 		t.Fatalf("status: %v", err)
@@ -122,13 +123,145 @@ func TestAuth_UpdateAPIBaseURLPreservesCredentials(t *testing.T) {
 		t.Fatalf("mail token changed: %q, %v", mailToken, err)
 	}
 
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_demo")
 	if err != nil {
 		t.Fatalf("auth status: %v", err)
 	}
 	if activeOf(t, out)["api_base_url"] != "http://127.0.0.1:28080" {
 		t.Fatalf("active profile = %#v", activeOf(t, out))
+	}
+}
+
+func TestAuth_ClearAPIBaseURLFallsBack(t *testing.T) {
+	cases := []struct {
+		name       string
+		env        string
+		want       string
+		wantSource string
+	}{
+		{"environment", "https://env.example", "https://env.example", "env"},
+		{"default", "", config.DefaultAPIBaseURL, "default"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(authstore.EnvConfigDir, t.TempDir())
+			t.Setenv(config.EnvAPIBaseURL, tc.env)
+			loginToken(t, "cli_clear", "app_demo_token")
+
+			store, err := authstore.New()
+			if err != nil {
+				t.Fatalf("authstore.New: %v", err)
+			}
+			if err := store.UpdateProfileAPIBaseURL("cli_clear", "https://octo.example"); err != nil {
+				t.Fatalf("seed API base URL: %v", err)
+			}
+
+			f := newAuthTestFactory()
+			out, _, err := execRoot(t, f,
+				"auth", "update", "--bot-id", "cli_clear", "--clear-api-base-url")
+			if err != nil {
+				t.Fatalf("auth update --clear-api-base-url: %v", err)
+			}
+			if data := dataOf(t, out); data["api_base_url"] != "" {
+				t.Fatalf("api_base_url = %v, want empty string", data["api_base_url"])
+			}
+
+			store, err = authstore.New()
+			if err != nil {
+				t.Fatalf("authstore.New after update: %v", err)
+			}
+			profiles, err := store.LoadProfiles()
+			if err != nil {
+				t.Fatalf("LoadProfiles: %v", err)
+			}
+			if got := profiles["cli_clear"].APIBaseURL; got != "" {
+				t.Fatalf("stored API base URL = %q, want cleared", got)
+			}
+
+			f = newAuthTestFactory()
+			out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_clear")
+			if err != nil {
+				t.Fatalf("auth status: %v", err)
+			}
+			active := activeOf(t, out)
+			if got := active["api_base_url"]; got != tc.want {
+				t.Fatalf("effective api_base_url = %v, want %q", got, tc.want)
+			}
+			if got := active["api_base_url_source"]; got != tc.wantSource {
+				t.Fatalf("effective api_base_url_source = %v, want %q", got, tc.wantSource)
+			}
+		})
+	}
+}
+
+func TestAuth_ClearAPIBaseURLRequiresOneOf(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_clear", "app_demo_token")
+
+	f := newTestFactoryWithReg()
+	_, _, err := execRoot(t, f, "auth", "update", "--bot-id", "cli_clear")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" {
+		t.Fatalf("auth update without a URL action = %v, want validation", err)
+	}
+}
+
+func TestAuth_UpdateRejectsConflictingURLActions(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	loginToken(t, "cli_clear", "app_demo_token")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	if err := store.UpdateProfileAPIBaseURL("cli_clear", "https://octo.example"); err != nil {
+		t.Fatalf("seed API base URL: %v", err)
+	}
+
+	f := newTestFactoryWithReg()
+	_, _, err = execRoot(t, f,
+		"auth", "update", "--bot-id", "cli_clear",
+		"--api-base-url", "https://other.example", "--clear-api-base-url")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" || !strings.Contains(ee.Message, "mutually exclusive") {
+		t.Fatalf("auth update with conflicting actions = %v (%+v), want structured validation", err, ee)
+	}
+
+	profiles, err := store.LoadProfiles()
+	if err != nil {
+		t.Fatalf("LoadProfiles: %v", err)
+	}
+	if got := profiles["cli_clear"].APIBaseURL; got != "https://octo.example" {
+		t.Fatalf("conflicting update changed API base URL to %q", got)
+	}
+}
+
+func TestConfigShow_InvalidProfileURLSurfacesRecovery(t *testing.T) {
+	t.Setenv(authstore.EnvConfigDir, t.TempDir())
+	t.Setenv(config.EnvAPIBaseURL, "https://env.example")
+	loginToken(t, "bad", "app_bad")
+
+	store, err := authstore.New()
+	if err != nil {
+		t.Fatalf("authstore.New: %v", err)
+	}
+	if err := store.UpdateProfileAPIBaseURL("bad", "https://bad.example/fleet/api"); err != nil {
+		t.Fatalf("seed invalid API base URL: %v", err)
+	}
+
+	f := newAuthTestFactory()
+	_, errOut, err := execRoot(t, f, "config", "show")
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Type != "validation" {
+		t.Fatalf("config show error = %v, want structured validation", err)
+	}
+	if !strings.Contains(ee.Hint, "octo-cli --profile bad auth update --api-base-url <origin>") ||
+		!strings.Contains(ee.Hint, "octo-cli --profile bad auth update --clear-api-base-url") {
+		t.Fatalf("config show hint = %q, want full-selector recovery", ee.Hint)
+	}
+	if !strings.Contains(errOut, "validation") {
+		t.Fatalf("config show did not emit an error envelope: %q", errOut)
 	}
 }
 
@@ -216,7 +349,7 @@ func TestAuth_ProfileNameDefaultsToBotID(t *testing.T) {
 	loginToken(t, "cli_demo", "app_demo_token")
 
 	// Selecting by --profile cli_demo (the defaulted name) resolves the same entry.
-	f := newTestFactoryWithReg()
+	f := newAuthTestFactory()
 	out, _, err := execRoot(t, f, "auth", "status", "--profile", "cli_demo")
 	if err != nil {
 		t.Fatalf("status by profile: %v", err)
@@ -233,7 +366,7 @@ func TestAuth_StatusAmbiguousIsInformational(t *testing.T) {
 
 	// status with no selector must NOT error — it's introspection. It reports
 	// active=null + a pointer, but never enumerates (that is `auth list`).
-	f := newTestFactoryWithReg()
+	f := newAuthTestFactory()
 	out, _, err := execRoot(t, f, "auth", "status")
 	if err != nil {
 		t.Fatalf("status should not error on ambiguity: %v", err)
@@ -250,7 +383,7 @@ func TestAuth_StatusAmbiguousIsInformational(t *testing.T) {
 	}
 
 	// status with --bot-id resolves to the one active bot.
-	f = newTestFactoryWithReg()
+	f = newAuthTestFactory()
 	out, _, err = execRoot(t, f, "auth", "status", "--bot-id", "cli_b")
 	if err != nil {
 		t.Fatalf("status --bot-id: %v", err)

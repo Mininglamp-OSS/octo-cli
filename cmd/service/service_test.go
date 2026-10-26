@@ -27,7 +27,7 @@ import (
 // TestMain isolates the whole package from the developer's own OCTO_
 // environment. These tests assert on the exact request the engine builds, and
 // ambient variables rewrite it: OCTO_MARKETPLACE_API_PREFIX replaces the
-// leading /market segment (run.go marketplacePath), OCTO_API_BASE_URL and
+// leading /market segment (run.go MarketplacePath), OCTO_API_BASE_URL and
 // OCTO_SPACE_ID feed the resolved config, OCTO_FORMAT reshapes the envelope.
 //
 // The sweep is by prefix rather than by name on purpose. Naming variables is
@@ -135,7 +135,7 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 	loop := findCmd(root, "loop")
 	for _, resource := range []string{
 		"attachment", "autopilot", "comment", "execution", "expert",
-		"expert-template", "expert-team", "label", "project", "runtime",
+		"expert-template", "expert-team", "label", "runtime",
 		"skill", "skill-file", "task", "workspace",
 	} {
 		if findCmd(loop, resource) == nil {
@@ -168,11 +168,12 @@ func TestRegisterServiceCommands_TreeShape(t *testing.T) {
 }
 
 func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
-	var gotPath, gotAuth, gotSpace string
+	var gotPath, gotAuth, gotSpace, gotAccept string
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
 		gotSpace = r.Header.Get("X-Space-Id")
+		gotAccept = r.Header.Get("Accept")
 		_, _ = w.Write([]byte(`{"data":{"task_id":"task-1"}}`))
 	}))
 	defer gateway.Close()
@@ -203,6 +204,96 @@ func TestLoopCommandUsesUnifiedGatewayAndModulePath(t *testing.T) {
 	}
 	if gotSpace != "" {
 		t.Fatalf("Loop public API must not receive X-Space-Id, got %q", gotSpace)
+	}
+	if gotAccept != "application/vnd.octo+json" {
+		t.Fatalf("Accept = %q, want application/vnd.octo+json", gotAccept)
+	}
+}
+
+func TestLoopCommandReportsUnsupportedServerVersion(t *testing.T) {
+	t.Parallel()
+
+	root, tf, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/fleet/api/v1/tasks/task-1" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	})
+	root.SetArgs([]string{"loop", "task", "get", "task-1", "--workspace-id", "workspace-1"})
+
+	err := root.Execute()
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error = %T %v, want LOOP_API_UNSUPPORTED", err, err)
+	}
+
+	var envelope struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Hint    string `json:"hint"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(tf.ErrOut.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode error envelope: %v\n%s", err, tf.ErrOut.String())
+	}
+	if envelope.OK {
+		t.Fatal("error envelope ok = true")
+	}
+	if envelope.Error.Type != "api_error" || envelope.Error.Code != "LOOP_API_UNSUPPORTED" {
+		t.Fatalf("error envelope = %+v", envelope.Error)
+	}
+	if envelope.Error.Message != "this Octo server version does not support Loop" {
+		t.Errorf("message = %q", envelope.Error.Message)
+	}
+	if !strings.Contains(envelope.Error.Hint, "/fleet/api/v1") {
+		t.Errorf("hint = %q, want Fleet API path", envelope.Error.Hint)
+	}
+}
+
+func TestLoopExpertTeamEvaluateCommandShape(t *testing.T) {
+	var gotMethod, gotPath, gotWorkspace string
+	var gotBody map[string]any
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotWorkspace = r.Header.Get("X-Workspace-ID")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"evaluation-1"}`))
+	})
+	loop := findCmd(root, "loop")
+	expertTeam := findCmd(loop, "expert-team")
+	if expertTeam == nil || findCmd(expertTeam, "evaluate") == nil {
+		t.Fatal("loop expert-team evaluate command not registered")
+	}
+	task := findCmd(loop, "task")
+	if task != nil && findCmd(task, "team-evaluation") != nil {
+		t.Fatal("legacy loop task team-evaluation hierarchy must not be generated")
+	}
+
+	root.SetArgs([]string{
+		"loop", "expert-team", "evaluate", "task-1",
+		"--workspace-id", "workspace-1",
+		"--outcome", "no_action",
+		"--reason", "nothing to dispatch",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("loop expert-team evaluate: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/fleet/api/v1/tasks/task-1/expert_team_evaluations" {
+		t.Fatalf("request = %s %s", gotMethod, gotPath)
+	}
+	if gotWorkspace != "workspace-1" {
+		t.Fatalf("X-Workspace-ID = %q", gotWorkspace)
+	}
+	if gotBody["outcome"] != "no_action" || gotBody["reason"] != "nothing to dispatch" {
+		t.Fatalf("request body = %#v", gotBody)
 	}
 }
 
@@ -567,17 +658,29 @@ func TestHTMLCanonicalDraftCreate(t *testing.T) {
 }
 
 func TestHTMLDraftCreateRejectsSlugWithoutHTTPRequest(t *testing.T) {
-	hits := 0
-	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
-		hits++
-		_, _ = w.Write([]byte(`{"data":{}}`))
-	})
-	root.SetArgs([]string{"html", "draft", "create", "--data", `{"html":"wip","slug":"legacy"}`})
-	if err := root.Execute(); err == nil {
-		t.Fatal("draft create with slug unexpectedly succeeded")
-	}
-	if hits != 0 {
-		t.Fatalf("draft create with slug reached backend %d time(s)", hits)
+	const hint = "create a draft with non-empty html; the CLI generates idempotency_key when omitted; slug is not accepted on this endpoint"
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "slug is forbidden", body: `{"html":"wip","slug":"legacy"}`},
+		{name: "html is blank", body: `{"html":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := 0
+			root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+				hits++
+				_, _ = w.Write([]byte(`{"data":{}}`))
+			})
+			root.SetArgs([]string{"html", "draft", "create", "--data", tc.body})
+			err := output.AsExitError(root.Execute())
+			if err == nil || err.Code != "VALIDATION_ERROR" || err.Hint != hint {
+				t.Fatalf("draft create invalid-mode hint = %#v, want %q", err, hint)
+			}
+			if hits != 0 {
+				t.Fatalf("invalid draft create reached backend %d time(s)", hits)
+			}
+		})
 	}
 }
 
@@ -1399,7 +1502,6 @@ func TestValidateRequiredBodyFields_AllowsOptionalLoopNulls(t *testing.T) {
 	}
 	body := map[string]any{
 		"description":         nil,
-		"project_id":          nil,
 		"task_title_template": nil,
 	}
 	if err := validateRequiredBodyFields(&operationRuntime{detail: update}, body); err != nil {
