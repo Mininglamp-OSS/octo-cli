@@ -80,6 +80,11 @@ var overridableParams = map[string]map[string]overridableField{
 	"group.list": {
 		"space_id": fieldSpaceID,
 	},
+	// thread.create gained an on_behalf_of body field upstream; a configured
+	// --force-on-behalf-of must confine it like every other OBO-capable op.
+	"thread.create": {
+		"on_behalf_of": fieldOnBehalfOf,
+	},
 	// The message.search* family is force-when-configured, NOT excluded: when the
 	// operator sets a --force-* value it must win (confine the search to that
 	// channel / on-behalf-of subject), and apply's empty-value skip preserves the
