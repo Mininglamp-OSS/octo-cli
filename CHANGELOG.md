@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Case-fold spellings of declared secrets are masked** — `--dry-run`,
+  `--verbose` and MCP `execute` dry runs now mask a declared `x-octo-secret`
+  value whose property name differs from the declared one only by Unicode
+  case folding (for example `HEADERS`, `URL` or `header\u017f` inside a
+  `capability.install` MCP server object). The request still carries exactly
+  what the caller wrote.
 - **Nullable search filters** — Drive accepts explicit `null` for optional size
   boundaries and ownership filtering, while retaining exact non-null uint64 and
   vocabulary checks and refusing null on non-nullable IDs.
@@ -202,7 +208,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dropped while the call runs live. Inside operation arguments, a misplaced
     `dry_run` / `schema_fingerprint` and any undeclared name that equals a
     declared one under Unicode case folding (for example `\u017fpace_id` for a
-    connection-forced `space_id`) are refused for `execute` and `call_op`. The
+    connection-forced `space_id`) are refused for `execute` and `call_op`.
+    These name checks run before the credential is resolved, so they are
+    bounded: one call accepts at most 1024 top-level argument names, aliases
+    are found through a case-fold index rather than by comparing every pair,
+    and a request whose context is cancelled or times out during validation is
+    refused as `REQUEST_CANCELLED` with nothing sent. The
     multipart / raw-body dry run resolves the credential and token-kind gate,
     refuses the empty or dot-segment values a real call refuses, and lists
     query, header and form arguments where they would be sent. `get_skill`
