@@ -209,9 +209,9 @@ func TestDo_IdempotentMethodsStillRetryTransientFailures(t *testing.T) {
 	}
 }
 
-// A write carrying a spec-declared idempotency key is deduplicated by the
-// backend, so it keeps the retries; DisableRetry still wins over the key.
-func TestDo_IdempotencyKeyedWriteRetries(t *testing.T) {
+// A write whose backend deduplicates every resend keeps the retries;
+// DisableRetry still wins.
+func TestDo_ReplaySafeWriteRetries(t *testing.T) {
 	for _, disable := range []bool{false, true} {
 		var hits int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,7 +221,7 @@ func TestDo_IdempotencyKeyedWriteRetries(t *testing.T) {
 			}
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		}))
-		_, err := newTestClient(srv).Do(context.Background(), &Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{"idempotency_key": "k"}, IdempotencyKeyed: true, DisableRetry: disable})
+		_, err := newTestClient(srv).Do(context.Background(), &Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{"idempotency_key": "k"}, ReplaySafe: true, DisableRetry: disable})
 		srv.Close()
 		want := int32(2)
 		if disable {

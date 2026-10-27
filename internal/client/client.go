@@ -98,11 +98,13 @@ type Request struct {
 	// It is independent of the global --no-retry switch and deliberately lives
 	// on Request so operation metadata can enforce the safety contract.
 	DisableRetry bool
-	// IdempotencyKeyed marks a POST or PATCH that carries a spec-declared
-	// idempotency key the backend deduplicates on (x-octo-auto-idempotency-key,
-	// or a declared Idempotency-Key header with a value). Resending it cannot
-	// repeat the side effect, so it is retried like an idempotent method.
-	IdempotencyKeyed bool
+	// ReplaySafe marks a POST or PATCH whose backend is verified to
+	// deduplicate a resend of the same request for every target resource, so it
+	// is retried like an idempotent method. Carrying an idempotency key is not
+	// enough on its own: a backend may accept a key and ignore it for some
+	// resources (docs-backend only honours Idempotency-Key for html_ppt), and a
+	// resend would then repeat the side effect.
+	ReplaySafe bool
 	// UnknownOutcomeOnNetworkFailure changes a transport failure or an ambiguous
 	// gateway 502/503/504 into a machine-readable RESULT_UNKNOWN error. It is for
 	// side effects where the server may have accepted the request before the
@@ -1494,7 +1496,7 @@ func isIdempotentMethod(method string) bool {
 // retrySafe reports whether resending r after an ambiguous failure cannot
 // repeat its side effect.
 func (r *Request) retrySafe() bool {
-	return r.IdempotencyKeyed || isIdempotentMethod(r.Method)
+	return r.ReplaySafe || isIdempotentMethod(r.Method)
 }
 
 // definitelyNotProcessed reports whether a failed attempt certainly did not

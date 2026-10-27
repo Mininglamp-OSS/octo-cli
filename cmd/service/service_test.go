@@ -609,32 +609,35 @@ func TestHTMLListOperationsPreserveOffsetPaginationEnvelope(t *testing.T) {
 	}
 }
 
+// html.publish carries a generated run-scoped idempotency key, but the
+// docs-html backend's deduplication of a resend is not verified, so an
+// ambiguous failure is not resent. The key the backend received is reported
+// with the unknown outcome so the caller can resume the same creation with it.
 func TestHTMLCreateGeneratesRunScopedIdempotencyKey(t *testing.T) {
 	var bodies []map[string]any
-	hits := 0
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		bodies = append(bodies, body)
-		hits++
-		if hits == 1 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
 	})
 	root.SetArgs([]string{"html", "publish", "--html", "new"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("create: %v", err)
+	err := root.Execute()
+	if len(bodies) != 1 {
+		t.Fatalf("request count = %d, want one delivery", len(bodies))
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("request count = %d, want retry", len(bodies))
+	sent, _ := bodies[0]["idempotency_key"].(string)
+	if !strings.HasPrefix(sent, "octo-cli-") {
+		t.Fatalf("generated key = %q", sent)
 	}
-	first, _ := bodies[0]["idempotency_key"].(string)
-	second, _ := bodies[1]["idempotency_key"].(string)
-	if first == "" || first != second {
-		t.Errorf("retry keys = %q, %q; want one generated key", first, second)
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "RESULT_UNKNOWN" {
+		t.Fatalf("err = %v, want RESULT_UNKNOWN", err)
+	}
+	var detail map[string]any
+	if json.Unmarshal(ee.Detail, &detail) != nil || detail["idempotency_key"] != sent {
+		t.Errorf("detail = %s, want idempotency_key %q", ee.Detail, sent)
 	}
 }
 

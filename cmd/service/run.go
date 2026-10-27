@@ -114,11 +114,9 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
-	// A spec-declared idempotency key lets the backend deduplicate a resent
-	// write, so such a request keeps the transport's automatic retries.
-	if _, key := requestIdempotencyKey(rt, &req); key != "" {
-		req.IdempotencyKeyed = true
-	}
+	// Forwarding an idempotency key is not proof that the backend deduplicates
+	// a resend, so only a verified contract keeps the automatic retries.
+	req.ReplaySafe = replayDeduplicated(rt, &req)
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
 	if rt.pageAll != nil && *rt.pageAll && (f.Globals == nil || !f.Globals.DryRun) {
@@ -1417,6 +1415,34 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 			strings.ReplaceAll(field, "_", "-"), key)
 	}
 	return exit
+}
+
+// verifiedReplayDedup lists the operations whose backend is verified to
+// deduplicate every resend of the same request carrying the same idempotency
+// key, whatever resource it targets. Only these POSTs are resent after an
+// attempt that may have taken effect. An operation is absent when its key is
+// honoured only for some resources (docs.create, docs.comments.add and the
+// docs.versions writes: octo-docs-backend reads Idempotency-Key on html_ppt
+// paths only and ignores it for every other document type) or when its backend
+// contract has not been verified (summary.create, html.publish and
+// html.draft.create).
+var verifiedReplayDedup = map[string]bool{
+	// octo-fleet CreateCapabilityInstallation requires the key and claims it in
+	// capability_installation_receipt (primary key workspace, owner, key) inside
+	// the install transaction; a repeat within 24 hours replays the stored
+	// receipt, and a different request under the same key is refused with 409.
+	"capability.install": true,
+}
+
+// replayDeduplicated reports whether req may be resent after an ambiguous
+// failure: its operation has a verified deduplication contract and the request
+// carries a key.
+func replayDeduplicated(rt *operationRuntime, req *client.Request) bool {
+	if rt == nil || rt.detail == nil || !verifiedReplayDedup[rt.detail.ID] {
+		return false
+	}
+	_, key := requestIdempotencyKey(rt, req)
+	return strings.TrimSpace(key) != ""
 }
 
 func requestIdempotencyKey(rt *operationRuntime, req *client.Request) (field, key string) {
