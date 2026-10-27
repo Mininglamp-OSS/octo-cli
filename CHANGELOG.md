@@ -59,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `strings.EqualFold` matches with `dry_run` / `schema_fingerprint` are now
   refused on `execute` and `call_op` like their ASCII spellings, instead of
   being forwarded to the backend.
+- **MCP positional query arguments** — `task.search` from `execute`, its dry run
+  and `call_op` failed locally with "a flag in the command line was not
+  recognised": an argument whose query parameter declares `x-octo-positional`
+  (`q`) was rendered as a `--q` flag the command never registers. It is now
+  passed as the command's operand after `--`, in spec order, so a search term
+  with spaces, Unicode or a leading `-` reaches the wire unchanged. The MCP
+  argument name stays `q`; the CLI label `query` is still refused, with a hint
+  naming `q`.
 
 - **Case-fold spellings of declared secrets are masked** — `--dry-run`,
   `--verbose` and MCP `execute` dry runs now mask a declared `x-octo-secret`

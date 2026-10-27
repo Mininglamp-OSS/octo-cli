@@ -345,9 +345,12 @@ func checkArgumentNames(ctx context.Context, args map[string]any, pathSet map[st
 // buildArgv translates an MCP call_op arguments object into CLI argv for the
 // operation's generated leaf command. Path parameters become positionals after
 // a "--" separator (so a base64url id starting with "-" is never parsed as a
-// flag); query and header parameters become their spec-derived flags; every
-// remaining declared/extra field is passed as the JSON --data body so run.go's
-// merged-body validator judges it at every depth (no second validator here).
+// flag); a query parameter that declares x-octo-positional follows them, in
+// spec order, exactly where the engine's leaf command reads its operand (so a
+// search term starting with "-" stays data too); every other query and header
+// parameter becomes its spec-derived flag; every remaining declared/extra field
+// is passed as the JSON --data body so run.go's merged-body validator judges it
+// at every depth (no second validator here).
 //
 // Two capability guards run here, before cobra parsing:
 //   - A synthesized flag name may never be a reserved engine/root flag: a
@@ -410,6 +413,9 @@ func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string
 			}
 		case pathSet[k]:
 			// consumed as a positional below
+		case queryByName[k] != nil && queryByName[k].PositionalName != "":
+			// consumed as a positional below: the engine registers no flag
+			// for it, only the <operand> after the path values
 		case queryByName[k] != nil:
 			if v == nil {
 				continue // null query arg => omitted, not an empty scope
@@ -474,7 +480,18 @@ func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string
 
 	if len(unexpected) > 0 {
 		sort.Strings(unexpected)
-		return nil, fmt.Errorf("unexpected argument(s) for %s: %s", d.ID, strings.Join(unexpected, ", "))
+		msg := fmt.Sprintf("unexpected argument(s) for %s: %s", d.ID, strings.Join(unexpected, ", "))
+		// A positional query parameter shows its CLI operand label next to its
+		// wire name, so name the argument a caller most likely meant. The
+		// label itself is still refused: it is not an argument.
+		for _, k := range unexpected {
+			for i := range d.Parameters {
+				if p := &d.Parameters[i]; p.In == "query" && p.PositionalName == k {
+					msg += fmt.Sprintf(" (%q is the CLI operand label of query argument %q; pass it as %q)", k, p.Name, p.Name)
+				}
+			}
+		}
+		return nil, errors.New(msg)
 	}
 
 	if len(body) > 0 {
@@ -504,6 +521,26 @@ func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string
 		s, err := scalarString(pv)
 		if err != nil {
 			return nil, fmt.Errorf("path argument %q: %w", n, err)
+		}
+		positionals = append(positionals, s)
+	}
+	// Positional query operands, in declaration order: the same order the
+	// engine registers them (cmd/service registerQueryFlags) and reads them
+	// back from the tail of its args. The engine's leaf command requires every
+	// one of them (cobra.ExactArgs), so an absent or null value is reported
+	// here by its wire name instead of as an operand-count error.
+	for i := range d.Parameters {
+		p := &d.Parameters[i]
+		if p.In != "query" || p.PositionalName == "" {
+			continue
+		}
+		pv, ok := args[p.Name]
+		if !ok || pv == nil {
+			return nil, fmt.Errorf("missing required query argument %q for %s", p.Name, d.ID)
+		}
+		s, err := scalarString(pv)
+		if err != nil {
+			return nil, fmt.Errorf("query argument %q: %w", p.Name, err)
 		}
 		positionals = append(positionals, s)
 	}
