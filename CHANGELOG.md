@@ -44,7 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   waiting to resend, or a replay into 404 (a DELETE that committed and lost its
   response) end as `RESULT_UNKNOWN` instead of a definite failure; a keyed
   write that exhausts its retries is `RESULT_UNKNOWN` on the CLI, `call_op`
-  and `execute` alike. A request whose every dial failed is reported as a plain
+  and `execute` alike. A replay-safe write is no longer resent by net/http
+  behind the retry loop, so a delivery on a reused connection followed by a
+  refused dial stays `RESULT_UNKNOWN`, and `execute` reports `result_unknown`
+  when the replay of such a write was refused with 400/401/409. A request whose every dial failed is reported as a plain
   `NETWORK_ERROR` known not to have been sent (`execution_error` from
   `execute`).
 - **MCP `call_op` refuses unknown tool arguments** — `dry_run`,

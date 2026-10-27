@@ -428,11 +428,14 @@ reads `Idempotency-Key` on `html_ppt` paths only). Only an operation listed in
 resend of the same key, keeps the idempotent retries; `x-octo-retry: never`
 still disables retries entirely.
 
-A request that may not be resent is also kept from net/http's own replay of a
-request on a failed reused keep-alive connection, which the Transport applies
-to any request with an `Idempotency-Key` / `X-Idempotency-Key` header: the key
-goes on the wire under its lower-case spelling. With `--no-retry` a safe
-request is kept from that replay as well.
+Every mutating request, including a replay-safe one, is kept from net/http's
+own replay of a request on a failed reused keep-alive connection, which the
+Transport applies to any request with an `Idempotency-Key` /
+`X-Idempotency-Key` header and reports only as its last send: the key goes on
+the wire under its lower-case spelling, so each attempt passes through the
+retry loop and its history. With `--no-retry` a safe request is kept from that
+replay as well. MCP `execute` reports an engine `RESULT_UNKNOWN` as
+`result_unknown` whatever the Type of the last response.
 
 The outcome is decided from the whole attempt history: once an attempt may
 have taken effect (anything but a failed dial or a definite 4xx other than

@@ -538,6 +538,14 @@ func classifyExecuteResult(env []byte, okRun bool, operationID, fingerprint stri
 // available (e.g. a synthesized envelope).
 func classifyFailure(method string, parsed map[string]any, exitErr *output.ExitError) string {
 	if exitErr != nil {
+		// The engine decided from the whole attempt history that a sent request
+		// may have been applied. That error keeps the Type of the last response,
+		// so a replay refused with 400/401/409 reads as validation or auth; the
+		// explicit unknown outcome wins. A local or first-attempt refusal never
+		// carries this code.
+		if exitErr.Code == "RESULT_UNKNOWN" {
+			return "result_unknown"
+		}
 		switch exitErr.Type {
 		case "auth_error":
 			return "auth_error"
