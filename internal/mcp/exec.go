@@ -214,6 +214,57 @@ func synthErrorEnvelope(err error) []byte {
 	return buf.Bytes()
 }
 
+// toolSafetyArgumentNames are the execute tool's own switches. Inside an
+// operation's arguments they are never operation input; an undeclared
+// dry_run would otherwise be forwarded as body data while the call runs live.
+var toolSafetyArgumentNames = map[string]bool{"dryrun": true, "schemafingerprint": true}
+
+// checkArgumentNames refuses argument names that could change what the call
+// does without looking like it:
+//   - a misplaced tool switch (dry_run, schema_fingerprint, or a spelling of
+//     them with other case or separators) that the operation does not declare;
+//   - a name that is not a declared parameter or body field but equals one
+//     under Unicode case folding (for example "ſpace_id" for "space_id"), or two
+//     names that fold together. A Go backend binds JSON keys case-insensitively
+//     with this folding and the last match wins, so such a key could override
+//     a declared or connection-forced value that is also in the body.
+func checkArgumentNames(args map[string]any, pathSet map[string]bool, query, header map[string]*registry.ParamInfo, body map[string]registry.SchemaInfo) error {
+	declared := map[string]bool{"page_all": true, "file_path": true}
+	for n := range pathSet {
+		declared[n] = true
+	}
+	for n := range query {
+		declared[n] = true
+	}
+	for n := range header {
+		declared[n] = true
+	}
+	for n := range body { //nolint:gocritic // schema properties are read-only values
+		declared[n] = true
+	}
+	keys := sortedKeys(args)
+	for i, k := range keys {
+		if declared[k] {
+			continue
+		}
+		folded := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(k))
+		if toolSafetyArgumentNames[folded] {
+			return fmt.Errorf("argument %q is a tool option, not an operation argument; execute takes dry_run and schema_fingerprint next to operation_id", truncateRunes(k, 200))
+		}
+		for n := range declared {
+			if strings.EqualFold(k, n) {
+				return fmt.Errorf("argument %q is not the declared spelling of %q", truncateRunes(k, 200), n)
+			}
+		}
+		for _, other := range keys[i+1:] {
+			if strings.EqualFold(k, other) {
+				return fmt.Errorf("arguments %q and %q differ only by case folding", truncateRunes(k, 200), truncateRunes(other, 200))
+			}
+		}
+	}
+	return nil
+}
+
 // buildArgv translates an MCP call_op arguments object into CLI argv for the
 // operation's generated leaf command. Path parameters become positionals after
 // a "--" separator (so a base64url id starting with "-" is never parsed as a
@@ -257,6 +308,10 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 		for name, prop := range d.RequestBody.Properties { //nolint:gocritic // schema properties are read-only values
 			declaredBody[name] = prop
 		}
+	}
+
+	if err := checkArgumentNames(args, pathSet, queryByName, headerByName, declaredBody); err != nil {
+		return nil, err
 	}
 
 	var flags []string

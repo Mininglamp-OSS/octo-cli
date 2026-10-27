@@ -294,6 +294,9 @@ type toolCallParams struct {
 }
 
 func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic,gocyclo // request snapshot is immutable during dispatch; one branch per tool
+	if err := validateToolCallKeys(req.Params); err != nil {
+		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
+	}
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
@@ -395,6 +398,44 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 	default:
 		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool: "+p.Name)
 	}
+}
+
+// validateToolCallKeys checks the tools/call params object before struct
+// decoding can drop or merge keys. Only name, arguments and _meta are accepted,
+// with their exact spelling and at most once each, so a misplaced safety field
+// such as params.dry_run, or a second arguments object, is refused instead of
+// being silently discarded while the call runs live.
+func validateToolCallKeys(raw json.RawMessage) error {
+	if len(raw) == 0 || !isJSONObject(raw) {
+		return nil // the struct decode reports a missing or non-object params value
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := d.Token(); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := token.(string)
+		switch key {
+		case "name", "arguments", "_meta":
+		default:
+			return fmt.Errorf("unknown field %q; tool inputs belong inside arguments", truncateRunes(key, 200))
+		}
+		if seen[key] {
+			return fmt.Errorf("duplicate field %q", key)
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return err
+		}
+	}
+	_, err := d.Token()
+	return err
 }
 
 // validateExecuteKeys keeps safety switches fail-closed. Struct unmarshalling
