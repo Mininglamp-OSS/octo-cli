@@ -26,8 +26,9 @@ type ExitError struct {
 }
 
 // OutcomeUnknown reports whether the request may have been applied despite the
-// error. A 4xx is a definite refusal; anything else — a transport failure, a
-// timeout, or a 5xx after the server may have committed — is ambiguous.
+// error. The client's RESULT_UNKNOWN decision takes precedence over status,
+// including a 429 or a later 4xx following a possibly committed attempt.
+// Otherwise a 4xx is a refusal; transport failures and 5xx are ambiguous.
 func (e *ExitError) OutcomeUnknown() bool {
 	if e == nil {
 		return false

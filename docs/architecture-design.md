@@ -417,9 +417,12 @@ GET, HEAD, OPTIONS, TRACE, PUT and DELETE are idempotent (RFC 9110 §9.2.2) and
 retry on every retryable failure. A POST or PATCH may already have been applied
 when the connection drops after the request was sent, the server answers 429 or
 a 5xx, or the request times out, so it is not resent; the failure is reported
-as `RESULT_UNKNOWN`, keeping the backend's message (a 429 is returned as the
-server's answer, with its Retry-After in the hint). It is still resent when the
-dial failed (nothing reached the server; reported as `NETWORK_ERROR`). The API
+as `RESULT_UNKNOWN`, keeping the backend's message and payload, including its
+original error code in detail. A terminal 429 retains its HTTP status and
+Retry-After guidance alongside the instruction not to retry automatically.
+This includes the first attempt and `--no-retry`; all terminal 5xx responses
+likewise retain their possible delivery in the outcome. It is still resent when
+the dial failed (nothing reached the server; reported as `NETWORK_ERROR`). The API
 has no general idempotency guarantee for POST, so this applies to a POST that
 only reads as well. Carrying an idempotency key is not enough to resend: a
 backend may accept a key and ignore it for some resources (octo-docs-backend

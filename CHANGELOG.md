@@ -38,16 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was lost could be delivered four times while the final error said not to
   retry. A POST or PATCH is now resent only when the dial failed; otherwise the
   CLI and MCP report `RESULT_UNKNOWN` (`result_unknown` from `execute`) after
-  exactly one delivery, keeping the backend's message. A 429 is returned as is
-  with its Retry-After in the hint rather than resent, because a handler can
-  answer 429 after it committed. Forwarding an `Idempotency-Key` no longer
+  exactly one delivery, keeping the backend's message. A 429 is also
+  `RESULT_UNKNOWN`, with its backend code in detail and Retry-After in the
+  hint rather than resent, because a handler can answer 429 after it committed.
+  Forwarding an `Idempotency-Key` no longer
   enables resends: octo-docs-backend honours that key for `html_ppt` only, so
   `docs create` / `docs comments add` / `docs versions` writes on any other
   document type were duplicated. Only an operation whose backend deduplicates
   every resend (`capability.install`) keeps the retries. net/http no longer
   resends a keyed write on its own after a reused keep-alive connection fails,
   and `--no-retry` now means a single delivery at that layer too.
-- **A retried request is classified by its whole attempt history** — once an
+- **A failed request is classified by its whole attempt history** — including
+  the terminal attempt, so even a first-attempt 429 or 5xx after a committed
+  mutation is `RESULT_UNKNOWN`, including with `--no-retry`. Once an
   attempt may have applied a write, later refused dials, a cancellation while
   waiting to resend, or a replay into 404 (a DELETE that committed and lost its
   response) end as `RESULT_UNKNOWN` instead of a definite failure; a keyed
@@ -249,7 +252,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     fingerprint is deterministic schema-drift detection only — it does not prove
     `describe` was called this session; a stateful session challenge is deferred.
     Machine-readable outcome semantics distinguish `result_unknown` (a mutating
-    request whose outcome is ambiguous after a transport/timeout/5xx — may have
+    request whose outcome is ambiguous after a transport/timeout/429/5xx — may have
     applied, do not auto-retry) and `auth_error` (fix the credential) from a
     plain `execution_error`. Error and degradation hints are facade-aware: under
     `--facade two` they route to `get_skill`, never the disabled

@@ -346,8 +346,10 @@ func TestDo_AmbiguousGatewayFailureReturnsResultUnknown(t *testing.T) {
 		})
 	}
 
-	t.Run("rate limit remains definitive", func(t *testing.T) {
+	t.Run("rate limit preserves unknown mutation outcome", func(t *testing.T) {
+		var calls atomic.Int32
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
 			w.WriteHeader(http.StatusTooManyRequests)
 			_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"slow down"}}`))
 		}))
@@ -361,8 +363,11 @@ func TestDo_AmbiguousGatewayFailureReturnsResultUnknown(t *testing.T) {
 			UnknownOutcomeOnNetworkFailure: true,
 		})
 		got := output.AsExitError(err)
-		if got == nil || got.Code == "RESULT_UNKNOWN" {
-			t.Fatalf("error = %#v, want definitive rate-limit error", got)
+		if got == nil || got.Code != "RESULT_UNKNOWN" || got.HTTPStatus != http.StatusTooManyRequests || !got.OutcomeUnknown() || calls.Load() != 1 {
+			t.Fatalf("error = %#v calls=%d, want unknown outcome after one delivery", got, calls.Load())
+		}
+		if !strings.Contains(string(got.Detail), "RATE_LIMITED") || !strings.Contains(got.Message, "slow down") || !strings.Contains(got.Hint, "do not retry automatically") {
+			t.Errorf("backend diagnostic or recovery lost: %+v", got)
 		}
 	})
 }

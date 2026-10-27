@@ -917,29 +917,27 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
-	result, earlierMayHaveApplied, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+	result, mayHaveApplied, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
 	if err != nil {
-		return nil, settleFailure(req, err, earlierMayHaveApplied)
+		return nil, settleFailure(req, err, mayHaveApplied)
 	}
 	return result, nil
 }
 
 // settleFailure classifies a failed request from its whole attempt history,
-// not only from the error that ended it. earlierMayHaveApplied is true when an
-// attempt before that error may have reached the backend and taken effect; a
-// later failed dial, a definite refusal, or a cancellation while waiting to
-// resend cannot undo that.
+// not only from the error that ended it. mayHaveApplied includes the terminal
+// attempt: a first-attempt 429 or 5xx can follow a committed mutation too. A
+// later failed dial, definite refusal, or cancellation cannot undo a delivery.
 //
 // A mutating request is reported as RESULT_UNKNOWN when an earlier attempt may
 // have applied it (a DELETE that committed and lost its response replays into
 // 404; a keyed create that answered 503 is followed by refused dials), or when
-// the final error is itself ambiguous (a transport failure after the
-// connection was made, a timeout, a 502/503/504). Otherwise the final error
+// the terminal attempt itself may have applied it. Otherwise the final error
 // stands: a definite refusal, a backend error, or a failure that never reached
 // the backend (NotProcessed).
-func settleFailure(req *Request, err error, earlierMayHaveApplied bool) error {
+func settleFailure(req *Request, err error, mayHaveApplied bool) error {
 	err = withRetryAfterHint(err)
-	if !earlierMayHaveApplied && !ambiguousOutcome(err) {
+	if !mayHaveApplied {
 		return err
 	}
 	if req.UnknownOutcomeOnNetworkFailure || !isSafeMethod(req.Method) {
@@ -981,8 +979,8 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 	transportReplay := isSafeMethod(req.Method) && maxRetries > 0
 
 	var lastErr error
-	// mayHaveApplied covers every attempt made so far; the value returned with
-	// an attempt's error covers only the attempts before it.
+	// The same history decides both replay safety and the terminal outcome;
+	// excluding the current attempt would lose first-attempt uncertainty.
 	mayHaveApplied := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -1015,12 +1013,11 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 			return body, false, nil
 		}
 		lastErr = err
-		earlier := mayHaveApplied
 		applied := attemptMayHaveApplied(err)
 		mayHaveApplied = mayHaveApplied || applied
 
 		if !isRetryable(err) || (!replayable && applied) || attempt == maxRetries {
-			return nil, earlier, err
+			return nil, mayHaveApplied, err
 		}
 	}
 	return nil, mayHaveApplied, lastErr
@@ -1519,26 +1516,10 @@ func markResultUnknown(err error) error {
 		unknown.Message += ": " + ee.Message
 	}
 	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
+	if ee.Hint != "" {
+		unknown.Hint += "; server guidance: " + ee.Hint
+	}
 	return &unknown
-}
-
-// ambiguousOutcome reports whether a single failure leaves open whether the
-// request was applied: a transport failure after the connection was made, a
-// timeout, or a gateway 502/503/504. A failed dial and any 4xx (including 429)
-// are answers; another 5xx keeps the backend's own error code, as before.
-func ambiguousOutcome(err error) bool {
-	ee := output.AsExitError(err)
-	if ee == nil {
-		return true
-	}
-	if ee.NotProcessed {
-		return false
-	}
-	switch ee.HTTPStatus {
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true
-	}
-	return ee.Type == "network"
 }
 
 // withRetryAfterHint keeps a 429's Retry-After visible when the request ends

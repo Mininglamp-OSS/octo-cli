@@ -122,8 +122,8 @@ func TestDo_NonIdempotentWriteIsDeliveredOnceOnTimeoutAndCancel(t *testing.T) {
 // A 429 is not proof that a write was not processed: a handler can answer 429
 // after it committed (octo-server OIDC bind does for an already-created token).
 // A write without a verified deduplication contract is therefore not resent
-// after a 429; the server's answer is returned as is with its Retry-After in
-// the hint. A replay-safe write and a GET still wait for Retry-After and retry.
+// after a 429; RESULT_UNKNOWN preserves its status, diagnostic and Retry-After
+// hint. A replay-safe write and a GET still wait for Retry-After and retry.
 func TestDo_429RetriesOnlyReplaySafeRequests(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -156,8 +156,11 @@ func TestDo_429RetriesOnlyReplaySafeRequests(t *testing.T) {
 			}
 			if c.want == 1 {
 				ee := output.AsExitError(err)
-				if ee == nil || ee.Code != "RATE_LIMITED" || ee.HTTPStatus != http.StatusTooManyRequests || ee.NotProcessed {
-					t.Fatalf("err = %+v, want the backend's 429", ee)
+				if ee == nil || ee.Code != "RESULT_UNKNOWN" || ee.HTTPStatus != http.StatusTooManyRequests || ee.NotProcessed || !ee.OutcomeUnknown() {
+					t.Fatalf("err = %+v, want RESULT_UNKNOWN retaining the backend's 429", ee)
+				}
+				if !strings.Contains(string(ee.Detail), "RATE_LIMITED") || !strings.Contains(ee.Hint, "do not retry automatically") {
+					t.Errorf("backend code or recovery instruction lost: %+v", ee)
 				}
 				if !strings.Contains(ee.Hint, "Retry-After") || !strings.Contains(ee.Message, "slow down") {
 					t.Errorf("Retry-After or backend message lost: %+v", ee)
