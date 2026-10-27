@@ -156,3 +156,80 @@ func TestForbidTransportReplayKeepsWireShape(t *testing.T) {
 		t.Fatalf("GET arrived with a body: headers=%v body=%q", got, gotBody)
 	}
 }
+
+// A replay-safe keyed write may be resent, but only by the retry loop, which
+// records every attempt. If net/http resent it on its own after the reused
+// connection dropped the response, the loop would see only the final refused
+// dial and report a request that reached the backend as never sent.
+func TestDo_ReplaySafeWriteOnReusedConnectionKeepsItsHistory(t *testing.T) {
+	var posts int32
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.ReadAll(r.Body)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		atomic.AddInt32(&posts, 1)
+		_ = srv.Listener.Close()
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+	c := New(&config.Config{APIBaseURL: srv.URL}, nil, Options{})
+	c.httpClient = srv.Client()
+	if _, err := c.Do(context.Background(), &Request{Method: http.MethodGet, Path: "/fleet/api/v1/docs/d1"}); err != nil {
+		t.Fatalf("warm-up GET: %v", err)
+	}
+	_, err := c.Do(context.Background(), &Request{
+		Method: http.MethodPost, Path: "/fleet/api/v1/capabilities/install",
+		Headers:    map[string]string{"Idempotency-Key": "cap-1", "X-Workspace-ID": "w1"},
+		Body:       map[string]any{"definition": map[string]any{"name": "c"}},
+		ReplaySafe: true,
+	})
+	if got := atomic.LoadInt32(&posts); got != 1 {
+		t.Fatalf("POST deliveries = %d, want 1", got)
+	}
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "RESULT_UNKNOWN" || !ee.OutcomeUnknown() || ee.NotProcessed {
+		t.Fatalf("err = %+v, want RESULT_UNKNOWN for a write that reached the backend", ee)
+	}
+}
+
+// The explicit loop still retries a replay-safe write on a reused connection,
+// and the key and body reach the backend on every attempt.
+func TestDo_ReplaySafeWriteOnReusedConnectionStillRetries(t *testing.T) {
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Idempotency-Key")+"|"+string(body))
+		n := len(seen)
+		mu.Unlock()
+		if n == 1 {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := New(&config.Config{APIBaseURL: srv.URL}, nil, Options{})
+	c.httpClient = srv.Client()
+	if _, err := c.Do(context.Background(), &Request{Method: http.MethodGet, Path: "/warm"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Do(context.Background(), &Request{Method: http.MethodPost, Path: "/x", Headers: map[string]string{"Idempotency-Key": "cap-2"}, Body: map[string]any{"a": 1}, ReplaySafe: true}); err != nil {
+		t.Fatalf("want success on the retry, got %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 || seen[0] != `cap-2|{"a":1}` || seen[1] != seen[0] {
+		t.Fatalf("deliveries = %q, want two identical keyed deliveries", seen)
+	}
+}

@@ -972,8 +972,13 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 	}
 	replayable := req.replayAllowed()
 	// net/http resends some requests on its own when a reused keep-alive
-	// connection fails; that must not happen where this loop would not resend.
-	transportReplay := replayable && maxRetries > 0
+	// connection fails after the request was written, and reports only the
+	// last of those sends. Every attempt of a mutating request must go
+	// through this loop so its history is complete, even when the request may
+	// be resent: a replay-safe write delivered on the reused connection and
+	// then followed by a refused dial would otherwise look never sent. Only a
+	// safe method with retries enabled keeps the Transport's own replay.
+	transportReplay := isSafeMethod(req.Method) && maxRetries > 0
 
 	var lastErr error
 	// mayHaveApplied covers every attempt made so far; the value returned with
