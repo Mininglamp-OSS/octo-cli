@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -97,6 +98,11 @@ type Request struct {
 	// It is independent of the global --no-retry switch and deliberately lives
 	// on Request so operation metadata can enforce the safety contract.
 	DisableRetry bool
+	// IdempotencyKeyed marks a POST or PATCH that carries a spec-declared
+	// idempotency key the backend deduplicates on (x-octo-auto-idempotency-key,
+	// or a declared Idempotency-Key header with a value). Resending it cannot
+	// repeat the side effect, so it is retried like an idempotent method.
+	IdempotencyKeyed bool
 	// UnknownOutcomeOnNetworkFailure changes a transport failure or an ambiguous
 	// gateway 502/503/504 into a machine-readable RESULT_UNKNOWN error. It is for
 	// side effects where the server may have accepted the request before the
@@ -910,18 +916,26 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 	}
 
 	result, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
-	if err != nil && req.UnknownOutcomeOnNetworkFailure {
+	if err != nil && (req.UnknownOutcomeOnNetworkFailure || !req.retrySafe()) {
 		return nil, markResultUnknown(err)
 	}
 	return result, err
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
+//
+// A request whose method is not idempotent (POST, PATCH) is only resent when
+// the previous attempt definitely did not take effect: the connection was never
+// established, or the server answered 429. A transport failure after the
+// connection was made, a timeout, or a 502/503/504 may follow a request the
+// server already applied, so resending it could repeat the side effect; that
+// failure is returned at once and reported as RESULT_UNKNOWN by do.
 func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry || req.DisableRetry {
 		maxRetries = 0
 	}
+	idempotent := req.retrySafe()
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -942,7 +956,11 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 				redactError(lastErr, req.SecretValues))
 			select {
 			case <-ctx.Done():
-				return nil, output.ErrNetwork(ctx.Err().Error(), "request cancelled")
+				cancelled := output.ErrNetwork(ctx.Err().Error(), "request cancelled")
+				// A non-idempotent request only gets here after attempts that
+				// definitely did not take effect, so nothing was applied.
+				cancelled.NotProcessed = !idempotent
+				return nil, cancelled
 			case <-time.After(delay):
 			}
 		}
@@ -954,6 +972,9 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 		lastErr = err
 
 		if !isRetryable(err) {
+			return nil, err
+		}
+		if !idempotent && !definitelyNotProcessed(err) {
 			return nil, err
 		}
 	}
@@ -1008,9 +1029,11 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}
-		return nil, &retryableErr{
-			ExitError: output.ErrNetwork(msg, "transport error"),
-		}
+		ee := output.ErrNetwork(msg, "transport error")
+		// A failed dial means no byte of the request reached the server.
+		var opErr *net.OpError
+		ee.NotProcessed = errors.As(err, &opErr) && opErr.Op == "dial"
+		return nil, &retryableErr{ExitError: ee}
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
@@ -1435,6 +1458,9 @@ func extractRetryAfterFromErr(err error) (time.Duration, bool) {
 // mutating an error that may also be retained by retry bookkeeping.
 func markResultUnknown(err error) error {
 	ee := output.AsExitError(err)
+	if ee != nil && ee.NotProcessed {
+		return err
+	}
 	var re *retryableErr
 	ambiguousGatewayStatus := errors.As(err, &re) &&
 		(re.status == http.StatusBadGateway || re.status == http.StatusServiceUnavailable || re.status == http.StatusGatewayTimeout)
@@ -1444,8 +1470,45 @@ func markResultUnknown(err error) error {
 	unknown := *ee
 	unknown.Code = "RESULT_UNKNOWN"
 	unknown.Message = "the request may have been accepted, but no definitive response was received"
+	if ee.Message != "" {
+		unknown.Message += ": " + ee.Message
+	}
 	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
 	return &unknown
+}
+
+// isIdempotentMethod reports whether repeating a request with this method has
+// the same effect on the server as sending it once (RFC 9110 section 9.2.2:
+// GET, HEAD, OPTIONS, TRACE, PUT and DELETE). An empty method is GET. POST and
+// PATCH are not idempotent; the API offers no idempotency guarantee the client
+// can rely on for them in general, so every POST is treated as a possible
+// side effect, including a POST that only reads.
+func isIdempotentMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// retrySafe reports whether resending r after an ambiguous failure cannot
+// repeat its side effect.
+func (r *Request) retrySafe() bool {
+	return r.IdempotencyKeyed || isIdempotentMethod(r.Method)
+}
+
+// definitelyNotProcessed reports whether a failed attempt certainly did not
+// take effect, so a non-idempotent request can be sent again: the connection
+// was never established, or the server refused the request with 429.
+func definitelyNotProcessed(err error) bool {
+	var re *retryableErr
+	if !errors.As(err, &re) {
+		return false
+	}
+	if re.status == http.StatusTooManyRequests {
+		return true
+	}
+	return re.ExitError != nil && re.ExitError.NotProcessed
 }
 
 func isRetryableStatus(status int) bool {

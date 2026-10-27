@@ -411,6 +411,19 @@ injected automatically when x-octo-space-header is set.
 | Request timeout | 30s | `--timeout <duration>` |
 | Retryable codes | 429, 502, 503, 504 | — |
 | Retry-After | Respected, NOT capped by max delay | — |
+| Non-idempotent writes | POST/PATCH retried only after a failed dial or a 429 | spec idempotency key |
+
+GET, HEAD, OPTIONS, TRACE, PUT and DELETE are idempotent (RFC 9110 §9.2.2) and
+retry on every retryable failure. A POST or PATCH may already have been applied
+when the connection drops after the request was sent, the server answers
+502/503/504, or the request times out, so it is not resent; the failure is
+reported as `RESULT_UNKNOWN`, keeping the backend's message. It is still resent
+when the dial failed (nothing reached the server; reported as `NETWORK_ERROR`)
+or the server answered 429. The API has no general idempotency guarantee for
+POST, so this applies to a POST that only reads as well. A request carrying a
+spec-declared idempotency key (`x-octo-auto-idempotency-key`, or a declared
+`Idempotency-Key` header with a value) keeps the idempotent retries, and
+`x-octo-retry: never` still disables retries entirely.
 
 ### 6.3 Input Resolution
 

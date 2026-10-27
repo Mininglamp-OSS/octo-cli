@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Non-idempotent writes are no longer resent after an ambiguous failure** —
+  the transport used to retry every request up to four times on a dropped
+  connection, a timeout or a 502/503/504, so a `message send` whose response
+  was lost could be delivered four times while the final error said not to
+  retry. A POST or PATCH is now resent only when the dial failed or the server
+  answered 429; otherwise the CLI and MCP report `RESULT_UNKNOWN`
+  (`result_unknown` from `execute`) after exactly one delivery, keeping the
+  backend's message. Idempotent methods, requests carrying a spec-declared
+  idempotency key and Retry-After handling are unchanged. A connection that was
+  never established is now reported as a plain `NETWORK_ERROR` known not to
+  have been sent (`execution_error` from `execute`) rather than an unknown
+  result.
+- **MCP `call_op` refuses unknown tool arguments** — `dry_run`,
+  `schema_fingerprint` or any other key next to `operation_id` / `arguments`,
+  and a repeated key, are refused with `-32602` before anything is sent.
+  Previously they were dropped and the operation ran live.
+- **Unicode spellings of the execute switches are refused inside operation
+  arguments** — `ſchema_fingerprint` (U+017F long s) and other spellings that
+  `strings.EqualFold` matches with `dry_run` / `schema_fingerprint` are now
+  refused on `execute` and `call_op` like their ASCII spellings, instead of
+  being forwarded to the backend.
+
 - **Case-fold spellings of declared secrets are masked** — `--dry-run`,
   `--verbose` and MCP `execute` dry runs now mask a declared `x-octo-secret`
   value whose property name differs from the declared one only by Unicode

@@ -114,6 +114,11 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	// A spec-declared idempotency key lets the backend deduplicate a resent
+	// write, so such a request keeps the transport's automatic retries.
+	if _, key := requestIdempotencyKey(rt, &req); key != "" {
+		req.IdempotencyKeyed = true
+	}
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
 	if rt.pageAll != nil && *rt.pageAll && (f.Globals == nil || !f.Globals.DryRun) {

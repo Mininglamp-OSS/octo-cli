@@ -628,8 +628,10 @@ func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) 
 		}),
 	}
 
+	// GET, because a POST is not resent after a transport failure, so its retry
+	// diagnostics would never be printed.
 	_, err := c.Do(ctx, &Request{
-		Method:               http.MethodPost,
+		Method:               http.MethodGet,
 		Path:                 "/v1/user/drive/files/42/upload/parts-presign",
 		ResponseSecretFields: []string{"parts[].url"},
 	})

@@ -19,13 +19,17 @@ type ExitError struct {
 	// the error did not come from an HTTP response. It distinguishes a definite
 	// server-side refusal (4xx) from an outcome the caller cannot determine.
 	HTTPStatus int `json:"-"`
+	// NotProcessed marks a failure where the request definitely did not take
+	// effect: no connection to the server was ever established, or every
+	// attempt that reached it was explicitly refused before being processed.
+	NotProcessed bool `json:"-"`
 }
 
 // OutcomeUnknown reports whether the request may have been applied despite the
 // error. A 4xx is a definite refusal; anything else — a transport failure, a
 // timeout, or a 5xx after the server may have committed — is ambiguous.
 func (e *ExitError) OutcomeUnknown() bool {
-	if e == nil {
+	if e == nil || e.NotProcessed {
 		return false
 	}
 	return e.HTTPStatus < 400 || e.HTTPStatus > 499
