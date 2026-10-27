@@ -25,7 +25,7 @@ func attachTaskAssignAlias(loop *cobra.Command, f *cmdutil.Factory) {
 	alias := *update
 	alias.ID = "task.assign"
 	alias.Summary = "Assign or unassign a task"
-	alias.Description = "Alias for task.update. Use --to <name> (a leading @ or ＠ is a mention prefix), --to-id <Project member Octo UID or expert/expert-team UUID>, or --unassign. Use --to-id for a literal name beginning with @. Name and ID selectors read up to 10 pages each of workspace members, experts and expert teams before writing; lookup failures stop the assignment. For larger rosters, use task update with an explicit assignee type and ID. Use --suppress-run when changing the owner without starting a new run."
+	alias.Description = "Alias for task.update. Use --to <name> (a leading @ or ＠ is a mention prefix), --to-id <member or expert/expert-team ID>, or --unassign. Project member IDs are case-sensitive strings; native Workspace member and expert/expert-team IDs are UUIDs. Use --to-id for a literal name beginning with @. Name and ID selectors read up to 10 pages each of workspace members, experts and expert teams before writing; lookup failures stop the assignment. For larger rosters, use task update with an explicit assignee type and ID. Use --suppress-run when changing the owner without starting a new run."
 	body := *update.RequestBody
 	body.Properties = map[string]registry.SchemaInfo{}
 	for _, name := range []string{"assignee_type", "assignee_id", "assignee_octo_uid", "suppress_run", "handoff_note"} {
@@ -33,7 +33,7 @@ func attachTaskAssignAlias(loop *cobra.Command, f *cmdutil.Factory) {
 	}
 	alias.RequestBody = &body
 	command := buildOperationCmd(f, &alias, "assign")
-	for _, name := range []string{"assignee-type", "assignee-id", "assignee-octo-uid"} {
+	for _, name := range []string{"assignee-type", "assignee-id", "assignee-member-id"} {
 		command.Flags().Lookup(name).Hidden = true
 	}
 	tasks.AddCommand(command)
@@ -46,20 +46,53 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 	switch d.ID {
 	case "task.assign":
 		cmd.Flags().String("to", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from workspace lists")
-		cmd.Flags().String("to-id", "", "Full Project member Octo UID (case-sensitive) or expert/expert-team UUID; infer type")
+		cmd.Flags().String("to-id", "", "Full member ID (Project: case-sensitive string; native Workspace: user UUID) or expert/expert-team UUID; infer type")
 		cmd.Flags().Bool("unassign", false, "Remove the current assignee")
 	case "task.create", "task.update":
 		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from up to 10 pages per workspace list; do not mix with explicit selectors")
 		flag := cmd.Flags().Lookup("assignee-id")
 		if flag != nil {
-			flag.Usage += " When type is omitted, resolve a Project member Octo UID or expert/expert-team UUID from workspace lists."
+			flag.Usage += " When type is omitted, resolve the exact ID from workspace lists; Project member IDs are case-sensitive strings, while native Workspace member and expert/team IDs are UUIDs."
 		}
 	case "task.list":
 		cmd.Flags().String("assignee", "", "Assignee name (leading @ or ＠ is a mention prefix, not part of the name); infer type from up to 10 pages per workspace list; do not mix with explicit filters")
 		if flag := cmd.Flags().Lookup("assignee-id"); flag != nil {
-			flag.Usage += " Sent directly to the task service without a roster lookup; use --assignee-octo-uid for a Project member UID."
+			flag.Usage += " Sent directly without a roster lookup; use --assignee-member-id for a Project member ID."
 		}
 	}
+}
+
+// The wire field names remain stable. Keep the former flags accepted for
+// existing scripts, but show only member-ID names in generated help.
+var taskMemberIDLegacyFlags = map[string]string{
+	"assignee-member-id":  "assignee-octo-uid",
+	"assignee-member-ids": "assignee-octo-uids",
+	"creator-member-id":   "creator-octo-uid",
+	"creator-member-ids":  "creator-octo-uids",
+}
+
+func registerTaskMemberIDLegacyFlags(cmd *cobra.Command, d *registry.OperationDetail) {
+	if d.Service != "loop" {
+		return
+	}
+	for memberFlag, oldFlag := range taskMemberIDLegacyFlags {
+		current := cmd.Flags().Lookup(memberFlag)
+		if current == nil || cmd.Flags().Lookup(oldFlag) != nil {
+			continue
+		}
+		cmd.Flags().Var(current.Value, oldFlag, "Compatibility alias for --"+memberFlag)
+		cmd.Flags().Lookup(oldFlag).Hidden = true
+	}
+}
+
+func taskFlagChanged(cmd *cobra.Command, flagName string) bool {
+	if cmd.Flags().Changed(flagName) {
+		return true
+	}
+	if oldFlag := taskMemberIDLegacyFlags[flagName]; oldFlag != "" {
+		return cmd.Flags().Changed(oldFlag)
+	}
+	return false
 }
 
 func applyTaskAssigneeBody(cmd *cobra.Command, f *cmdutil.Factory, rt *operationRuntime, body map[string]any) error {
@@ -136,7 +169,7 @@ func taskBodyAssigneeSelector(cmd *cobra.Command, body map[string]any) (input st
 	}
 	if cmd.Flags().Changed("assignee-id") && body["assignee_type"] == nil {
 		if _, supplied := body["assignee_octo_uid"]; supplied {
-			return "", false, false, assignmentError("--assignee-id cannot be combined with assignee_octo_uid")
+			return "", false, false, assignmentError("--assignee-id cannot be combined with a Project member ID field")
 		}
 		return cmd.Flags().Lookup("assignee-id").Value.String(), true, true, nil
 	}
@@ -174,7 +207,7 @@ func applyTaskAssigneeQuery(cmd *cobra.Command, f *cmdutil.Factory, rt *operatio
 }
 
 func taskQueryAssigneeSelector(cmd *cobra.Command, query url.Values) (input string, resolve bool, err error) {
-	// The existing --assignee-id filter belongs to Fleet. Historical assignees
+	// The existing --assignee-id filter is sent directly. Historical assignees
 	// must remain queryable without current roster read access.
 	if !cmd.Flags().Changed("assignee") {
 		return "", false, nil

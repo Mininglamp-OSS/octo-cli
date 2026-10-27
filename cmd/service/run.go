@@ -488,7 +488,7 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 	}
 	q := url.Values{}
 	for flagName, qf := range rt.queryFlags {
-		if !cobraCmd.Flags().Changed(flagName) {
+		if !taskFlagChanged(cobraCmd, flagName) {
 			continue
 		}
 		if err := addQueryFlagValue(q, rt, flagName, qf); err != nil {
@@ -874,7 +874,7 @@ func missingVariantRequiredValue(value any) bool {
 // bare JSON integer — the wire contract stays integer while the flag is text.
 func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[string]any) *output.ExitError {
 	for flagName, bf := range rt.bodyFlags {
-		if !cobraCmd.Flags().Changed(flagName) {
+		if !taskFlagChanged(cobraCmd, flagName) {
 			if _, supplied := base[bf.apiName]; !supplied && bf.boolDefault != nil {
 				base[bf.apiName] = *bf.boolDefault
 			}

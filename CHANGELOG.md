@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Loop member identifiers** — task help, README, and the bundled Loop skill
+  use member-ID flag names while preserving the existing backend fields and
+  old flag spellings for scripts. Project members use the `uid` from the member
+  list; native Workspace members continue to use their `user_id` UUID.
+
 - **API base URL precedence** — the active profile's stored `api_base_url` now
   outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored
   profile is routed to the origin it was created against even when the

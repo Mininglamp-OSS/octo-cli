@@ -207,6 +207,7 @@ func buildOperationCmd(f *cmdutil.Factory, d *registry.OperationDetail, verb str
 
 	registerBodyFlags(cmd, rt, d)
 	registerTaskAssigneeFlags(cmd, d)
+	registerTaskMemberIDLegacyFlags(cmd, d)
 
 	if d.Pagination != nil {
 		var pageAll bool

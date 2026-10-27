@@ -87,7 +87,7 @@ callers cannot select another human identity. No `--obo` flag is needed.
 Read Project members from `.data[]`. Each member contains `uid`, `name`, `role`
 (`0` member, `1` admin, `2` owner), and `robot` (`0` person, `1` Bot). Preserve
 `uid` as opaque, case-sensitive text; pass a person's UID as `task assign --to-id`
-or use the explicit `--assignee-octo-uid` field. Member listings include Bot
+or use the explicit `--assignee-member-id` field. Member listings include Bot
 seats; consumers choosing a human assignee must check `robot == 0`.
 
 Pagination uses `--page` (one-based, default 1) and `--page-size` (default 50,
@@ -138,10 +138,12 @@ octo-cli loop task group --workspace-id <ws> --group-by assignee \
   --group-assignee-type expert --group-assignee-id <expert-uuid>
 ```
 
-Identity selection supports `assignee_id(s)`, `assignee_octo_uid(s)` and
-`assignee_filters`, with the corresponding `creator_id(s)`,
-`creator_octo_uid(s)` and `creator_filters`. Actor ID filters take exact UUIDs;
-Octo UID filters take exact member UIDs. Typed filters use
+Identity selection supports `--assignee-id`, `--assignee-ids`,
+`--assignee-member-id`, `--assignee-member-ids` and `--assignee-filters`, with
+corresponding `--creator-id`, `--creator-ids`, `--creator-member-id`,
+`--creator-member-ids` and `--creator-filters`. UUID filters accept expert,
+expert-team, or native Workspace member user UUIDs; Project member-ID filters
+accept the exact, case-sensitive `uid` from the member list. Typed filters use
 `<member|expert|expert_team>:<UUID>` entries.
 `label_ids` is a comma-separated scalar union. `include_no_assignee` includes
 unassigned tasks alongside an assignee filter; `involves_user_id` selects
@@ -294,13 +296,13 @@ octo-cli loop task update <task-id> --workspace-id <ws> --priority high
 octo-cli loop task update <task-id> --workspace-id <ws> --status <status>
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "Alice"
 octo-cli loop task assign <task-id> --workspace-id <ws> --to "@Alice" --suppress-run
-octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-octo-uid-or-expert-or-team-uuid> --suppress-run
+octo-cli loop task assign <task-id> --workspace-id <ws> --to-id <member-or-expert-or-team-id> --suppress-run
 octo-cli loop task assign <task-id> --workspace-id <ws> --unassign
 octo-cli loop task create --workspace-id <ws> --title "Example" --assignee "Alice"
 octo-cli loop task update <task-id> --workspace-id <ws> --assignee-type expert --assignee-id <expert-uuid>
 octo-cli loop task list --workspace-id <ws> --assignee "Alice"
-octo-cli loop task list --workspace-id <ws> --assignee-id <assignee-uuid>
-octo-cli loop task list --workspace-id <ws> --assignee-octo-uid <member-octo-uid>
+octo-cli loop task list --workspace-id <ws> --assignee-id <expert-or-team-or-native-member-uuid>
+octo-cli loop task list --workspace-id <ws> --assignee-member-id <project-member-id>
 ```
 
 These Multica-style selectors infer the member/expert/expert-team type by making
@@ -312,11 +314,13 @@ substring; an ambiguous name fails
 with matching IDs. A leading `@` or `＠` is always a mention prefix; use the
 full ID if the stored name itself begins with one of those characters.
 `--to-id` and untyped `--assignee-id` on create/update require a complete, exact
-Project member Octo UID or expert/expert-team UUID.
+ID from the member, expert, or expert-team list. Project member IDs are the
+case-sensitive `uid` strings in the member list; native Workspace members use
+their `user_id` UUID. Experts and expert teams use their own UUIDs.
 `task list --assignee-id` is a direct filter, not an assignment selector;
-it passes the supplied UUID to the task service, including for historical
-assignees. Use `--assignee-octo-uid` to filter by Project member UID.
-Project member UIDs are case-sensitive. Bot members and archived actors are
+it passes the supplied UUID to Loop, including for historical assignees.
+Use `--assignee-member-id` to filter by Project member ID.
+Bot members and archived actors are
 excluded from name/ID resolution for writes. A failed or incomplete list stops
 assignment.
 The selected credential and workspace apply to every lookup and write; Fleet
@@ -330,15 +334,16 @@ explicit type keeps the original direct API behavior:
 octo-cli loop task update <task-id> --workspace-id <ws> \
   --assignee-id <expert-or-team-uuid> --assignee-type expert   # or expert_team
 octo-cli loop task update <task-id> --workspace-id <ws> \
-  --assignee-octo-uid <member-octo-uid> --assignee-type member --suppress-run
+  --assignee-member-id <project-member-id> --assignee-type member --suppress-run
+octo-cli loop task update <task-id> --workspace-id <ws> \
+  --assignee-id <native-member-user-uuid> --assignee-type member --suppress-run
 octo-cli loop task get <task-id> --workspace-id <ws>  # read back the saved assignee
 ```
 
-`assignee_octo_uid` is for member assignment in an authorized Octo Project. The
-backend requires it to be paired with `assignee_type=member` and forbids
-combining it with `assignee_id`; project authorization remains backend-enforced.
-For assignment, use `assignee_id` for experts or expert teams and
-`assignee_octo_uid` for Project members.
+`--assignee-member-id` is for direct Project member assignment. Pair it with
+`--assignee-type member`; do not combine it with `--assignee-id`. For native
+Workspace members, use their `user_id` UUID with `--assignee-id` and
+`--assignee-type member`. Project authorization remains backend-enforced.
 
 `task assign --unassign` sends `{"assignee_type":null,"assignee_id":null}`.
 The same body is accepted through
