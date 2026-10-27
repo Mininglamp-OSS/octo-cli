@@ -938,6 +938,9 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 		maxRetries = 0
 	}
 	idempotent := req.retrySafe()
+	// net/http resends some requests on its own when a reused keep-alive
+	// connection fails; that must not happen where this loop would not resend.
+	transportReplay := idempotent && maxRetries > 0
 
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -967,7 +970,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 			}
 		}
 
-		body, err := c.attempt(ctx, req, urlStr, body, contentType)
+		body, err := c.attempt(ctx, req, urlStr, body, contentType, transportReplay)
 		if err == nil {
 			return body, nil
 		}
@@ -984,7 +987,7 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body []byte, contentType string, transportReplay bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -1006,6 +1009,9 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+	if !transportReplay {
+		forbidTransportReplay(httpReq)
 	}
 
 	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
@@ -1512,6 +1518,47 @@ func definitelyNotProcessed(err error) bool {
 	}
 	return re.ExitError != nil && re.ExitError.NotProcessed
 }
+
+// transportReplayKeys are the headers net/http takes as permission to resend a
+// request with a body by itself (http.Transport: a request is idempotent when
+// its Header map has an "Idempotency-Key" or "X-Idempotency-Key" entry).
+var transportReplayKeys = []string{"Idempotency-Key", "X-Idempotency-Key"}
+
+// forbidTransportReplay stops net/http from resending r on its own after a
+// reused keep-alive connection fails once the request may have been written.
+// The Transport does that for a request it considers idempotent, which
+// includes any request carrying an idempotency key header, below the retry
+// loop and regardless of --no-retry.
+//
+// The key headers still go on the wire, under their lower-case spelling: the
+// Transport only looks for the canonical map entries, and HTTP header names
+// are case-insensitive, so the backend receives the same header. A safe
+// method is replayable by the Transport whatever its headers, so its body is
+// made non-rewindable instead; GET, HEAD and OPTIONS with an empty body are
+// still sent without one. A request the Transport knows it never wrote is
+// still resent, since that cannot repeat anything.
+func forbidTransportReplay(r *http.Request) {
+	for _, key := range transportReplayKeys {
+		if values, ok := r.Header[key]; ok {
+			delete(r.Header, key)
+			r.Header[strings.ToLower(key)] = values
+		}
+	}
+	switch r.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions:
+		r.GetBody = nil
+		if r.Body == nil || r.Body == http.NoBody {
+			r.Body = emptyRequestBody{}
+		}
+	}
+}
+
+// emptyRequestBody is an empty body net/http cannot rewind, unlike nil or
+// http.NoBody.
+type emptyRequestBody struct{}
+
+func (emptyRequestBody) Read([]byte) (int, error) { return 0, io.EOF }
+func (emptyRequestBody) Close() error             { return nil }
 
 func isRetryableStatus(status int) bool {
 	switch status {
