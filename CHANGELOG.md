@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Marketplace dependency pins and reads** — `plugin upsert` and
+  `plugin review-request create` accept an optional `target_version_id` on
+  skill/member relations and refuse connector pins, duplicate targets and
+  relation types that do not match the plugin type before any HTTP request.
+  New reads: `plugin version get`, `plugin version download` (requires
+  `--path`; use `-o` for bytes), `plugin dependents list` and
+  `plugin graph get` (`/detail_graph`).
+
 ### Changed
 
 - **Loop member identifiers** — task help, README, and the bundled Loop skill

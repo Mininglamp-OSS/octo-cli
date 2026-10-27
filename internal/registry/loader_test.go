@@ -67,7 +67,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"docs":        45,
 		"drive":       46,
 		"html":        22,
-		"marketplace": 25,
+		"marketplace": 29,
 		"mail":        18,
 		"summary":     4,
 		"loop":        116,
@@ -747,6 +747,27 @@ func TestBodyVariantsAlwaysDeclareActionableHint(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no body-variant operations found")
+	}
+}
+
+func TestMarketplacePluginListDeclaresDependencyIssues(t *testing.T) {
+	r := MustNew()
+	op, ok := r.GetOperation("plugin.list")
+	if !ok || op.ResponseSchema == nil {
+		t.Fatal("plugin.list response schema not found")
+	}
+	data, ok := op.ResponseSchema.Properties["data"]
+	if !ok || data.Type != "array" || data.Items == nil {
+		t.Fatalf("plugin.list data schema = %+v, want an item array", data)
+	}
+	issues, ok := data.Items.Properties["dependency_issues"]
+	if !ok || issues.Type != "array" || issues.Items == nil {
+		t.Fatalf("plugin.list dependency_issues schema = %+v, want an item array", issues)
+	}
+	for _, field := range []string{"target_plugin_id", "target_name", "relation_type", "reason", "via"} {
+		if _, ok := issues.Items.Properties[field]; !ok {
+			t.Errorf("dependency_issues missing %q", field)
+		}
 	}
 }
 
