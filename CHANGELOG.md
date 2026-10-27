@@ -196,6 +196,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     plain `execution_error`. Error and degradation hints are facade-aware: under
     `--facade two` they route to `get_skill`, never the disabled
     `search_ops` / `describe_op`.
+    `tools/call` params accept only `name`, `arguments` and `_meta`, each once
+    and exactly spelled, so a `dry_run` or `schema_fingerprint` placed beside
+    `arguments`, or a second `arguments` object, is refused instead of being
+    dropped while the call runs live. Inside operation arguments, a misplaced
+    `dry_run` / `schema_fingerprint` and any undeclared name that equals a
+    declared one under Unicode case folding (for example `\u017fpace_id` for a
+    connection-forced `space_id`) are refused for `execute` and `call_op`. The
+    multipart / raw-body dry run resolves the credential and token-kind gate,
+    refuses the empty or dot-segment values a real call refuses, and lists
+    query, header and form arguments where they would be sent. `get_skill`
+    arguments are a closed object.
   The facade reuses the existing registry/schema, Skill mapping/resources and
   over-privilege protection white-list unchanged; contract and side-by-side comparison
   tests assert both facades drive the backend to the same wire.

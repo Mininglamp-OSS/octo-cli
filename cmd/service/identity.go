@@ -180,6 +180,19 @@ func MountForOperation(f *cmdutil.Factory, operationID string) (string, error) {
 	return mount, nil
 }
 
+// ResolveOperationIdentity resolves the active credential and applies d's
+// token-kind gate without building a request: the same checks a generated
+// leaf runs before its own --dry-run. The MCP multipart dry run, which plans
+// the request from metadata instead of running the leaf, calls it so it never
+// describes a request for a credential the real call would refuse.
+func ResolveOperationIdentity(f *cmdutil.Factory, d *registry.OperationDetail) error {
+	if _, err := activeTokenKind(f); err != nil {
+		return err
+	}
+	_, err := applyIdentityRouting(f, d, d.Path)
+	return err
+}
+
 // ValidateRequestBody applies operationID's declared pre-send body checks —
 // required fields, minItems, enum vocabularies and uint64 id ranges — to a body
 // a hand-written command assembled itself.

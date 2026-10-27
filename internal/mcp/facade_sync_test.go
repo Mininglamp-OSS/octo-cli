@@ -23,6 +23,8 @@ func TestExecute_MultipartDryRunUploadPolicy(t *testing.T) {
 	for _, httpMode := range []bool{false, true} {
 		s := facadeServer(t, facadeTwo)
 		s.httpMode = httpMode
+		// The dry run resolves the credential first (XIN-2438); give it one.
+		s.factoryFn = fakeBackendFactory("http://127.0.0.1:1", "bf_test")
 		args := map[string]any{"operation_id": "file.upload", "dry_run": true,
 			"arguments": map[string]any{"file_path": "missing.bin"}}
 		res := callTool(t, s, "execute", args)

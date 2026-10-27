@@ -477,8 +477,17 @@ func unknownOperationPayload(reg *registry.Registry, operationID, discoverHint s
 // truncateRunes caps a possibly-attacker-sized string before it is echoed back
 // in an error message, so a multi-megabyte operation_id is not reflected whole.
 func truncateRunes(s string, n int) string {
+	// A rune is at most utf8.UTFMax bytes, so the first n runes lie inside
+	// this prefix; cutting first keeps a huge input from being expanded whole.
+	cut := len(s) > n*utf8.UTFMax
+	if cut {
+		s = s[:n*utf8.UTFMax]
+	}
 	r := []rune(s)
 	if len(r) <= n {
+		if cut {
+			return s + "…"
+		}
 		return s
 	}
 	return string(r[:n]) + "…"
@@ -500,6 +509,9 @@ func nearestOperations(reg *registry.Registry, query string) []string {
 	type scored struct {
 		id   string
 		dist int
+	}
+	if len(query) > maxRankQueryRunes*utf8.UTFMax {
+		query = query[:maxRankQueryRunes*utf8.UTFMax]
 	}
 	q := strings.ToLower(query)
 	if r := []rune(q); len(r) > maxRankQueryRunes {

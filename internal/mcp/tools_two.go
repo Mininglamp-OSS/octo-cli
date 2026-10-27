@@ -3,10 +3,12 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -34,8 +36,8 @@ func twoToolDefinitions() []toolDef {
 	return []toolDef{
 		{
 			Name:        "get_skill",
-			Description: "Skill-driven discovery for Octo operations. intent=\"search\": find operations by domain and/or keyword (no domain and no query returns a service<->skill module map); returns operation ids + one-line summaries + which business Skill to load, NOT full schemas or Skill bodies. intent=\"describe\": return one operation's full zero-drift parameter schema (from the embedded spec), its Skill reference and pre-call advice, a per-operation constraint_enforcement projection, and a schema_fingerprint to pass to execute. depth=\"summary\" returns a shallow outline; depth=\"full\" (default) the complete schema. Parameter truth lives here; the Skill carries semantics only.",
-			InputSchema: rawSchema(`{"type":"object","required":["intent"],"properties":{"intent":{"type":"string","enum":["search","describe"]},"domain":{"type":"string","description":"search: service filter, e.g. docs, message"},"query":{"type":"string","description":"search: keyword over id/summary/path"},"operation_id":{"type":"string","description":"describe: the operation id"},"depth":{"type":"string","enum":["summary","full"],"description":"describe depth; default full"}}}`),
+			Description: "Skill-driven discovery for Octo operations. intent=\"search\": find operations by domain and/or keyword (no domain and no query returns a service<->skill module map); returns operation ids + one-line summaries + which business Skill to load, NOT full schemas or Skill bodies. intent=\"describe\": return one operation's full zero-drift parameter schema (from the embedded spec), its Skill reference and pre-call advice, a per-operation constraint_enforcement projection, and a schema_fingerprint to pass to execute. depth=\"summary\" returns a shallow outline; depth=\"full\" (default) the complete schema. Parameter truth lives here; the Skill carries semantics only. A failed call carries status validation_error, ambiguous (operation_id did not resolve; candidates lists the closest ids) or internal_error.",
+			InputSchema: rawSchema(`{"type":"object","additionalProperties":false,"required":["intent"],"properties":{"intent":{"type":"string","enum":["search","describe"]},"domain":{"type":"string","description":"search: service filter, e.g. docs, message"},"query":{"type":"string","description":"search: keyword over id/summary/path"},"operation_id":{"type":"string","description":"describe: the operation id"},"depth":{"type":"string","enum":["summary","full"],"description":"describe depth; default full"}}}`),
 		},
 		{
 			Name:        "execute",
@@ -228,11 +230,11 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 // multipartDryRun describes a multipart operation's planned request WITHOUT any
 // filesystem or network side effect (B1): the file at file_path is never opened
 // or read, its bytes never appear in the result, and the multipart body is not
-// materialized. Secret-flagged form fields are masked. Confinement of
-// file_path to the operator upload root, identity resolution, and transport are
-// Lexical upload policy is checked during planning; descriptor confinement,
-// identity resolution and transport run only on a real call. The limitation is
-// stated in the note rather than silently implied.
+// materialized. Secret-flagged form fields and parameters are masked. The
+// credential and the operation's token-kind gate are resolved and the lexical
+// upload policy is checked during planning; descriptor confinement and
+// transport run only on a real call. The limitation is stated in the note
+// rather than silently implied.
 func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[string]any, fingerprint string) toolResult {
 	// Trusted-context projection first (over-privilege protection, #177 B4): a forced
 	// field wins and is reflected in the plan, and must not be reported as
@@ -253,13 +255,42 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 			"envelope":     decodeEnvelope(synthErrorEnvelope(verr)),
 		}, true)
 	}
+	// Resolve the credential and the token-kind gate exactly as the engine
+	// does before its own dry run, so a plan is never returned for a caller
+	// the real call would refuse (for example an HTTP connection without a
+	// bearer).
+	fn := s.factoryFn
+	if fn == nil {
+		fn = s.makeFactory
+	}
+	f, _, _ := fn(s.trusted)
+	if err := service.ResolveOperationIdentity(f, detail); err != nil {
+		var exitErr *output.ExitError
+		if !errors.As(err, &exitErr) {
+			exitErr = output.ErrAuth(err.Error(), "")
+		}
+		return jsonToolResult(map[string]any{
+			"status":       classifyFailure(detail.Method, nil, exitErr),
+			"operation_id": detail.ID,
+			"dry_run":      true,
+			"envelope":     decodeEnvelope(synthErrorEnvelope(exitErr)),
+		}, true)
+	}
 
 	pathSet := map[string]bool{}
 	for _, n := range extractPathParams(detail.Path) {
 		pathSet[n] = true
 	}
+	params := map[string]*registry.ParamInfo{}
+	for i := range detail.Parameters {
+		if p := &detail.Parameters[i]; p.In == "query" || p.In == "header" {
+			params[p.Name] = p
+		}
+	}
 	fileField := binaryFileField(detail)
 	formFields := map[string]any{}
+	queryFields := map[string]any{}
+	headerFields := map[string]any{}
 	var filePath string
 	for _, k := range sortedKeys(args) {
 		if k == "file_path" {
@@ -269,16 +300,36 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 		if pathSet[k] || k == "page_all" {
 			continue
 		}
-		if detail.RequestBody != nil && detail.RequestBody.Properties[k].Secret {
-			formFields[k] = "***"
+		v := args[k]
+		if p := params[k]; p != nil {
+			if v == nil {
+				continue // a null query/header argument is omitted, as on a real call
+			}
+			if p.Secret {
+				v = "***"
+			}
+			if p.In == "query" {
+				queryFields[k] = v
+			} else {
+				headerFields[k] = v
+			}
 			continue
 		}
-		formFields[k] = args[k]
+		if detail.RequestBody != nil && detail.RequestBody.Properties[k].Secret {
+			v = "***"
+		}
+		formFields[k] = v
 	}
 	data := map[string]any{
 		"dry_run": true,
 		"method":  detail.Method,
 		"path":    fillPathParams(detail.Path, args),
+	}
+	if len(queryFields) > 0 {
+		data["query"] = queryFields
+	}
+	if len(headerFields) > 0 {
+		data["headers"] = headerFields
 	}
 	if detail.RawBody {
 		// The file is the whole body: describe its media type and limit, never
@@ -288,11 +339,10 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 		if detail.RawBodyMaxBytes > 0 {
 			data["max_bytes"] = detail.RawBodyMaxBytes
 		}
-		data["headers"] = formFields
 		if filePath != "" {
 			data["file_path"] = filePath
 		}
-		note := "raw-body dry-run: metadata-only. Required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, identity resolution, and transport are enforced only on a real (non-dry-run) call."
+		note := "raw-body dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, and transport are enforced only on a real (non-dry-run) call."
 		return jsonToolResult(map[string]any{
 			"status":             "ok",
 			"operation_id":       detail.ID,
@@ -308,7 +358,7 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 		data["file_field"] = fileField
 		data["file_path"] = filePath
 	}
-	note := "multipart dry-run: metadata-only. Required path/query/header/body fields and the multipart file binding were validated; file_path is NOT opened or read and its bytes are never returned; the multipart body is not materialized and nothing is sent. Descriptor-based upload-root containment, identity resolution, and transport are enforced only on a real (non-dry-run) call."
+	note := "multipart dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header/body fields and the multipart file binding were validated; file_path is NOT opened or read and its bytes are never returned; the multipart body is not materialized and nothing is sent. Descriptor-based upload-root containment and transport are enforced only on a real (non-dry-run) call."
 	out := map[string]any{
 		"status":             "ok",
 		"operation_id":       detail.ID,
@@ -331,6 +381,15 @@ func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, p
 	hint := pol.describeHint
 	if _, err := buildArgv(d, args, pol); err != nil {
 		return output.ErrValidation(err.Error(), hint)
+	}
+	for _, name := range extractPathParams(d.Path) {
+		switch v := scalarText(args[name]); v {
+		case "":
+			return output.ErrValidation(fmt.Sprintf("<%s> is empty", name),
+				"pass the id value; an empty path value would address the collection, not a resource")
+		case ".", "..":
+			return output.ErrValidation(fmt.Sprintf("<%s> must not be %q", name, v), hint)
+		}
 	}
 	if err := requireQueryAndHeaderArgs(d, args, hint); err != nil {
 		return err
@@ -355,7 +414,7 @@ func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, p
 			}
 			continue
 		}
-		if _, ok := args[name]; !ok {
+		if v, ok := args[name]; !ok || v == nil {
 			return output.ErrValidation(fmt.Sprintf("missing required field %q for %s", name, d.ID), hint)
 		}
 	}
@@ -373,8 +432,20 @@ func requireQueryAndHeaderArgs(d *registry.OperationDetail, args map[string]any,
 		if _, ok := args[p.Name]; !ok {
 			return output.ErrValidation(fmt.Sprintf("missing required %s parameter %q for %s", p.In, p.Name, d.ID), hint)
 		}
+		if scalarText(args[p.Name]) == "" {
+			return output.ErrValidation(fmt.Sprintf("%s parameter %q is empty, but %s requires a value", p.In, p.Name, d.ID), hint)
+		}
 	}
 	return nil
+}
+
+// scalarText is the text a real call would put on the wire for an argument;
+// null is treated as empty because a null query/header/path value is omitted.
+func scalarText(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
 }
 
 // binaryFileField returns the name of the multipart binary field (schema

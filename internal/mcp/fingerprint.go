@@ -88,7 +88,7 @@ func constraintEnforcement(d *registry.OperationDetail) map[string]any {
 		ce["raw_body_note"] = "raw-body upload: the file named by file_path is sent as the whole request body; local checks cover required arguments, the file binding and the declared size limit, and content validation is backend-enforced"
 	}
 	if d.Multipart {
-		ce["multipart_note"] = "multipart operation: local checks cover required fields and the file binding; per-form-field content constraints are backend-enforced, not locally projected"
+		ce["multipart_note"] = "multipart operation: pass the local file to upload as file_path; local checks cover required fields and the file binding; per-form-field content constraints are backend-enforced, not locally projected"
 	}
 	return ce
 }
@@ -109,6 +109,15 @@ func summaryView(d *registry.OperationDetail) map[string]any {
 	}
 	if d.Risk != "" {
 		out["risk"] = d.Risk
+	}
+	if d.Multipart {
+		out["multipart"] = true
+	}
+	if d.RawBody {
+		out["raw_body"] = true
+	}
+	if d.Multipart || d.RawBody {
+		out["file_argument"] = "file_path"
 	}
 	if len(d.Parameters) > 0 {
 		params := make([]map[string]any, 0, len(d.Parameters))

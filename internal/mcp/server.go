@@ -352,6 +352,9 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		defer s.mu.Unlock()
 		return newResultResponse(req.ID, s.callOp(ctx, a.OperationID, args))
 	case "get_skill":
+		if err := validateClosedKeys(p.Arguments, getSkillArgumentNames); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid get_skill arguments: "+err.Error())
+		}
 		var a struct {
 			Intent      string `json:"intent"`
 			Domain      string `json:"domain"`
@@ -427,6 +430,43 @@ func validateToolCallKeys(raw json.RawMessage) error {
 		}
 		if seen[key] {
 			return fmt.Errorf("duplicate field %q", key)
+		}
+		seen[key] = true
+		var value json.RawMessage
+		if err := d.Decode(&value); err != nil {
+			return err
+		}
+	}
+	_, err := d.Token()
+	return err
+}
+
+// getSkillArgumentNames is get_skill's closed argument set; a misspelled
+// depth or operation_id must not silently fall back to its default.
+var getSkillArgumentNames = map[string]bool{"intent": true, "domain": true, "query": true, "operation_id": true, "depth": true}
+
+// validateClosedKeys refuses an unknown, mis-cased or repeated key in a tool's
+// arguments object before struct decoding would ignore or merge it.
+func validateClosedKeys(raw json.RawMessage, allowed map[string]bool) error {
+	if len(raw) == 0 || !isJSONObject(raw) {
+		return nil
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if _, err := d.Token(); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		token, err := d.Token()
+		if err != nil {
+			return err
+		}
+		key, _ := token.(string)
+		if !allowed[key] {
+			return fmt.Errorf("unknown argument %q", truncateRunes(key, 200))
+		}
+		if seen[key] {
+			return fmt.Errorf("duplicate argument %q", key)
 		}
 		seen[key] = true
 		var value json.RawMessage
