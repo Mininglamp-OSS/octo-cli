@@ -249,7 +249,7 @@ func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRu
 	if body == nil || rt.detail.RequestBody == nil {
 		return nil
 	}
-	bodySecrets, err := CollectBodySecrets(rt.detail.RequestBody, body)
+	bodySecrets, err := CollectRequestSecrets(rt.detail, body)
 	if err != nil {
 		return output.ErrValidation(fmt.Sprintf("--data: %v", err),
 			"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")

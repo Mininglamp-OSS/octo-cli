@@ -7328,6 +7328,7 @@
               "properties": {
                 "custom_env": {
                   "type": "object",
+                  "x-octo-secret": true,
                   "additionalProperties": {
                     "type": "string"
                   }
@@ -9613,6 +9614,7 @@
       "CapabilityEnvironmentVariables": {
         "type": "object",
         "description": "Environment variables. Names must match ^[A-Za-z_][A-Za-z0-9_]*$; values are sensitive.",
+        "x-octo-secret": true,
         "maxProperties": 100,
         "propertyNames": {
           "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
@@ -9666,10 +9668,12 @@
           "url": {
             "type": "string",
             "format": "uri",
-            "pattern": "^https?://"
+            "pattern": "^https?://",
+            "x-octo-secret": true
           },
           "headers": {
             "type": "object",
+            "x-octo-secret": true,
             "maxProperties": 100,
             "propertyNames": {
               "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"

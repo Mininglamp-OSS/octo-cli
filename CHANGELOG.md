@@ -140,6 +140,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Group and thread webhook create/regenerate return the push token and URLs in
   the result, as accepted by the owner. Risk labels are descriptive, not an
   enforced confirmation step.
+  `capability install` masks the expert environment maps and each MCP
+  server's `env`, `headers` and `url` in `--dry-run` output and `--verbose`
+  traces (and the MCP dry run); the request itself is unchanged. Secrets are
+  found through a registry walk that follows references, dynamic maps and
+  `oneOf` alternatives below the resolved request-body tree.
 - **Raw request-body uploads** (`x-octo-raw-body`) — five docs routes that take
   the file bytes as the body (PPT media, SVG attachments, docx/markdown/xlsx
   import) are generated operations with `--file`, a declared media type and a
