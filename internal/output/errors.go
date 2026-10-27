@@ -29,7 +29,15 @@ type ExitError struct {
 // error. A 4xx is a definite refusal; anything else — a transport failure, a
 // timeout, or a 5xx after the server may have committed — is ambiguous.
 func (e *ExitError) OutcomeUnknown() bool {
-	if e == nil || e.NotProcessed {
+	if e == nil {
+		return false
+	}
+	// The client decided from the whole attempt history that the request may
+	// have been applied, even if the last attempt was a definite refusal.
+	if e.Code == "RESULT_UNKNOWN" {
+		return true
+	}
+	if e.NotProcessed {
 		return false
 	}
 	return e.HTTPStatus < 400 || e.HTTPStatus > 499

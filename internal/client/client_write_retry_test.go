@@ -119,29 +119,58 @@ func TestDo_NonIdempotentWriteIsDeliveredOnceOnTimeoutAndCancel(t *testing.T) {
 	})
 }
 
-// A write the server refused with 429 was not processed, so it is still
-// retried, and Retry-After is honoured.
-func TestDo_NonIdempotentWriteRetriesAfter429(t *testing.T) {
-	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.ReadAll(r.Body)
-		if atomic.AddInt32(&hits, 1) == 1 {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		_, _ = w.Write([]byte(`{"ok":true}`))
-	}))
-	defer srv.Close()
-	start := time.Now()
-	if _, err := newTestClient(srv).Do(context.Background(), &Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{}}); err != nil {
-		t.Fatalf("want success after a 429, got %v", err)
-	}
-	if got := atomic.LoadInt32(&hits); got != 2 {
-		t.Errorf("deliveries = %d, want 2", got)
-	}
-	if time.Since(start) < 900*time.Millisecond {
-		t.Errorf("Retry-After: 1 was not honoured (elapsed %s)", time.Since(start))
+// A 429 is not proof that a write was not processed: a handler can answer 429
+// after it committed (octo-server OIDC bind does for an already-created token).
+// A write without a verified deduplication contract is therefore not resent
+// after a 429; the server's answer is returned as is with its Retry-After in
+// the hint. A replay-safe write and a GET still wait for Retry-After and retry.
+func TestDo_429RetriesOnlyReplaySafeRequests(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		req  Request
+		want int32
+	}{
+		{"POST", Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{}}, 1},
+		{"PATCH", Request{Method: http.MethodPatch, Path: "/x", Body: map[string]any{}}, 1},
+		{"replay-safe POST", Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{}, ReplaySafe: true}, 2},
+		{"GET", Request{Method: http.MethodGet, Path: "/x"}, 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var hits int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.ReadAll(r.Body)
+				if atomic.AddInt32(&hits, 1) == 1 {
+					w.Header().Set("Retry-After", "1")
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"slow down"}}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			start := time.Now()
+			req := c.req
+			_, err := newTestClient(srv).Do(context.Background(), &req)
+			if got := atomic.LoadInt32(&hits); got != c.want {
+				t.Fatalf("deliveries = %d, want %d (err %v)", got, c.want, err)
+			}
+			if c.want == 1 {
+				ee := output.AsExitError(err)
+				if ee == nil || ee.Code != "RATE_LIMITED" || ee.HTTPStatus != http.StatusTooManyRequests || ee.NotProcessed {
+					t.Fatalf("err = %+v, want the backend's 429", ee)
+				}
+				if !strings.Contains(ee.Hint, "Retry-After") || !strings.Contains(ee.Message, "slow down") {
+					t.Errorf("Retry-After or backend message lost: %+v", ee)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("want success after a 429, got %v", err)
+			}
+			if time.Since(start) < 900*time.Millisecond {
+				t.Errorf("Retry-After: 1 was not honoured (elapsed %s)", time.Since(start))
+			}
+		})
 	}
 }
 
@@ -164,24 +193,23 @@ func TestDo_NonIdempotentWriteRetriesAndReportsNotSentOnDialFailure(t *testing.T
 	}
 }
 
-// Cancelling while waiting to resend a write that was refused with 429 leaves
+// Cancelling while waiting to resend a write whose every dial failed leaves
 // nothing applied, so the result is not reported as unknown.
 func TestDo_NonIdempotentWriteCancelledDuringBackoffIsNotUnknown(t *testing.T) {
-	var hits int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&hits, 1)
-		w.Header().Set("Retry-After", "5")
-		w.WriteHeader(http.StatusTooManyRequests)
-	}))
-	defer srv.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	var calls int32
+	c := New(&config.Config{APIBaseURL: "http://127.0.0.1:1"}, nil, Options{})
+	c.httpClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		atomic.AddInt32(&calls, 1)
+		return nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+	})}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	_, err := newTestClient(srv).Do(ctx, &Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{}})
-	if got := atomic.LoadInt32(&hits); got != 1 {
-		t.Errorf("deliveries = %d, want 1", got)
+	_, err := c.Do(ctx, &Request{Method: http.MethodPost, Path: "/x", Body: map[string]any{}})
+	if got := atomic.LoadInt32(&calls); got < 1 || got > defaultMaxRetries {
+		t.Errorf("attempts = %d, want the backoff to be cancelled", got)
 	}
 	ee := output.AsExitError(err)
-	if ee == nil || ee.Code == "RESULT_UNKNOWN" || ee.OutcomeUnknown() {
+	if ee == nil || ee.Code == "RESULT_UNKNOWN" || ee.OutcomeUnknown() || !ee.NotProcessed {
 		t.Fatalf("err = %+v, want a cancellation known not to have applied the write", ee)
 	}
 }

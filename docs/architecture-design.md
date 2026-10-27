@@ -411,19 +411,34 @@ injected automatically when x-octo-space-header is set.
 | Request timeout | 30s | `--timeout <duration>` |
 | Retryable codes | 429, 502, 503, 504 | — |
 | Retry-After | Respected, NOT capped by max delay | — |
-| Non-idempotent writes | POST/PATCH retried only after a failed dial or a 429 | spec idempotency key |
+| Non-idempotent writes | POST/PATCH retried only after a failed dial | verified deduplication contract |
 
 GET, HEAD, OPTIONS, TRACE, PUT and DELETE are idempotent (RFC 9110 §9.2.2) and
 retry on every retryable failure. A POST or PATCH may already have been applied
-when the connection drops after the request was sent, the server answers
-502/503/504, or the request times out, so it is not resent; the failure is
-reported as `RESULT_UNKNOWN`, keeping the backend's message. It is still resent
-when the dial failed (nothing reached the server; reported as `NETWORK_ERROR`)
-or the server answered 429. The API has no general idempotency guarantee for
-POST, so this applies to a POST that only reads as well. A request carrying a
-spec-declared idempotency key (`x-octo-auto-idempotency-key`, or a declared
-`Idempotency-Key` header with a value) keeps the idempotent retries, and
-`x-octo-retry: never` still disables retries entirely.
+when the connection drops after the request was sent, the server answers 429 or
+a 5xx, or the request times out, so it is not resent; the failure is reported
+as `RESULT_UNKNOWN`, keeping the backend's message (a 429 is returned as the
+server's answer, with its Retry-After in the hint). It is still resent when the
+dial failed (nothing reached the server; reported as `NETWORK_ERROR`). The API
+has no general idempotency guarantee for POST, so this applies to a POST that
+only reads as well. Carrying an idempotency key is not enough to resend: a
+backend may accept a key and ignore it for some resources (octo-docs-backend
+reads `Idempotency-Key` on `html_ppt` paths only). Only an operation listed in
+`verifiedReplayDedup` (`cmd/service/run.go`), whose backend deduplicates every
+resend of the same key, keeps the idempotent retries; `x-octo-retry: never`
+still disables retries entirely.
+
+A request that may not be resent is also kept from net/http's own replay of a
+request on a failed reused keep-alive connection, which the Transport applies
+to any request with an `Idempotency-Key` / `X-Idempotency-Key` header: the key
+goes on the wire under its lower-case spelling. With `--no-retry` a safe
+request is kept from that replay as well.
+
+The outcome is decided from the whole attempt history: once an attempt may
+have taken effect (anything but a failed dial or a definite 4xx other than
+429), a later refused dial, 4xx or cancellation does not turn a mutating
+request into a definite failure; it is `RESULT_UNKNOWN`. Only a definitive
+success ends that uncertainty.
 
 ### 6.3 Input Resolution
 

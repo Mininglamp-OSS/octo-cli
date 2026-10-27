@@ -26,16 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Non-idempotent writes are no longer resent after an ambiguous failure** —
   the transport used to retry every request up to four times on a dropped
-  connection, a timeout or a 502/503/504, so a `message send` whose response
+  connection, a timeout or a 429/502/503/504, so a `message send` whose response
   was lost could be delivered four times while the final error said not to
-  retry. A POST or PATCH is now resent only when the dial failed or the server
-  answered 429; otherwise the CLI and MCP report `RESULT_UNKNOWN`
-  (`result_unknown` from `execute`) after exactly one delivery, keeping the
-  backend's message. Idempotent methods, requests carrying a spec-declared
-  idempotency key and Retry-After handling are unchanged. A connection that was
-  never established is now reported as a plain `NETWORK_ERROR` known not to
-  have been sent (`execution_error` from `execute`) rather than an unknown
-  result.
+  retry. A POST or PATCH is now resent only when the dial failed; otherwise the
+  CLI and MCP report `RESULT_UNKNOWN` (`result_unknown` from `execute`) after
+  exactly one delivery, keeping the backend's message. A 429 is returned as is
+  with its Retry-After in the hint rather than resent, because a handler can
+  answer 429 after it committed. Forwarding an `Idempotency-Key` no longer
+  enables resends: octo-docs-backend honours that key for `html_ppt` only, so
+  `docs create` / `docs comments add` / `docs versions` writes on any other
+  document type were duplicated. Only an operation whose backend deduplicates
+  every resend (`capability.install`) keeps the retries. net/http no longer
+  resends a keyed write on its own after a reused keep-alive connection fails,
+  and `--no-retry` now means a single delivery at that layer too.
+- **A retried request is classified by its whole attempt history** — once an
+  attempt may have applied a write, later refused dials, a cancellation while
+  waiting to resend, or a replay into 404 (a DELETE that committed and lost its
+  response) end as `RESULT_UNKNOWN` instead of a definite failure; a keyed
+  write that exhausts its retries is `RESULT_UNKNOWN` on the CLI, `call_op`
+  and `execute` alike. A request whose every dial failed is reported as a plain
+  `NETWORK_ERROR` known not to have been sent (`execution_error` from
+  `execute`).
 - **MCP `call_op` refuses unknown tool arguments** — `dry_run`,
   `schema_fingerprint` or any other key next to `operation_id` / `arguments`,
   and a repeated key, are refused with `-32602` before anything is sent.

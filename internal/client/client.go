@@ -917,32 +917,68 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
-	result, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
-	if err != nil && (req.UnknownOutcomeOnNetworkFailure || !req.retrySafe()) {
-		return nil, markResultUnknown(err)
+	result, earlierMayHaveApplied, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+	if err != nil {
+		return nil, settleFailure(req, err, earlierMayHaveApplied)
 	}
-	return result, err
+	return result, nil
+}
+
+// settleFailure classifies a failed request from its whole attempt history,
+// not only from the error that ended it. earlierMayHaveApplied is true when an
+// attempt before that error may have reached the backend and taken effect; a
+// later failed dial, a definite refusal, or a cancellation while waiting to
+// resend cannot undo that.
+//
+// A mutating request is reported as RESULT_UNKNOWN when an earlier attempt may
+// have applied it (a DELETE that committed and lost its response replays into
+// 404; a keyed create that answered 503 is followed by refused dials), or when
+// the final error is itself ambiguous (a transport failure after the
+// connection was made, a timeout, a 502/503/504). Otherwise the final error
+// stands: a definite refusal, a backend error, or a failure that never reached
+// the backend (NotProcessed).
+func settleFailure(req *Request, err error, earlierMayHaveApplied bool) error {
+	err = withRetryAfterHint(err)
+	if !earlierMayHaveApplied && !ambiguousOutcome(err) {
+		return err
+	}
+	if req.UnknownOutcomeOnNetworkFailure || !isSafeMethod(req.Method) {
+		return markResultUnknown(err)
+	}
+	if ee := output.AsExitError(err); ee != nil && ee.NotProcessed {
+		// A safe method changes nothing, but its failure must not claim that
+		// no attempt reached the server.
+		reached := *ee
+		reached.NotProcessed = false
+		return &reached
+	}
+	return err
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
+// It also reports whether any attempt may have taken effect on the backend, so
+// the caller can classify the whole operation rather than its last attempt.
 //
-// A request whose method is not idempotent (POST, PATCH) is only resent when
-// the previous attempt definitely did not take effect: the connection was never
-// established, or the server answered 429. A transport failure after the
-// connection was made, a timeout, or a 502/503/504 may follow a request the
+// A request that is not replay-safe (POST or PATCH without a verified backend
+// deduplication contract) is only resent when the previous attempt definitely
+// did not reach the backend: the dial failed. A transport failure after the
+// connection was made, a timeout, a 5xx or a 429 may follow a request the
 // server already applied, so resending it could repeat the side effect; that
 // failure is returned at once and reported as RESULT_UNKNOWN by do.
-func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) {
+func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, bool, error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry || req.DisableRetry {
 		maxRetries = 0
 	}
-	idempotent := req.retrySafe()
+	replayable := req.replayAllowed()
 	// net/http resends some requests on its own when a reused keep-alive
 	// connection fails; that must not happen where this loop would not resend.
-	transportReplay := idempotent && maxRetries > 0
+	transportReplay := replayable && maxRetries > 0
 
 	var lastErr error
+	// mayHaveApplied covers every attempt made so far; the value returned with
+	// an attempt's error covers only the attempts before it.
+	mayHaveApplied := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt)
@@ -961,29 +997,28 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 				redactError(lastErr, req.SecretValues))
 			select {
 			case <-ctx.Done():
+				// Nothing is sent by this cancellation; the earlier attempts decide.
 				cancelled := output.ErrNetwork(ctx.Err().Error(), "request cancelled")
-				// A non-idempotent request only gets here after attempts that
-				// definitely did not take effect, so nothing was applied.
-				cancelled.NotProcessed = !idempotent
-				return nil, cancelled
+				cancelled.NotProcessed = true
+				return nil, mayHaveApplied, cancelled
 			case <-time.After(delay):
 			}
 		}
 
 		body, err := c.attempt(ctx, req, urlStr, body, contentType, transportReplay)
 		if err == nil {
-			return body, nil
+			return body, false, nil
 		}
 		lastErr = err
+		earlier := mayHaveApplied
+		applied := attemptMayHaveApplied(err)
+		mayHaveApplied = mayHaveApplied || applied
 
-		if !isRetryable(err) {
-			return nil, err
-		}
-		if !idempotent && !definitelyNotProcessed(err) {
-			return nil, err
+		if !isRetryable(err) || (!replayable && applied) || attempt == maxRetries {
+			return nil, earlier, err
 		}
 	}
-	return nil, lastErr
+	return nil, mayHaveApplied, lastErr
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
@@ -1460,29 +1495,88 @@ func extractRetryAfterFromErr(err error) (time.Duration, bool) {
 	return 0, false
 }
 
-// markResultUnknown preserves ordinary API/validation errors but makes a
-// network failure or ambiguous gateway failure explicit for callers that must
-// not blindly repeat an external side effect. Copying the ExitError avoids
-// mutating an error that may also be retained by retry bookkeeping.
+// markResultUnknown reports a failure whose request may have been applied as a
+// machine-readable RESULT_UNKNOWN. The caller decides from the whole attempt
+// history; this only refuses to relabel an error that never came from the
+// backend or the network (for example a local write failure after a 2xx).
+// Copying the ExitError avoids mutating an error that may also be retained by
+// retry bookkeeping.
 func markResultUnknown(err error) error {
 	ee := output.AsExitError(err)
-	if ee != nil && ee.NotProcessed {
-		return err
-	}
-	var re *retryableErr
-	ambiguousGatewayStatus := errors.As(err, &re) &&
-		(re.status == http.StatusBadGateway || re.status == http.StatusServiceUnavailable || re.status == http.StatusGatewayTimeout)
-	if ee == nil || (ee.Type != "network" && !ambiguousGatewayStatus) {
+	if ee == nil || (ee.Type != "network" && ee.HTTPStatus == 0) {
 		return err
 	}
 	unknown := *ee
 	unknown.Code = "RESULT_UNKNOWN"
+	unknown.NotProcessed = false
 	unknown.Message = "the request may have been accepted, but no definitive response was received"
 	if ee.Message != "" {
 		unknown.Message += ": " + ee.Message
 	}
 	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
 	return &unknown
+}
+
+// ambiguousOutcome reports whether a single failure leaves open whether the
+// request was applied: a transport failure after the connection was made, a
+// timeout, or a gateway 502/503/504. A failed dial and any 4xx (including 429)
+// are answers; another 5xx keeps the backend's own error code, as before.
+func ambiguousOutcome(err error) bool {
+	ee := output.AsExitError(err)
+	if ee == nil {
+		return true
+	}
+	if ee.NotProcessed {
+		return false
+	}
+	switch ee.HTTPStatus {
+	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return ee.Type == "network"
+}
+
+// withRetryAfterHint keeps a 429's Retry-After visible when the request ends
+// on it, so a caller that was not resent automatically knows when to try.
+func withRetryAfterHint(err error) error {
+	var re *retryableErr
+	if !errors.As(err, &re) || re.status != http.StatusTooManyRequests || re.retryAfter <= 0 || re.ExitError == nil {
+		return err
+	}
+	hinted := *re.ExitError
+	note := fmt.Sprintf("the server asked to wait %s before another request (Retry-After)", re.retryAfter)
+	if hinted.Hint == "" {
+		hinted.Hint = note
+	} else {
+		hinted.Hint += "; " + note
+	}
+	return &retryableErr{ExitError: &hinted, retryAfter: re.retryAfter, status: re.status}
+}
+
+// attemptMayHaveApplied reports whether one failed attempt may have reached the
+// backend and taken effect, which decides both whether a request that is not
+// replay-safe may be resent and how a later failure is reported. Only a failed
+// dial and a definite refusal (a 4xx other than 429) prove it did not. A 429 is
+// not taken as proof: most come from pre-handler rate limiters, but a handler
+// can also answer 429 after it committed (octo-server OIDC bind does for an
+// already-created token), and the client cannot tell the two apart.
+func attemptMayHaveApplied(err error) bool {
+	ee := output.AsExitError(err)
+	if ee == nil {
+		return true
+	}
+	if ee.NotProcessed {
+		return false
+	}
+	if ee.Type == "network" {
+		return true
+	}
+	status := ee.HTTPStatus
+	var re *retryableErr
+	if errors.As(err, &re) && re.status != 0 {
+		status = re.status
+	}
+	return status == http.StatusTooManyRequests || status >= 500
 }
 
 // isIdempotentMethod reports whether repeating a request with this method has
@@ -1499,24 +1593,20 @@ func isIdempotentMethod(method string) bool {
 	return false
 }
 
-// retrySafe reports whether resending r after an ambiguous failure cannot
-// repeat its side effect.
-func (r *Request) retrySafe() bool {
-	return r.ReplaySafe || isIdempotentMethod(r.Method)
-}
-
-// definitelyNotProcessed reports whether a failed attempt certainly did not
-// take effect, so a non-idempotent request can be sent again: the connection
-// was never established, or the server refused the request with 429.
-func definitelyNotProcessed(err error) bool {
-	var re *retryableErr
-	if !errors.As(err, &re) {
-		return false
-	}
-	if re.status == http.StatusTooManyRequests {
+// isSafeMethod reports whether a method cannot change server state (RFC 9110
+// section 9.2.1), so its failure never leaves a "may have been applied" outcome.
+func isSafeMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
 		return true
 	}
-	return re.ExitError != nil && re.ExitError.NotProcessed
+	return false
+}
+
+// replayAllowed reports whether r may be resent after an attempt that may have
+// taken effect, because resending it cannot repeat its side effect.
+func (r *Request) replayAllowed() bool {
+	return r.ReplaySafe || isIdempotentMethod(r.Method)
 }
 
 // transportReplayKeys are the headers net/http takes as permission to resend a
