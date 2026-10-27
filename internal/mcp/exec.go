@@ -216,10 +216,28 @@ func synthErrorEnvelope(err error) []byte {
 	return buf.Bytes()
 }
 
-// toolSafetyArgumentNames are the execute tool's own switches. Inside an
-// operation's arguments they are never operation input; an undeclared
-// dry_run would otherwise be forwarded as body data while the call runs live.
-var toolSafetyArgumentNames = map[string]bool{"dryrun": true, "schemafingerprint": true}
+// toolSafetyArgumentNames are the execute tool's own switches, keyed by
+// safetyNameKey. Inside an operation's arguments they are never operation
+// input; an undeclared dry_run would otherwise be forwarded as body data while
+// the call runs live.
+var toolSafetyArgumentNames = map[string]bool{
+	safetyNameKey("dry_run"):            true,
+	safetyNameKey("schema_fingerprint"): true,
+}
+
+// safetyNameSeparators are dropped when comparing a name with the tool
+// switches, so dry-run, dryRun and DRY_RUN all match dry_run.
+var safetyNameSeparators = strings.NewReplacer("_", "", "-", "")
+
+// safetyNameKey folds a name for comparison with the tool switches. It uses the
+// same Unicode simple folding as the declared-name index (foldkey.Key, which
+// agrees with strings.EqualFold) rather than ASCII lowercasing, so spellings
+// such as "ſchema_fingerprint" (U+017F long s) that a case-insensitive JSON
+// binder treats as schema_fingerprint are recognised too. The cost is linear
+// in the length of the name.
+func safetyNameKey(name string) string {
+	return safetyNameSeparators.Replace(foldkey.Key(name))
+}
 
 // maxArgumentNames bounds how many top-level argument names one call may carry.
 // The largest operation declares a few dozen parameters and body fields, so
@@ -310,8 +328,7 @@ func checkArgumentNames(ctx context.Context, args map[string]any, pathSet map[st
 			seen[fk] = k
 			continue
 		}
-		folded := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(k))
-		if toolSafetyArgumentNames[folded] {
+		if toolSafetyArgumentNames[safetyNameKey(k)] {
 			return fmt.Errorf("argument %q is a tool option, not an operation argument; execute takes dry_run and schema_fingerprint next to operation_id", truncateRunes(k, 200))
 		}
 		if n, ok := declaredByFold[fk]; ok {
