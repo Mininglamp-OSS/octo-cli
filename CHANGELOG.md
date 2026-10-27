@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MCP HTTP context is operator-controlled** — requests containing
+  `X-Space-Id`, `X-Octo-Channel-Id`, `X-Octo-Channel-Type` or
+  `X-Octo-On-Behalf-Of` now fail with HTTP 403 before dispatch, including
+  empty, repeated and case-varied headers. They previously filled unset
+  trusted context fields from client input. Use server `--space` / `--force-*`
+  flags or their environment equivalents; proxy-injected context headers are
+  no longer supported. Bearers remain isolated per request, and ordinary
+  operation arguments remain subject to backend authorization.
 - **Non-idempotent writes are no longer resent after an ambiguous failure** —
   the transport used to retry every request up to four times on a dropped
   connection, a timeout or a 429/502/503/504, so a `message send` whose response

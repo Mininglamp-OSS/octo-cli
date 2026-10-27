@@ -92,7 +92,7 @@ func TestHTTP_ValidBearerUsesConnectionCredential_RealMakeFactory(t *testing.T) 
 
 // --- trusted-context precedence + case-insensitive Bearer ---
 
-func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
+func TestConnectionServer_OnlyOperatorSuppliesTrustedContext(t *testing.T) {
 	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
@@ -112,8 +112,8 @@ func TestConnectionServer_OperatorForcedWinsOverHeader(t *testing.T) {
 	if srv.trusted.OnBehalfOf != "op-obo" {
 		t.Errorf("operator-forced OnBehalfOf must win, got %q", srv.trusted.OnBehalfOf)
 	}
-	if srv.trusted.ChannelID != "hdr-chan" {
-		t.Errorf("unforced field may be filled by header, got %q", srv.trusted.ChannelID)
+	if srv.trusted.ChannelID != "" {
+		t.Errorf("unforced field must remain unset despite the header, got %q", srv.trusted.ChannelID)
 	}
 }
 

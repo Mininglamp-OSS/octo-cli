@@ -67,11 +67,11 @@ Deployment (HTTP):
   - No TLS is provided. --http binds every interface unless you give a loopback
     host (e.g. --http 127.0.0.1:8080). Terminate TLS at a reverse proxy and/or
     bind loopback; the bearer is a long-lived bot token sent per request.
-  - Trusted-context headers (X-Space-Id, X-Octo-Channel-Id, X-Octo-Channel-Type,
-    X-Octo-On-Behalf-Of) are a gateway convenience, NOT authentication: operator
-    --force-* / --space values always win, and a header may only fill a field
-    the operator did not force. Only a proxy that sets and strips these headers
-    makes them trustworthy.
+  - Trusted context comes only from operator --force-* / --space values or
+    OCTO_FORCE_* / OCTO_SPACE_ID. Requests containing X-Space-Id,
+    X-Octo-Channel-Id, X-Octo-Channel-Type or X-Octo-On-Behalf-Of are refused
+    with HTTP 403, even when empty or matching operator values. There is no
+    trusted-proxy header mode; configure a fixed server context instead.
   - OCTO_MCP_ALLOWED_ORIGINS (comma-separated) permits browser origins; unset,
     only loopback origins are accepted (anti DNS-rebinding). Setting it replaces
     the loopback default, so list your loopback origin too if you still use it.
@@ -90,9 +90,9 @@ never allows unconfined uploads.
 
 Over-privilege protection: for stdio the forced space / channel / on-behalf-of
 values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*
-env); for HTTP they come per-connection from the operator config with request
-headers filling only unforced fields, plus the bearer Authorization header, so
-one connection can never act in another's scope.
+env); HTTP uses the same operator config and a separate Authorization bearer
+per request. Unconfigured business target arguments remain caller-supplied
+inputs subject to backend authorization; they do not become trusted context.
 
 --dry-run turns the whole server into a rehearsal: every call_op prints the
 request it would send (method, url, masked headers, body) as a "dry_run": true

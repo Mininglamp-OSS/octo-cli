@@ -66,37 +66,19 @@ func TestStdioTransport_ParseErrorDoesNotKillLoop(t *testing.T) {
 	}
 }
 
-// TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders is the HTTP
-// (JSON-RPC over POST) smoke test plus a multi-tenant isolation proof: two POSTs with different
-// bearers and different X-Space-Id headers each reach the backend with their
-// own credential and space.
-func TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders(t *testing.T) {
+// HTTP requests keep independent bearers and use only the operator's context.
+// Exercise the real handler and factory, including its header refusal gate.
+func TestHTTPTransport_PerRequestCredentialAndOperatorContext(t *testing.T) {
 	be := &backend{}
 	backendSrv := be.server(t)
+	t.Setenv("OCTO_API_BASE_URL", backendSrv.URL)
+	t.Setenv("OCTO_CONFIG_DIR", t.TempDir())
 
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "operator-space"}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	// Point call_op's factory at the fake backend regardless of connection.
-	// The handler builds a per-request server; wrap it so each request's
-	// connection server uses the fake backend but keeps its own trusted context.
-	mcpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Reuse the handler's routing but override factory to the fake backend.
-		// We do this by delegating to a per-request server we build here.
-		srv := h.connectionServer(r)
-		srv.factoryFn = fakeBackendFactory(backendSrv.URL, srv.credentialToken)
-		body, _ := readAll(r)
-		var req rpcRequest
-		_ = json.Unmarshal(body, &req)
-		resp, has := srv.Dispatch(r.Context(), req)
-		w.Header().Set("Content-Type", "application/json")
-		if !has {
-			w.WriteHeader(http.StatusAccepted)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(resp)
-	}))
+	mcpSrv := httptest.NewServer(h)
 	t.Cleanup(mcpSrv.Close)
 
 	// tools/list works with no auth.
@@ -104,17 +86,18 @@ func TestHTTPTransport_PerConnectionCredentialAndTrustedHeaders(t *testing.T) {
 		t.Fatalf("tools/list over HTTP returned %d", code)
 	}
 
-	// call_op carries the connection bearer + trusted space to the backend.
-	_, body := postJSON(t, mcpSrv.URL, "bf_alice", "space-alice",
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"call_op","arguments":{"operation_id":"message.send","arguments":{"channel_id":"c1","channel_type":1,"payload":{"text":"hi"}}}}}`)
-	if !envelopeOKFromRPC(t, body) {
-		t.Fatalf("call_op over HTTP did not succeed: %s", body)
-	}
-	if !strings.HasPrefix(be.auth, "Bearer bf_alice") {
-		t.Errorf("backend saw Authorization %q, want the per-connection bearer", be.auth)
-	}
-	if be.space != "space-alice" {
-		t.Errorf("backend saw X-Space-Id %q, want space-alice", be.space)
+	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"call_op","arguments":{"operation_id":"message.send","arguments":{"channel_id":"c1","channel_type":1,"payload":{"text":"hi"}}}}}`
+	for _, token := range []string{"bf_alice", "bf_bob", "bf_alice"} {
+		_, body := postJSON(t, mcpSrv.URL, token, "", call)
+		if !envelopeOKFromRPC(t, body) {
+			t.Fatalf("call_op over HTTP did not succeed: %s", body)
+		}
+		if be.auth != "Bearer "+token || be.space != "operator-space" {
+			t.Errorf("backend auth=%q space=%q, want current bearer and operator context", be.auth, be.space)
+		}
+		if code, _ := postJSON(t, mcpSrv.URL, token, "attacker-space", call); code != http.StatusForbidden {
+			t.Errorf("context header status=%d, want 403", code)
+		}
 	}
 }
 

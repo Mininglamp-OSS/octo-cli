@@ -28,10 +28,9 @@ const maxHTTPBodyBytes = 8 << 20
 // NOT (yet) full MCP streamable HTTP — there is no SSE stream (GET) and no
 // server-managed session; each POST is one request and one response. It is the
 // intended production shape because each request carries its own bearer
-// (Authorization) and its own trusted headers, so the server injects a
-// per-connection credential and per-connection over-privilege-protection values — a
-// client on connection A can never act in connection B's space / channel /
-// identity. reg and mapping are shared read-only across requests; the mutable
+// (Authorization), while trusted context comes only from operator config.
+// Client context headers are refused before dispatch. Credentials are isolated
+// per request. reg and mapping are shared read-only across requests; the mutable
 // per-connection state lives on the short-lived per-request Server.
 type HTTPHandler struct {
 	reg            *registry.Registry
@@ -45,8 +44,8 @@ type HTTPHandler struct {
 	requestTimeout time.Duration
 }
 
-// Trusted-context request headers. Space also flows onto the credential so
-// X-Space-Id is set exactly as the CLI already does it.
+// Reserved context headers: callers cannot supply trusted provenance. An
+// outbound X-Space-Id is derived only from the operator's TrustedContext.
 const (
 	headerSpaceID     = "X-Space-Id"
 	headerChannelID   = "X-Octo-Channel-Id"
@@ -55,7 +54,7 @@ const (
 )
 
 // NewHTTPHandler builds the HTTP handler. baseTrusted supplies operator-forced
-// values (which win over request headers); base carries the operator's
+// values (the only source of trusted context); base carries the operator's
 // serve-time credential-selector / limit globals into each call. Origin
 // validation (anti DNS-rebinding) reads an exact-match allowlist from
 // OCTO_MCP_ALLOWED_ORIGINS (comma-separated); when unset, only loopback origins
@@ -109,6 +108,17 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
+	}
+	// A valid bearer authorizes backend requests, not arbitrary trusted scope
+	// or principal injection. Refuse even empty or duplicate context headers,
+	// including when operator values are fixed, rather than silently accepting
+	// an obsolete gateway-header contract. Do not disclose any context values.
+	for name := range r.Header {
+		if strings.EqualFold(name, headerSpaceID) || strings.EqualFold(name, headerChannelID) ||
+			strings.EqualFold(name, headerChannelType) || strings.EqualFold(name, headerOnBehalfOf) {
+			http.Error(w, "context headers are not accepted; configure trusted context on the server", http.StatusForbidden)
+			return
+		}
 	}
 	// Read one byte past the cap so an over-limit body is rejected outright
 	// rather than silently truncated to a valid-JSON prefix.
@@ -175,33 +185,15 @@ func originAllowed(origin string, allowed []string) bool {
 	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
-// connectionServer builds the per-request Server with connection-scoped
-// credential and trusted context from the request headers.
-//
-// Precedence: operator-configured (baseTrusted) values WIN. A request
-// X-Octo-* header may only fill a field the operator did NOT force. Header
-// trust is a gateway-mode convenience, not authentication — the bearer
-// credential and Origin validation are the guards; deploy behind a
-// loopback bind or a TLS-terminating reverse proxy that sets these headers.
+// connectionServer builds the per-request Server with the request bearer and
+// an immutable operator-configured trusted context. Headers never fill unset
+// fields, even if an embedding handler calls this helper without ServeHTTP.
 func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
-	tc := h.baseTrusted
-	if tc.SpaceID == "" {
-		tc.SpaceID = r.Header.Get(headerSpaceID)
-	}
-	if tc.ChannelID == "" {
-		tc.ChannelID = r.Header.Get(headerChannelID)
-	}
-	if tc.ChannelType == "" {
-		tc.ChannelType = r.Header.Get(headerChannelType)
-	}
-	if tc.OnBehalfOf == "" {
-		tc.OnBehalfOf = r.Header.Get(headerOnBehalfOf)
-	}
 	return &Server{
 		reg:             h.reg,
 		mapping:         h.mapping,
 		build:           h.build,
-		trusted:         tc,
+		trusted:         h.baseTrusted,
 		credentialToken: bearerToken(r),
 		httpMode:        true,
 		uploadRoot:      h.uploadRoot,
