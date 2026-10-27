@@ -428,7 +428,7 @@ func TestExecute_MatchingFingerprintProceeds(t *testing.T) {
 }
 
 // TestExecute_TrustedContextOverridesModelChannel proves execute reuses the
-// same over-privilege防护 authz backend as call_op: the connection's forced
+// same over-privilege protection authz backend as call_op: the connection's forced
 // channel wins over a model-supplied one.
 func TestExecute_TrustedContextOverridesModelChannel(t *testing.T) {
 	be := &backend{}

@@ -19,8 +19,9 @@ import (
 //     intent=describe is describe_op plus a schema fingerprint, a per-operation
 //     constraint-enforcement projection, and progressive depth.
 //   - execute: call_op with a structured status envelope (ok / validation_error
-//     / ambiguous / execution_error / schema_drift), honest dry-run boundaries,
-//     and optional schema-drift detection via the fingerprint.
+//     / ambiguous / auth_error / result_unknown / execution_error /
+//     schema_drift), honest dry-run boundaries, and optional schema-drift
+//     detection via the fingerprint.
 //
 // It is opt-in per connection (mcp serve --facade two|both). The three-tool
 // facade stays the default and is unchanged, so the two can be compared
@@ -38,7 +39,7 @@ func twoToolDefinitions() []toolDef {
 		},
 		{
 			Name:        "execute",
-			Description: "Invoke one Octo operation by id. arguments is a flat object keyed by the operation's declared params / body fields (see get_skill intent=describe). Returns a structured result: status is one of ok, validation_error, ambiguous, auth_error, result_unknown, execution_error, schema_drift; the engine's JSON envelope is under \"envelope\". Set dry_run=true to construct and locally validate the request WITHOUT calling the backend (no server-side success is implied). Optionally pass the schema_fingerprint from describe: if the operation schema has drifted since you read it, execute returns schema_drift instead of calling. The fingerprint detects schema drift only; it does not prove describe was called this session. Security-sensitive fields forced by the server connection are ignored if supplied.",
+			Description: "Invoke one Octo operation by id. arguments is a flat object keyed by the operation's declared params / body fields (see get_skill intent=describe). Returns a structured result: status is one of ok, validation_error, ambiguous, auth_error, result_unknown, execution_error, schema_drift. ambiguous only means operation_id did not resolve to an operation: nothing was sent, and candidates lists the closest ids to pick from; it never describes the outcome of a sent request (that is result_unknown). The engine's JSON envelope is under \"envelope\". Set dry_run=true to construct and locally validate the request WITHOUT calling the backend (no server-side success is implied). Optionally pass the schema_fingerprint from describe: if the operation schema has drifted since you read it, execute returns schema_drift instead of calling. The fingerprint detects schema drift only; it does not prove describe was called this session. Security-sensitive fields forced by the server connection are ignored if supplied.",
 			InputSchema: rawSchema(`{"type":"object","additionalProperties":false,"required":["operation_id"],"properties":{"operation_id":{"type":"string"},"arguments":{"type":"object"},"dry_run":{"type":"boolean","description":"construct + validate only; do not send"},"schema_fingerprint":{"type":"string","description":"fingerprint from describe; mismatch => schema_drift"}}}`),
 		},
 	}
@@ -420,6 +421,12 @@ func fillPathParams(path string, args map[string]any) string {
 //   - validation_error — refused locally before/at request build; never applied.
 //   - execution_error  — a definite failure with a known, non-applied outcome
 //     (4xx refusal, rate limit, or a read that produced no side effect).
+//
+// Two statuses are set before this point and never by classifyFailure:
+// schema_drift (execute refuses a stale fingerprint) and ambiguous (the
+// operation_id did not resolve, so unknownOperationPayload returns the nearest
+// candidates and nothing is sent). ambiguous is about the operation name only;
+// a sent request whose outcome is uncertain is always result_unknown.
 //
 // The ambiguity split is authoritative: it uses the engine's own
 // ExitError.OutcomeUnknown() (HTTP status < 400 or > 499), combined with whether
