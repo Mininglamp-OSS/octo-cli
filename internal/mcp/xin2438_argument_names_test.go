@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -76,7 +77,7 @@ func TestXIN2438CheckArgumentNames(t *testing.T) {
 		{map[string]any{"schema-fingerprint": "x"}, false},
 	}
 	for _, c := range cases {
-		err := checkArgumentNames(c.args, map[string]bool{}, nil, nil, body)
+		err := checkArgumentNames(context.Background(), c.args, map[string]bool{}, nil, nil, body)
 		if (err == nil) != c.ok {
 			t.Errorf("checkArgumentNames(%v) error = %v, want ok=%v", c.args, err, c.ok)
 		}

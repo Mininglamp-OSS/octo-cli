@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -220,7 +221,7 @@ func TestBuildArgv_CoercesForcedChannelTypeToInteger(t *testing.T) {
 		}},
 	}
 	// channel_type supplied as the string "1" (as a header-forced value would be).
-	argv, err := buildArgv(d, map[string]any{"channel_type": "1", "message_id": "m"}, execPolicy{})
+	argv, err := buildArgv(context.Background(), d, map[string]any{"channel_type": "1", "message_id": "m"}, execPolicy{})
 	if err != nil {
 		t.Fatalf("buildArgv: %v", err)
 	}
@@ -236,7 +237,7 @@ func TestBuildArgv_NullQueryArgIsOmitted(t *testing.T) {
 		Parameters:    []registry.ParamInfo{{Name: "keyword", In: "query"}},
 	}
 	// null => omitted (no --keyword= empty flag).
-	argv, err := buildArgv(d, map[string]any{"keyword": nil}, execPolicy{})
+	argv, err := buildArgv(context.Background(), d, map[string]any{"keyword": nil}, execPolicy{})
 	if err != nil {
 		t.Fatalf("buildArgv: %v", err)
 	}
@@ -246,7 +247,7 @@ func TestBuildArgv_NullQueryArgIsOmitted(t *testing.T) {
 		}
 	}
 	// a real value still emits the flag.
-	argv2, _ := buildArgv(d, map[string]any{"keyword": "hi"}, execPolicy{})
+	argv2, _ := buildArgv(context.Background(), d, map[string]any{"keyword": "hi"}, execPolicy{})
 	if !hasArg(argv2, "--keyword=hi") {
 		t.Errorf("non-null query arg must emit its flag, got %v", argv2)
 	}

@@ -205,7 +205,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 	// goes through the engine (its dry-run reads nothing from disk).
 	dryRun = dryRun || s.baseGlobals.DryRun
 	if dryRun && (detail.Multipart || detail.RawBody) {
-		return s.multipartDryRun(detail, arguments, current)
+		return s.multipartDryRun(ctx, detail, arguments, current)
 	}
 
 	// Over-privilege protection: force the connection's trusted values, same table as
@@ -235,7 +235,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 // upload policy is checked during planning; descriptor confinement and
 // transport run only on a real call. The limitation is stated in the note
 // rather than silently implied.
-func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[string]any, fingerprint string) toolResult {
+func (s *Server) multipartDryRun(ctx context.Context, detail *registry.OperationDetail, args map[string]any, fingerprint string) toolResult {
 	// Trusted-context projection first (over-privilege protection, #177 B4): a forced
 	// field wins and is reflected in the plan, and must not be reported as
 	// "missing" when the operator supplies it.
@@ -247,7 +247,7 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 	// upload-root policy gate — all WITHOUT opening/reading/materializing the
 	// file and without backend I/O. An invalid dry-run is a validation_error,
 	// never a false "ok".
-	if verr := validateMultipartDryRun(detail, args, pol); verr != nil {
+	if verr := validateMultipartDryRun(ctx, detail, args, pol); verr != nil {
 		return jsonToolResult(map[string]any{
 			"status":       "validation_error",
 			"operation_id": detail.ID,
@@ -377,10 +377,10 @@ func (s *Server) multipartDryRun(detail *registry.OperationDetail, args map[stri
 // the filesystem), then adds the required query/header/body-field checks the
 // engine's pre-flight validator applies. The binary file field is satisfied by
 // the file_path binding rather than a form value.
-func validateMultipartDryRun(d *registry.OperationDetail, args map[string]any, pol execPolicy) error {
+func validateMultipartDryRun(ctx context.Context, d *registry.OperationDetail, args map[string]any, pol execPolicy) error {
 	hint := pol.describeHint
-	if _, err := buildArgv(d, args, pol); err != nil {
-		return output.ErrValidation(err.Error(), hint)
+	if _, err := buildArgv(ctx, d, args, pol); err != nil {
+		return argvError(err, hint)
 	}
 	for _, name := range extractPathParams(d.Path) {
 		switch v := scalarText(args[name]); v {

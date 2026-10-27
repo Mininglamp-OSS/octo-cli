@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -46,7 +47,7 @@ func TestBuildArgv_SplitsParamsByPosition(t *testing.T) {
 		"If-Match": "v7",
 		"text":     "hello",
 	}
-	argv, err := buildArgv(d, args, execPolicy{})
+	argv, err := buildArgv(context.Background(), d, args, execPolicy{})
 	if err != nil {
 		t.Fatalf("buildArgv: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestBuildArgv_UnexpectedArgumentForBodylessOp(t *testing.T) {
 	d := &registry.OperationDetail{
 		OperationInfo: registry.OperationInfo{ID: "event.list", Service: "event", Method: "GET", Path: "/v1/bot/events"},
 	}
-	_, err := buildArgv(d, map[string]any{"bogus": "x"}, execPolicy{})
+	_, err := buildArgv(context.Background(), d, map[string]any{"bogus": "x"}, execPolicy{})
 	if err == nil || !strings.Contains(err.Error(), "unexpected argument") {
 		t.Errorf("expected unexpected-argument error, got %v", err)
 	}
@@ -82,7 +83,7 @@ func TestBuildArgv_MissingPathArg(t *testing.T) {
 	d := &registry.OperationDetail{
 		OperationInfo: registry.OperationInfo{ID: "docs.get", Service: "docs", Method: "GET", Path: "/v1/bot/docs/{doc_id}"},
 	}
-	_, err := buildArgv(d, map[string]any{}, execPolicy{})
+	_, err := buildArgv(context.Background(), d, map[string]any{}, execPolicy{})
 	if err == nil || !strings.Contains(err.Error(), "missing required path argument") {
 		t.Errorf("expected missing-path-arg error, got %v", err)
 	}

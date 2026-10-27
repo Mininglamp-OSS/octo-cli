@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/foldkey"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -104,13 +106,13 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	outBuf.Reset()
 	errBuf.Reset()
 
-	argv, terr := buildArgv(detail, arguments, pol)
+	argv, terr := buildArgv(ctx, detail, arguments, pol)
 	if terr != nil {
 		hint := pol.describeHint
 		if hint == "" {
 			hint = "call describe_op to see the operation's declared arguments"
 		}
-		ee := output.ErrValidation(terr.Error(), hint)
+		ee := argvError(terr, hint)
 		return synthErrorEnvelope(ee), false, ee
 	}
 	if len(globalFlags) > 0 {
@@ -219,6 +221,39 @@ func synthErrorEnvelope(err error) []byte {
 // dry_run would otherwise be forwarded as body data while the call runs live.
 var toolSafetyArgumentNames = map[string]bool{"dryrun": true, "schemafingerprint": true}
 
+// maxArgumentNames bounds how many top-level argument names one call may carry.
+// The largest operation declares a few dozen parameters and body fields, so
+// this leaves ample room for legitimate extra fields while keeping the name
+// checks below, which run before any credential is resolved, to a fixed
+// amount of work per request.
+const maxArgumentNames = 1024
+
+// argumentCheckInterval is how many argument names are examined between
+// context checks, so a cancelled or timed-out request stops validating.
+const argumentCheckInterval = 64
+
+// errArgumentsCancelled marks a call whose context ended during argument
+// validation. Nothing was sent, so it is reported as a local refusal rather
+// than as an execution with an unknown outcome.
+type errArgumentsCancelled struct{ err error }
+
+func (e errArgumentsCancelled) Error() string {
+	return "request cancelled before argument validation completed: " + e.err.Error()
+}
+
+func (e errArgumentsCancelled) Unwrap() error { return e.err }
+
+// argvError renders a buildArgv failure. A context that ended during argument
+// validation is REQUEST_CANCELLED; every other failure is a VALIDATION_ERROR.
+// Neither sent anything.
+func argvError(err error, hint string) *output.ExitError {
+	var cancelled errArgumentsCancelled
+	if errors.As(err, &cancelled) {
+		return output.ErrWithHint("validation", "REQUEST_CANCELLED", err.Error(), "nothing was sent; retry with a longer deadline")
+	}
+	return output.ErrValidation(err.Error(), hint)
+}
+
 // checkArgumentNames refuses argument names that could change what the call
 // does without looking like it:
 //   - a misplaced tool switch (dry_run, schema_fingerprint, or a spelling of
@@ -228,7 +263,18 @@ var toolSafetyArgumentNames = map[string]bool{"dryrun": true, "schemafingerprint
 //     names that fold together. A Go backend binds JSON keys case-insensitively
 //     with this folding and the last match wins, so such a key could override
 //     a declared or connection-forced value that is also in the body.
-func checkArgumentNames(args map[string]any, pathSet map[string]bool, query, header map[string]*registry.ParamInfo, body map[string]registry.SchemaInfo) error {
+//
+// It runs before credential resolution, so its cost is bounded: at most
+// maxArgumentNames names are accepted, each is folded once into an index
+// (linear in the total name length rather than pairwise), and ctx is checked
+// before the work starts and periodically while it runs.
+func checkArgumentNames(ctx context.Context, args map[string]any, pathSet map[string]bool, query, header map[string]*registry.ParamInfo, body map[string]registry.SchemaInfo) error {
+	if err := ctx.Err(); err != nil {
+		return errArgumentsCancelled{err}
+	}
+	if len(args) > maxArgumentNames {
+		return fmt.Errorf("too many arguments: %d names exceed the limit of %d", len(args), maxArgumentNames)
+	}
 	declared := map[string]bool{"page_all": true, "file_path": true}
 	for n := range pathSet {
 		declared[n] = true
@@ -242,25 +288,39 @@ func checkArgumentNames(args map[string]any, pathSet map[string]bool, query, hea
 	for n := range body { //nolint:gocritic // schema properties are read-only values
 		declared[n] = true
 	}
+	// Index declared names by fold key. Distinct declared names that fold
+	// together keep the smallest, so the reported spelling is deterministic.
+	declaredByFold := make(map[string]string, len(declared))
+	for n := range declared {
+		fk := foldkey.Key(n)
+		if prev, ok := declaredByFold[fk]; !ok || n < prev {
+			declaredByFold[fk] = n
+		}
+	}
 	keys := sortedKeys(args)
+	seen := make(map[string]string, len(keys))
 	for i, k := range keys {
+		if i%argumentCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return errArgumentsCancelled{err}
+			}
+		}
+		fk := foldkey.Key(k)
 		if declared[k] {
+			seen[fk] = k
 			continue
 		}
 		folded := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(k))
 		if toolSafetyArgumentNames[folded] {
 			return fmt.Errorf("argument %q is a tool option, not an operation argument; execute takes dry_run and schema_fingerprint next to operation_id", truncateRunes(k, 200))
 		}
-		for n := range declared {
-			if strings.EqualFold(k, n) {
-				return fmt.Errorf("argument %q is not the declared spelling of %q", truncateRunes(k, 200), n)
-			}
+		if n, ok := declaredByFold[fk]; ok {
+			return fmt.Errorf("argument %q is not the declared spelling of %q", truncateRunes(k, 200), n)
 		}
-		for _, other := range keys[i+1:] {
-			if strings.EqualFold(k, other) {
-				return fmt.Errorf("arguments %q and %q differ only by case folding", truncateRunes(k, 200), truncateRunes(other, 200))
-			}
+		if other, ok := seen[fk]; ok {
+			return fmt.Errorf("arguments %q and %q differ only by case folding", truncateRunes(other, 200), truncateRunes(k, 200))
 		}
+		seen[fk] = k
 	}
 	return nil
 }
@@ -285,7 +345,7 @@ func checkArgumentNames(args map[string]any, pathSet map[string]bool, query, hea
 // A query/header argument whose value is JSON null is dropped (null means
 // "omitted", not "send an empty value"), so a null scope parameter cannot empty
 // a required filter on the wire.
-func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) { //nolint:gocyclo // spec-driven argument assembly handles distinct parameter locations and upload policy
+func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string]any, pol execPolicy) ([]string, error) { //nolint:gocyclo // spec-driven argument assembly handles distinct parameter locations and upload policy
 	pathNames := extractPathParams(d.Path)
 	pathSet := make(map[string]bool, len(pathNames))
 	for _, n := range pathNames {
@@ -310,7 +370,7 @@ func buildArgv(d *registry.OperationDetail, args map[string]any, pol execPolicy)
 		}
 	}
 
-	if err := checkArgumentNames(args, pathSet, queryByName, headerByName, declaredBody); err != nil {
+	if err := checkArgumentNames(ctx, args, pathSet, queryByName, headerByName, declaredBody); err != nil {
 		return nil, err
 	}
 

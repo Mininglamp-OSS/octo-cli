@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,12 +129,12 @@ func TestBuildArgv_MultipartFilePathConfinement(t *testing.T) {
 	}
 	// Default-deny on HTTP and stdio alike.
 	for _, httpMode := range []bool{false, true} {
-		if _, err := buildArgv(d, map[string]any{"file_path": "/etc/passwd"}, execPolicy{httpMode: httpMode}); err == nil {
+		if _, err := buildArgv(context.Background(), d, map[string]any{"file_path": "/etc/passwd"}, execPolicy{httpMode: httpMode}); err == nil {
 			t.Errorf("httpMode=%v: multipart file_path with no upload root must be rejected", httpMode)
 		}
 	}
 	// stdio with the operator opt-in works.
-	argv, err := buildArgv(d, map[string]any{"file_path": "/tmp/x"}, execPolicy{allowLocalUpload: true})
+	argv, err := buildArgv(context.Background(), d, map[string]any{"file_path": "/tmp/x"}, execPolicy{allowLocalUpload: true})
 	if err != nil || !hasPrefix(argv, "--file=") {
 		t.Errorf("stdio --allow-local-upload multipart upload must work, argv=%v err=%v", argv, err)
 	}
@@ -156,18 +157,18 @@ func TestBuildArgv_MultipartRejectsUndeclaredAndReservedKeys(t *testing.T) {
 	d := multipartOp()
 	// Identity/scope/output flags must never be injectable through multipart keys.
 	for _, k := range []string{"profile", "bot_id", "space", "verbose", "format", "data"} {
-		_, err := buildArgv(d, map[string]any{"file_path": "/tmp/f", k: "evil"}, execPolicy{allowLocalUpload: true})
+		_, err := buildArgv(context.Background(), d, map[string]any{"file_path": "/tmp/f", k: "evil"}, execPolicy{allowLocalUpload: true})
 		if err == nil {
 			t.Errorf("multipart key %q must be rejected, was accepted", k)
 		}
 	}
 	// A non-reserved but UNDECLARED key must also be rejected (isolates the
 	// declared-only guard, independent of the reserved-flag guard).
-	if _, err := buildArgv(d, map[string]any{"file_path": "/tmp/f", "arbitrary_extra": "x"}, execPolicy{allowLocalUpload: true}); err == nil {
+	if _, err := buildArgv(context.Background(), d, map[string]any{"file_path": "/tmp/f", "arbitrary_extra": "x"}, execPolicy{allowLocalUpload: true}); err == nil {
 		t.Errorf("undeclared multipart key must be rejected")
 	}
 	// A declared body field still works and rides as its own flag.
-	argv, err := buildArgv(d, map[string]any{"file_path": "/tmp/f", "caption": "hello"}, execPolicy{allowLocalUpload: true})
+	argv, err := buildArgv(context.Background(), d, map[string]any{"file_path": "/tmp/f", "caption": "hello"}, execPolicy{allowLocalUpload: true})
 	if err != nil {
 		t.Fatalf("declared multipart field must be accepted: %v", err)
 	}
@@ -183,7 +184,7 @@ func TestBuildArgv_NonMultipartBodyGoesToDataNotFlags(t *testing.T) {
 		OperationInfo: registry.OperationInfo{ID: "docs.create", Service: "docs", Method: "POST", Path: "/v1/bot/docs"},
 		RequestBody:   &registry.SchemaInfo{Type: "object", Properties: map[string]registry.SchemaInfo{"title": {Type: "string"}}},
 	}
-	argv, err := buildArgv(d, map[string]any{"profile": "evil", "title": "t"}, execPolicy{})
+	argv, err := buildArgv(context.Background(), d, map[string]any{"profile": "evil", "title": "t"}, execPolicy{})
 	if err != nil {
 		t.Fatalf("json-body op should accept body keys via --data: %v", err)
 	}
