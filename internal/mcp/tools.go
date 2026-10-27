@@ -75,7 +75,7 @@ func toolDefinitions() []toolDef {
 		{
 			Name:        "call_op",
 			Description: "Invoke one operation. arguments is a flat object keyed by the operation's declared params / body fields (see describe_op). path params, query params, and body fields all go in arguments by their wire name. Security-sensitive fields forced by the server connection are ignored if supplied.",
-			InputSchema: rawSchema(`{"type":"object","required":["operation_id"],"properties":{"operation_id":{"type":"string"},"arguments":{"type":"object"}}}`),
+			InputSchema: rawSchema(`{"type":"object","additionalProperties":false,"required":["operation_id"],"properties":{"operation_id":{"type":"string"},"arguments":{"type":"object"}}}`),
 		},
 	}
 }

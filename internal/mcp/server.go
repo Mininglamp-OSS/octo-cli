@@ -331,6 +331,9 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		}
 		return newResultResponse(req.ID, s.describeOp(a.OperationID))
 	case "call_op":
+		if err := validateClosedKeys(p.Arguments, callOpArgumentNames); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid call_op arguments: "+err.Error())
+		}
 		var a struct {
 			OperationID string          `json:"operation_id"`
 			Arguments   json.RawMessage `json:"arguments"`
@@ -444,6 +447,11 @@ func validateToolCallKeys(raw json.RawMessage) error {
 // getSkillArgumentNames is get_skill's closed argument set; a misspelled
 // depth or operation_id must not silently fall back to its default.
 var getSkillArgumentNames = map[string]bool{"intent": true, "domain": true, "query": true, "operation_id": true, "depth": true}
+
+// callOpArgumentNames is call_op's closed argument set. call_op has no dry_run
+// or schema_fingerprint switch, so such a key next to operation_id must be
+// refused rather than dropped while the operation is sent live.
+var callOpArgumentNames = map[string]bool{"operation_id": true, "arguments": true}
 
 // validateClosedKeys refuses an unknown, mis-cased or repeated key in a tool's
 // arguments object before struct decoding would ignore or merge it.
