@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — MCP secret download links
+
+- Add `get_secret_download_url` once in each facade (4/3/6 tools total), keeping
+  existing meta-tool contracts. Resolve stored aliases/IDs under the actual
+  caller credential and publish a reusable 300-second snapshot capability
+  through private shared Redis. TTL is operator-configurable; 600 seconds is
+  guidance, not a hard cap. No raw resolver registry exposure is added.
+- HTTP replicas serve exact attachment bytes; stdio publishes to the same
+  explicitly configured HTTP service/Redis. Missing config fails closed for
+  the feature. Public HTTPS routing, private Redis ACL/TLS and log/retention
+  policy are deployment prerequisites, not deployed by this change.
+- Ship direct-to-private-client-file instructions and the configuration,
+  snapshot/expiry, bounded transfer and Redis persistence risk contract in
+  `octo-shared/secret-download.md`.
+
+
 All notable changes to `octo-cli` are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

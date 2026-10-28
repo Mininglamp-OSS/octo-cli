@@ -57,9 +57,10 @@ func ParseFacade(s string) (facadeMode, bool) {
 // bearer instead of the process env (stdio). baseGlobals carries the operator's
 // parsed serve-time globals (credential selector + limits) into each call.
 type Server struct {
-	reg     *registry.Registry
-	mapping *Mapping
-	build   RootBuilder
+	secretDownloads *SecretDownloads
+	reg             *registry.Registry
+	mapping         *Mapping
+	build           RootBuilder
 
 	trusted          TrustedContext
 	credentialToken  string                // "" → resolve from env (stdio) unless httpMode
@@ -121,20 +122,28 @@ func (s *Server) WithFacade(f facadeMode) *Server { s.facade = f; return s }
 
 // toolList returns the tools/list surface for the active facade.
 func (s *Server) toolList() []toolDef {
+	var tools []toolDef
 	switch s.facade {
 	case facadeTwo:
-		return twoToolDefinitions()
+		tools = twoToolDefinitions()
 	case facadeBoth:
-		return append(toolDefinitions(), twoToolDefinitions()...)
+		tools = append(toolDefinitions(), twoToolDefinitions()...)
 	default:
-		return toolDefinitions()
+		tools = toolDefinitions()
 	}
+	return append(tools, secretToolDefinition())
 }
+
+// WithSecretDownloads sets the shared publication and retrieval service.
+func (s *Server) WithSecretDownloads(d *SecretDownloads) *Server { s.secretDownloads = d; return s }
 
 // toolEnabled reports whether a tool name is callable under the active facade,
 // so a tool from the other facade is a clean "unknown tool" rather than a
 // silent cross-facade call.
 func (s *Server) toolEnabled(name string) bool {
+	if name == "get_secret_download_url" {
+		return true
+	}
 	three := name == "search_ops" || name == "describe_op" || name == "call_op"
 	two := name == "get_skill" || name == "execute"
 	switch s.facade {
@@ -310,6 +319,8 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		return newErrorResponse(req.ID, codeInvalidParams, "tool arguments must be a JSON object")
 	}
 	switch p.Name {
+	case "get_secret_download_url":
+		return newResultResponse(req.ID, s.secretDownloadTool(ctx, p.Arguments))
 	case "search_ops":
 		var a struct {
 			Domain string `json:"domain"`

@@ -66,9 +66,9 @@ func toolNamesFromToolsList(t *testing.T, raw []byte) []string {
 }
 
 var facadeWant = map[string][]string{
-	"three": {"search_ops", "describe_op", "call_op"},
-	"two":   {"get_skill", "execute"},
-	"both":  {"search_ops", "describe_op", "call_op", "get_skill", "execute"},
+	"three": {"search_ops", "describe_op", "call_op", "get_secret_download_url"},
+	"two":   {"get_skill", "execute", "get_secret_download_url"},
+	"both":  {"search_ops", "describe_op", "call_op", "get_skill", "execute", "get_secret_download_url"},
 }
 
 // TestBuiltBinary_StdioFacadeToolsList drives the built binary over stdio for

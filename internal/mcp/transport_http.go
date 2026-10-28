@@ -33,15 +33,16 @@ const maxHTTPBodyBytes = 8 << 20
 // per request. reg and mapping are shared read-only across requests; the mutable
 // per-connection state lives on the short-lived per-request Server.
 type HTTPHandler struct {
-	reg            *registry.Registry
-	mapping        *Mapping
-	build          RootBuilder
-	baseTrusted    TrustedContext
-	facade         facadeMode
-	baseGlobals    cmdutil.GlobalOptions
-	allowedOrigins []string // exact-match allowlist; empty => loopback origins only
-	uploadRoot     string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
-	requestTimeout time.Duration
+	secretDownloads *SecretDownloads
+	reg             *registry.Registry
+	mapping         *Mapping
+	build           RootBuilder
+	baseTrusted     TrustedContext
+	facade          facadeMode
+	baseGlobals     cmdutil.GlobalOptions
+	allowedOrigins  []string // exact-match allowlist; empty => loopback origins only
+	uploadRoot      string   // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path
+	requestTimeout  time.Duration
 }
 
 // Reserved context headers: callers cannot supply trusted provenance. An
@@ -73,8 +74,13 @@ func NewHTTPHandler(build RootBuilder, baseTrusted TrustedContext, base cmdutil.
 	if err != nil {
 		return nil, err
 	}
+	var downloads *SecretDownloads
+	if !base.DryRun {
+		downloads = SecretDownloadsFromEnv()
+	}
 	return &HTTPHandler{
-		reg: reg, mapping: mapping, build: build, baseTrusted: baseTrusted, baseGlobals: base,
+		secretDownloads: downloads,
+		reg:             reg, mapping: mapping, build: build, baseTrusted: baseTrusted, baseGlobals: base,
 		allowedOrigins: parseAllowedOrigins(os.Getenv("OCTO_MCP_ALLOWED_ORIGINS")),
 		uploadRoot:     os.Getenv("OCTO_MCP_UPLOAD_ROOT"),
 		requestTimeout: httpRequestTimeoutFromEnv(),
@@ -94,7 +100,14 @@ func httpRequestTimeoutFromEnv() time.Duration {
 	return defaultHTTPRequestTimeout
 }
 
+// Close releases the optional Redis pool.
+func (h *HTTPHandler) Close() { h.secretDownloads.Close() }
+
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, secretDownloadPath) {
+		h.secretDownloads.serveDownload(w, r)
+		return
+	}
 	// Origin validation first: reject a cross-origin browser request before any
 	// work, so a page on another origin cannot drive this server via the user's
 	// loopback binding (DNS-rebinding / CSRF class).
@@ -190,6 +203,7 @@ func originAllowed(origin string, allowed []string) bool {
 // fields, even if an embedding handler calls this helper without ServeHTTP.
 func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 	return &Server{
+		secretDownloads: h.secretDownloads,
 		reg:             h.reg,
 		mapping:         h.mapping,
 		build:           h.build,

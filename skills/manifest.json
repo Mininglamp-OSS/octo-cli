@@ -2,7 +2,8 @@
   "version": 1,
   "skills": {
     "octo-shared": {
-      "summary_short": "Shared octo-cli knowledge: auth, gateway config, output envelopes, universal flags, error handling."
+      "summary_short": "Shared octo-cli knowledge: auth, gateway config, output envelopes, universal flags, error handling.",
+      "references": {"secret-download.md": {"topics": ["stored secret", "secret download", "private client file", "get_secret_download_url"]}}
     },
     "octo-messaging": {
       "summary_short": "Messaging: send/edit/sync, search, groups and threads, event polling; App Bot is DM-only.",

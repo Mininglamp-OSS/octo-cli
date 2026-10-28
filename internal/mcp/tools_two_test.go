@@ -24,9 +24,9 @@ func TestToolList_FacadeSelectsSurface(t *testing.T) {
 		facade facadeMode
 		want   []string
 	}{
-		{facadeThree, []string{"search_ops", "describe_op", "call_op"}},
-		{facadeTwo, []string{"get_skill", "execute"}},
-		{facadeBoth, []string{"search_ops", "describe_op", "call_op", "get_skill", "execute"}},
+		{facadeThree, []string{"search_ops", "describe_op", "call_op", "get_secret_download_url"}},
+		{facadeTwo, []string{"get_skill", "execute", "get_secret_download_url"}},
+		{facadeBoth, []string{"search_ops", "describe_op", "call_op", "get_skill", "execute", "get_secret_download_url"}},
 	}
 	for _, c := range cases {
 		s := facadeServer(t, c.facade)

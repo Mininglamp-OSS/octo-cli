@@ -53,12 +53,17 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
   octo-cli mcp serve                     # stdio (local / trusted-client transport)
   octo-cli mcp serve --http :8080        # HTTP: JSON-RPC over POST (production transport)
 
-By default three meta-tools are exposed: search_ops, describe_op, call_op. The
+The existing facade meta-tools are search_ops, describe_op, call_op by default. The
 --facade flag selects the tool surface: "three" (default), "two" (the
-Skill-driven get_skill + execute facade), or "both" (all five, for controlled
+Skill-driven get_skill + execute facade), or "both" (the five existing meta-tools, for controlled
 side-by-side comparison). Either way the full operation set is discovered
 dynamically rather than expanded into hundreds of resident MCP tools, so a
-client's tools/list stays small.
+client's tools/list stays small. Each facade additionally exposes one dedicated
+get_secret_download_url tool (4 / 3 / 6 tools total). It requires private shared
+Redis and an explicit client-reachable public HTTPS origin; see the shipped
+octo-shared/secret-download.md. Stdio publishes to the same Redis as that
+HTTP MCP download service, without a local listener. Missing/invalid feature
+configuration fails closed for this tool; existing tools remain available.
 
 The HTTP transport is JSON-RPC request/response over POST (one request, one
 response); it does not yet serve an SSE stream or a server-managed session.
@@ -138,7 +143,12 @@ envelope and performs no backend mutation for the server's lifetime.`,
 			if err != nil {
 				return err
 			}
-			srv.WithFacade(fac).WithTrustedContext(tc).WithBaseGlobals(base).
+			var downloads *mcp.SecretDownloads
+			if !base.DryRun {
+				downloads = mcp.SecretDownloadsFromEnv()
+			}
+			defer downloads.Close()
+			srv.WithSecretDownloads(downloads).WithFacade(fac).WithTrustedContext(tc).WithBaseGlobals(base).
 				WithUploadPolicy(os.Getenv("OCTO_MCP_UPLOAD_ROOT"), allowLocalUpload)
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
@@ -163,6 +173,7 @@ func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.T
 	if err != nil {
 		return err
 	}
+	defer h.Close()
 	if !isLoopbackAddr(addr) {
 		fmt.Fprintf(warn, "warning: MCP HTTP server binding %q is not loopback and serves cleartext; terminate TLS at a proxy and/or bind 127.0.0.1\n", addr) //nolint:errcheck // best-effort stderr warning
 	}
