@@ -72,3 +72,155 @@ func elementLabel(el map[string]any, i int) string {
 	}
 	return fmt.Sprintf("elements[%d]", i)
 }
+
+// validateMarketplaceRelations rejects marketplace relation payloads that the
+// backend would refuse, so the operator sees the exact array index and field
+// instead of a round-trip error. Target existence, publication state and scope
+// stay server-side decisions.
+func validateMarketplaceRelations(body any, review bool) *output.ExitError {
+	m, ok := body.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, present := m["relations"]
+	if !present || raw == nil {
+		// A present-null relations value is the clearing/absent spelling; the
+		// generic body walker passes it through for this optional field.
+		return nil
+	}
+	rels, ok := raw.([]any)
+	if !ok {
+		return output.ErrValidation("`relations` must be a JSON array", relationsHint(review))
+	}
+	pluginType := marketplacePluginType(m)
+	seen := map[string]struct{}{}
+	for i, entry := range rels {
+		rel, ok := entry.(map[string]any)
+		if !ok {
+			return output.ErrValidation(fmt.Sprintf("relations[%d] must be a JSON object", i), relationsHint(review))
+		}
+		if verr := validateRelationEntry(i, pluginType, rel, seen, review); verr != nil {
+			return verr
+		}
+	}
+	return nil
+}
+
+// marketplacePluginType reads the plugin type from the upsert wrapper or, for
+// review submissions, from the top-level manifest/package documents.
+func marketplacePluginType(m map[string]any) string {
+	if plugin, ok := m["plugin"].(map[string]any); ok {
+		if t, _ := plugin["plugin_type"].(string); t != "" {
+			return canonicalMarketplacePluginType(t)
+		}
+	}
+	for _, key := range []string{"manifest_json", "plugin_json"} {
+		if doc, ok := m[key].(map[string]any); ok {
+			if t, _ := doc["plugin_type"].(string); t != "" {
+				return canonicalMarketplacePluginType(t)
+			}
+		}
+	}
+	return ""
+}
+
+// canonicalMarketplacePluginType folds the documented legacy spellings onto the
+// current vocabulary so the relation matrix also applies to frozen review
+// manifests, whose manifest_json is not enum-constrained by the schema walker.
+func canonicalMarketplacePluginType(t string) string {
+	switch t {
+	case "squad":
+		return "expert_team"
+	case "mcp":
+		return "connector"
+	default:
+		return t
+	}
+}
+
+// validateRelationEntry checks one relation against the marketplace matrix and
+// records its (type,target) and member key for duplicate detection.
+func validateRelationEntry(i int, pluginType string, rel map[string]any, seen map[string]struct{}, review bool) *output.ExitError {
+	relType, _ := rel["relation_type"].(string)
+	switch relType {
+	case "expert_skill", "expert_connector", "expert_team_expert":
+	default:
+		return output.ErrValidation(fmt.Sprintf("relations[%d].relation_type is invalid", i), relationsHint(review))
+	}
+	switch pluginType {
+	case "expert_team":
+		if relType != "expert_team_expert" {
+			return output.ErrValidation(fmt.Sprintf("relations[%d].relation_type is invalid for an expert_team", i), relationsHint(review))
+		}
+	case "expert":
+		if relType == "expert_team_expert" {
+			return output.ErrValidation(fmt.Sprintf("relations[%d].relation_type is invalid for an expert", i), relationsHint(review))
+		}
+	default:
+		// Review requests may legitimately inherit the owner type from the stored
+		// plugin when no documents are supplied (first listing of an unlisted
+		// Space-intent draft). Defer only the type-dependent matrix check; the
+		// relation shape, duplicate and pin checks still run below.
+		if !review || pluginType != "" {
+			// Skills and connectors never carry relations; an explicitly supplied
+			// unknown type is also fail-closed.
+			return output.ErrValidation(fmt.Sprintf("relations[%d].relation_type is invalid for plugin_type %q", i, pluginType), relationsHint(review))
+		}
+	}
+	target, _ := rel["target_plugin_id"].(string)
+	if target == "" {
+		return output.ErrValidation(fmt.Sprintf("relations[%d].target_plugin_id is required", i), relationsHint(review))
+	}
+	key := relType + "\x00" + target
+	if _, dup := seen[key]; dup {
+		return output.ErrValidation(fmt.Sprintf("relations[%d] duplicates target %s", i, target), relationsHint(review))
+	}
+	seen[key] = struct{}{}
+	if verr := validateRelationVersion(i, relType, rel, review); verr != nil {
+		return verr
+	}
+	if relType != "expert_team_expert" {
+		return nil
+	}
+	if rawData, hasData := rel["data"]; hasData && rawData != nil {
+		if _, ok := rawData.(map[string]any); !ok {
+			return output.ErrValidation(fmt.Sprintf("relations[%d].data must be a JSON object", i), relationsHint(review))
+		}
+	}
+	return nil
+}
+
+func validateRelationVersion(i int, relType string, rel map[string]any, review bool) *output.ExitError {
+	rawVersion, hasVersion := rel["target_version_id"]
+	if !hasVersion || rawVersion == nil {
+		return nil
+	}
+	if relType == "expert_connector" {
+		// Only a real pin is forbidden: "" is the wire spelling of "no pin" that
+		// a read-modify-write echo can produce. Validate the JSON type first so a
+		// number/boolean/object cannot bypass the connector rule via a failed
+		// string assertion.
+		s, ok := rawVersion.(string)
+		if !ok {
+			return output.ErrValidation(fmt.Sprintf("relations[%d].target_version_id must be a string when supplied", i), relationsHint(review))
+		}
+		if s != "" {
+			return output.ErrValidation(fmt.Sprintf("relations[%d].target_version_id is forbidden for connectors", i), relationsHint(review))
+		}
+		return nil
+	}
+	if _, ok := rawVersion.(string); !ok {
+		return output.ErrValidation(fmt.Sprintf("relations[%d].target_version_id must be a string when supplied", i), relationsHint(review))
+	}
+	return nil
+}
+
+// relationsHint keeps upsert's destructive omission semantics separate from
+// review_submit's inherit semantics; one shared string would tell review callers
+// to freeze a visibility-filtered graph.
+func relationsHint(review bool) string {
+	if review {
+		return "Omit relations to inherit the live graph; when present this list replaces the frozen review snapshot. Skill and team-member relations may set target_version_id; expert_connector must not."
+	}
+	return "relations is a full replacement list: send every edge, every time. Omitting the key is the same as [] and soft-deletes every live relation. Skill and team-member relations may set target_version_id; expert_connector must not."
+}

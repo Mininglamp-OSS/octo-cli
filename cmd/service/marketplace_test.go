@@ -51,6 +51,12 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"skill_parse_task.get":     {http.MethodGet, "/market/api/v1/skill_parse_tasks/{skill_parse_task_id}"},
 		"skill_icon_upload.create": {http.MethodPost, "/market/api/v1/skill_icon_uploads"},
 		"mcp_icon_upload.create":   {http.MethodPost, "/market/api/v1/mcp_icon_uploads"},
+
+		// Dependency and version reads (2026-10 dependency-pin work).
+		"plugin.version.get":      {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/versions/{version_id}"},
+		"plugin.version.download": {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/versions/{version_id}/file"},
+		"plugin.dependents.list":  {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/dependents"},
+		"plugin.graph.get":        {http.MethodGet, "/market/api/v1/plugins/detail_graph"},
 	}
 
 	if got := len(r.ListOperations("marketplace")); got != len(wants) {
@@ -69,6 +75,13 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		}
 		if !op.SpaceHeader {
 			t.Errorf("%s must send the space header", id)
+		}
+	}
+
+	for _, id := range []string{"plugin.upsert", "plugin.review_request.create"} {
+		detail, ok := r.GetOperation(id)
+		if !ok || !detail.ValidateMarketplaceRelations {
+			t.Errorf("%s lost x-octo-validate-marketplace-relations", id)
 		}
 	}
 
@@ -601,6 +614,31 @@ func TestMarketplacePublicationLifecycleRequests(t *testing.T) {
 		}
 		if gotPath != "/market/api/v1/plugins/publish" || gotBody["plugin_id"] != "p1" || gotBody["version"] != "1.2.0" {
 			t.Fatalf("publish request = %s %#v", gotPath, gotBody)
+		}
+	})
+
+	t.Run("review create inherits owner type", func(t *testing.T) {
+		// No manifest/plugin documents: the backend inherits the stored draft's
+		// type. The local gate must not reject the replacement relation list.
+		var gotPath string
+		var gotBody map[string]any
+		root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			_ = json.NewDecoder(r.Body).Decode(&gotBody)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"review_id":"r1"}}`))
+		})
+		root.SetArgs([]string{"marketplace", "plugin", "review-request", "create", "--data",
+			`{"plugin_id":"p1","version":"1.0.0","relations":[{"relation_type":"expert_connector","target_plugin_id":"c1"}]}`})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if gotPath != "/market/api/v1/plugins/review_requests" {
+			t.Fatalf("review create path = %q", gotPath)
+		}
+		rels, _ := gotBody["relations"].([]any)
+		if len(rels) != 1 {
+			t.Fatalf("review create relations = %#v", gotBody["relations"])
 		}
 	})
 

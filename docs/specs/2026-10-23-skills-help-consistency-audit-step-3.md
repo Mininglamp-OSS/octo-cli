@@ -2,7 +2,7 @@
 
 Date: 2026-10-23
 
-Status: authorized scope implemented and locally accepted on 2026-10-23; 26 entries addressed, nine retained by user decision and three capability candidates excluded.
+Status: authorized scope implemented and locally accepted on 2026-10-23; 26 entries addressed, nine retained by user decision and two capability candidates excluded; AUD3-037 was re-authorized on 2026-10-26.
 
 ## Purpose and maintenance
 
@@ -20,7 +20,7 @@ The user authorized implementation and acceptance of this register on 2026-10-23
 
 - AUD3-024: retain the existing Docs sharing-role vocabulary, `read|edit`.
 - AUD3-026–033: leave all HTML behavior, schemas and skills unchanged. The recorded differences and external deletion-policy uncertainty remain historical findings, not verified repairs.
-- AUD3-036–038: do not add the three capability candidates.
+- AUD3-036–038: do not add the three capability candidates; AUD3-037 (`plugin.graph.get`) was explicitly re-authorized by the product owner on 2026-10-26 and is implemented.
 - Implement the remaining existing-surface contract and guidance corrections. Registration caching is CLI housekeeping guidance, not a prohibition on legitimate runtime re-registration.
 - Continue excluding Agent Mail, Matter and Smart Summary. No backend implementation, deployment, release or installed-binary replacement is authorized.
 
@@ -533,6 +533,7 @@ These entries describe inspected backend capabilities outside the current declar
 - **Sources:** `octo-marketplace:internal/api/handler/plugin/handler.go:408–445`; `octo-marketplace:docs/openapi/swagger.yaml`, operation `plugin.graph.get`; `internal/registry/specs/marketplace.json`.
 - **Boundary:** this is not a demonstrated defect in the existing one-level command. No live graph was fetched.
 - **Status / handling (2026-10-23):** Out of scope by user decision. Do not add the graph operation; retain the current one-level relation command.
+- **Status / handling (2026-10-26):** Decision reversed by the product owner because full dependency-chain inspection is required for the pinned-reference rollout. Added `plugin.graph.get` to `internal/registry/specs/marketplace.json`, the registry-shape test and `CHANGELOG.md`; `skills/octo-marketplace/expert.md` now documents the flat transitive closure and keeps the one-level caution. Verified with `go test ./...`, `go build ./...`, registry count 29 and `plugin graph get --help`; no live graph was fetched.
 
 ### AUD3-038 — Marketplace has an additive, user-only installation contract
 

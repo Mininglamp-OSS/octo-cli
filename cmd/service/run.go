@@ -234,6 +234,11 @@ func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRu
 			return verr
 		}
 	}
+	if rt.detail.ValidateMarketplaceRelations {
+		if verr := validateMarketplaceRelations(body, rt.detail.ID == "plugin.review_request.create"); verr != nil {
+			return verr
+		}
+	}
 	req.Body = body
 	if body == nil || rt.detail.RequestBody == nil {
 		return nil
