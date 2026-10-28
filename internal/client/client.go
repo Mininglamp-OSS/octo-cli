@@ -731,7 +731,7 @@ func redactBodyValue(v any, secrets []string) any {
 	case []string:
 		out := make([]string, len(t))
 		for i, val := range t {
-			out[i] = redactSecrets(val, secrets)
+			out[i] = maskOrSuppressValue(val, secrets)
 		}
 		return out
 	}
