@@ -70,7 +70,7 @@ func TestAllDomainOperationCounts(t *testing.T) {
 		"marketplace": 29,
 		"mail":        18,
 		"summary":     4,
-		"loop":        116,
+		"loop":        126,
 	}
 	totalWant := 0
 	for svc, want := range expected {

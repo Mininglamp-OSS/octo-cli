@@ -74,6 +74,9 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// A Workspace path flag and its binding header share one selector. Resolve
 	// both from the same value so Fleet can authorize before route dispatch.
 	headers = bindWorkspacePathHeader(rt, pathValues, headers)
+	if err := applyLoopProjectQuery(cobraCmd, rt, q); err != nil {
+		return emitAndReturn(f, err)
+	}
 	if err := applyTaskAssigneeQuery(cobraCmd, f, rt, q, headers); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
@@ -493,7 +496,7 @@ func buildQuery(cobraCmd *cobra.Command, rt *operationRuntime) (url.Values, *out
 	}
 	q := url.Values{}
 	for flagName, qf := range rt.queryFlags {
-		if !taskFlagChanged(cobraCmd, flagName) {
+		if !loopFlagChanged(cobraCmd, flagName) {
 			continue
 		}
 		if err := addQueryFlagValue(q, rt, flagName, qf); err != nil {
@@ -714,6 +717,9 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 	if err := applyBodyFlags(cobraCmd, rt, base); err != nil {
 		return nil, err
 	}
+	if err := applyLoopProjectBody(cobraCmd, rt, base); err != nil {
+		return nil, err
+	}
 	if err := applyTaskAssigneeBody(cobraCmd, f, rt, base); err != nil {
 		return nil, err
 	}
@@ -879,7 +885,7 @@ func missingVariantRequiredValue(value any) bool {
 // bare JSON integer — the wire contract stays integer while the flag is text.
 func applyBodyFlags(cobraCmd *cobra.Command, rt *operationRuntime, base map[string]any) *output.ExitError {
 	for flagName, bf := range rt.bodyFlags {
-		if !taskFlagChanged(cobraCmd, flagName) {
+		if !loopFlagChanged(cobraCmd, flagName) {
 			if _, supplied := base[bf.apiName]; !supplied && bf.boolDefault != nil {
 				base[bf.apiName] = *bf.boolDefault
 			}

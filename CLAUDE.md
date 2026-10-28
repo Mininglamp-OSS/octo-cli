@@ -42,7 +42,7 @@
   for that origin. Mail never uses a separate token or base-URL environment
   variable.
 
-## Command Structure (12 active domains, 339 embedded operations)
+## Command Structure (12 active domains, 349 embedded operations)
 
 Service commands are auto-registered. The hand-written leaves are `schema`, `version`, `upgrade`, `skills`, `sheet-cell`, `api` (generic passthrough), `config`, `auth`, and the cobra-generated `completion`. `loop task assign` is a CLI alias for the generated `task.update` operation.
 
@@ -125,6 +125,8 @@ octo-cli mail      me
 octo-cli loop      workspace list|get
                          member list
                task create|list|get|update|assign|delete
+               project list|search|get|create|update|delete
+                       resource list|create|add|update|delete|remove
                expert list|get|create|update|archive|restore
                expert-team list|get|create|update|delete
                # Additional Fleet resources: run `octo-cli loop --help`.
