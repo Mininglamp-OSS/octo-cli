@@ -132,7 +132,7 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req rpcRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := decodeRPCRequest(body, &req); err != nil {
 		writeHTTPError(w, nil, codeParseError, "parse error: "+err.Error())
 		return
 	}

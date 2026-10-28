@@ -16,7 +16,11 @@
 // merged and validated fail-fast at startup.
 package mcp
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+)
 
 // JSON-RPC 2.0 wire types. MCP is JSON-RPC 2.0 over stdio (newline-delimited)
 // or HTTP (JSON-RPC over POST).
@@ -30,6 +34,41 @@ type rpcRequest struct {
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+// decodeRPCRequest rejects repeated top-level members before struct decoding
+// can overwrite them. Both transports cap raw at 8 MiB. Token decodes key
+// escapes; RawMessage skips nested values without changing their semantics.
+// Keep the existing decoder's case aliases, extension fields and shape rules.
+func decodeRPCRequest(raw []byte, req *rpcRequest) error {
+	if isJSONObject(raw) {
+		d := json.NewDecoder(bytes.NewReader(raw))
+		if _, err := d.Token(); err != nil {
+			return err
+		}
+		seen := make(map[string]bool)
+		for d.More() {
+			token, err := d.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := token.(string)
+			if seen[key] {
+				return errors.New("duplicate JSON-RPC envelope member")
+			}
+			seen[key] = true
+			var value json.RawMessage
+			if err := d.Decode(&value); err != nil {
+				return err
+			}
+		}
+		if _, err := d.Token(); err != nil {
+			return err
+		}
+	}
+	// Unmarshal also enforces full consumption and preserves the old handling
+	// of malformed, non-object, null and case-varied envelopes.
+	return json.Unmarshal(raw, req)
 }
 
 // isNotification reports whether the message omits an id (JSON-RPC

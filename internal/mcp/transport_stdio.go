@@ -65,7 +65,7 @@ func readStdioMessage(r *bufio.Reader) (line []byte, oversized bool, err error) 
 
 func (s *Server) handleStdioLine(ctx context.Context, line []byte, out io.Writer) {
 	var req rpcRequest
-	if err := json.Unmarshal(line, &req); err != nil {
+	if err := decodeRPCRequest(line, &req); err != nil {
 		writeMessage(out, newErrorResponse(nil, codeParseError, "parse error: "+err.Error()))
 		return
 	}
