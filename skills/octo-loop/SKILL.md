@@ -1,7 +1,7 @@
 ---
 name: octo-loop
 version: 0.1.0
-description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
+description: "Use when operating the Octo Loop control plane through the octo-cli `loop` commands: reading or writing Fleet tasks, comments, metadata, Loop projects/resources, and labels; dispatching work to experts or expert-teams and watching or cancelling their executions; creating, triaging, updating status, or reading progress on a task; listing tasks, experts, or expert-teams in a workspace; and safely handling mention and status-change side effects. Terminology: task (was issue), expert (was agent), expert-team (was squad), dispatch (assign a task to an expert/expert-team and trigger its run). Trigger phrases include: create or report a task/bug, dispatch or schedule work, assign to an expert, run or rerun a task, update or read progress, comment on or reply to a task, list or search tasks in a Loop workspace. Do not use for chit-chat unrelated to Loop, for pure local file work, or when a task or issue clearly refers to GitHub/Jira rather than Loop. Load after octo-shared."
 metadata:
   requires:
     bins: ["octo-cli"]
@@ -20,7 +20,7 @@ Terminology (legacy → current): **agent → expert**, **squad → expert-team*
 ## When to use / not use
 
 Use this skill when the request targets a specific Loop workspace or task:
-reading or writing tasks, comments, or metadata; working with experts
+reading or writing tasks, comments, Loop projects/resources, or metadata; working with experts
 or expert-teams (dispatch, schedule, trigger a run); replying to a comment,
 creating or triaging a task, updating status, or reading progress.
 
@@ -65,6 +65,51 @@ explicitly. Discover available workspaces first:
 ```bash
 octo-cli loop workspace list
 ```
+
+### Loop projects and resources
+
+`loop project` manages the projects shown in the Loop Project tab. Each belongs
+to a workspace. Its UUID is independent of the octo-server Project UUID used as
+`--workspace-id`; a project selector never grants workspace access or replaces
+that required flag. Use full project UUIDs returned by list/search, not names
+or abbreviated IDs.
+
+```bash
+octo-cli loop project list --workspace-id <ws> --status planned
+octo-cli loop project search "release plan" --workspace-id <ws>
+octo-cli loop project get <project-id> --workspace-id <ws>
+octo-cli loop project create --workspace-id <ws> --title "Release plan" --status planned
+octo-cli loop project update <project-id> --workspace-id <ws> --status in_progress
+octo-cli loop project resource list <project-id> --workspace-id <ws>
+octo-cli loop project resource add <project-id> --workspace-id <ws> --type github_repo --ref '{"url":"https://github.com/org/repo","default_branch_hint":"main"}'
+octo-cli loop project resource add <project-id> --workspace-id <ws> --type local_directory --ref '{"local_path":"/work/repo","daemon_id":"<daemon-id>"}'
+octo-cli loop project resource update <project-id> <resource-id> --workspace-id <ws> --label "Source"
+octo-cli loop project resource remove <project-id> <resource-id> --workspace-id <ws>
+octo-cli loop project delete <project-id> --workspace-id <ws>
+```
+
+Resource `add`/`remove` are aliases for `create`/`delete`. `--ref` accepts one
+complete JSON object and cannot be mixed with `resource_ref` in `--data`.
+Changing a resource reference replaces the full reference; preserve the repo
+URL or the local directory's path and daemon ID. Nested initial `resources`
+can be supplied in project create's `--data` for atomic creation.
+
+Project statuses are `planned`, `in_progress`, `paused`, `completed`, and
+`cancelled`; priorities are `urgent`, `high`, `medium`, `low`, and `none`.
+Project leads accept `member` or `expert`, not `expert_team`. Use `--lead-id`
+for a Fleet UUID or `--lead-member-id` with `--lead-type member`; never supply
+both identity fields. The former `--lead-octo-uid` spelling remains a hidden
+compatibility alias. Clear a lead with
+`--data '{"lead_type":null,"lead_id":null}'`. Omitted update fields are preserved.
+
+Tasks and autopilots accept `--project-id <project-id>`; `--project` is a
+convenience alias for the same UUID. Updates support `--project ""` or
+`--data '{"project_id":null}'` to clear an association. Do not combine the
+alias with `--project-id` or JSON `project_id`. Task list/group accept
+`--project-ids "<project-1>,<project-2>"` and `--include-no-project`; single
+and plural project filters are mutually exclusive. `--include-no-project`
+alone selects tasks without a project, and with selected projects adds those
+unassociated tasks to their union.
 
 ### Project members
 
@@ -162,8 +207,8 @@ keys are `title`, `created_at`, `start_date`, `due_date` or `priority`, with
 
 Grouping is by assignee. `group_assignee_type` can be `none`, `member`,
 `expert` or `expert_team`; supply `group_assignee_id` for a specific actor and
-omit it when the type is `none`. These filters are backend-validated. Do not
-use retired project selectors or assume a task belongs to a project.
+omit it when the type is `none`. These filters are backend-validated. Project
+selection is independent of assignee selection; tasks may have no project.
 
 Inspect the current contract before constructing a write:
 
@@ -218,7 +263,7 @@ With `--output`, JSON stdout reports response metadata and the output path.
 Without it, the CLI describes the binary response but saves no file. The flag
 does not bypass workspace or attachment permissions.
 
-Explore other namespaces (`expert`, `expert-team`,
+Explore other namespaces (`project`, `expert`, `expert-team`,
 `expert-template`, `execution`, `runtime`, `skill`, `skill-file`, `autopilot`,
 `attachment`, `label`, top-level `comment`) with `--help` — their shapes vary.
 

@@ -48,7 +48,7 @@ Key properties:
 | `message` | 10  | Messaging — send, edit, sync, read-receipt; search (search/all/files/media/around/groups, in-channel or cross-channel) |
 | `file`    | 4   | Files — upload, download, credentials, presigned URLs          |
 | `event`   | 2   | Event polling — list, ack                                      |
-| `loop`    | 116 | Fleet control plane — tasks and assignees, Project member rosters, experts, expert teams, workspaces, runtimes, skills, automations, attachments, and related resources |
+| `loop`    | 126 | Fleet control plane — tasks and assignees, Loop projects/resources, Project member rosters, experts, expert teams, workspaces, runtimes, skills, automations, and attachments |
 
 ## Installation
 
