@@ -1056,6 +1056,13 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		c.verbosef("request body: %s", truncate(redactDiagnosticBody(req, body), 1024))
 	}
 
+	// Only cancellation observed before Do proves this attempt was never sent.
+	// The retry loop still retains any earlier attempt that may have applied.
+	if err := ctx.Err(); err != nil {
+		cancelled := output.ErrNetwork(err.Error(), "request cancelled")
+		cancelled.NotProcessed = true
+		return nil, cancelled
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		// *url.Error.Error() embeds the whole request URL, so an x-octo-secret
@@ -1542,7 +1549,8 @@ func withRetryAfterHint(err error) error {
 // attemptMayHaveApplied reports whether one failed attempt may have reached the
 // backend and taken effect, which decides both whether a request that is not
 // replay-safe may be resent and how a later failure is reported. Only a failed
-// dial and a definite refusal (a 4xx other than 429) prove it did not. A 429 is
+// dial, cancellation before Do, and a definite refusal (a 4xx other than 429)
+// prove it did not. A 429 is
 // not taken as proof: most come from pre-handler rate limiters, but a handler
 // can also answer 429 after it committed (octo-server OIDC bind does for an
 // already-created token), and the client cannot tell the two apart.
