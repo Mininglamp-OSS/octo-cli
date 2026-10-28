@@ -3207,7 +3207,7 @@
                     "properties": {
                       "uid": {
                         "type": "string",
-                        "description": "Opaque, case-sensitive Octo user UID. Use assignee_octo_uid when assigning a human Project member."
+                        "description": "Opaque, case-sensitive Project member ID. Use --assignee-member-id for direct assignment."
                       },
                       "name": {
                         "type": "string"
@@ -3228,11 +3228,11 @@
                       },
                       "user_id": {
                         "type": "string",
-                        "description": "Legacy Fleet user ID."
+                        "description": "Native Workspace member user UUID, used as assignee_id when assigning that member."
                       },
                       "octo_uid": {
                         "type": "string",
-                        "description": "Legacy user's Octo UID when available."
+                        "description": "Optional linked identity for a native Workspace member; assignment uses user_id."
                       }
                     }
                   }
@@ -6328,7 +6328,7 @@
       "TaskAssigneeID": {
         "name": "assignee_id",
         "in": "query",
-        "description": "Include tasks assigned to this Fleet actor UUID.",
+        "description": "Exact expert, expert-team, or native Workspace member user UUID. Project members use --assignee-member-id.",
         "schema": {
           "type": "string",
           "format": "uuid"
@@ -6337,7 +6337,7 @@
       "TaskAssigneeIDs": {
         "name": "assignee_ids",
         "in": "query",
-        "description": "Comma-separated Fleet actor UUIDs; matching assignees form a union.",
+        "description": "Comma-separated expert, expert-team, or native Workspace member user UUIDs; matching assignees form a union. Project members use --assignee-member-ids.",
         "schema": {
           "type": "string"
         }
@@ -6345,7 +6345,8 @@
       "TaskAssigneeOctoUID": {
         "name": "assignee_octo_uid",
         "in": "query",
-        "description": "Exact member Octo UID. Mutually exclusive with assignee ID and Octo UID list filters.",
+        "x-octo-flag": "assignee-member-id",
+        "description": "Exact Project member ID from the member list. Mutually exclusive with assignee ID and member-ID list filters.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -6355,7 +6356,8 @@
       "TaskAssigneeOctoUIDs": {
         "name": "assignee_octo_uids",
         "in": "query",
-        "description": "Comma-separated exact member Octo UIDs, at most 100. Mutually exclusive with assignee ID and single Octo UID filters.",
+        "x-octo-flag": "assignee-member-ids",
+        "description": "Comma-separated exact Project member IDs, at most 100. Mutually exclusive with assignee ID and single member-ID filters.",
         "schema": {
           "type": "string",
           "minLength": 1
@@ -6372,7 +6374,7 @@
       "TaskCreatorID": {
         "name": "creator_id",
         "in": "query",
-        "description": "Include tasks created by this Fleet actor UUID.",
+        "description": "Exact task creator UUID. Project member creators use --creator-member-id.",
         "schema": {
           "type": "string",
           "format": "uuid"
@@ -6381,7 +6383,7 @@
       "TaskCreatorIDs": {
         "name": "creator_ids",
         "in": "query",
-        "description": "Comma-separated Fleet actor UUIDs; matching creators form a union.",
+        "description": "Comma-separated task creator UUIDs; matching creators form a union. Project member creators use --creator-member-ids.",
         "schema": {
           "type": "string"
         }
@@ -6389,7 +6391,8 @@
       "TaskCreatorOctoUID": {
         "name": "creator_octo_uid",
         "in": "query",
-        "description": "Exact creator member Octo UID. Mutually exclusive with creator ID and Octo UID list filters.",
+        "x-octo-flag": "creator-member-id",
+        "description": "Exact Project member ID of the task creator. Mutually exclusive with creator ID and member-ID list filters.",
         "schema": {
           "type": "string",
           "minLength": 1,
@@ -6399,7 +6402,8 @@
       "TaskCreatorOctoUIDs": {
         "name": "creator_octo_uids",
         "in": "query",
-        "description": "Comma-separated exact creator member Octo UIDs, at most 100. Mutually exclusive with creator ID and single Octo UID filters.",
+        "x-octo-flag": "creator-member-ids",
+        "description": "Comma-separated exact Project member IDs of task creators, at most 100. Mutually exclusive with creator ID and single member-ID filters.",
         "schema": {
           "type": "string",
           "minLength": 1
@@ -7429,18 +7433,19 @@
               "expert_team",
               "member"
             ],
-            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid."
+            "description": "Public assignee type. Use with --assignee-id or --assignee-member-id."
           },
           "assignee_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
+            "description": "Expert or expert-team UUID, or a native Workspace member user UUID with assignee_type=member. Project members use --assignee-member-id."
           },
           "assignee_octo_uid": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "description": "Member Octo UID for assignment in an authorized Octo Project. The backend requires it to be paired with member assignee_type and mutually exclusive with assignee_id."
+            "x-octo-flag": "assignee-member-id",
+            "description": "Exact Project member ID from the member list; pair with assignee_type=member and do not combine with assignee_id."
           },
           "status": {
             "type": "string",
@@ -7519,7 +7524,7 @@
               "member",
               null
             ],
-            "description": "Public assignee type. Use with assignee_id or assignee_octo_uid; to clear, pass --data '{\"assignee_type\":null,\"assignee_id\":null}' or use task assign --unassign."
+            "description": "Public assignee type. Use with --assignee-id or --assignee-member-id; to clear, pass --data '{\"assignee_type\":null,\"assignee_id\":null}' or use task assign --unassign."
           },
           "assignee_id": {
             "type": [
@@ -7527,13 +7532,14 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Fleet actor UUID. For authorized Octo Project member assignments, a raw Octo UID is accepted for compatibility; prefer assignee_octo_uid."
+            "description": "Expert or expert-team UUID, or a native Workspace member user UUID with assignee_type=member. Project members use --assignee-member-id."
           },
           "assignee_octo_uid": {
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "description": "Member Octo UID for assignment in an authorized Octo Project. The backend requires it to be paired with member assignee_type and mutually exclusive with assignee_id."
+            "x-octo-flag": "assignee-member-id",
+            "description": "Exact Project member ID from the member list; pair with assignee_type=member and do not combine with assignee_id."
           },
           "status": {
             "type": "string",
@@ -7624,12 +7630,12 @@
           "expert_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet expert UUID; provide this or expert_team_id."
+            "description": "Expert UUID; provide this or expert_team_id."
           },
           "expert_team_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet expert-team UUID; provide this or expert_id."
+            "description": "Expert-team UUID; provide this or expert_id."
           },
           "parent_task_id": {
             "type": "string",
@@ -7695,7 +7701,7 @@
           "user_id": {
             "type": "string",
             "format": "uuid",
-            "description": "Fleet actor UUID."
+            "description": "Workspace user UUID of the subscriber."
           }
         }
       },

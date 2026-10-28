@@ -196,6 +196,76 @@ func TestTaskListAssigneeIDPassesThroughWithoutRosterReads(t *testing.T) {
 	}
 }
 
+func TestTaskMemberIDFlagsKeepBackendFields(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, field, value string
+		args                       []string
+	}{
+		{"update member", http.MethodPatch, "assignee_octo_uid", "Human/CaseSensitive", []string{"update", "TASK-1", "--assignee-type", "member", "--assignee-member-id", "Human/CaseSensitive"}},
+		{"create member", http.MethodPost, "assignee_octo_uid", "Human/CaseSensitive", []string{"create", "--title", "Example", "--assignee-type", "member", "--assignee-member-id", "Human/CaseSensitive"}},
+		{"list member", http.MethodGet, "assignee_octo_uid", "Human/CaseSensitive", []string{"list", "--assignee-member-id", "Human/CaseSensitive"}},
+		{"list members", http.MethodGet, "assignee_octo_uids", "Human/CaseSensitive,Second", []string{"list", "--assignee-member-ids", "Human/CaseSensitive,Second"}},
+		{"list creator", http.MethodGet, "creator_octo_uid", "Human/CaseSensitive", []string{"list", "--creator-member-id", "Human/CaseSensitive"}},
+		{"list creators", http.MethodGet, "creator_octo_uids", "Human/CaseSensitive,Second", []string{"list", "--creator-member-ids", "Human/CaseSensitive,Second"}},
+		{"old update flag", http.MethodPatch, "assignee_octo_uid", "Human/CaseSensitive", []string{"update", "TASK-1", "--assignee-type", "member", "--assignee-octo-uid", "Human/CaseSensitive"}},
+		{"old list flag", http.MethodGet, "assignee_octo_uid", "Human/CaseSensitive", []string{"list", "--assignee-octo-uid", "Human/CaseSensitive"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			root, _ := rootWithDriveToken(t, "bf_assignment", func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Method != tc.method {
+					t.Errorf("method = %s, want %s", r.Method, tc.method)
+				}
+				if tc.method == http.MethodGet {
+					if got := r.URL.Query().Get(tc.field); got != tc.value {
+						t.Errorf("%s = %q, want %q", tc.field, got, tc.value)
+					}
+					_, _ = io.WriteString(w, `{"data":[],"pagination":{"total":0}}`)
+					return
+				}
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
+				if got := body[tc.field]; got != tc.value {
+					t.Errorf("%s = %v, want %q", tc.field, got, tc.value)
+				}
+				_, _ = io.WriteString(w, `{"data":{"task_id":"TASK-1"}}`)
+			})
+			root.SetArgs(append(append([]string{"loop", "task"}, tc.args...), "--workspace-id", projectMemberTestID))
+			if err := root.Execute(); err != nil || requests != 1 {
+				t.Fatalf("execute: %v; requests=%d", err, requests)
+			}
+		})
+	}
+}
+
+func TestTaskMemberIDHelpHidesWireTerminology(t *testing.T) {
+	for _, verb := range []string{"create", "update", "list", "group", "assign"} {
+		t.Run(verb, func(t *testing.T) {
+			root, _ := rootWithDriveDryRun(t, "bf_assignment")
+			var helpOutput strings.Builder
+			root.SetOut(&helpOutput)
+			args := []string{"loop", "task", verb}
+			if verb == "update" || verb == "assign" {
+				args = append(args, "TASK-1")
+			}
+			root.SetArgs(append(args, "--help"))
+			if err := root.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			help := strings.ToLower(helpOutput.String())
+			if strings.Contains(help, "octo uid") || strings.Contains(help, "octo-uid") || strings.Contains(help, "octo_uid") {
+				t.Errorf("help exposes backend identity terminology: %s", helpOutput.String())
+			}
+			if verb != "assign" && !strings.Contains(help, "--assignee-member-id") {
+				t.Errorf("help omits member ID flag: %s", helpOutput.String())
+			}
+		})
+	}
+}
+
 func TestTaskAssignmentLookupSuppressesSpaceHeader(t *testing.T) {
 	lookups := 0
 	root, _, _ := rootWithServiceSpaced(t, "space-from-profile", func(w http.ResponseWriter, r *http.Request) {
