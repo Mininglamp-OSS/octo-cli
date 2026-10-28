@@ -15,16 +15,24 @@ import (
 // connected agent can reach. "baseline" holds the operations exposed before
 // the XIN-2424 Bot API coverage work; "approved" holds each operation that work
 // added or exposed, keyed to the approved inventory rows it covers (see
-// docs/mcp-bot-api-coverage.json). TestExposure_* keeps the table, the registry
+// docs/mcp-bot-api-coverage.json). "withheld" records inherited CLI operations
+// without authorizing MCP exposure. TestExposure_* keeps the table, the registry
 // and the coverage manifest in sync.
 //
 //go:embed exposure.json
 var exposureJSON []byte
 
 type exposureFile struct {
-	Version  int                 `json:"version"`
-	Baseline []string            `json:"baseline"`
-	Approved map[string][]string `json:"approved"`
+	Version  int                         `json:"version"`
+	Baseline []string                    `json:"baseline"`
+	Approved map[string][]string         `json:"approved"`
+	Withheld map[string]withheldExposure `json:"withheld"`
+}
+
+type withheldExposure struct {
+	Reason         string `json:"reason"`
+	UpstreamCommit string `json:"upstream_commit"`
+	UpstreamPR     string `json:"upstream_pr"`
 }
 
 // exposedOps is the parsed classification; a parse failure leaves it empty,
@@ -43,14 +51,19 @@ func loadExposure(raw []byte) map[string]bool {
 	for id := range f.Approved {
 		out[id] = true
 	}
+	// A withheld entry is always denied, even if a malformed table also
+	// lists it in an allowed class. The census rejects such overlaps.
+	for id := range f.Withheld {
+		delete(out, id)
+	}
 	return out
 }
 
 // mcpExposed reports whether operationID is classified for MCP exposure.
 func mcpExposed(operationID string) bool { return exposedOps[operationID] }
 
-// unclassifiedOpError reports an operation the MCP exposure table does not
-// list. The CLI may still reach it; MCP refuses until it is classified.
+// unclassifiedOpError reports an operation absent from the MCP table's allowed
+// classes. The CLI may still reach it; MCP refuses until exposure is approved.
 func unclassifiedOpError(operationID string) error {
 	return output.ErrValidation(
 		fmt.Sprintf("operation %q is not classified for MCP exposure", operationID),

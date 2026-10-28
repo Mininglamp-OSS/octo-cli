@@ -411,6 +411,11 @@ type OperationDetail struct {
 	// sent — so index-less / garbage-index whiteboard elements (XIN-792) can no
 	// longer reach the backend and corrupt a board.
 	ValidateElementsIndex bool `json:"validate_elements_index,omitempty"`
+	// ValidateMarketplaceRelations captures x-octo-validate-marketplace-relations.
+	// When true the CLI rejects relation payloads that violate the marketplace
+	// matrix (connector pinned to a version, missing pin field type, duplicate
+	// target, invalid team wiring) before the request is sent.
+	ValidateMarketplaceRelations bool `json:"validate_marketplace_relations,omitempty"`
 	// RetryMode captures the optional x-octo-retry operation extension. Empty
 	// keeps the transport default; "never" disables automatic retries for the
 	// individual request. This is required for non-idempotent external side
@@ -591,6 +596,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	}
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
+	d.ValidateMarketplaceRelations = boolOf(op["x-octo-validate-marketplace-relations"])
 	d.RetryMode = stringOf(op["x-octo-retry"])
 	// Identity routing is declared at the spec top level (every operation in a
 	// domain shares one mount table) but an operation may narrow the allowed

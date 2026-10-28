@@ -219,16 +219,16 @@ octo-cli loop task list --workspace-id <workspace-uuid>
 # Multica-style assignment: --to accepts a name with an optional leading @; use --to-id for a complete ID.
 # Automatic name/ID lookup reads at most 10 pages per roster; use explicit typed fields for larger rosters.
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to "@Alice"
-octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <member-octo-uid-or-actor-uuid> --suppress-run
+octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to-id <member-or-expert-or-team-id> --suppress-run
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --unassign
 octo-cli loop task create --workspace-id <workspace-uuid> --title "Example" --assignee "Alice"
-octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-id <actor-id>
+octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> --assignee-type expert --assignee-id <expert-uuid>
 octo-cli loop task update TASK-42 --workspace-id <workspace-uuid> \
-  --assignee-type member --assignee-octo-uid <member-octo-uid> --suppress-run
+  --assignee-type member --assignee-member-id <project-member-id> --suppress-run
 octo-cli loop task list --workspace-id <workspace-uuid> --assignee "Alice"
-# ID filters go directly to Fleet, so historical assignees remain searchable.
-octo-cli loop task list --workspace-id <workspace-uuid> --assignee-id <fleet-actor-uuid>
-octo-cli loop task list --workspace-id <workspace-uuid> --assignee-octo-uid <member-octo-uid>
+# ID filters go directly to Loop, so historical assignees remain searchable.
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-id <expert-or-team-or-native-member-uuid>
+octo-cli loop task list --workspace-id <workspace-uuid> --assignee-member-id <project-member-id>
 # Project members use Fleet authorization, including its verified Bot-owner fallback.
 octo-cli loop workspace member list <project-uuid>
 # Alternatively select the Project with --workspace-id; results are in .data[].

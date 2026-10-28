@@ -1,6 +1,28 @@
 {
   "version": 1,
-  "note": "MCP exposure classification. An enabled registry operation is callable over MCP only when listed here; anything else is denied. baseline = operations exposed before XIN-2424; approved = operations added or exposed by XIN-2424, each tied to its approved inventory rows (docs/mcp-bot-api-coverage.json). The ten Loop workspace/runtime management operations that the CLI keeps x-octo-cli-hidden are excluded by owner decision and must never be listed here.",
+  "note": "MCP exposure classification. An enabled registry operation is callable over MCP only in baseline or approved; anything else is denied. baseline = operations exposed before XIN-2424; approved = operations added or exposed by XIN-2424, each tied to its approved inventory rows (docs/mcp-bot-api-coverage.json); withheld = inherited CLI operations kept denied by the XIN-2572 integration decision, with upstream provenance. The ten Loop workspace/runtime management operations that the CLI keeps x-octo-cli-hidden are excluded by owner decision and must never be listed in an allowed class.",
+  "withheld": {
+    "plugin.dependents.list": {
+      "reason": "Inherited CLI operation; XIN-2572 preserves the existing MCP default-deny boundary pending separate exposure approval.",
+      "upstream_commit": "e8f60c58a2c55b271690246beebedcaabafdd1b6",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/216"
+    },
+    "plugin.graph.get": {
+      "reason": "Inherited CLI operation; XIN-2572 preserves the existing MCP default-deny boundary pending separate exposure approval.",
+      "upstream_commit": "e8f60c58a2c55b271690246beebedcaabafdd1b6",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/216"
+    },
+    "plugin.version.download": {
+      "reason": "Inherited CLI operation; XIN-2572 preserves the existing MCP default-deny boundary pending separate exposure approval.",
+      "upstream_commit": "e8f60c58a2c55b271690246beebedcaabafdd1b6",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/216"
+    },
+    "plugin.version.get": {
+      "reason": "Inherited CLI operation; XIN-2572 preserves the existing MCP default-deny boundary pending separate exposure approval.",
+      "upstream_commit": "e8f60c58a2c55b271690246beebedcaabafdd1b6",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/216"
+    }
+  },
   "baseline": [
     "attachment.content.get",
     "attachment.delete",

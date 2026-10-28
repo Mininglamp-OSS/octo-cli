@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Marketplace dependency pins and reads** — `plugin upsert` and
+  `plugin review-request create` accept an optional `target_version_id` on
+  skill/member relations and refuse connector pins, duplicate targets and
+  relation types that do not match the plugin type before any HTTP request.
+  New reads: `plugin version get`, `plugin version download` (requires
+  `--path`; use `-o` for bytes), `plugin dependents list` and
+  `plugin graph get` (`/detail_graph`).
+
 ### Changed
+
+- **Loop member identifiers** — task help, README, and the bundled Loop skill
+  use member-ID flag names while preserving the existing backend fields and
+  old flag spellings for scripts. Project members use the `uid` from the member
+  list; native Workspace members continue to use their `user_id` UUID.
 
 - **API base URL precedence** — the active profile's stored `api_base_url` now
   outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored

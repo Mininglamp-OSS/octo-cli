@@ -338,8 +338,8 @@ func TestXIN2424ExcludedRowsStayUnexposed(t *testing.T) {
 }
 
 // TestExposure_EveryEnabledOperationIsClassified is the default-deny guard: an
-// enabled registry operation that is neither in the baseline nor approved
-// would be refused by MCP, so CI fails until it is classified on purpose.
+// enabled registry operation must be allowed by baseline/approved or explicitly
+// withheld. CI fails on missing classifications and overlapping classes.
 func TestExposure_EveryEnabledOperationIsClassified(t *testing.T) {
 	reg := registry.MustNew()
 	var f exposureFile
@@ -349,7 +349,7 @@ func TestExposure_EveryEnabledOperationIsClassified(t *testing.T) {
 	enabled := map[string]bool{}
 	for _, op := range reg.EnabledOperations() {
 		enabled[op.ID] = true
-		if !mcpExposed(op.ID) {
+		if _, withheld := f.Withheld[op.ID]; !mcpExposed(op.ID) && !withheld {
 			t.Errorf("enabled operation %q is not classified for MCP exposure", op.ID)
 		}
 	}
@@ -376,6 +376,25 @@ func TestExposure_EveryEnabledOperationIsClassified(t *testing.T) {
 		sort.Strings(got)
 		if strings.Join(got, ",") != strings.Join(rows, ",") {
 			t.Errorf("approved operation %q rows = %v, manifest says %v", id, rows, got)
+		}
+	}
+	for id, entry := range f.Withheld {
+		if !enabled[id] {
+			t.Errorf("withheld operation %q is not an enabled registry operation", id)
+		}
+		if mcpExposed(id) {
+			t.Errorf("withheld operation %q is exposed", id)
+		}
+		if _, overlap := f.Approved[id]; overlap {
+			t.Errorf("operation %q is both approved and withheld", id)
+		}
+		for _, baselineID := range f.Baseline {
+			if baselineID == id {
+				t.Errorf("operation %q is both baseline and withheld", id)
+			}
+		}
+		if strings.TrimSpace(entry.Reason) == "" || len(entry.UpstreamCommit) != 40 || entry.UpstreamPR == "" {
+			t.Errorf("withheld operation %q lacks a reason or upstream provenance: %+v", id, entry)
 		}
 	}
 }

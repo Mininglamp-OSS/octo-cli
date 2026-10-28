@@ -184,6 +184,23 @@
                                 "type": "string"
                               }
                             }
+                          },
+                          "dependency_issues": {
+                            "type": "array",
+                            "description": "Owner/Admin diagnostics for unavailable published dependencies; omitted on the public catalog.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "target_plugin_id": { "type": "string" },
+                                "target_name": { "type": "string" },
+                                "relation_type": { "type": "string" },
+                                "reason": { "type": "string" },
+                                "via": {
+                                  "type": "array",
+                                  "items": { "type": "string" }
+                                }
+                              }
+                            }
                           }
                         }
                       }
@@ -543,6 +560,7 @@
       },
       "post": {
         "operationId": "plugin.review_request.create",
+        "x-octo-validate-marketplace-relations": true,
         "summary": "Submit a plugin for Space review",
         "description": "Freeze a Space-visible plugin version for review. The authenticated Space's automatic-review policy applies: automatic approval is enabled by default when there is no stored override and publishes immediately; when disabled, the request remains pending for owner/admin approval. Supply parse_task_id for a skill zip, manifest_json plus plugin_json for declared documents, or neither only for the first listing of an unlisted Space-intent draft. parse_task_id is mutually exclusive with the document pair. An omitted relations key inherits the live graph; a present array replaces the reviewed graph.",
         "x-octo-risk": "write",
@@ -570,6 +588,7 @@
                         "relation_id": { "type": "string" },
                         "source_plugin_id": { "type": "string" },
                         "target_plugin_id": { "type": "string" },
+                        "target_version_id": { "type": "string", "description": "Released target version. Required when the marketplace references rollout is enabled (the server rejects a missing or unreleased pin); forbidden for expert_connector. Older deployments may auto-pin the target's current published version when omitted." },
                         "relation_type": { "type": "string", "enum": ["expert_team_expert", "expert_skill", "expert_connector"] },
                         "sort_order": { "type": "integer" },
                         "data": { "type": "object" }
@@ -652,6 +671,7 @@
     "/market/api/v1/plugins/upsert": {
       "post": {
         "operationId": "plugin.upsert",
+        "x-octo-validate-marketplace-relations": true,
         "summary": "Create or update a plugin (every save is a version snapshot)",
         "description": "Create (plugin.plugin_id empty) or update an editable plugin. A create is a draft; an update preserves the current listing state. Published Space plugins reject direct edits and must submit a frozen review request instead. Every accepted save appends a plugin_versions snapshot. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skill drafts prefer upload+import.",
         "x-octo-risk": "write",
@@ -754,6 +774,10 @@
                           "type": "string",
                           "description": "Target plugin id (required)."
                         },
+                        "target_version_id": {
+                          "type": "string",
+                          "description": "Released target version. Required when the marketplace references rollout is enabled (the server rejects a missing or unreleased pin); forbidden for expert_connector. Older deployments may auto-pin the target's current published version when omitted."
+                        },
                         "relation_type": {
                           "type": "string",
                           "enum": [
@@ -776,7 +800,7 @@
                         "relation_type"
                       ]
                     },
-                    "description": "Relation rows. EVERY upsert replaces the relation set — resubmit the complete list even on metadata-only edits; omitting the key is identical to sending [] and soft-deletes every live relation (team members, attached skills, attached connectors) on save. The key stays optional because skills and connectors never carry relations, so nothing here is validated locally: on an expert or expert_team, forgetting it destroys the whole membership graph without any client-side error. Echo relation_id for rows you want to keep verbatim."
+                    "description": "Relation rows. EVERY upsert replaces the relation set — resubmit the complete list even on metadata-only edits; omitting the key is identical to sending [] and soft-deletes every live relation (team members, attached skills, attached connectors) on save. The key stays optional because skills and connectors never carry relations. Requests are pre-validated locally: duplicate (relation_type,target_plugin_id) pairs, connector target_version_id values and relation types that do not match the plugin type are refused before any HTTP request. Echo relation_id for rows you want to keep verbatim."
                   }
                 },
                 "required": [
@@ -1498,6 +1522,59 @@
           "skill_upload"
         ],
         "x-octo-risk": "write"
+      }
+    },
+    "/market/api/v1/plugins/{plugin_id}/versions/{version_id}": {
+      "get": {
+        "operationId": "plugin.version.get",
+        "summary": "Get one immutable plugin version",
+        "tags": ["marketplace"],
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "plugin_id", "in": "path", "required": true, "description": "Plugin ID.", "schema": { "type": "string" } },
+          { "name": "version_id", "in": "path", "required": true, "description": "Immutable version ID.", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/{plugin_id}/versions/{version_id}/file": {
+      "get": {
+        "operationId": "plugin.version.download",
+        "summary": "Download one original file from a fixed skill version",
+        "description": "Return the original bytes of one file recorded in the version snapshot. The relative path is required; storage identities are never exposed. Use --output/-o to write the bytes to a file.",
+        "tags": ["marketplace"],
+        "x-octo-binary-response": true,
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "plugin_id", "in": "path", "required": true, "description": "Plugin ID.", "schema": { "type": "string" } },
+          { "name": "version_id", "in": "path", "required": true, "description": "Immutable version ID.", "schema": { "type": "string" } },
+          { "name": "path", "in": "query", "required": true, "description": "Relative file path inside the version package, e.g. AGENTS.md.", "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Original file bytes", "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/{plugin_id}/dependents": {
+      "get": {
+        "operationId": "plugin.dependents.list",
+        "summary": "List published roots that reference a plugin",
+        "tags": ["marketplace"],
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "plugin_id", "in": "path", "required": true, "description": "Plugin ID.", "schema": { "type": "string" } },
+          { "name": "page", "in": "query", "description": "1-based page number (default 1).", "schema": { "type": "integer" } },
+          { "name": "page_size", "in": "query", "description": "Page size, 1-100 (default 20).", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
+    "/market/api/v1/plugins/detail_graph": {
+      "get": {
+        "operationId": "plugin.graph.get",
+        "summary": "Get a plugin relation graph",
+        "tags": ["marketplace"],
+        "x-octo-risk": "read",
+        "parameters": [{ "name": "plugin_id", "in": "query", "required": true, "description": "Plugin ID.", "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "OK", "content": { "application/json": { "schema": { "type": "object" } } } } }
       }
     },
     "/market/api/v1/mcp_icon_uploads": {
