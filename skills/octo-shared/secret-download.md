@@ -58,11 +58,12 @@ private_dir=$(mktemp -d "${TMPDIR:-/tmp}/octo-secret.XXXXXXXX")
 partial="$private_dir/.partial"
 destination="$private_dir/secret.bin"
 trap 'rm -f "$partial"; rmdir "$private_dir" 2>/dev/null || true' EXIT
-if ! printf 'url = "%s"\n' "$SECRET_DOWNLOAD_URL" |
+if ! http_status=$(printf 'url = "%s"\n' "$SECRET_DOWNLOAD_URL" |
   curl --config - --proto '=https' --silent --fail --max-time 10 \
-    --output "$partial" >/dev/null 2>/dev/null; then
+    --output "$partial" --write-out '%{http_code}' 2>/dev/null); then
   exit 1
 fi
+[ "$http_status" = 200 ] || exit 1
 # Hard-link creation is exclusive: an existing destination is never replaced.
 ln "$partial" "$destination"
 unset SECRET_DOWNLOAD_URL
