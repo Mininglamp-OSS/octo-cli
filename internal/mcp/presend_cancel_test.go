@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
-	"github.com/spf13/cobra"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/spf13/cobra"
 )
 
 func TestXIN2549MCPAfterValidationCancellation(t *testing.T) {

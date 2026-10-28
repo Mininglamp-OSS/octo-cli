@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func TestXIN2549ArrayRedaction(t *testing.T) {

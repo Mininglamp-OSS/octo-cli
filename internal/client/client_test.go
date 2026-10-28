@@ -615,9 +615,10 @@ func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) 
 	signedLocation := "https://objects.example.test/object?" + marker + "&signature=%zz"
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // make the retry loop exit immediately after its first diagnostic
+	defer cancel()
 
 	var diagnostics bytes.Buffer
+	var transportCalls int
 	c := New(
 		&config.Config{APIBaseURL: "https://api.example.test"},
 		nil,
@@ -625,6 +626,8 @@ func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) 
 	)
 	c.httpClient = &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			transportCalls++
+			cancel() // exit backoff after exercising the transport error diagnostic
 			return nil, &url.Error{
 				Op:  "Get",
 				URL: signedLocation,
@@ -642,6 +645,9 @@ func TestDo_ResponseSecretTransportErrorFailsClosedBeforeRetryLog(t *testing.T) 
 	})
 	if err == nil {
 		t.Fatal("expected the transport error to fail")
+	}
+	if transportCalls != 1 {
+		t.Fatalf("transport calls=%d, want one", transportCalls)
 	}
 	if strings.Contains(err.Error(), marker) {
 		t.Fatalf("response secret reached the returned error: %v", err)

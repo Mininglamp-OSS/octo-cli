@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 func TestXIN2549CLIContext(t *testing.T) {

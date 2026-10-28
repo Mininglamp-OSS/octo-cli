@@ -1,9 +1,10 @@
 package service
 
 import (
+	"testing"
+
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 	"github.com/spf13/cobra"
-	"testing"
 )
 
 func TestXIN2549TypedArrayReachability(t *testing.T) {
