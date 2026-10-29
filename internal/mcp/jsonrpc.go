@@ -17,9 +17,10 @@
 package mcp
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/foldkey"
 )
 
 // JSON-RPC 2.0 wire types. MCP is JSON-RPC 2.0 over stdio (newline-delimited)
@@ -36,39 +37,36 @@ type rpcRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-// decodeRPCRequest rejects repeated top-level members before struct decoding
-// can overwrite them. Both transports cap raw at 8 MiB. Token decodes key
-// escapes; RawMessage skips nested values without changing their semantics.
+// decodeRPCRequest rejects repeated logical members before they can overwrite
+// one another. Both transports cap raw at 8 MiB. Key escapes are decoded and
+// nested values retain their original JSON without repeated grammar scans.
 // Keep the existing decoder's case aliases, extension fields and shape rules.
 func decodeRPCRequest(raw []byte, req *rpcRequest) error {
-	if isJSONObject(raw) {
-		d := json.NewDecoder(bytes.NewReader(raw))
-		if _, err := d.Token(); err != nil {
-			return err
-		}
-		seen := make(map[string]bool)
-		for d.More() {
-			token, err := d.Token()
-			if err != nil {
-				return err
-			}
-			key, _ := token.(string)
-			if seen[key] {
-				return errors.New("duplicate JSON-RPC envelope member")
-			}
-			seen[key] = true
-			var value json.RawMessage
-			if err := d.Decode(&value); err != nil {
-				return err
-			}
-		}
-		if _, err := d.Token(); err != nil {
-			return err
-		}
+	if !isJSONObject(raw) {
+		return json.Unmarshal(raw, req)
 	}
-	// Unmarshal also enforces full consumption and preserves the old handling
-	// of malformed, non-object, null and case-varied envelopes.
-	return json.Unmarshal(raw, req)
+	seen := map[string]bool{}
+	return visitObjectMembers(raw, func(key string, value json.RawMessage) error {
+		switch folded := foldkey.Key(key); folded {
+		case "JSONRPC", "ID", "METHOD", "PARAMS":
+			key = folded
+		}
+		if seen[key] {
+			return errors.New("duplicate JSON-RPC envelope member")
+		}
+		seen[key] = true
+		switch key {
+		case "JSONRPC":
+			return json.Unmarshal(value, &req.Jsonrpc)
+		case "ID":
+			req.ID = value
+		case "METHOD":
+			return json.Unmarshal(value, &req.Method)
+		case "PARAMS":
+			req.Params = value
+		}
+		return nil
+	})
 }
 
 // isNotification reports whether the message omits an id (JSON-RPC

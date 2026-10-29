@@ -419,7 +419,7 @@ func (s *Server) callOp(ctx context.Context, operationID string, arguments map[s
 	if fn == nil {
 		fn = s.makeFactory
 	}
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe()}
+	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe(), dryRun: s.baseGlobals.DryRun, uploadOpener: s.uploadOpener}
 	f, outBuf, errBuf := fn(s.trusted)
 	// call_op reports failures through the envelope alone; the structured
 	// error only feeds the two-tool execute classification.

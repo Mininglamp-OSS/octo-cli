@@ -21,6 +21,56 @@
       "reason": "Inherited CLI operation; XIN-2572 preserves the existing MCP default-deny boundary pending separate exposure approval.",
       "upstream_commit": "e8f60c58a2c55b271690246beebedcaabafdd1b6",
       "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/216"
+    },
+    "project.create": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.delete": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.get": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.list": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.resource.create": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.resource.delete": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.resource.list": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.resource.update": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.search": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
+    },
+    "project.update": {
+      "reason": "Restored upstream project/resource operation; CLI access retained, MCP exposure pending explicit approval.",
+      "upstream_commit": "7ffb7238756dcec639502ddb584b465fa770b6c1",
+      "upstream_pr": "https://github.com/Mininglamp-OSS/octo-cli/pull/221"
     }
   },
   "baseline": [

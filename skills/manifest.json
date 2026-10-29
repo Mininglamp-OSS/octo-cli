@@ -76,7 +76,7 @@
       "operations": {
         "docs.create": {
           "level": "required-before-write",
-          "advice": "Pick the editable surface with doc_type; an optional Idempotency-Key header dedupes retries."
+          "advice": "Only html_ppt requires Idempotency-Key and dedupes the same key/payload. Ordinary creates lack header deduplication: after an uncertain result, inspect server state before manual retry."
         },
         "docs.versions.restore": {
           "level": "required-before-write",

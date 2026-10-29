@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/foldkey"
@@ -35,7 +37,9 @@ type execPolicy struct {
 	uploadRoot       string // OCTO_MCP_UPLOAD_ROOT; "" => local upload disabled unless allowLocalUpload
 	describeHint     string
 	dryRun           bool
-	allowLocalUpload bool // operator --allow-local-upload: unconfined pass-through, stdio only
+	allowLocalUpload bool                                       // operator --allow-local-upload: unconfined pass-through, stdio only
+	typedSlices      bool                                       // execution sets query slices directly, bypassing CLI CSV parsing
+	uploadOpener     func(string, execPolicy) (*os.File, error) // nil uses descriptor-confined openUpload
 }
 
 // maxInlineBinaryBytes bounds a binary response body returned inline by an MCP
@@ -105,6 +109,13 @@ func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forc
 func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) {
 	outBuf.Reset()
 	errBuf.Reset()
+	pol.dryRun = effectiveDryRun(pol.dryRun || f.Globals.DryRun, globalFlags)
+	f.Globals.DryRun = pol.dryRun
+	// Both facades must stop before path resolution can touch the filesystem.
+	if pol.dryRun && (detail.Multipart || detail.RawBody) {
+		return planUploadDryRun(ctx, f, detail, arguments, pol)
+	}
+	pol.typedSlices = true
 
 	argv, terr := buildArgv(ctx, detail, arguments, pol)
 	if terr != nil {
@@ -115,12 +126,10 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 		ee := argvError(terr, hint)
 		return synthErrorEnvelope(ee), false, ee
 	}
-	if len(globalFlags) > 0 {
-		argv = spliceGlobalFlags(argv, globalFlags)
-	}
+	argv = spliceGlobalFlags(argv, globalFlags)
 	if detail.Multipart || detail.RawBody {
 		if value, ok := arguments["file_path"]; ok && value != nil && fmt.Sprint(value) != "" {
-			file, err := openUpload(fmt.Sprint(value), pol)
+			file, err := pol.openFile(fmt.Sprint(value))
 			if err != nil {
 				ee := output.ErrValidation(err.Error(), "check the configured upload root and file path")
 				return synthErrorEnvelope(ee), false, ee
@@ -155,6 +164,10 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	root.SetErr(errBuf)
 	root.SilenceUsage = true
 	root.SilenceErrors = true
+	if err := replaceQuerySlices(root, detail, arguments); err != nil {
+		ee := output.ErrValidation(err.Error(), pol.describeHint)
+		return synthErrorEnvelope(ee), false, ee
+	}
 
 	execErr := root.ExecuteContext(ctx)
 	env, runOK := readEnvelope(outBuf, errBuf, execErr)
@@ -163,6 +176,25 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	// outcome classification (auth vs ambiguous vs plain failure) is available
 	// to the two-tool execute facade without re-parsing the rendered JSON.
 	return env, runOK, output.AsExitError(execErr)
+}
+
+func effectiveDryRun(current bool, globalFlags []string) bool {
+	if current {
+		return true
+	}
+	for _, flag := range globalFlags {
+		if flag == "--dry-run" {
+			return true
+		}
+	}
+	return false
+}
+
+func (pol execPolicy) openFile(path string) (*os.File, error) {
+	if pol.uploadOpener != nil {
+		return pol.uploadOpener(path, pol)
+	}
+	return openUpload(path, pol)
 }
 
 // readEnvelope picks the envelope the run produced. A successful RunE writes a
@@ -424,6 +456,9 @@ func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string
 			if reservedFlagNames[fn] {
 				return nil, fmt.Errorf("argument %q maps to reserved flag --%s and cannot be set", k, fn)
 			}
+			if _, array := v.([]any); pol.typedSlices && array && queryByName[k].Type == "array" {
+				continue // set with SliceValue.Replace after building the leaf
+			}
 			vs, err := flagArgs(fn, v)
 			if err != nil {
 				return nil, err
@@ -552,6 +587,42 @@ func buildArgv(ctx context.Context, d *registry.OperationDetail, args map[string
 		argv = append(argv, positionals...)
 	}
 	return argv, nil
+}
+
+// replaceQuerySlices preserves already-decoded JSON elements, including CRLF
+// and empty strings. Only MCP uses this bridge; CLI flags retain CSV syntax.
+func replaceQuerySlices(root *cobra.Command, d *registry.OperationDetail, args map[string]any) error {
+	leaf, _, err := root.Find(commandWords(d))
+	if err != nil {
+		return err
+	}
+	for i := range d.Parameters {
+		p := &d.Parameters[i]
+		items, supplied := args[p.Name].([]any)
+		if !supplied || p.In != "query" || p.Type != "array" || p.PositionalName != "" {
+			continue
+		}
+		flag := leaf.Flags().Lookup(flagName(p))
+		if flag == nil {
+			return fmt.Errorf("array parameter %q has no declared flag", p.Name)
+		}
+		slice, ok := flag.Value.(pflag.SliceValue)
+		if !ok {
+			return fmt.Errorf("array parameter %q has no slice flag", p.Name)
+		}
+		values := make([]string, len(items))
+		for j, item := range items {
+			values[j], err = scalarString(item)
+			if err != nil {
+				return fmt.Errorf("array parameter %q: %w", p.Name, err)
+			}
+		}
+		if err := slice.Replace(values); err != nil {
+			return fmt.Errorf("array parameter %q: %w", p.Name, err)
+		}
+		flag.Changed = true
+	}
+	return nil
 }
 
 // commandWords maps an operationId to its CLI command path words, matching the

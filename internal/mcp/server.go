@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
@@ -63,11 +64,12 @@ type Server struct {
 	build           RootBuilder
 
 	trusted          TrustedContext
-	credentialToken  string                // "" → resolve from env (stdio) unless httpMode
-	httpMode         bool                  // HTTP connection: never inherit the server env credential
-	uploadRoot       string                // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path (both transports)
-	allowLocalUpload bool                  // operator --allow-local-upload: unconfined stdio upload pass-through
-	baseGlobals      cmdutil.GlobalOptions // operator serve-time globals (BotID/Profile/Timeout/NoRetry/DryRun)
+	credentialToken  string                                     // "" → resolve from env (stdio) unless httpMode
+	httpMode         bool                                       // HTTP connection: never inherit the server env credential
+	uploadRoot       string                                     // OCTO_MCP_UPLOAD_ROOT; confines multipart file_path (both transports)
+	allowLocalUpload bool                                       // operator --allow-local-upload: unconfined stdio upload pass-through
+	uploadOpener     func(string, execPolicy) (*os.File, error) // optional internal upload-boundary observer
+	baseGlobals      cmdutil.GlobalOptions                      // operator serve-time globals (BotID/Profile/Timeout/NoRetry/DryRun)
 
 	protocolVersion string
 	clientResources bool
@@ -303,11 +305,8 @@ type toolCallParams struct {
 }
 
 func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic,gocyclo // request snapshot is immutable during dispatch; one branch per tool
-	if err := validateToolCallKeys(req.Params); err != nil {
-		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
-	}
 	var p toolCallParams
-	if err := json.Unmarshal(req.Params, &p); err != nil {
+	if err := decodeToolCallParams(req.Params, &p); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
 	}
 	if !s.toolEnabled(p.Name) {
@@ -422,37 +421,30 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 // with their exact spelling and at most once each, so a misplaced safety field
 // such as params.dry_run, or a second arguments object, is refused instead of
 // being silently discarded while the call runs live.
-func validateToolCallKeys(raw json.RawMessage) error {
-	if len(raw) == 0 || !isJSONObject(raw) {
-		return nil // the struct decode reports a missing or non-object params value
+func decodeToolCallParams(raw json.RawMessage, p *toolCallParams) error {
+	if len(raw) == 0 {
+		return nil
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if _, err := d.Token(); err != nil {
-		return err
+	if !isJSONObject(raw) {
+		return json.Unmarshal(raw, p)
 	}
 	seen := map[string]bool{}
-	for d.More() {
-		token, err := d.Token()
-		if err != nil {
-			return err
-		}
-		key, _ := token.(string)
-		switch key {
-		case "name", "arguments", "_meta":
-		default:
+	return visitObjectMembers(raw, func(key string, value json.RawMessage) error {
+		if key != "name" && key != "arguments" && key != "_meta" {
 			return fmt.Errorf("unknown field %q; tool inputs belong inside arguments", truncateRunes(key, 200))
 		}
 		if seen[key] {
 			return fmt.Errorf("duplicate field %q", key)
 		}
 		seen[key] = true
-		var value json.RawMessage
-		if err := d.Decode(&value); err != nil {
-			return err
+		switch key {
+		case "name":
+			return json.Unmarshal(value, &p.Name)
+		case "arguments":
+			p.Arguments = value
 		}
-	}
-	_, err := d.Token()
-	return err
+		return nil
+	})
 }
 
 // getSkillArgumentNames is get_skill's closed argument set; a misspelled

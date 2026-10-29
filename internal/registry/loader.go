@@ -450,7 +450,7 @@ type OperationDetail struct {
 	// The client uses these paths to collect actual secret values from a
 	// backend error body before parsing or rendering it.
 	ResponseSecretFields []string `json:"response_secret_fields,omitempty"`
-	// RequestSecretPaths lists every request-body path marked x-octo-secret,
+	// RequestSecretPaths lists every request-body path marked x-octo-secret or writeOnly,
 	// found by walking the raw spec without the RequestBody reference budget:
 	// "a.b" is a property, "[]" an array item and "*" any key of a dynamic map
 	// (additionalProperties); oneOf/anyOf/allOf alternatives share their
@@ -795,7 +795,7 @@ func operationRequestBody(doc, op map[string]any) (*SchemaInfo, bool) {
 }
 
 // requestSecretPaths walks the raw request-body schema of op and returns the
-// sorted paths of every node marked x-octo-secret (see
+// sorted paths of every node marked x-octo-secret or writeOnly (see
 // OperationDetail.RequestSecretPaths). References are followed without a depth
 // budget; a reference already on the current walk is not entered again, so a
 // recursive model still terminates.
@@ -826,11 +826,15 @@ func requestSecretPaths(doc, op map[string]any) []string {
 	return paths
 }
 
+// RequestSensitive is the shared request-only sensitivity policy. Response
+// credentials keep their separate output contract.
+func RequestSensitive(secret, writeOnly bool) bool { return secret || writeOnly }
+
 func walkSecretPaths(doc, node map[string]any, path string, active, found map[string]bool) {
 	if node == nil {
 		return
 	}
-	if path != "" && truthy(node["x-octo-secret"]) {
+	if path != "" && RequestSensitive(truthy(node["x-octo-secret"]), boolOf(node["writeOnly"])) {
 		found[path] = true
 	}
 	if ref := stringOf(node["$ref"]); ref != "" && !active[ref] {

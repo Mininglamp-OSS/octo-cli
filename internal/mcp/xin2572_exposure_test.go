@@ -11,8 +11,8 @@ func TestXIN2572WithheldClassification(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := []string{"plugin.version.get", "plugin.version.download", "plugin.dependents.list", "plugin.graph.get"}
-	if len(f.Withheld) != len(ids) {
-		t.Fatalf("withheld count = %d, want %d", len(f.Withheld), len(ids))
+	if len(f.Withheld) != len(ids)+10 {
+		t.Fatalf("withheld count = %d, want %d", len(f.Withheld), len(ids)+10)
 	}
 	for _, id := range ids {
 		entry, ok := f.Withheld[id]

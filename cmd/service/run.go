@@ -74,9 +74,6 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// A Workspace path flag and its binding header share one selector. Resolve
 	// both from the same value so Fleet can authorize before route dispatch.
 	headers = bindWorkspacePathHeader(rt, pathValues, headers)
-	if err := applyLoopProjectQuery(cobraCmd, rt, q); err != nil {
-		return emitAndReturn(f, err)
-	}
 	if err := applyTaskAssigneeQuery(cobraCmd, f, rt, q, headers); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
@@ -152,6 +149,9 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 		return nil, nil, err
 	}
 	if err := validateSheetReadSelection(rt, q); err != nil {
+		return nil, nil, err
+	}
+	if err := applyLoopProjectQuery(cobraCmd, rt, q); err != nil {
 		return nil, nil, err
 	}
 	return q, headers, nil
@@ -1588,7 +1588,8 @@ func writeOnlyBodyFields(schema *registry.SchemaInfo) []string {
 	}
 	var fields []string
 	for name := range schema.Properties {
-		if schema.Properties[name].WriteOnly {
+		prop := schema.Properties[name]
+		if registry.RequestSensitive(prop.Secret, prop.WriteOnly) {
 			fields = append(fields, name)
 		}
 	}

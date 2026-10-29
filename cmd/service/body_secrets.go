@@ -9,7 +9,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
-// CollectBodySecrets returns the non-empty string values marked x-octo-secret
+// CollectBodySecrets returns non-empty strings marked x-octo-secret or writeOnly
 // in a decoded request body. Secret string-map properties collect each map
 // value; all other secret properties must remain scalar strings.
 func CollectBodySecrets(schema *registry.SchemaInfo, value any) ([]string, error) {
@@ -142,9 +142,12 @@ func schemaHasSecret(schema *registry.SchemaInfo) bool {
 	if schema == nil {
 		return false
 	}
+	if registry.RequestSensitive(schema.Secret, schema.WriteOnly) {
+		return true
+	}
 	for name := range schema.Properties {
 		prop := schema.Properties[name]
-		if prop.Secret || schemaHasSecret(&prop) {
+		if registry.RequestSensitive(prop.Secret, prop.WriteOnly) || schemaHasSecret(&prop) {
 			return true
 		}
 	}
@@ -152,6 +155,12 @@ func schemaHasSecret(schema *registry.SchemaInfo) bool {
 }
 
 func bodySecretValues(schema *registry.SchemaInfo, value any, at string) ([]string, error) {
+	if schema == nil {
+		return nil, nil
+	}
+	if registry.RequestSensitive(schema.Secret, schema.WriteOnly) {
+		return propertySecretValues(*schema, value, at)
+	}
 	switch v := value.(type) {
 	case map[string]any:
 		return objectSecretValues(schema, v, at)
@@ -193,7 +202,7 @@ func objectSecretValues(schema *registry.SchemaInfo, obj map[string]any, at stri
 }
 
 func propertySecretValues(prop registry.SchemaInfo, child any, where string) ([]string, error) { //nolint:gocritic // schema properties are read-only values
-	if prop.Secret {
+	if registry.RequestSensitive(prop.Secret, prop.WriteOnly) {
 		if prop.Type == "object" {
 			return secretStringMapValues(where, child)
 		}

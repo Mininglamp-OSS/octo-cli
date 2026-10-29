@@ -1,14 +1,14 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
-	"github.com/Mininglamp-OSS/octo-cli/cmd/service"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
@@ -198,15 +198,8 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 		arguments = map[string]any{}
 	}
 
-	// B1: a multipart dry-run must NOT open/read the file_path, materialize the
-	// multipart body, or contact the backend. Short-circuit here and describe the
-	// planned request from metadata only — the engine's dry-run would otherwise
-	// stream the file bytes into envelope.data.body. Non-multipart dry-run still
-	// goes through the engine (its dry-run reads nothing from disk).
+	// Effective preview intent is carried into the shared execution boundary.
 	dryRun = dryRun || s.baseGlobals.DryRun
-	if dryRun && (detail.Multipart || detail.RawBody) {
-		return s.multipartDryRun(ctx, detail, arguments, current)
-	}
 
 	// Over-privilege protection: force the connection's trusted values, same table as
 	// call_op — a shared authz backend, not a second policy.
@@ -216,7 +209,7 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 	if fn == nil {
 		fn = s.makeFactory
 	}
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe()}
+	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe(), uploadOpener: s.uploadOpener}
 	f, outBuf, errBuf := fn(s.trusted)
 	var globalFlags []string
 	if dryRun {
@@ -225,149 +218,6 @@ func (s *Server) execute(ctx context.Context, operationID string, arguments map[
 	env, okRun, exitErr := executeOperation(ctx, s.build, f, detail, arguments, pol, outBuf, errBuf, globalFlags...)
 	env = spliceForcedArguments(env, forced)
 	return classifyExecuteResult(env, okRun, operationID, current, dryRun, detail.Method, exitErr)
-}
-
-// multipartDryRun describes a multipart operation's planned request WITHOUT any
-// filesystem or network side effect (B1): the file at file_path is never opened
-// or read, its bytes never appear in the result, and the multipart body is not
-// materialized. Secret-flagged form fields and parameters are masked. The
-// credential and the operation's token-kind gate are resolved and the lexical
-// upload policy is checked during planning; descriptor confinement and
-// transport run only on a real call. The limitation is stated in the note
-// rather than silently implied.
-func (s *Server) multipartDryRun(ctx context.Context, detail *registry.OperationDetail, args map[string]any, fingerprint string) toolResult {
-	// Trusted-context projection first (over-privilege protection, #177 B4): a forced
-	// field wins and is reflected in the plan, and must not be reported as
-	// "missing" when the operator supplies it.
-	s.trusted.apply(detail.ID, args)
-
-	pol := execPolicy{httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, describeHint: s.hintDescribe(), dryRun: true}
-	// Real metadata-only validation: operation shape, required path/query/header
-	// fields, declared multipart binding, reserved-flag guard, and the HTTP
-	// upload-root policy gate — all WITHOUT opening/reading/materializing the
-	// file and without backend I/O. An invalid dry-run is a validation_error,
-	// never a false "ok".
-	if verr := validateMultipartDryRun(ctx, detail, args, pol); verr != nil {
-		return jsonToolResult(map[string]any{
-			"status":       "validation_error",
-			"operation_id": detail.ID,
-			"dry_run":      true,
-			"envelope":     decodeEnvelope(synthErrorEnvelope(verr)),
-		}, true)
-	}
-	// Resolve the credential and the token-kind gate exactly as the engine
-	// does before its own dry run, so a plan is never returned for a caller
-	// the real call would refuse (for example an HTTP connection without a
-	// bearer).
-	fn := s.factoryFn
-	if fn == nil {
-		fn = s.makeFactory
-	}
-	f, _, _ := fn(s.trusted)
-	if err := service.ResolveOperationIdentity(f, detail); err != nil {
-		var exitErr *output.ExitError
-		if !errors.As(err, &exitErr) {
-			exitErr = output.ErrAuth(err.Error(), "")
-		}
-		return jsonToolResult(map[string]any{
-			"status":       classifyFailure(detail.Method, nil, exitErr),
-			"operation_id": detail.ID,
-			"dry_run":      true,
-			"envelope":     decodeEnvelope(synthErrorEnvelope(exitErr)),
-		}, true)
-	}
-
-	pathSet := map[string]bool{}
-	for _, n := range extractPathParams(detail.Path) {
-		pathSet[n] = true
-	}
-	params := map[string]*registry.ParamInfo{}
-	for i := range detail.Parameters {
-		if p := &detail.Parameters[i]; p.In == "query" || p.In == "header" {
-			params[p.Name] = p
-		}
-	}
-	fileField := binaryFileField(detail)
-	formFields := map[string]any{}
-	queryFields := map[string]any{}
-	headerFields := map[string]any{}
-	var filePath string
-	for _, k := range sortedKeys(args) {
-		if k == "file_path" {
-			filePath = fmt.Sprint(args[k]) // the PATH string only; contents are never read
-			continue
-		}
-		if pathSet[k] || k == "page_all" {
-			continue
-		}
-		v := args[k]
-		if p := params[k]; p != nil {
-			if v == nil {
-				continue // a null query/header argument is omitted, as on a real call
-			}
-			if p.Secret {
-				v = "***"
-			}
-			if p.In == "query" {
-				queryFields[k] = v
-			} else {
-				headerFields[k] = v
-			}
-			continue
-		}
-		if detail.RequestBody != nil && detail.RequestBody.Properties[k].Secret {
-			v = "***"
-		}
-		formFields[k] = v
-	}
-	data := map[string]any{
-		"dry_run": true,
-		"method":  detail.Method,
-		"path":    fillPathParams(detail.Path, args),
-	}
-	if len(queryFields) > 0 {
-		data["query"] = queryFields
-	}
-	if len(headerFields) > 0 {
-		data["headers"] = headerFields
-	}
-	if detail.RawBody {
-		// The file is the whole body: describe its media type and limit, never
-		// its bytes. Header arguments (e.g. X-Media-Type) are listed as such.
-		data["raw_body"] = true
-		data["content_type"] = detail.RawBodyContentType
-		if detail.RawBodyMaxBytes > 0 {
-			data["max_bytes"] = detail.RawBodyMaxBytes
-		}
-		if filePath != "" {
-			data["file_path"] = filePath
-		}
-		note := "raw-body dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, and transport are enforced only on a real (non-dry-run) call."
-		return jsonToolResult(map[string]any{
-			"status":             "ok",
-			"operation_id":       detail.ID,
-			"schema_fingerprint": fingerprint,
-			"dry_run":            true,
-			"dry_run_note":       note,
-			"envelope":           map[string]any{"ok": true, "data": data},
-		}, false)
-	}
-	data["multipart"] = true
-	data["form_fields"] = formFields
-	if filePath != "" {
-		data["file_field"] = fileField
-		data["file_path"] = filePath
-	}
-	note := "multipart dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header/body fields and the multipart file binding were validated; file_path is NOT opened or read and its bytes are never returned; the multipart body is not materialized and nothing is sent. Descriptor-based upload-root containment and transport are enforced only on a real (non-dry-run) call."
-	out := map[string]any{
-		"status":             "ok",
-		"operation_id":       detail.ID,
-		"schema_fingerprint": fingerprint,
-		"dry_run":            true,
-		"dry_run_note":       note,
-		"envelope":           map[string]any{"ok": true, "data": data},
-	}
-	return jsonToolResult(out, false)
 }
 
 // validateMultipartDryRun performs the metadata-only checks the engine would do
@@ -528,6 +378,11 @@ func classifyExecuteResult(env []byte, okRun bool, operationID, fingerprint stri
 	if dryRun {
 		out["dry_run"] = true
 		out["dry_run_note"] = "request was constructed and locally validated only; nothing was sent and server-side success is not implied. Local file reads, multipart parts, and composite sub-requests are described, not performed."
+		if data, ok := parsed["data"].(map[string]any); ok {
+			if note, ok := data["dry_run_note"].(string); ok {
+				out["dry_run_note"] = note
+			}
+		}
 	}
 	return jsonToolResult(out, status != "ok")
 }
@@ -588,7 +443,9 @@ func isMutatingMethod(method string) bool {
 // always emits one — but the facade must never lose the payload).
 func decodeEnvelope(env []byte) map[string]any {
 	var parsed map[string]any
-	if err := json.Unmarshal(env, &parsed); err == nil && parsed != nil {
+	d := json.NewDecoder(bytes.NewReader(env))
+	d.UseNumber()
+	if err := d.Decode(&parsed); err == nil && parsed != nil && d.Decode(new(any)) == io.EOF {
 		return parsed
 	}
 	return map[string]any{"ok": false, "raw": string(env)}
