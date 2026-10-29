@@ -180,6 +180,21 @@ func MountForOperation(f *cmdutil.Factory, operationID string) (string, error) {
 	return mount, nil
 }
 
+// PathForOperation resolves an operation's full path using the same prefix
+// overrides and identity rules as a generated leaf. Unlike MountForOperation,
+// it also supports services without a token-kind mount table.
+func PathForOperation(f *cmdutil.Factory, operationID string) (string, error) {
+	reg := f.Registry()
+	if reg == nil {
+		return "", output.ErrWithHint("internal", "REGISTRY_UNAVAILABLE", "operation registry is not available", "")
+	}
+	d, ok := reg.GetOperation(operationID)
+	if !ok {
+		return "", output.ErrWithHint("internal", "OPERATION_UNKNOWN", "operation is not in the embedded registry", "report the CLI build")
+	}
+	return applyIdentityRouting(f, d, MarketplacePath(d.Service, d.Path))
+}
+
 // ValidateRequestBody applies operationID's declared pre-send body checks —
 // required fields, minItems, enum vocabularies and uint64 id ranges — to a body
 // a hand-written command assembled itself.

@@ -87,6 +87,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	registerDocsExcalidrawExportCmd(root, f)
 	registerDocsBoardCommentCmd(root, f)
 	registerDriveCmds(root, f)
+	registerMarketplaceUploadCmd(root, f)
 	withholdDisabledServices(root, f)
 
 	return root

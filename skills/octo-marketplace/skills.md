@@ -90,8 +90,8 @@ Do not search the machine or guess a path.
 5. Presign + upload + parse + import:
 
    ```bash
-   octo-cli marketplace skill-upload create --file-name "<file>.zip" --file-size <bytes>
-   # PUT the bytes to the returned presigned_url with its method/headers
+   octo-cli marketplace skill-upload file "./<file>.zip"
+   # Returns skill_upload_id after uploading the bytes; the signed URL stays internal.
    octo-cli marketplace skill-upload parse <skill_upload_id>
    octo-cli marketplace skill-parse-task get <parse_task_id>   # poll until success
    # create: pass `--plugin-name` and omit `--plugin-id`
@@ -103,6 +103,15 @@ Do not search the machine or guess a path.
      --parse-task-id <parse_task_id> --name "<skill-name>" \
      --visibility space --version <next-version>
    ```
+
+   `skill-upload file` accepts a local non-empty `.zip` or `.skill` archive,
+   derives its name and size, and performs initialization + streaming PUT using
+   the signed headers. It does not parse, import, or publish automatically.
+   `--dry-run` validates locally without creating an upload. The low-level
+   `skill-upload create` remains metadata-only; do not try to PUT to a URL copied
+   from its redacted output. On upload failure no parse is triggered; the backend
+   has no cancel operation, so a pending upload may remain. Inspect the reported
+   upload id before retrying rather than assuming a failed transfer sent no bytes.
 
    `--plugin-name` is the visible Marketplace title; `--name` is the stable
    machine name from `SKILL.md`. `plugin import` builds the attachment tree and
