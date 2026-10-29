@@ -373,16 +373,40 @@ func TestLoopWorkspaceIDFlagIsRequired(t *testing.T) {
 	}
 }
 
+// Workspace and runtime management stay withheld with x-octo-cli-hidden by
+// owner decision, so none of their leaves may be registered and none may send
+// a request.
 func TestLoopWorkspaceCreateIsNotRegistered(t *testing.T) {
 	root, _, _ := rootWithService(t, func(http.ResponseWriter, *http.Request) {
-		t.Fatal("hidden workspace create command must not send a request")
+		t.Fatal("hidden workspace and runtime management commands must not send a request")
 	})
-	workspace := findCmd(findCmd(root, "loop"), "workspace")
+	loop := findCmd(root, "loop")
+	if loop == nil {
+		t.Fatal("loop command not registered")
+	}
+	workspace := findCmd(loop, "workspace")
 	if workspace == nil {
 		t.Fatal("loop workspace command not registered")
 	}
-	if findCmd(workspace, "create") != nil {
-		t.Fatal("loop workspace create must not be registered")
+	runtime := findCmd(loop, "runtime")
+	if runtime == nil {
+		t.Fatal("loop runtime command not registered")
+	}
+	for _, words := range [][]string{
+		{"workspace", "create"}, {"workspace", "update"}, {"workspace", "delete"},
+		{"runtime", "update"}, {"runtime", "delete"}, {"runtime", "archive-and-delete"},
+		{"runtime", "update-request", "create"}, {"runtime", "model-request", "create"},
+		{"runtime", "local-skill-request", "create"}, {"runtime", "local-skill-import", "create"},
+	} {
+		cmd := loop
+		for _, w := range words {
+			if cmd = findCmd(cmd, w); cmd == nil {
+				break
+			}
+		}
+		if cmd != nil {
+			t.Errorf("loop %s must not be registered", strings.Join(words, " "))
+		}
 	}
 }
 
@@ -585,32 +609,35 @@ func TestHTMLListOperationsPreserveOffsetPaginationEnvelope(t *testing.T) {
 	}
 }
 
+// html.publish carries a generated run-scoped idempotency key, but the
+// docs-html backend's deduplication of a resend is not verified, so an
+// ambiguous failure is not resent. The key the backend received is reported
+// with the unknown outcome so the caller can resume the same creation with it.
 func TestHTMLCreateGeneratesRunScopedIdempotencyKey(t *testing.T) {
 	var bodies []map[string]any
-	hits := 0
 	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		bodies = append(bodies, body)
-		hits++
-		if hits == 1 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"data":{"slug":"doc-1","doc_id":"doc-1"}}`))
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code":"TEMP","message":"retry"}`))
 	})
 	root.SetArgs([]string{"html", "publish", "--html", "new"})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("create: %v", err)
+	err := root.Execute()
+	if len(bodies) != 1 {
+		t.Fatalf("request count = %d, want one delivery", len(bodies))
 	}
-	if len(bodies) != 2 {
-		t.Fatalf("request count = %d, want retry", len(bodies))
+	sent, _ := bodies[0]["idempotency_key"].(string)
+	if !strings.HasPrefix(sent, "octo-cli-") {
+		t.Fatalf("generated key = %q", sent)
 	}
-	first, _ := bodies[0]["idempotency_key"].(string)
-	second, _ := bodies[1]["idempotency_key"].(string)
-	if first == "" || first != second {
-		t.Errorf("retry keys = %q, %q; want one generated key", first, second)
+	ee := output.AsExitError(err)
+	if ee == nil || ee.Code != "RESULT_UNKNOWN" {
+		t.Fatalf("err = %v, want RESULT_UNKNOWN", err)
+	}
+	var detail map[string]any
+	if json.Unmarshal(ee.Detail, &detail) != nil || detail["idempotency_key"] != sent {
+		t.Errorf("detail = %s, want idempotency_key %q", ee.Detail, sent)
 	}
 }
 
@@ -1364,7 +1391,7 @@ func TestBuildMultipartBody_FormTextFields(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	raw, ct, err := buildMultipartBody(cmd, rt)
+	raw, ct, err := buildMultipartBody(cmd, rt, nil)
 	if err != nil {
 		t.Fatalf("buildMultipartBody: %v", err)
 	}
@@ -1576,7 +1603,7 @@ func TestBuildMultipartBody_MissingFile(t *testing.T) {
 	empty := ""
 	rt := &operationRuntime{filePath: &empty}
 	cmd := &cobra.Command{Use: "synth"}
-	_, _, err := buildMultipartBody(cmd, rt)
+	_, _, err := buildMultipartBody(cmd, rt, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1648,7 +1675,7 @@ func TestParentCommand_RejectsUnknownSubcommand(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"thread + removed leaf (delete)", []string{"thread", "delete", "g", "s"}},
+		{"thread + unknown leaf (destroy)", []string{"thread", "destroy", "g", "s"}},
 		{"thread + bogus", []string{"thread", "bogus"}},
 		{"group + bogus", []string{"group", "nope"}},
 	}

@@ -20,6 +20,17 @@ Octo instead. Do not switch credentials/routes or clear the document's contents
 as a workaround. This rule concerns whole documents, not normal editing or
 otherwise-permitted comment, version, asset, or sheet row/column removal.
 
+## Stored-secret download links over MCP
+
+For a stored alias or ID, use `get_secret_download_url` and follow
+[the private client-file workflow](secret-download.md). Download directly to
+an exclusive private file; never fetch it as text, open/read/cat it into model
+context, or echo it from scripts. The temporary URL is sensitive too. This
+feature requires private shared Redis and an explicitly routed public HTTPS
+MCP download service, including for stdio publishers. Rotation does not revoke
+issued snapshots. The linked reference covers configuration, bounds, retention
+and client-history limits.
+
 ## 1. Authentication
 
 Bots authenticate with a bearer token. There is no interactive user login — but besides the two bot tokens (`app_*`, `bf_*`) there is a third kind, a **user API key** (`uk_*`), which carries a real person's identity and is used for `message search` and the whole `drive` domain. Two ways to supply any of them:

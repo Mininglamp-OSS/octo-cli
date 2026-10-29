@@ -1,6 +1,7 @@
 ---
 name: octo-mail
 version: 0.1.0
+services: ["mail"]
 description: OCTO Agent Mail operations for reading, searching, policy-aware sending, preparing drafts, and checking delivery status exclusively through octo-cli.
 metadata:
   requires:

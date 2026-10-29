@@ -697,7 +697,7 @@
       "get": {
         "operationId": "docs.scene.export",
         "summary": "Export a whiteboard's live scene as PNG, SVG, or portable Excalidraw (needs reader)",
-        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o. For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
+        "description": "Exports the LIVE scene of a doc_type 'board'. `--image-format png` (default) and `svg` render on the server; `excalidraw` is assembled locally with referenced attachments embedded for round-trip import and requires --output/-o on the CLI; over MCP the file is returned inline (bounded like any binary result). For PNG/SVG, without --output the command reports response metadata only. A non-board target returns 409 unsupported_doc_type; an unrecognised format returns 400 invalid_format.",
         "x-octo-risk": "read",
         "x-octo-risk-note": "read reflects the server-side effect: this is a GET that renders and returns the live scene as an image without mutating any doc state. The optional --output/-o writes to a local, user-chosen path (client side, analogous to curl -o) and does not change the API risk class.",
         "x-octo-binary-response": true,
@@ -3473,6 +3473,2563 @@
           }
         },
         "x-octo-risk": "write"
+      }
+    },
+    "/v1/bot/docs/{docId}/ppt/media/{attachId}": {
+      "get": {
+        "operationId": "docs.ppt.media.get",
+        "summary": "Download one PPT media attachment's bytes (reader or higher, html_ppt only)",
+        "description": "Returns the stored bytes of a document-owned ppt-media: attachment (image, audio or video) with Content-Disposition: attachment and the stored MIME type. Pass --output <path> to save the bytes. With --metadata 1 the backend instead returns a {data:{mime,sizeBytes}} JSON envelope. The target must be an html_ppt document (otherwise UNSUPPORTED_DOCUMENT_TYPE); unknown or foreign attachIds return NOT_FOUND. Authorization is re-checked after the object read, and a permission change in between fails with FORBIDDEN. Errors use the PPT {error} envelope.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "attachId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "attachId returned by the PPT media upload or attachments ingest (ref ppt-media:<attachId>)"
+          },
+          {
+            "name": "metadata",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "set to 1 to return {data:{mime,sizeBytes}} JSON instead of the media bytes"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Media bytes (Content-Type is the stored media MIME type)",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/invites/{inviteToken}/accept": {
+      "post": {
+        "operationId": "docs.invites.accept",
+        "summary": "Accept a document link invite as the bot itself",
+        "description": "Grants the calling bot the invite's role on the invited document through the same accept transaction as the human flow (doc_member row with source=invite). The bot route does not restrict the document to the bot's own Space. Invalid, revoked, expired or exhausted invites, and invites whose document is missing or deleted, all return 410 invite_invalid. The bot route passes no home Space, so the 404 not_found branch of the shared accept transaction is never reached here.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          {
+            "name": "inviteToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "invite token from docs invites create or docs invites list (credential-equivalent; masked in traces)",
+            "x-octo-secret": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "documentName": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "principalSpaceId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/published": {
+      "post": {
+        "operationId": "docs.published",
+        "summary": "Notify docs-backend that an HTML document was durably published (owner bot only)",
+        "description": "Bot-token only. The document must be in the bot's Space (else 404 not_found) and owned by the calling bot (else 403 forbidden). Only doc_type html is accepted: an archived document returns 409 document_archived, another type 409 wrong_document_type, and a deleted one 410 canonical_document_deleted. An optional title renames the registered document. When search indexing is enabled the document is queued for re-indexing (indexed=true).",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "description": "optional new title (at most 512 characters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Publish recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "indexed": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/view": {
+      "post": {
+        "operationId": "docs.view",
+        "summary": "Record that the bot opened a document in its recent-view history (needs reader)",
+        "description": "No request body. The view is recorded under the bot's server-resolved Space. Returns {ok:true, viewedAt} when recorded, or {ok:true, recorded:false} when the write was skipped.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "View recorded or skipped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "viewedAt": {
+                      "type": "string"
+                    },
+                    "recorded": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/recent": {
+      "get": {
+        "operationId": "docs.recent.list",
+        "summary": "List documents the bot recently viewed (keyset-paginated, newest first)",
+        "description": "Scoped to the bot uid and its server-resolved Space; deleted, archived or no-longer-permitted documents drop out at query time. Returns {total, items, nextCursor}; pass --cursor with the returned nextCursor for the next page, or --page-all to follow it. A malformed cursor returns 400 invalid_cursor.",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "itemsField": "items",
+          "cursorField": "nextCursor",
+          "inferHasMore": true,
+          "rejectCursorRepeats": true
+        },
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "title keyword filter"
+          },
+          {
+            "name": "creator",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "repeatable owner uid filter"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "doc",
+                  "sheet",
+                  "board",
+                  "html",
+                  "html_ppt"
+                ]
+              }
+            },
+            "description": "repeatable document kind filter"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "opaque nextCursor from the previous page"
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "items per page (clamped to 1-100, default 20)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of recently viewed documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "total": {
+                      "type": "integer"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "docId": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "ownerId": {
+                            "type": "string"
+                          },
+                          "isExternal": {
+                            "type": "boolean"
+                          },
+                          "docType": {
+                            "type": "string"
+                          },
+                          "octoDocSlug": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          },
+                          "updatedBy": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "uid": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "viewedAt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/recent/creators": {
+      "get": {
+        "operationId": "docs.recent.creators",
+        "summary": "List distinct creators of the bot's recently viewed documents",
+        "description": "Same scope and permission filtering as docs recent list, filtered by q but not by creator. Display names are resolved server-side; an unresolved uid falls back to the uid as its name.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "title keyword filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Distinct creators",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "creators": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "uid": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/octo-doc/{octoDocSlug}": {
+      "patch": {
+        "operationId": "docs.octo-doc.rename",
+        "summary": "Rename a registered HTML document by its octo-doc slug (needs admin)",
+        "description": "The slug is resolved only within the bot's server-resolved Space (unknown or deleted slug: 404 not_found). Requires admin on the resolved document. Used to keep an octo-doc HTML title in sync with docs-backend.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "octoDocSlug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "octo-doc slug (the octoDocSlug field of docs get)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512,
+                    "description": "new non-empty title (at most 512 characters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Renamed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/forward-grant/batch": {
+      "post": {
+        "operationId": "docs.forward-grant.batch",
+        "summary": "Grant (never downgrade) reader/commenter/writer access to many uids at once (needs admin)",
+        "description": "Max-merge grant for up to 1000 targets. The whole request is validated first (non-empty array, at most 1000 entries, unique non-empty uid, role reader|commenter|writer); any violation is a 400 with zero writes. Identities are resolved in one batch with the bot's own token (502 identity_unavailable if the lookup fails). Grants are then applied in order without rollback: per-item status is ok, user_not_found or grant_failed, and ok is true only when failed is 0.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "grants"
+                ],
+                "properties": {
+                  "grants": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1000,
+                    "description": "grant targets (1-1000, unique uid)",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "uid",
+                        "role"
+                      ],
+                      "properties": {
+                        "uid": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "target user uid"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "reader",
+                            "commenter",
+                            "writer"
+                          ],
+                          "description": "role to grant (grant-only, never downgrades)"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-target grant results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "granted": {
+                      "type": "integer"
+                    },
+                    "failed": {
+                      "type": "integer"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "uid": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "ok",
+                              "user_not_found",
+                              "grant_failed"
+                            ]
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "changed": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/access-requests": {
+      "post": {
+        "operationId": "docs.access-requests.create",
+        "summary": "Ask the document admins for access as the bot itself (no document role needed)",
+        "description": "The document must be in the bot's Space (else 404 not_found); an archived document returns 409 conflict. requestedRole defaults to reader; html documents accept reader|commenter only, other documents reader|commenter|writer. If the bot already holds the requested role the response is 200 {status:already_granted, role}. Omit botUids for a bot caller: bot ownership is resolved from a human session, so any supplied bot uid is rejected with 403 bot_not_owned_in_space.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "requestedRole": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer"
+                    ],
+                    "default": "reader",
+                    "description": "role requested; html documents accept reader or commenter only"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "optional reason shown to approvers (truncated to 512 characters)"
+                  },
+                  "botUids": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "description": "Space bots owned by a human requester; not usable by a bot caller",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Pending request created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Requested role already held",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "docs.access-requests.list",
+        "summary": "List a document's access requests by status (needs admin)",
+        "description": "Defaults to pending requests; status=approved or status=denied selects decided ones.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "denied"
+              ],
+              "default": "pending"
+            },
+            "description": "request status filter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Access requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "requestId": {
+                            "type": "string"
+                          },
+                          "uid": {
+                            "type": "string"
+                          },
+                          "principalSpaceId": {
+                            "type": "string"
+                          },
+                          "requestedRole": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          },
+                          "botUids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/access-requests/{requestId}/approve": {
+      "post": {
+        "operationId": "docs.access-requests.approve",
+        "summary": "Approve a pending access request and grant the requester a role (needs admin)",
+        "description": "Atomically consumes the pending request (409 not_pending if it was already decided; 404 not_found for an unknown request), grants the human role, then grants the selected carried bots. humanRole defaults to the requested role (legacy alias: role); botRole defaults to role, then humanRole. html documents may grant reader|commenter|admin; other documents reader|commenter|writer|admin (400 role_not_grantable_for_document_type). botUids must be a subset of the bots carried by the request (400 bot_not_in_request).",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "humanRole": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "description": "role granted to the requester (defaults to the requested role)"
+                  },
+                  "botRole": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "description": "role granted to the selected bots (defaults to role, then humanRole)"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "description": "legacy unified role for both the requester and bots"
+                  },
+                  "botUids": {
+                    "type": "array",
+                    "description": "subset of the request's carried bot uids to grant (defaults to all carried bots)",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "botGrantResult": {
+                      "type": "object",
+                      "properties": {
+                        "succeeded": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "failed": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "uid": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/access-requests/{requestId}/deny": {
+      "post": {
+        "operationId": "docs.access-requests.deny",
+        "summary": "Deny a pending access request (needs admin)",
+        "description": "No request body. 404 not_found for an unknown request; 409 not_pending if it was already decided.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/invites": {
+      "post": {
+        "operationId": "docs.invites.create",
+        "summary": "Create a link invite token for a document (needs admin)",
+        "description": "The returned inviteToken lets anyone holding it join the document with the invite role, so treat it as a credential. role defaults to writer. expiresInDays is clamped to 1-7 (missing or non-integer: 3). maxUses is a non-negative integer; 0 (the default, also used for invalid values) means unlimited. The share URL is built by the client; the backend returns only the token, role and expiry.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "reader",
+                      "commenter",
+                      "writer",
+                      "admin"
+                    ],
+                    "default": "writer",
+                    "description": "role granted on accept"
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 7,
+                    "default": 3,
+                    "description": "lifetime in days (clamped to 1-7, default 3)"
+                  },
+                  "maxUses": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0,
+                    "description": "maximum accepts; 0 means unlimited"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Invite created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "inviteToken": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "docs.invites.list",
+        "summary": "List a document's active link invites (needs admin)",
+        "description": "Response items include the invite tokens, which are credential-equivalent.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active invites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "inviteToken": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          },
+                          "maxUses": {
+                            "type": "integer"
+                          },
+                          "usedCount": {
+                            "type": "integer"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/invites/{inviteToken}": {
+      "delete": {
+        "operationId": "docs.invites.revoke",
+        "summary": "Revoke a document link invite (needs admin)",
+        "description": "404 not_found when the token does not exist or belongs to another document.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "inviteToken",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "invite token (credential-equivalent; masked in traces)",
+            "x-octo-secret": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/copy": {
+      "post": {
+        "operationId": "docs.attachments.copy",
+        "summary": "Copy stored attachments from other documents into this document (needs writer)",
+        "description": "Writer on the target document and reader on every source document; bot callers may only copy from documents in their own Space. Each source attachment must belong to its claimed source document and pass the current MIME allow/deny lists and size caps. Sources are de-duplicated; a failing source is reported in notCopied (source_not_found, source_forbidden, mime_not_allowed, size_too_large, copy_failed) without failing the batch. The batch is capped by ATTACHMENT_MAX_RESOLVE_BATCH (default 200; 400 sources_too_many).",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "sources"
+                ],
+                "properties": {
+                  "sources": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "source attachments (non-empty; capped by the backend batch limit, default 200)",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "docId",
+                        "attachId"
+                      ],
+                      "properties": {
+                        "docId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "source document id"
+                        },
+                        "attachId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "source attachment id"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Copied attachments and per-source failures",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mappings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sourceDocId": {
+                            "type": "string"
+                          },
+                          "sourceAttachId": {
+                            "type": "string"
+                          },
+                          "attachId": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "mime": {
+                            "type": "string"
+                          },
+                          "sizeBytes": {
+                            "type": "integer"
+                          },
+                          "fileName": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "notCopied": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sourceDocId": {
+                            "type": "string"
+                          },
+                          "sourceAttachId": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/ingest": {
+      "post": {
+        "operationId": "docs.attachments.ingest",
+        "summary": "Fetch external URLs server-side and store them as document attachments (needs writer)",
+        "description": "Every URL is fetched through the backend SSRF guard (http/https and allow-listed ports only; loopback, private, link-local, CGNAT and metadata addresses are refused; the connection is pinned to the validated IP). Bytes are validated by magic number, not by Content-Type or extension, and SVG is sanitized. Non-PPT documents accept allowed images within the image size tier; html_ppt documents accept image, audio or video (at most 10 URLs and 100 MiB per batch) and return ppt-media refs. Failures are reported per URL in notIngested (for example ssrf_blocked, fetch_failed, not_an_image, mime_not_allowed, size_too_large) without failing the batch. The batch is capped by ATTACHMENT_MAX_RESOLVE_BATCH (default 200; 400 urls_too_many).",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "urls"
+                ],
+                "properties": {
+                  "urls": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "public http(s) URLs to ingest (duplicates are ignored)",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ingested attachments and per-URL failures",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mappings": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sourceUrl": {
+                            "type": "string"
+                          },
+                          "attachId": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "ref": {
+                            "type": "string"
+                          },
+                          "mime": {
+                            "type": "string"
+                          },
+                          "sizeBytes": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "notIngested": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sourceUrl": {
+                            "type": "string"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/link-card": {
+      "post": {
+        "operationId": "docs.link-card",
+        "summary": "Resolve an Open Graph link preview card for a URL (needs reader)",
+        "description": "Fetches the page server-side through the SSRF guard and caches the result; no document state changes. Errors: 400 url_required/url_invalid/scheme_not_allowed, 403 ssrf_blocked, 413 response_too_large, 415 unsupported_content_type, 502 fetch_failed.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "http(s) URL to preview"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Link card",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "image": {
+                      "type": "string"
+                    },
+                    "siteName": {
+                      "type": "string"
+                    },
+                    "fetchedAt": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/comment-task/events": {
+      "get": {
+        "operationId": "docs.comment-task.events",
+        "summary": "Read the public tool-event transcript of a comment task (needs reader)",
+        "description": "Finite JSON poll, not a stream. Returns events after the since sequence for the task's current attempt, plus cursor, availability and completion flags. 400 bad_request for invalid query values.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "comment id the task was created for"
+          },
+          {
+            "name": "botUid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "uid of the bot handling the task"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "doc",
+                "html",
+                "ppt"
+              ],
+              "default": "doc"
+            },
+            "description": "comment surface"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,4}$",
+              "default": "0"
+            },
+            "description": "return events with seq greater than this value (0-1000)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task events page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "cursor": {
+                      "type": "integer"
+                    },
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "attemptId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "expectedCount": {
+                      "type": "integer"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "terminal": {
+                      "type": "boolean"
+                    },
+                    "complete": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/comment-task": {
+      "get": {
+        "operationId": "docs.comment-task.get",
+        "summary": "Read the progress record of a bot comment task (needs reader)",
+        "description": "Returns {task} for the (document, kind, commentId, botUid) tuple; task is null when none exists. 400 bad_request for invalid query values.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "commentId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "comment id the task was created for"
+          },
+          {
+            "name": "botUid",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "uid of the bot handling the task"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "doc",
+                "html",
+                "ppt"
+              ],
+              "default": "doc"
+            },
+            "description": "comment surface"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "docs.comment-task.report",
+        "summary": "Report progress and public tool events for the bot's own comment task",
+        "description": "Bot-token only (403 forbidden otherwise). The task is looked up by idempotencyKey and must belong to the calling bot (else 404 not_found); the bot needs reader on the task's document. The path docId must be the task's source id: the doc_id for doc and ppt tasks, but the document's octo_doc_slug for html tasks (otherwise 404 not_found). The body accepts only idempotencyKey, progress and events (unknown keys: 400 bad_request). A report for a stale attempt returns 409 stale_task_attempt. Only public process metadata belongs here, never tool arguments, raw output or model reasoning.",
+        "x-octo-risk": "write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "doc_id for doc and ppt tasks; octo_doc_slug for html tasks"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "idempotencyKey",
+                  "progress"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "description": "task key delivered with the comment task"
+                  },
+                  "progress": {
+                    "type": "object",
+                    "required": [
+                      "attemptId",
+                      "sequence",
+                      "state",
+                      "phase",
+                      "steps",
+                      "omittedSteps",
+                      "replyDelivered"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "attemptId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[a-zA-Z0-9_.:/-]+$"
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "waiting",
+                          "running",
+                          "finished",
+                          "failed",
+                          "unknown"
+                        ]
+                      },
+                      "phase": {
+                        "type": "string",
+                        "enum": [
+                          "received",
+                          "model",
+                          "tool",
+                          "ended"
+                        ],
+                        "description": "waiting requires received; running requires model or tool; every other state requires ended"
+                      },
+                      "steps": {
+                        "type": "array",
+                        "maxItems": 100,
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "tool",
+                            "state",
+                            "startedAt"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[a-zA-Z0-9_.:/-]+$"
+                            },
+                            "tool": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120,
+                              "pattern": "^[a-zA-Z0-9_.:/-]+$"
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "running",
+                                "finished",
+                                "failed",
+                                "unknown"
+                              ]
+                            },
+                            "startedAt": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "finishedAt": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "durationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 604800000
+                            },
+                            "exitCode": {
+                              "type": "integer",
+                              "minimum": -2147483648,
+                              "maximum": 2147483647
+                            }
+                          }
+                        }
+                      },
+                      "omittedSteps": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000000
+                      },
+                      "replyDelivered": {
+                        "type": "boolean"
+                      },
+                      "errorCode": {
+                        "type": "string",
+                        "enum": [
+                          "dispatch_failed",
+                          "delivery_failed",
+                          "permission_denied",
+                          "interrupted"
+                        ]
+                      },
+                      "eventCount": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000
+                      },
+                      "detailsTruncated": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "events": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "description": "up to 10 new events with strictly increasing seq",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "seq",
+                        "stepId",
+                        "tool",
+                        "type",
+                        "content",
+                        "at",
+                        "truncated",
+                        "redacted",
+                        "failed"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 1000,
+                          "description": "strictly increasing within the request"
+                        },
+                        "stepId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[a-zA-Z0-9_.:/-]+$"
+                        },
+                        "tool": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120,
+                          "pattern": "^[a-zA-Z0-9_.:/-]+$"
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "tool_use",
+                            "tool_result",
+                            "error"
+                          ]
+                        },
+                        "content": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "at": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        },
+                        "redacted": {
+                          "type": "boolean"
+                        },
+                        "failed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Report accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments/markers": {
+      "get": {
+        "operationId": "docs.comments.markers",
+        "summary": "List unresolved comment markers of a whiteboard (needs reader)",
+        "description": "Board documents only (409 unsupported_doc_type otherwise). Lightweight feed of unresolved thread roots; pass --cursor with the returned nextCursor for the next page (400 invalid_cursor if malformed).",
+        "x-octo-risk": "read",
+        "x-octo-pagination": {
+          "cursorParam": "cursor",
+          "itemsField": "items",
+          "cursorField": "nextCursor",
+          "inferHasMore": true,
+          "rejectCursorRepeats": true
+        },
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "id cursor from a previous page's nextCursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "page size (1-100, default 50)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of markers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "anchorStart": {
+                            "type": "string"
+                          },
+                          "anchorEnd": {
+                            "type": "string"
+                          },
+                          "anchorText": {
+                            "type": "string"
+                          },
+                          "resolved": {
+                            "type": "boolean"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/comments/{id}/thread": {
+      "get": {
+        "operationId": "docs.comments.thread",
+        "summary": "Fetch one comment thread root with its replies (needs reader)",
+        "description": "id must be a root comment of this document (404 not_found for a reply, an unknown id, or a deleted root outside html_ppt). html_ppt responses also carry repliesNextCursor.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "root comment id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Thread root with replies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "docId": {
+                      "type": "string"
+                    },
+                    "parentId": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "authorUid": {
+                      "type": "string"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "anchorStart": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "anchorEnd": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "anchorText": {
+                      "type": "string"
+                    },
+                    "resolved": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    },
+                    "replies": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "repliesNextCursor": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/summary-source": {
+      "get": {
+        "operationId": "docs.summary-source",
+        "summary": "Read a rich-text document flattened to plain text for summarization (needs reader)",
+        "description": "Rich-text documents only (same doc_type gate as docs content get; other types return 409 unsupported_doc_type). content is block-separated plain text; chunks is currently always empty.",
+        "x-octo-risk": "read",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Summary source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "document_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "chunks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/export/file": {
+      "get": {
+        "operationId": "docs.file.export",
+        "summary": "Export a document or sheet as an md, docx, pdf or xlsx file (needs reader)",
+        "description": "Pass --output <path> to save the file bytes. md, docx and pdf require a doc; xlsx requires a sheet (409 unsupported_doc_type otherwise). An unknown format returns 400 invalid_format. Markdown and DOCX exports embed time-limited signed attachment links.",
+        "x-octo-risk": "read",
+        "x-octo-binary-response": true,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "md",
+                "docx",
+                "pdf",
+                "xlsx"
+              ]
+            },
+            "description": "file format; exposed as --export-format so it does not shadow the global --format flag",
+            "x-octo-flag": "export-format"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exported file",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/ppt/media": {
+      "post": {
+        "operationId": "docs.ppt.media.upload",
+        "summary": "Upload one local media file into a PPT document (writer, html_ppt only)",
+        "description": "Sends the file bytes as the raw request body (not multipart). X-Media-Type is required and must be one of image/svg+xml, image/png, image/jpeg, image/webp, image/gif, image/avif, image/bmp, video/mp4, video/webm, video/ogg, video/quicktime, audio/mpeg, audio/mp4, audio/webm, audio/ogg, audio/wav, audio/x-wav, audio/flac (anything else is 400 unsupported_media_type). The limit is the smaller of the attachment size limit and 50 MiB; SVG is limited to 1 MiB and sanitized. Requires writer on an html_ppt document; authorization is re-checked after the object upload. Reference the result in the deck as ppt-media:<attachId>.",
+        "x-octo-risk": "write",
+        "x-octo-raw-body": true,
+        "x-octo-raw-body-max-bytes": 52428800,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Media-Type",
+            "in": "header",
+            "required": true,
+            "x-octo-flag": "media-type",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "media MIME type of the file (see the operation description for the allowed list)"
+          },
+          {
+            "name": "X-File-Name",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "file-name",
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "optional file name, URI-encoded (encodeURIComponent); the backend keeps the last path segment and sanitizes it"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored media reference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "ref": {
+                          "type": "string"
+                        },
+                        "attachId": {
+                          "type": "string"
+                        },
+                        "mime": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/attachments/svg": {
+      "post": {
+        "operationId": "docs.attachments.svg-upload",
+        "summary": "Upload an SVG image as a document attachment (writer)",
+        "description": "Sends the SVG markup as the raw request body (image/svg+xml, not multipart). The backend sanitizes the SVG and refuses bodies over 1 MiB (413 size_too_large), empty bodies (400 invalid_svg) and markup the sanitizer rejects (400). Requires writer on the document. 502 upload_failed when object storage refuses the write.",
+        "x-octo-risk": "write",
+        "x-octo-raw-body": true,
+        "x-octo-raw-body-max-bytes": 1048576,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-File-Name",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "file-name",
+            "schema": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "description": "optional file name, URI-encoded (encodeURIComponent); the backend keeps the last path segment and sanitizes it"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/svg+xml": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Stored SVG attachment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attachId": {
+                      "type": "string"
+                    },
+                    "objectKey": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer"
+                    },
+                    "fileName": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "attachId"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/import/docx": {
+      "post": {
+        "operationId": "docs.raw-import.docx",
+        "summary": "Import a .docx file into a doc document (writer)",
+        "description": "Sends the .docx bytes as the raw request body. With X-Octo-Import-Apply: true the converted content replaces the document atomically; without it the backend only parses and returns the converted document. Doc documents only (409 unsupported_doc_type). The backend limit is DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB); 422 import_failed for an unreadable file. The `docs import --file` command wraps the same route with extra local checks.",
+        "x-octo-risk": "high-risk-write",
+        "x-octo-raw-body": true,
+        "x-octo-raw-body-max-bytes": 209715200,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Octo-Import-Apply",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "apply",
+            "schema": {
+              "type": "string"
+            },
+            "description": "send true to replace the document content atomically; omit to only parse and return the converted document without writing"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied import, or the parsed document when not applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "baseVersion": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    },
+                    "doc": {
+                      "type": "object"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/import/markdown": {
+      "post": {
+        "operationId": "docs.raw-import.markdown",
+        "summary": "Import a Markdown file into a doc document (writer)",
+        "description": "Sends UTF-8 Markdown as the raw request body (text/markdown). With X-Octo-Import-Apply: true the converted content replaces the document atomically; without it the backend only parses. Applying requires a doc document (409 unsupported_doc_type). The backend limit is MAX_DOC_BYTES (default 20 MiB); an empty body is 400 empty_upload.",
+        "x-octo-risk": "high-risk-write",
+        "x-octo-raw-body": true,
+        "x-octo-raw-body-max-bytes": 20971520,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Octo-Import-Apply",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "apply",
+            "schema": {
+              "type": "string"
+            },
+            "description": "send true to replace the document content atomically; omit to only parse and return the converted document without writing"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/markdown": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied import, or the parsed document when not applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "baseVersion": {
+                      "type": "integer"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    },
+                    "doc": {
+                      "type": "object"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/import/xlsx": {
+      "post": {
+        "operationId": "docs.raw-import.xlsx",
+        "summary": "Import an .xlsx workbook into a sheet document (writer)",
+        "description": "Sends the .xlsx bytes as the raw request body. The import always applies (the backend does not read X-Octo-Import-Apply) and replaces the sheet content. Sheet documents only (409 unsupported_doc_type). The backend limit is DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB); 413 doc_too_large when the converted sheet is too large.",
+        "x-octo-risk": "high-risk-write",
+        "x-octo-raw-body": true,
+        "x-octo-raw-body-max-bytes": 209715200,
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied import",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseVersion": {
+                      "type": "integer"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/docs/{docId}/import/excalidraw": {
+      "post": {
+        "operationId": "docs.scene.import",
+        "summary": "Import an Excalidraw scene into a whiteboard (needs writer)",
+        "description": "Board documents only (409 unsupported_doc_type). Send the .excalidraw JSON envelope as the body, for example --data @board.excalidraw. mode=merge (default) keeps existing elements; mode=replace overwrites the board after the backend takes a safety snapshot. Embedded files are validated, sanitized and stored as attachments, and element/file ids are remapped (elementIdMap, fileIdMap). The body is limited by DOCX_IMPORT_MAX_UPLOAD_BYTES (default 200 MiB) and the board element limits.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          {
+            "name": "docId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "merge",
+                "replace"
+              ],
+              "default": "merge"
+            },
+            "description": "merge preserves existing elements; replace overwrites the board"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "version",
+                  "elements",
+                  "files"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "excalidraw"
+                    ]
+                  },
+                  "version": {
+                    "type": "integer",
+                    "enum": [
+                      2
+                    ]
+                  },
+                  "elements": {
+                    "type": "array",
+                    "description": "Excalidraw elements; each needs a non-empty string id",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "files": {
+                    "type": "object",
+                    "description": "Excalidraw files map keyed by file id; each entry carries a dataURL"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "docId": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "importedElements": {
+                      "type": "integer"
+                    },
+                    "importedFiles": {
+                      "type": "integer"
+                    },
+                    "elementIdMap": {
+                      "type": "object"
+                    },
+                    "fileIdMap": {
+                      "type": "object"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "baseVersion": {
+                      "type": "string"
+                    },
+                    "newDocVersionSeq": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

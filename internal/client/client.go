@@ -7,11 +7,15 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -75,6 +79,13 @@ type Request struct {
 	// historical describe-only behaviour. A 3xx (redirect-to-URL) response is
 	// never written — its URL is surfaced in the envelope as before.
 	OutputPath string
+	// InlineBinaryLimit, when positive and OutputPath is empty, returns a 2xx
+	// binary body INSIDE the envelope (content_text for valid UTF-8 text media
+	// types, content_base64 otherwise) when it is at most this many bytes, so
+	// a caller with no filesystem destination (the MCP server) can still use
+	// the result. A larger body is described with its size and sha256 and
+	// inline:false. Zero keeps the describe-only behaviour.
+	InlineBinaryLimit int64
 	// SuppressSpaceHeader omits the X-Space-Id header even when the active
 	// credential carries a SpaceID. It is set for operations whose spec declares
 	// x-octo-space-header:false (e.g. the docs bot mount resolves the space
@@ -87,6 +98,13 @@ type Request struct {
 	// It is independent of the global --no-retry switch and deliberately lives
 	// on Request so operation metadata can enforce the safety contract.
 	DisableRetry bool
+	// ReplaySafe marks a POST or PATCH whose backend is verified to
+	// deduplicate a resend of the same request for every target resource, so it
+	// is retried like an idempotent method. Carrying an idempotency key is not
+	// enough on its own: a backend may accept a key and ignore it for some
+	// resources (docs-backend only honours Idempotency-Key for html_ppt), and a
+	// resend would then repeat the side effect.
+	ReplaySafe bool
 	// UnknownOutcomeOnNetworkFailure changes a transport failure or an ambiguous
 	// gateway 502/503/504 into a machine-readable RESULT_UNKNOWN error. It is for
 	// side effects where the server may have accepted the request before the
@@ -713,7 +731,7 @@ func redactBodyValue(v any, secrets []string) any {
 	case []string:
 		out := make([]string, len(t))
 		for i, val := range t {
-			out[i] = redactSecrets(val, secrets)
+			out[i] = maskOrSuppressValue(val, secrets)
 		}
 		return out
 	}
@@ -899,21 +917,70 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		return c.renderDryRun(req, u, bodyBytes)
 	}
 
-	result, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
-	if err != nil && req.UnknownOutcomeOnNetworkFailure {
-		return nil, markResultUnknown(err)
+	result, mayHaveApplied, err := c.doWithRetry(ctx, req, u, bodyBytes, contentType)
+	if err != nil {
+		return nil, settleFailure(req, err, mayHaveApplied)
 	}
-	return result, err
+	return result, nil
+}
+
+// settleFailure classifies a failed request from its whole attempt history,
+// not only from the error that ended it. mayHaveApplied includes the terminal
+// attempt: a first-attempt 429 or 5xx can follow a committed mutation too. A
+// later failed dial, definite refusal, or cancellation cannot undo a delivery.
+//
+// A mutating request is reported as RESULT_UNKNOWN when an earlier attempt may
+// have applied it (a DELETE that committed and lost its response replays into
+// 404; a keyed create that answered 503 is followed by refused dials), or when
+// the terminal attempt itself may have applied it. Otherwise the final error
+// stands: a definite refusal, a backend error, or a failure that never reached
+// the backend (NotProcessed).
+func settleFailure(req *Request, err error, mayHaveApplied bool) error {
+	err = withRetryAfterHint(err)
+	if !mayHaveApplied {
+		return err
+	}
+	if req.UnknownOutcomeOnNetworkFailure || !isSafeMethod(req.Method) {
+		return markResultUnknown(err)
+	}
+	if ee := output.AsExitError(err); ee != nil && ee.NotProcessed {
+		// A safe method changes nothing, but its failure must not claim that
+		// no attempt reached the server.
+		reached := *ee
+		reached.NotProcessed = false
+		return &reached
+	}
+	return err
 }
 
 // doWithRetry runs the HTTP request, retrying transient errors with backoff.
-func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) {
+// It also reports whether any attempt may have taken effect on the backend, so
+// the caller can classify the whole operation rather than its last attempt.
+//
+// A request that is not replay-safe (POST or PATCH without a verified backend
+// deduplication contract) is only resent when the previous attempt definitely
+// did not reach the backend: the dial failed. A transport failure after the
+// connection was made, a timeout, a 5xx or a 429 may follow a request the
+// server already applied, so resending it could repeat the side effect; that
+// failure is returned at once and reported as RESULT_UNKNOWN by do.
+func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) (result []byte, mayHaveApplied bool, err error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry || req.DisableRetry {
 		maxRetries = 0
 	}
+	replayable := req.replayAllowed()
+	// net/http resends some requests on its own when a reused keep-alive
+	// connection fails after the request was written, and reports only the
+	// last of those sends. Every attempt of a mutating request must go
+	// through this loop so its history is complete, even when the request may
+	// be resent: a replay-safe write delivered on the reused connection and
+	// then followed by a refused dial would otherwise look never sent. Only a
+	// safe method with retries enabled keeps the Transport's own replay.
+	transportReplay := isSafeMethod(req.Method) && maxRetries > 0
 
 	var lastErr error
+	// The same history decides both replay safety and the terminal outcome;
+	// excluding the current attempt would lose first-attempt uncertainty.
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt)
@@ -932,26 +999,31 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 				redactError(lastErr, req.SecretValues))
 			select {
 			case <-ctx.Done():
-				return nil, output.ErrNetwork(ctx.Err().Error(), "request cancelled")
+				// Nothing is sent by this cancellation; the earlier attempts decide.
+				cancelled := output.ErrNetwork(ctx.Err().Error(), "request cancelled")
+				cancelled.NotProcessed = true
+				return nil, mayHaveApplied, cancelled
 			case <-time.After(delay):
 			}
 		}
 
-		body, err := c.attempt(ctx, req, urlStr, body, contentType)
+		body, err := c.attempt(ctx, req, urlStr, body, contentType, transportReplay)
 		if err == nil {
-			return body, nil
+			return body, false, nil
 		}
 		lastErr = err
+		applied := attemptMayHaveApplied(err)
+		mayHaveApplied = mayHaveApplied || applied
 
-		if !isRetryable(err) {
-			return nil, err
+		if !isRetryable(err) || (!replayable && applied) || attempt == maxRetries {
+			return nil, mayHaveApplied, err
 		}
 	}
-	return nil, lastErr
+	return nil, mayHaveApplied, lastErr
 }
 
 // attempt executes one HTTP round-trip and interprets the response.
-func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
+func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body []byte, contentType string, transportReplay bool) ([]byte, error) { //nolint:gocyclo // HTTP attempt handles auth, headers, dry-run, binary, retries in one flow
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -974,12 +1046,22 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
 	}
+	if !transportReplay {
+		forbidTransportReplay(httpReq)
+	}
 
 	c.verbosef("%s %s", req.Method, redactSecrets(urlStr, req.SecretValues))
 	if c.options.Verbose && len(body) > 0 {
 		c.verbosef("request body: %s", truncate(redactDiagnosticBody(req, body), 1024))
 	}
 
+	// Only cancellation observed before Do proves this attempt was never sent.
+	// The retry loop still retains any earlier attempt that may have applied.
+	if err := ctx.Err(); err != nil {
+		cancelled := output.ErrNetwork(err.Error(), "request cancelled")
+		cancelled.NotProcessed = true
+		return nil, cancelled
+	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		// *url.Error.Error() embeds the whole request URL, so an x-octo-secret
@@ -998,18 +1080,39 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, output.ErrNetwork(msg, "request timed out or was cancelled")
 		}
-		return nil, &retryableErr{
-			ExitError: output.ErrNetwork(msg, "transport error"),
-		}
+		ee := output.ErrNetwork(msg, "transport error")
+		// A failed dial means no byte of the request reached the server.
+		var opErr *net.OpError
+		ee.NotProcessed = errors.As(err, &opErr) && opErr.Op == "dial"
+		return nil, &retryableErr{ExitError: ee}
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
-	// The whole response body is buffered here. Every downstream branch needs
-	// it fully in memory anyway — JSON parsing, backend-error parsing, and the
-	// binary describe envelope (which reports size = len(body)) all consume the
-	// complete payload. Board PNG/SVG exports are bounded and small, so a size
-	// cap / streaming-to-temp path would add complexity without a real payoff
-	// today; deferred until an operation returns genuinely large bodies.
+	// A 2xx binary body returned inline (the MCP server, which has no output
+	// path) is streamed: only up to InlineBinaryLimit+1 bytes are kept, while
+	// the size and sha256 cover the whole body. A large export therefore never
+	// sits in memory just to be reported as inline:false.
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 && req.BinaryResponse && req.OutputPath == "" && req.InlineBinaryLimit > 0 {
+		head, size, sum, err := readBoundedBody(resp.Body, req.InlineBinaryLimit)
+		if err != nil {
+			return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
+		}
+		c.verbosef("← %d (%d bytes)", resp.StatusCode, size)
+		env := map[string]any{
+			"status":       resp.StatusCode,
+			"content_type": resp.Header.Get("Content-Type"),
+			"size":         size,
+		}
+		inlineBinaryEnvelope(env, head, size, sum, req.InlineBinaryLimit)
+		return json.Marshal(env)
+	}
+
+	// Every other response body is buffered whole. Every downstream branch needs
+	// it fully in memory anyway — JSON parsing, backend-error parsing, the
+	// binary describe envelope (which reports size = len(body)) and the atomic
+	// --output write all consume the complete payload. The CLI --output path
+	// still buffers a large export (docs.ppt.export allows up to 160 MiB);
+	// streaming it to the temp file is a separate change.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
@@ -1400,24 +1503,147 @@ func extractRetryAfterFromErr(err error) (time.Duration, bool) {
 	return 0, false
 }
 
-// markResultUnknown preserves ordinary API/validation errors but makes a
-// network failure or ambiguous gateway failure explicit for callers that must
-// not blindly repeat an external side effect. Copying the ExitError avoids
-// mutating an error that may also be retained by retry bookkeeping.
+// markResultUnknown reports a failure whose request may have been applied as a
+// machine-readable RESULT_UNKNOWN. The caller decides from the whole attempt
+// history; this only refuses to relabel an error that never came from the
+// backend or the network (for example a local write failure after a 2xx).
+// Copying the ExitError avoids mutating an error that may also be retained by
+// retry bookkeeping.
 func markResultUnknown(err error) error {
 	ee := output.AsExitError(err)
-	var re *retryableErr
-	ambiguousGatewayStatus := errors.As(err, &re) &&
-		(re.status == http.StatusBadGateway || re.status == http.StatusServiceUnavailable || re.status == http.StatusGatewayTimeout)
-	if ee == nil || (ee.Type != "network" && !ambiguousGatewayStatus) {
+	if ee == nil || (ee.Type != "network" && ee.HTTPStatus == 0) {
 		return err
 	}
 	unknown := *ee
 	unknown.Code = "RESULT_UNKNOWN"
+	unknown.NotProcessed = false
 	unknown.Message = "the request may have been accepted, but no definitive response was received"
+	if ee.Message != "" {
+		unknown.Message += ": " + ee.Message
+	}
 	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
+	if ee.Hint != "" {
+		unknown.Hint += "; server guidance: " + ee.Hint
+	}
 	return &unknown
 }
+
+// withRetryAfterHint keeps a 429's Retry-After visible when the request ends
+// on it, so a caller that was not resent automatically knows when to try.
+func withRetryAfterHint(err error) error {
+	var re *retryableErr
+	if !errors.As(err, &re) || re.status != http.StatusTooManyRequests || re.retryAfter <= 0 || re.ExitError == nil {
+		return err
+	}
+	hinted := *re.ExitError
+	note := fmt.Sprintf("the server asked to wait %s before another request (Retry-After)", re.retryAfter)
+	if hinted.Hint == "" {
+		hinted.Hint = note
+	} else {
+		hinted.Hint += "; " + note
+	}
+	return &retryableErr{ExitError: &hinted, retryAfter: re.retryAfter, status: re.status}
+}
+
+// attemptMayHaveApplied reports whether one failed attempt may have reached the
+// backend and taken effect, which decides both whether a request that is not
+// replay-safe may be resent and how a later failure is reported. Only a failed
+// dial, cancellation before Do, and a definite refusal (a 4xx other than 429)
+// prove it did not. A 429 is
+// not taken as proof: most come from pre-handler rate limiters, but a handler
+// can also answer 429 after it committed (octo-server OIDC bind does for an
+// already-created token), and the client cannot tell the two apart.
+func attemptMayHaveApplied(err error) bool {
+	ee := output.AsExitError(err)
+	if ee == nil {
+		return true
+	}
+	if ee.NotProcessed {
+		return false
+	}
+	if ee.Type == "network" {
+		return true
+	}
+	status := ee.HTTPStatus
+	var re *retryableErr
+	if errors.As(err, &re) && re.status != 0 {
+		status = re.status
+	}
+	return status == http.StatusTooManyRequests || status >= 500
+}
+
+// isIdempotentMethod reports whether repeating a request with this method has
+// the same effect on the server as sending it once (RFC 9110 section 9.2.2:
+// GET, HEAD, OPTIONS, TRACE, PUT and DELETE). An empty method is GET. POST and
+// PATCH are not idempotent; the API offers no idempotency guarantee the client
+// can rely on for them in general, so every POST is treated as a possible
+// side effect, including a POST that only reads.
+func isIdempotentMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// isSafeMethod reports whether a method cannot change server state (RFC 9110
+// section 9.2.1), so its failure never leaves a "may have been applied" outcome.
+func isSafeMethod(method string) bool {
+	switch strings.ToUpper(method) {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	}
+	return false
+}
+
+// replayAllowed reports whether r may be resent after an attempt that may have
+// taken effect, because resending it cannot repeat its side effect.
+func (r *Request) replayAllowed() bool {
+	return r.ReplaySafe || isIdempotentMethod(r.Method)
+}
+
+// transportReplayKeys are the headers net/http takes as permission to resend a
+// request with a body by itself (http.Transport: a request is idempotent when
+// its Header map has an "Idempotency-Key" or "X-Idempotency-Key" entry).
+var transportReplayKeys = []string{"Idempotency-Key", "X-Idempotency-Key"}
+
+// forbidTransportReplay stops net/http from resending r on its own after a
+// reused keep-alive connection fails once the request may have been written.
+// The Transport does that for a request it considers idempotent, which
+// includes any request carrying an idempotency key header, below the retry
+// loop and regardless of --no-retry.
+//
+// The key headers still go on the wire, under their lower-case spelling: the
+// Transport only looks for the canonical map entries, and HTTP header names
+// are case-insensitive, so the backend receives the same header. A safe
+// method is replayable by the Transport whatever its headers, so its body is
+// made non-rewindable instead; GET, HEAD and OPTIONS with an empty body are
+// still sent without one. A request the Transport knows it never wrote is
+// still resent, since that cannot repeat anything.
+func forbidTransportReplay(r *http.Request) {
+	for _, key := range transportReplayKeys {
+		if values, ok := r.Header[key]; ok {
+			delete(r.Header, key)
+			r.Header[strings.ToLower(key)] = values
+		}
+	}
+	switch r.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions:
+		r.GetBody = nil
+		if r.Body == nil || r.Body == http.NoBody {
+			r.Body = emptyRequestBody{}
+		}
+	}
+}
+
+// emptyRequestBody is an empty body net/http cannot rewind, unlike nil or
+// http.NoBody.
+type emptyRequestBody struct{}
+
+func (emptyRequestBody) Read([]byte) (int, error) { return 0, io.EOF }
+
+// Close releases the empty body without any work.
+func (emptyRequestBody) Close() error { return nil }
 
 func isRetryableStatus(status int) bool {
 	switch status {
@@ -1509,4 +1735,81 @@ func loopAPIUnsupported(service string, status int, body []byte) bool {
 		} `json:"error"`
 	}
 	return json.Unmarshal(body, &envelope) != nil || strings.TrimSpace(envelope.Error.Code) == ""
+}
+
+// readBoundedBody reads r to EOF, keeping at most limit+1 bytes. It returns
+// the kept prefix, the total size and the sha256 of the whole body, so a
+// caller can tell an over-limit body apart without buffering it.
+func readBoundedBody(r io.Reader, limit int64) (head []byte, size int64, sum []byte, err error) {
+	h := sha256.New()
+	var buf bytes.Buffer
+	n, err := io.Copy(io.MultiWriter(h, &capWriter{buf: &buf, max: limit + 1}), r)
+	if err != nil {
+		return nil, n, nil, err
+	}
+	return buf.Bytes(), n, h.Sum(nil), nil
+}
+
+// capWriter keeps the first max bytes written to it and silently drops the
+// rest, so it never fails the io.MultiWriter it sits in.
+type capWriter struct {
+	buf *bytes.Buffer
+	max int64
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if room := w.max - int64(w.buf.Len()); room > 0 {
+		if int64(len(p)) > room {
+			w.buf.Write(p[:room])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+// InlineBinaryEnvelope adds a bounded copy of body to env under the same rules
+// the client applies to a 2xx binary response (see Request.InlineBinaryLimit).
+// It is shared by composite commands that assemble their result locally.
+func InlineBinaryEnvelope(env map[string]any, body []byte, limit int64) {
+	sum := sha256.Sum256(body)
+	inlineBinaryEnvelope(env, body, int64(len(body)), sum[:], limit)
+}
+
+// inlineBinaryEnvelope adds a bounded copy of a binary body to env. Textual
+// media types that decode as UTF-8 are returned as text; everything else is
+// base64. The sha256 is always present so a caller can verify a body it later
+// fetches another way, and a body over limit is never truncated silently — it
+// is omitted with inline:false and the limit that applied. head holds the
+// body, or at least its first limit+1 bytes when size exceeds limit.
+func inlineBinaryEnvelope(env map[string]any, head []byte, size int64, sum []byte, limit int64) {
+	env["sha256"] = hex.EncodeToString(sum)
+	if size > limit {
+		env["inline"] = false
+		env["inline_limit"] = limit
+		return
+	}
+	env["inline"] = true
+	ct, _ := env["content_type"].(string)
+	if isTextMediaType(ct) && utf8.Valid(head) {
+		env["content_text"] = string(head)
+		return
+	}
+	env["content_base64"] = base64.StdEncoding.EncodeToString(head)
+}
+
+// isTextMediaType reports whether a Content-Type names textual content.
+func isTextMediaType(ct string) bool {
+	mt := strings.ToLower(strings.TrimSpace(ct))
+	if i := strings.IndexByte(mt, ';'); i >= 0 {
+		mt = strings.TrimSpace(mt[:i])
+	}
+	switch {
+	case strings.HasPrefix(mt, "text/"):
+		return true
+	case mt == "application/json", mt == "application/xml", mt == "image/svg+xml",
+		mt == "application/javascript", strings.HasSuffix(mt, "+json"), strings.HasSuffix(mt, "+xml"):
+		return true
+	}
+	return false
 }

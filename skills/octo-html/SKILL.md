@@ -1,6 +1,7 @@
 ---
 name: octo-html
 version: 0.3.0
+services: ["html"]
 description: HTML docs domain (octo-doc) — create and govern self-contained interactive HTML documents, immutable versions, drafts, sharing, media, comments, and agent element edits. Bots cannot delete documents. This is a DIFFERENT backend from the `octo-docs` (CRDT/Yjs) domain. Load after octo-shared.
 metadata:
   requires:
@@ -345,3 +346,7 @@ octo-cli schema html.publish
 octo-cli schema html.element.replace
 octo-cli schema html.reply
 ```
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.

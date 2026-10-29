@@ -938,8 +938,8 @@
                 "required": ["file_id"],
                 "properties": {
                   "file_id": { "type": "integer", "format": "uint64", "description": "confirmed blob node id" },
-                  "permission": { "type": "string", "default": "download", "enum": ["view", "download"], "description": "what the receiver may do" },
-                  "expires_in_seconds": { "type": "integer", "default": 0, "description": "0 uses the backend default (7 days)" },
+                  "permission": { "type": "string", "default": "view", "enum": ["view", "download"], "description": "what the receiver may do. When the field is omitted the backend stores view (preview only; share download then fails with permission_denied). The hand-written `drive share blob-create` command always sends --permission, which defaults to download." },
+                  "expires_in_seconds": { "type": "integer", "default": 0, "minimum": 0, "description": "0 uses the backend default (7 days); negative values are rejected" },
                   "password": { "type": "string", "maxLength": 72, "x-octo-secret": true, "description": "optional share password; hand it over out of band, never in the URL" }
                 }
               }
@@ -988,7 +988,7 @@
         "summary": "Resolve a blob share by its token (low-level; requires a verified identity)",
         "description": "The CLI leaf `drive share access` takes the whole share URL and parses this token out of it. Authentication is always required — there is no anonymous share surface.",
         "x-octo-risk": "read",
-        "x-octo-lossless-id-fields": ["file_id"],
+        "x-octo-lossless-id-fields": ["file_id", "existing_copies[].file_id"],
         "parameters": [
           { "name": "share_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "description": "share token parsed out of the share URL" }
         ],
@@ -1152,6 +1152,352 @@
           "201": { "description": "Transferred", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransferResult" } } } },
           "200": { "description": "Idempotent replay — a pre-existing row is returned with idempotent=true" }
         }
+      }
+    },
+    "/v1/bot/drive/hello": {
+      "get": {
+        "operationId": "drive.hello",
+        "summary": "Probe the drive mount and report the verified caller identity",
+        "description": "Connectivity and identity check. Only the mount's auth middleware runs (verify-bot for bf_/app_ on /v1/bot/drive, verify-api-key for uk_ on /v1/user/drive); no drive data is read. app_ tokens are rejected by verify-bot with 401.",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "description": "fixed greeting naming the mount" },
+                    "uid": { "type": "string", "description": "verified caller uid (the bot uid on the bot mount)" },
+                    "space_id": { "type": "string", "description": "Octo Space bound to the credential during verification (NOT a drive space id)" },
+                    "is_bot": { "type": "boolean", "description": "user-API-key mount only" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/ancestors": {
+      "get": {
+        "operationId": "drive.file.ancestors",
+        "summary": "List the folder path from the space root to a node's parent",
+        "description": "Root-first chain of folders above the node; the node itself is not included and a root-level node returns an empty list. Any live member of the node's drive space may read it. A pending or unknown node returns not_found. The walk stops early (partial chain) when a parent is missing, not a folder, or in another space.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["ancestors[].id"],
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "drive node id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ancestors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ancestors": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "folder node id, decimal string" },
+                          "name": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/files/{file_id}/doc-alive": {
+      "get": {
+        "operationId": "drive.file.doc-alive",
+        "summary": "Check whether a mounted document still exists in the docs backend",
+        "description": "Read-only probe for a type=doc node; it never changes the drive entry. Any live member of the node's drive space may call it. A non-doc node reports source_doc_missing. A docs backend failure is returned as an internal error rather than a missing status.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "mount node id (the drive file id, NOT the doc id)" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "alive": { "type": "boolean", "description": "true only when status is alive" },
+                    "status": { "type": "string", "enum": ["alive", "source_doc_deleted", "source_doc_archived", "source_doc_missing"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/docs/mount": {
+      "post": {
+        "operationId": "drive.doc.mount-by-role",
+        "summary": "Mount an online document after checking the caller's docs-backend admin role",
+        "description": "Same request and response as `drive doc mount` (POST /docs), but the document-side check asks docs-backend for the caller's role rank and requires admin. The principal Octo Space for that check is taken from the X-Space-Id header verbatim (this route has no space gate, so the header is not verified against the credential); an empty header fails closed. The caller also needs editor or higher in the destination drive space. A document already mounted in the same drive space returns conflict.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "parameters": [
+          { "name": "X-Space-Id", "in": "header", "required": true, "x-octo-flag": "octo-space-id", "schema": { "type": "string", "minLength": 1 }, "description": "the caller's Octo Space id used as the principal for the docs-backend role check (NOT the drive space id)" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["space_id", "doc_id"],
+                "properties": {
+                  "space_id": { "type": "string", "description": "destination drive space id" },
+                  "parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id" },
+                  "doc_id": { "type": "string", "description": "document id" },
+                  "source": { "type": "string", "default": "user-mount", "description": "origin tag: user-mount (default) or docs-sync; the backend rejects anything else with invalid_argument" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Mounted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocRef" } } } }
+        }
+      }
+    },
+    "/v1/bot/drive/blobs/im-transferred/batch": {
+      "post": {
+        "operationId": "drive.im-transfer.lookup",
+        "summary": "Check which IM attachments are already saved in the caller's drive spaces",
+        "description": "Looks each IM message up by its source key (channelType#channelID#msgID) across every drive space the caller belongs to in its verified Octo Space; personal wins over shared, then the most recently updated. Items with an empty im_group_no or im_msg_id are skipped, duplicates are collapsed, and only the first 100 distinct keys are checked. As a side effect the caller's personal drive space is created if it does not exist yet.",
+        "x-octo-risk": "write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "description": "IM messages to check, pass via --data",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "im_group_no": { "type": "string", "description": "channel id of the source message" },
+                        "im_channel_type": { "type": "integer", "minimum": 0, "maximum": 255, "description": "channel kind of the source message (1=DM, 2=group, 5=thread); must match the value used at transfer time" },
+                        "im_msg_id": { "type": "string", "description": "message id as a string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Hits keyed by source key; messages not saved anywhere are absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "file_id": { "type": "integer", "format": "uint64" },
+                          "space_id": { "type": "string" },
+                          "parent_id": { "type": "integer", "format": "uint64", "description": "0 is the space root" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/shares/{share_token}/transfer": {
+      "post": {
+        "operationId": "drive.share.transfer",
+        "summary": "Save a copy of a shared blob into a drive space",
+        "description": "Validates the share token, expiry and password like share access, then inserts a fresh copy of the blob (every call creates a new copy). Membership in the source space is not required. The caller needs uploader_downloader or higher in the target space; an omitted target_space_id saves into the caller's personal space root in its verified Octo Space. Only blob shares transfer.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["file_id", "parent_id"],
+        "parameters": [
+          { "name": "share_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "x-octo-flag": "share-token", "description": "share token parsed out of the share URL. base64url tokens may start with \"-\": pass --share-token <token>, or put the value after a \"--\" separator" }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": { "type": "string", "writeOnly": true, "description": "share password when the share is password-protected. writeOnly: masked in --verbose / --dry-run body traces whether it arrives as a flag or through --data" },
+                  "target_space_id": { "type": "string", "description": "destination drive space id; omit to use the caller's personal space" },
+                  "target_parent_id": { "type": "integer", "format": "uint64", "default": 0, "description": "destination folder id; ignored when target_space_id is omitted" },
+                  "name": { "type": "string", "description": "name for the copy; defaults to the shared file's name" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Copied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": { "type": "string", "description": "new drive node id, decimal string" },
+                    "space_id": { "type": "string" },
+                    "parent_id": { "type": "string", "description": "decimal string" },
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/shares/{share_token}/existing-copies": {
+      "get": {
+        "operationId": "drive.share.existing-copies",
+        "summary": "List copies of a shared blob the caller already holds",
+        "description": "No share password is needed: the reply only covers the caller's own drive spaces in its verified Octo Space that hold the same stored object. Unknown, revoked or expired shares still fail (not_found / share_expired). An empty list means no copy.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["existing_copies[].file_id"],
+        "parameters": [
+          { "name": "share_token", "in": "path", "required": true, "schema": { "type": "string" }, "x-octo-secret": true, "x-octo-flag": "share-token", "description": "share token parsed out of the share URL. base64url tokens may start with \"-\": pass --share-token <token>, or put the value after a \"--\" separator" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing copies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "existing_copies": { "type": "array", "items": { "$ref": "#/components/schemas/ExistingCopy" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/trash": {
+      "get": {
+        "operationId": "drive.trash.list",
+        "summary": "List recycle-bin entries the caller may see",
+        "description": "scope=all (default without space_id) returns rows the caller deleted plus every tombstone in drive spaces the caller is super_admin of; scope=mine only the caller's own deletions; scope=space (default when space_id is set) every tombstone in one drive space and requires super_admin there. Paged by an opaque cursor; pass next_cursor back to continue.",
+        "x-octo-risk": "read",
+        "x-octo-lossless-id-fields": ["items[].id", "items[].parent_id"],
+        "parameters": [
+          { "name": "scope", "in": "query", "schema": { "type": "string" }, "description": "view: all, mine or space (the backend rejects anything else with invalid_argument); defaults to space when space_id is set, otherwise all" },
+          { "name": "space_id", "in": "query", "schema": { "type": "string" }, "description": "drive space id (personal:<octo-space>:<uid> or shared:<uuid>); required for scope=space" },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" }, "description": "next_cursor from the previous page" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "maximum": 100 }, "description": "page size; values <= 0 use 50 and values above 100 are clamped to 100" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recycle-bin page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "description": "tombstoned node id, decimal string; pass to trash restore / trash delete" },
+                          "name": { "type": "string" },
+                          "type": { "type": "string", "enum": ["doc", "blob", "folder"] },
+                          "size": { "type": "integer" },
+                          "space_id": { "type": "string" },
+                          "space_name": { "type": "string" },
+                          "parent_id": { "type": "string", "description": "original parent folder id, decimal string" },
+                          "parent_alive": { "type": "boolean", "description": "false means a restore lands at the space root" },
+                          "orig_path": { "type": "array", "items": { "type": "string" }, "description": "original folder names from the space root" },
+                          "deleted_by": { "type": "string" },
+                          "deleted_by_name": { "type": "string" },
+                          "deleted_at": { "type": "string" },
+                          "owner_uid": { "type": "string" },
+                          "source": { "type": "string" }
+                        }
+                      }
+                    },
+                    "next_cursor": { "type": "string", "description": "absent on the last page" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/trash/{file_id}/restore": {
+      "post": {
+        "operationId": "drive.trash.restore",
+        "summary": "Restore a recycle-bin entry",
+        "description": "Allowed for the space's super_admin, or for the member who deleted it while still a member of the space. A folder restores with the subtree deleted in the same batch. When the original parent is gone the entry lands at the space root; a name clash gets a numeric suffix.",
+        "x-octo-risk": "write",
+        "x-octo-lossless-id-fields": ["id", "parent_id"],
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "tombstoned node id from trash list" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "description": "restored node id, decimal string" },
+                    "parent_id": { "type": "string", "description": "parent the node was restored under, decimal string" },
+                    "name": { "type": "string", "description": "final name after conflict resolution" },
+                    "restored_to_root": { "type": "boolean" },
+                    "restored_name_conflict": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/trash/{file_id}": {
+      "delete": {
+        "operationId": "drive.trash.delete",
+        "summary": "Permanently delete a recycle-bin entry (irreversible)",
+        "description": "Same permission as restore (space super_admin, or the deleter while still a member). Hard-deletes the tombstone and the subtree deleted in the same batch, then removes stored objects that no other row references. Cannot be undone.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "file_id", "in": "path", "required": true, "schema": { "type": "integer", "format": "uint64" }, "description": "tombstoned node id from trash list" }
+        ],
+        "responses": { "204": { "description": "Permanently deleted" } }
       }
     }
   },
@@ -1370,7 +1716,20 @@
           "file_name": { "type": "string" },
           "file_size": { "type": "integer" },
           "content_type": { "type": "string" },
-          "ref_id": { "type": "string", "description": "object-storage key; callers normally do not need it" }
+          "ref_id": { "type": "string", "description": "object-storage key; callers normally do not need it" },
+          "existing_copies": {
+            "type": "array",
+            "description": "best-effort hint: copies of the same blob the caller already holds in drive spaces of its current Octo Space. Omitted when there are none or the lookup failed.",
+            "items": { "$ref": "#/components/schemas/ExistingCopy" }
+          }
+        }
+      },
+      "ExistingCopy": {
+        "type": "object",
+        "properties": {
+          "file_id": { "type": "string", "description": "drive node id of the caller's existing copy, decimal string" },
+          "space_id": { "type": "string", "description": "drive space id holding the copy" },
+          "space_name": { "type": "string" }
         }
       },
       "ShareDownload": {

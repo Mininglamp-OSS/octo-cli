@@ -26,7 +26,7 @@ type operationRuntime struct {
 	bodyData         *string                // --data (nil when command has no body)
 	pageAll          *bool                  // --page-all (nil when no pagination)
 	pageLimit        *int                   // --page-limit
-	filePath         *string                // --file (multipart operations only)
+	filePath         *string                // --file (multipart and raw-body upload operations only)
 	outputPath       *string                // --output/-o (binary-response operations only)
 }
 
@@ -324,7 +324,7 @@ func registerBodyFlags(cmd *cobra.Command, rt *operationRuntime, d *registry.Ope
 	// Multipart operations: register --file for the binary upload and skip
 	// --data (JSON body doesn't apply). Non-binary body fields still register
 	// as flags below so they can go through as form text fields.
-	if d.Multipart {
+	if d.Multipart || d.RawBody {
 		filePath := new(string)
 		cmd.Flags().StringVar(filePath, "file", "", "path to the file to upload (required)")
 		_ = cmd.MarkFlagRequired("file") //nolint:errcheck // static flag name, can't fail
