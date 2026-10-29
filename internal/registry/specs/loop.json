@@ -60,6 +60,10 @@
     {
       "name": "capabilities",
       "description": "Portable capability definitions and atomic installation."
+    },
+    {
+      "name": "projects",
+      "description": "Loop projects inside a workspace; distinct from octo-server Project/Workspace identity."
     }
   ],
   "servers": [
@@ -69,9 +73,7 @@
   ],
   "security": [
     {
-      "bearer_auth": [
-
-      ]
+      "bearer_auth": []
     }
   ],
   "x-common-errors": {
@@ -187,6 +189,15 @@
           },
           {
             "$ref": "#/components/parameters/TaskDirection"
+          },
+          {
+            "$ref": "#/components/parameters/TaskProjectID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskProjectIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskIncludeNoProject"
           }
         ],
         "responses": {
@@ -407,6 +418,15 @@
           },
           {
             "$ref": "#/components/parameters/TaskGroupAssigneeID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskProjectID"
+          },
+          {
+            "$ref": "#/components/parameters/TaskProjectIDs"
+          },
+          {
+            "$ref": "#/components/parameters/TaskIncludeNoProject"
           }
         ],
         "responses": {
@@ -3334,12 +3354,19 @@
                       },
                       "role": {
                         "type": "integer",
-                        "enum": [0, 1, 2],
+                        "enum": [
+                          0,
+                          1,
+                          2
+                        ],
                         "description": "Project role: 0 common member, 1 admin, 2 owner."
                       },
                       "robot": {
                         "type": "integer",
-                        "enum": [0, 1],
+                        "enum": [
+                          0,
+                          1
+                        ],
                         "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
                       },
                       "id": {
@@ -3638,7 +3665,6 @@
         "x-octo-risk": "high-risk-write"
       }
     },
-
     "/fleet/api/v1/labels": {
       "get": {
         "summary": "List labels",
@@ -6679,6 +6705,566 @@
           "$ref": "#/components/parameters/WorkspaceIDHeader"
         }
       ]
+    },
+    "/fleet/api/v1/projects/_search": {
+      "get": {
+        "summary": "Search projects",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.search",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "x-octo-positional": "query"
+          },
+          {
+            "name": "include_closed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        },
+        "x-octo-risk": "read"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
+    },
+    "/fleet/api/v1/projects": {
+      "get": {
+        "summary": "List projects",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.list",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "planned",
+                "in_progress",
+                "paused",
+                "completed",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "urgent",
+                "high",
+                "medium",
+                "low",
+                "none"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        },
+        "x-octo-risk": "read"
+      },
+      "post": {
+        "summary": "Create project",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "write"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
+    },
+    "/fleet/api/v1/projects/{project_id}": {
+      "get": {
+        "summary": "Get project",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "read"
+      },
+      "patch": {
+        "summary": "Update project",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.update",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "write"
+      },
+      "delete": {
+        "summary": "Delete project",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "high-risk-write"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
+    },
+    "/fleet/api/v1/projects/{project_id}/resources": {
+      "get": {
+        "summary": "List project resources",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.list",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Page"
+          },
+          {
+            "$ref": "#/components/parameters/PageSize"
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Collection"
+          }
+        },
+        "x-octo-risk": "read"
+      },
+      "post": {
+        "summary": "Create project resource",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.create",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectResourceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "201": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "write"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
+    },
+    "/fleet/api/v1/projects/{project_id}/resources/{project_resource_id}": {
+      "patch": {
+        "summary": "Update project resource",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.update",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectResourceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "write"
+      },
+      "delete": {
+        "summary": "Delete project resource",
+        "description": "Operates on a Loop project within --workspace-id. The project UUID is distinct from the workspace UUID.",
+        "tags": [
+          "projects"
+        ],
+        "operationId": "project.resource.delete",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_resource_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "200": {
+            "$ref": "#/components/responses/Resource"
+          }
+        },
+        "x-octo-risk": "high-risk-write"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
     }
   },
   "components": {
@@ -7109,6 +7695,30 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200
+        }
+      },
+      "TaskProjectID": {
+        "name": "project_id",
+        "in": "query",
+        "description": "Filter by one Loop project UUID; mutually exclusive with project_ids.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskProjectIDs": {
+        "name": "project_ids",
+        "in": "query",
+        "description": "Comma-separated Loop project UUID union; mutually exclusive with project_id.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "TaskIncludeNoProject": {
+        "name": "include_no_project",
+        "in": "query",
+        "description": "Include tasks with no project, optionally alongside selected projects.",
+        "schema": {
+          "type": "boolean"
         }
       }
     },
@@ -7928,6 +8538,12 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -8040,6 +8656,15 @@
           "handoff_note": {
             "type": "string",
             "description": "Optional note supplied to Fleet's handoff path for this update."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -8088,6 +8713,12 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -8464,6 +9095,15 @@
               "null"
             ],
             "description": "Optional title template for tasks created in create_task mode."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -8514,6 +9154,15 @@
               "null"
             ],
             "description": "Replacement title template for tasks created in create_task mode, or null to clear it."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -8629,6 +9278,15 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Loop project UUID in the selected workspace. Independent of --workspace-id; null clears an existing association.",
+            "format": "uuid",
+            "minLength": 1
           }
         }
       },
@@ -10098,6 +10756,225 @@
                 }
               }
             }
+          }
+        }
+      },
+      "ProjectResourceCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource_type",
+          "resource_ref"
+        ],
+        "properties": {
+          "resource_type": {
+            "type": "string",
+            "description": "Resource kind.",
+            "enum": [
+              "github_repo",
+              "local_directory"
+            ],
+            "x-octo-flag": "type"
+          },
+          "resource_ref": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Complete resource_ref object: github_repo needs url and optional default_branch_hint; local_directory needs absolute local_path and daemon_id, with optional label. Use --data or --ref JSON."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable resource label; null clears it."
+          },
+          "position": {
+            "type": "integer",
+            "description": "Display position."
+          }
+        }
+      },
+      "ProjectResourceUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "resource_ref": {
+            "type": "object",
+            "minProperties": 1,
+            "description": "Complete resource_ref object: github_repo needs url and optional default_branch_hint; local_directory needs absolute local_path and daemon_id, with optional label. Use --data or --ref JSON."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable resource label; null clears it."
+          },
+          "position": {
+            "type": "integer",
+            "description": "Display position."
+          }
+        }
+      },
+      "ProjectCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Project title.",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project description."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project icon, such as an emoji."
+          },
+          "status": {
+            "type": "string",
+            "description": "Project lifecycle status.",
+            "enum": [
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "Project priority.",
+            "enum": [
+              "urgent",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ]
+          },
+          "lead_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project lead type. Public expert maps to Fleet agent; expert teams cannot lead projects.",
+            "enum": [
+              "member",
+              "expert",
+              null
+            ]
+          },
+          "lead_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fleet member or expert UUID. Mutually exclusive with --lead-member-id.",
+            "format": "uuid",
+            "minLength": 1
+          },
+          "lead_octo_uid": {
+            "type": "string",
+            "description": "Case-sensitive Project member ID; use with --lead-type member instead of --lead-id.",
+            "x-octo-flag": "lead-member-id",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "resources": {
+            "type": "array",
+            "description": "Resources to create atomically with the project. Supply via --data.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectResourceCreate"
+            }
+          }
+        }
+      },
+      "ProjectUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Project title.",
+            "minLength": 1
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project description."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project icon, such as an emoji."
+          },
+          "status": {
+            "type": "string",
+            "description": "Project lifecycle status.",
+            "enum": [
+              "planned",
+              "in_progress",
+              "paused",
+              "completed",
+              "cancelled"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "Project priority.",
+            "enum": [
+              "urgent",
+              "high",
+              "medium",
+              "low",
+              "none"
+            ]
+          },
+          "lead_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Project lead type. Public expert maps to Fleet agent; expert teams cannot lead projects.",
+            "enum": [
+              "member",
+              "expert",
+              null
+            ]
+          },
+          "lead_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Fleet member or expert UUID. Mutually exclusive with --lead-member-id.",
+            "format": "uuid",
+            "minLength": 1
+          },
+          "lead_octo_uid": {
+            "type": "string",
+            "description": "Case-sensitive Project member ID; use with --lead-type member instead of --lead-id.",
+            "x-octo-flag": "lead-member-id",
+            "minLength": 1,
+            "maxLength": 128
           }
         }
       }

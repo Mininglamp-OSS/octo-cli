@@ -64,18 +64,19 @@ func registerTaskAssigneeFlags(cmd *cobra.Command, d *registry.OperationDetail) 
 
 // The wire field names remain stable. Keep the former flags accepted for
 // existing scripts, but show only member-ID names in generated help.
-var taskMemberIDLegacyFlags = map[string]string{
+var loopMemberIDLegacyFlags = map[string]string{
 	"assignee-member-id":  "assignee-octo-uid",
 	"assignee-member-ids": "assignee-octo-uids",
 	"creator-member-id":   "creator-octo-uid",
 	"creator-member-ids":  "creator-octo-uids",
+	"lead-member-id":      "lead-octo-uid",
 }
 
-func registerTaskMemberIDLegacyFlags(cmd *cobra.Command, d *registry.OperationDetail) {
+func registerLoopMemberIDLegacyFlags(cmd *cobra.Command, d *registry.OperationDetail) {
 	if d.Service != "loop" {
 		return
 	}
-	for memberFlag, oldFlag := range taskMemberIDLegacyFlags {
+	for memberFlag, oldFlag := range loopMemberIDLegacyFlags {
 		current := cmd.Flags().Lookup(memberFlag)
 		if current == nil || cmd.Flags().Lookup(oldFlag) != nil {
 			continue
@@ -85,11 +86,11 @@ func registerTaskMemberIDLegacyFlags(cmd *cobra.Command, d *registry.OperationDe
 	}
 }
 
-func taskFlagChanged(cmd *cobra.Command, flagName string) bool {
+func loopFlagChanged(cmd *cobra.Command, flagName string) bool {
 	if cmd.Flags().Changed(flagName) {
 		return true
 	}
-	if oldFlag := taskMemberIDLegacyFlags[flagName]; oldFlag != "" {
+	if oldFlag := loopMemberIDLegacyFlags[flagName]; oldFlag != "" {
 		return cmd.Flags().Changed(oldFlag)
 	}
 	return false

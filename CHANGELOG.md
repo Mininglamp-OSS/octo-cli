@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New reads: `plugin version get`, `plugin version download` (requires
   `--path`; use `-o` for bytes), `plugin dependents list` and
   `plugin graph get` (`/detail_graph`).
+- **Loop projects restored** — `loop project list/search/get/create/update/delete`
+  and `resource list/create/update/delete` use the existing Fleet Public API.
+  Resource `add`/`remove` aliases and JSON `--ref` input follow Multica's command
+  structure. Typed project fields include member/expert leads and atomic resource
+  creation. All project operations require explicit `--workspace-id`.
+- **Loop project associations** — tasks and autopilots accept `--project-id` or
+  the `--project` convenience alias. Updates can clear the association with
+  `--project ""` or JSON `project_id: null`. Task list/group expose project union
+  and no-project filters. Loop project IDs remain distinct from octo-server
+  Project/Workspace IDs.
 
 ### Changed
 
