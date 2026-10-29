@@ -325,19 +325,7 @@ func checkArgumentNames(ctx context.Context, args map[string]any, pathSet map[st
 	if len(args) > maxArgumentNames {
 		return fmt.Errorf("too many arguments: %d names exceed the limit of %d", len(args), maxArgumentNames)
 	}
-	declared := map[string]bool{"page_all": true, "file_path": true}
-	for n := range pathSet {
-		declared[n] = true
-	}
-	for n := range query {
-		declared[n] = true
-	}
-	for n := range header {
-		declared[n] = true
-	}
-	for n := range body { //nolint:gocritic // schema properties are read-only values
-		declared[n] = true
-	}
+	declared := declaredArgumentNames(pathSet, query, header, body)
 	// Index declared names by fold key. Distinct declared names that fold
 	// together keep the smallest, so the reported spelling is deterministic.
 	declaredByFold := make(map[string]string, len(declared))
@@ -372,6 +360,23 @@ func checkArgumentNames(ctx context.Context, args map[string]any, pathSet map[st
 		seen[fk] = k
 	}
 	return nil
+}
+
+func declaredArgumentNames(pathSet map[string]bool, query, header map[string]*registry.ParamInfo, body map[string]registry.SchemaInfo) map[string]bool {
+	declared := map[string]bool{"page_all": true, "file_path": true}
+	for n := range pathSet {
+		declared[n] = true
+	}
+	for n := range query {
+		declared[n] = true
+	}
+	for n := range header {
+		declared[n] = true
+	}
+	for n := range body {
+		declared[n] = true
+	}
+	return declared
 }
 
 // buildArgv translates an MCP call_op arguments object into CLI argv for the

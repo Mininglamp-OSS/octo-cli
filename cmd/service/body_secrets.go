@@ -78,16 +78,7 @@ func secretValuesAtPath(value any, steps []string, at string) ([]string, error) 
 		return nil, nil
 	}
 	if len(steps) == 0 {
-		switch v := value.(type) {
-		case string:
-			if v == "" {
-				return nil, nil
-			}
-			return []string{v}, nil
-		case map[string]any:
-			return secretStringMapValues(at, v)
-		}
-		return nil, fmt.Errorf("%s is declared secret and must be a JSON string, not %s", at, jsonKindOf(value))
+		return secretLeafValues(value, at)
 	}
 	var out []string
 	switch step := steps[0]; step {
@@ -116,26 +107,45 @@ func secretValuesAtPath(value any, steps []string, at string) ([]string, error) 
 			out = append(out, found...)
 		}
 	default:
-		obj, ok := value.(map[string]any)
-		if !ok {
-			return nil, nil
-		}
-		// A backend may bind this property under any case-fold spelling, so
-		// every key equal to step under strings.EqualFold is followed, not only
-		// the exact spelling.
-		want := foldkey.Key(step)
-		for key, child := range obj {
-			if key != step && foldkey.Key(key) != want {
-				continue
-			}
-			found, err := secretValuesAtPath(child, steps[1:], joinPropertyPath(at, key))
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, found...)
-		}
+		return secretPropertyValues(value, step, steps[1:], at)
 	}
 	return out, nil
+}
+
+func secretPropertyValues(value any, step string, rest []string, at string) ([]string, error) {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	// A backend may bind this property under any case-fold spelling, so
+	// every key equal to step under strings.EqualFold is followed, not only
+	// the exact spelling.
+	want := foldkey.Key(step)
+	var out []string
+	for key, child := range obj {
+		if key != step && foldkey.Key(key) != want {
+			continue
+		}
+		found, err := secretValuesAtPath(child, rest, joinPropertyPath(at, key))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, found...)
+	}
+	return out, nil
+}
+
+func secretLeafValues(value any, at string) ([]string, error) {
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return nil, nil
+		}
+		return []string{v}, nil
+	case map[string]any:
+		return secretStringMapValues(at, v)
+	}
+	return nil, fmt.Errorf("%s is declared secret and must be a JSON string, not %s", at, jsonKindOf(value))
 }
 
 func schemaHasSecret(schema *registry.SchemaInfo) bool {

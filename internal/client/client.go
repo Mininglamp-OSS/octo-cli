@@ -963,7 +963,7 @@ func settleFailure(req *Request, err error, mayHaveApplied bool) error {
 // connection was made, a timeout, a 5xx or a 429 may follow a request the
 // server already applied, so resending it could repeat the side effect; that
 // failure is returned at once and reported as RESULT_UNKNOWN by do.
-func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) ([]byte, bool, error) {
+func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, body []byte, contentType string) (result []byte, mayHaveApplied bool, err error) {
 	maxRetries := defaultMaxRetries
 	if c.options.NoRetry || req.DisableRetry {
 		maxRetries = 0
@@ -981,7 +981,6 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 	var lastErr error
 	// The same history decides both replay safety and the terminal outcome;
 	// excluding the current attempt would lose first-attempt uncertainty.
-	mayHaveApplied := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt)
@@ -1642,7 +1641,9 @@ func forbidTransportReplay(r *http.Request) {
 type emptyRequestBody struct{}
 
 func (emptyRequestBody) Read([]byte) (int, error) { return 0, io.EOF }
-func (emptyRequestBody) Close() error             { return nil }
+
+// Close releases the empty body without any work.
+func (emptyRequestBody) Close() error { return nil }
 
 func isRetryableStatus(status int) bool {
 	switch status {

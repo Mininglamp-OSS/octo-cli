@@ -252,6 +252,10 @@ func validateMultipartDryRun(ctx context.Context, d *registry.OperationDetail, a
 		}
 		return nil
 	}
+	return requireMultipartBodyArgs(d, args, fileProvided, hint)
+}
+
+func requireMultipartBodyArgs(d *registry.OperationDetail, args map[string]any, fileProvided bool, hint string) error {
 	if d.RequestBody == nil {
 		return nil
 	}

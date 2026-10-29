@@ -92,7 +92,7 @@ func (b *xin2463Backend) reset(mode string) {
 	b.writes, b.keys, b.mode = 0, nil, mode
 }
 
-func (b *xin2463Backend) count() (int, []string) {
+func (b *xin2463Backend) count() (writes int, keys []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.writes, append([]string(nil), b.keys...)

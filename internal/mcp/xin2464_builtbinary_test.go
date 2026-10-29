@@ -77,7 +77,7 @@ func newXIN2464Backend(t *testing.T, actions ...string) *xin2464Backend {
 	return b
 }
 
-func (b *xin2464Backend) count() (int, []string, []string) {
+func (b *xin2464Backend) count() (writes int, keys, bodies []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.writes, append([]string(nil), b.keys...), append([]string(nil), b.bodies...)

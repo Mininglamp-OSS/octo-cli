@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -219,7 +220,7 @@ func TestXIN2441CapabilityAliasVerboseMaskedButSent(t *testing.T) {
 	}
 	gotJSON, _ := json.Marshal(got)
 	wantJSON, _ := json.Marshal(want)
-	if string(gotJSON) != string(wantJSON) {
+	if !bytes.Equal(gotJSON, wantJSON) {
 		t.Errorf("outbound body changed:\n got %s\nwant %s", gotJSON, wantJSON)
 	}
 }

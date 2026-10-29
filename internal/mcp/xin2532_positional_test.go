@@ -166,9 +166,9 @@ func TestXIN2532OperandLabelIsRefusedWithHint(t *testing.T) {
 // xin2532SampleArgs fills every declared path, query and header parameter of
 // an operation with a value its CLI flag parses, so the argv can be checked
 // against the engine's own cobra command.
-func xin2532SampleArgs(d *registry.OperationDetail) (map[string]any, map[string]string) {
-	args := map[string]any{}
-	operands := map[string]string{}
+func xin2532SampleArgs(d *registry.OperationDetail) (args map[string]any, operands map[string]string) {
+	args = map[string]any{}
+	operands = map[string]string{}
 	for _, n := range extractPathParams(d.Path) {
 		args[n] = "-p" + n // leading hyphen: must survive as a path value
 	}
@@ -216,7 +216,7 @@ func TestXIN2532RegistryWideArgvMatchesEngine(t *testing.T) {
 	f, _, _ := fakeBackendFactory("http://127.0.0.1:1", "bf_test")(TrustedContext{})
 	root := testRoot(f)
 	positionalOps, parsed, reserved := 0, 0, 0
-	for _, info := range reg.ListAllOperations() { //nolint:gocritic // read-only snapshot
+	for _, info := range reg.ListAllOperations() {
 		d, ok := reg.GetOperation(info.ID)
 		if !ok {
 			t.Fatalf("listed operation %s is not resolvable", info.ID)
@@ -277,10 +277,10 @@ func xin2532Parse(cmd *cobra.Command, args []string) error {
 	return cmd.ValidateArgs(cmd.Flags().Args())
 }
 
-func xin2532Server(t *testing.T, facade facadeMode, url string) *Server {
+func xin2532Server(t *testing.T, facade facadeMode, backendURL string) *Server {
 	t.Helper()
 	s := facadeServer(t, facade)
-	s.factoryFn = fakeBackendFactory(url, "bf_test")
+	s.factoryFn = fakeBackendFactory(backendURL, "bf_test")
 	return s
 }
 

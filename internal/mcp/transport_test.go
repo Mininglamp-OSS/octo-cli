@@ -191,12 +191,6 @@ func envelopeOKFromRPC(t *testing.T, body string) bool {
 	return envelopeOK([]byte(res.Content[0].Text))
 }
 
-func readAll(r *http.Request) ([]byte, error) {
-	buf := new(bytes.Buffer)
-	_, err := buf.ReadFrom(r.Body)
-	return buf.Bytes(), err
-}
-
 func postJSON(t *testing.T, url, bearer, space, body string) (code int, responseBody string) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(body))

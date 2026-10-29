@@ -122,8 +122,8 @@ func TestXIN2441ArgumentValidationHonorsCancellation(t *testing.T) {
 	if !asCancelled(err, &cancelled) {
 		t.Fatalf("cancellation during validation must stop it, got %v", err)
 	}
-	if n, max := mid.calls.Load(), int64(3); n != max {
-		t.Errorf("validation checked the context %d times, want %d (stopped at the first check after cancellation)", n, max)
+	if n, want := mid.calls.Load(), int64(3); n != want {
+		t.Errorf("validation checked the context %d times, want %d (stopped at the first check after cancellation)", n, want)
 	}
 }
 
@@ -192,7 +192,7 @@ func TestXIN2441ToolCallsBoundedBeforeAuth(t *testing.T) {
 }
 
 // dispatchToolCtx is callTool with a caller-supplied request context.
-func dispatchToolCtx(t *testing.T, ctx context.Context, s *Server, name string, args any) toolResult { //nolint:revive // test helper keeps t first
+func dispatchToolCtx(t *testing.T, ctx context.Context, s *Server, name string, args any) toolResult {
 	t.Helper()
 	argsRaw, _ := json.Marshal(args)
 	params, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(argsRaw)})

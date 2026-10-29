@@ -19,7 +19,7 @@ import (
 // upload policy is checked during planning; descriptor confinement and
 // transport run only on a real call. The limitation is stated in the note
 // rather than silently implied.
-func planUploadDryRun(ctx context.Context, f *cmdutil.Factory, detail *registry.OperationDetail, args map[string]any, pol execPolicy) ([]byte, bool, *output.ExitError) {
+func planUploadDryRun(ctx context.Context, f *cmdutil.Factory, detail *registry.OperationDetail, args map[string]any, pol execPolicy) (envelope []byte, ok bool, exitErr *output.ExitError) {
 	if err := validateMultipartDryRun(ctx, detail, args, pol); err != nil {
 		ee := output.AsExitError(cmdutil.WrapCLIError(err))
 		return synthErrorEnvelope(ee), false, ee
@@ -32,6 +32,46 @@ func planUploadDryRun(ctx context.Context, f *cmdutil.Factory, detail *registry.
 		return synthErrorEnvelope(ee), false, ee
 	}
 
+	formFields, queryFields, headerFields, filePath := uploadPlanFields(detail, args)
+	data := map[string]any{
+		"dry_run": true,
+		"method":  detail.Method,
+		"path":    fillPathParams(detail.Path, args),
+	}
+	if len(queryFields) > 0 {
+		data["query"] = queryFields
+	}
+	if len(headerFields) > 0 {
+		data["headers"] = headerFields
+	}
+	if detail.RawBody {
+		// The file is the whole body: describe its media type and limit, never
+		// its bytes. Header arguments (e.g. X-Media-Type) are listed as such.
+		data["raw_body"] = true
+		data["content_type"] = detail.RawBodyContentType
+		if detail.RawBodyMaxBytes > 0 {
+			data["max_bytes"] = detail.RawBodyMaxBytes
+		}
+		if filePath != "" {
+			data["file_path"] = filePath
+		}
+		note := "raw-body dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, and transport are enforced only on a real (non-dry-run) call."
+		data["dry_run_note"] = note
+		return marshalUploadPlan(data)
+	}
+	data["multipart"] = true
+	data["form_fields"] = formFields
+	if filePath != "" {
+		data["file_field"] = binaryFileField(detail)
+		data["file_path"] = filePath
+	}
+	note := "multipart dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header/body fields and the multipart file binding were validated; file_path is NOT opened or read and its bytes are never returned; the multipart body is not materialized and nothing is sent. Descriptor-based upload-root containment and transport are enforced only on a real (non-dry-run) call."
+	data["dry_run_note"] = note
+	return marshalUploadPlan(data)
+}
+
+// uploadPlanFields classifies and masks argument values without resolving files.
+func uploadPlanFields(detail *registry.OperationDetail, args map[string]any) (formFields, queryFields, headerFields map[string]any, filePath string) {
 	pathSet := map[string]bool{}
 	for _, n := range extractPathParams(detail.Path) {
 		pathSet[n] = true
@@ -42,11 +82,9 @@ func planUploadDryRun(ctx context.Context, f *cmdutil.Factory, detail *registry.
 			params[p.Name] = p
 		}
 	}
-	fileField := binaryFileField(detail)
-	formFields := map[string]any{}
-	queryFields := map[string]any{}
-	headerFields := map[string]any{}
-	var filePath string
+	formFields = map[string]any{}
+	queryFields = map[string]any{}
+	headerFields = map[string]any{}
 	for _, k := range sortedKeys(args) {
 		if k == "file_path" {
 			filePath = fmt.Sprint(args[k]) // the PATH string only; contents are never read
@@ -78,41 +116,7 @@ func planUploadDryRun(ctx context.Context, f *cmdutil.Factory, detail *registry.
 		}
 		formFields[k] = v
 	}
-	data := map[string]any{
-		"dry_run": true,
-		"method":  detail.Method,
-		"path":    fillPathParams(detail.Path, args),
-	}
-	if len(queryFields) > 0 {
-		data["query"] = queryFields
-	}
-	if len(headerFields) > 0 {
-		data["headers"] = headerFields
-	}
-	if detail.RawBody {
-		// The file is the whole body: describe its media type and limit, never
-		// its bytes. Header arguments (e.g. X-Media-Type) are listed as such.
-		data["raw_body"] = true
-		data["content_type"] = detail.RawBodyContentType
-		if detail.RawBodyMaxBytes > 0 {
-			data["max_bytes"] = detail.RawBodyMaxBytes
-		}
-		if filePath != "" {
-			data["file_path"] = filePath
-		}
-		note := "raw-body dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header arguments and the file binding were validated; file_path is NOT opened or read and its bytes are never returned; nothing is sent. Descriptor-based upload-root containment, the size limit, and transport are enforced only on a real (non-dry-run) call."
-		data["dry_run_note"] = note
-		return marshalUploadPlan(data)
-	}
-	data["multipart"] = true
-	data["form_fields"] = formFields
-	if filePath != "" {
-		data["file_field"] = fileField
-		data["file_path"] = filePath
-	}
-	note := "multipart dry-run: metadata-only. The credential and token-kind gate were resolved, and required path/query/header/body fields and the multipart file binding were validated; file_path is NOT opened or read and its bytes are never returned; the multipart body is not materialized and nothing is sent. Descriptor-based upload-root containment and transport are enforced only on a real (non-dry-run) call."
-	data["dry_run_note"] = note
-	return marshalUploadPlan(data)
+	return formFields, queryFields, headerFields, filePath
 }
 
 func marshalUploadPlan(data map[string]any) (envelope []byte, ok bool, exitErr *output.ExitError) {
