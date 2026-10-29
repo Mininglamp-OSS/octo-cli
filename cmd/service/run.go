@@ -1588,8 +1588,7 @@ func writeOnlyBodyFields(schema *registry.SchemaInfo) []string {
 	}
 	var fields []string
 	for name := range schema.Properties {
-		prop := schema.Properties[name]
-		if registry.RequestSensitive(prop.Secret, prop.WriteOnly) {
+		if schema.Properties[name].WriteOnly {
 			fields = append(fields, name)
 		}
 	}
