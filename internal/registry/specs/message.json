@@ -390,6 +390,123 @@
           }
         }
       }
+    },
+    "/v1/bot/message/card/revisions/clear": {
+      "post": {
+        "operationId": "message.card-revisions-clear",
+        "summary": "Erase the revision history of a card message the bot sent",
+        "description": "Deletes every stored revision frame of the card and writes an audit tombstone (editor, time, cleared count); the frames cannot be recovered. Only the bot that sent the message may clear it, and the message must be a card (type 17). Rejected when cards are disabled for bots (deployment card switch AND OCTO_BOT_CARD_ENABLED).",
+        "x-octo-risk": "high-risk-write",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["message_id", "channel_id", "channel_type"],
+                "properties": {
+                  "message_id": { "type": "string", "description": "decimal int64 message id" },
+                  "channel_id": { "type": "string", "description": "channel the card was sent to (peer uid for a DM)" },
+                  "channel_type": { "type": "integer", "minimum": 1, "description": "1=DM, 2=group, 5=thread" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revisions cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cleared": { "type": "integer", "description": "number of revision frames removed" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/messages/{message_id}": {
+      "get": {
+        "operationId": "message.group-get",
+        "summary": "Get one group message by id (User Bot only)",
+        "description": "The bot must be an active (not blacklisted) member of the group. Normal and disbanded groups are both readable (disbanded groups keep their history); disabled or missing groups return message-not-found. Messages hidden from the bot (visibles whitelist, deleted, expired, or before the bot's channel offset) return message-not-found. App Bot tokens are rejected. group_no must be 32 hex characters.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "message_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "positive decimal int64 message id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SingleMessage" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/messages/person/{peer_uid}/{message_id}": {
+      "get": {
+        "operationId": "message.person-get",
+        "summary": "Get one direct message by id",
+        "description": "Reads a message from the DM between the bot and peer_uid. A bot token carries no Space, so the same-space branch never applies to a bot caller: the peer must be a friend of the bot, a bot created by the calling bot, or a system bot, and (except for a bot it created) neither side may have blacklisted the other. Every denial returns message-not-found. A space-scoped App Bot additionally requires the peer to still be a member of its bound space. peer_uid must not be the bot itself or contain '@'.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "peer_uid", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "message_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "positive decimal int64 message id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SingleMessage" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/threads/{short_id}/messages/{message_id}": {
+      "get": {
+        "operationId": "message.thread-get",
+        "summary": "Get one thread message by id (User Bot only)",
+        "description": "Only available when the server runs with DM_THREAD_ON enabled (404 otherwise). The bot must be an active member of the parent group; archived threads are readable, deleted threads return message-not-found. App Bot tokens are rejected.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "short_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "message_id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "positive decimal int64 message id" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Message",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SingleMessage" } } }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SingleMessage": {
+        "type": "object",
+        "properties": {
+          "header": { "type": "object" },
+          "setting": { "type": "integer" },
+          "message_id": { "type": "integer", "format": "int64" },
+          "message_idstr": { "type": "string", "description": "message_id as a decimal string (use this to avoid precision loss)" },
+          "message_seq": { "type": "integer" },
+          "client_msg_no": { "type": "string" },
+          "from_uid": { "type": "string" },
+          "channel_id": { "type": "string" },
+          "channel_type": { "type": "integer" },
+          "timestamp": { "type": "integer" },
+          "payload": { "type": "object" },
+          "is_deleted": { "type": "integer" },
+          "reactions": { "type": "array", "items": { "type": "object" } },
+          "extra_version": { "type": "integer" }
+        }
+      }
     }
   }
 }

@@ -1,6 +1,7 @@
 ---
 name: octo-marketplace
 version: 0.7.0
+services: ["marketplace"]
 description: Search, install, publish, review, and update Marketplace plugins — Skills, MCP connectors, and Experts/Squads (专家/专家团) — through the unified plugin API. Load after octo-shared.
 metadata:
   requires:

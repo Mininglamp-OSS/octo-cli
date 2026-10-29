@@ -101,7 +101,7 @@ func (e *driveTestEnv) data(t *testing.T) map[string]any {
 
 // --- command tree ---
 
-// TestDrive_CommandCount pins the 49-command surface: 43 generated leaves plus
+// TestDrive_CommandCount pins the 59-command surface: 53 generated leaves plus
 // six composites (three of which replace generated leaves). A drift here means
 // either a spec op was added without a decision or a composite stopped
 // registering.
@@ -115,18 +115,19 @@ func TestDrive_CommandCount(t *testing.T) {
 		t.Fatal("missing drive command")
 	}
 	want := map[string][]string{
-		"":            {"browse", "search"},
+		"":            {"browse", "search", "hello"},
 		"space":       {"create", "list", "ensure-personal", "get", "rename", "delete"},
 		"member":      {"list", "add", "set-role", "remove"},
 		"folder":      {"create", "list", "rename", "move", "delete"},
-		"file":        {"get", "move", "copy", "rename"},
+		"file":        {"get", "move", "copy", "rename", "ancestors", "doc-alive"},
 		"blob":        {"create", "get", "list", "delete"},
 		"upload":      {"file", "prepare", "confirm", "cancel", "parts-presign", "complete", "abort"},
 		"download":    {"file", "url"},
-		"doc":         {"mount", "unmount", "list", "candidates"},
-		"share":       {"create", "blob-create", "list", "revoke", "access", "download"},
+		"doc":         {"mount", "unmount", "list", "candidates", "mount-by-role"},
+		"share":       {"create", "blob-create", "list", "revoke", "access", "download", "transfer", "existing-copies"},
 		"invite":      {"create", "list", "revoke", "accept"},
-		"im-transfer": {"create"},
+		"im-transfer": {"create", "lookup"},
+		"trash":       {"list", "restore", "delete"},
 	}
 	total := 0
 	for group, leaves := range want {
@@ -145,8 +146,8 @@ func TestDrive_CommandCount(t *testing.T) {
 			}
 		}
 	}
-	if total != 49 {
-		t.Errorf("expected 49 drive commands, the table lists %d", total)
+	if total != 59 {
+		t.Errorf("expected 59 drive commands, the table lists %d", total)
 	}
 	// Nothing beyond the table: a stray leaf (e.g. a duplicate generated
 	// `share access`) would otherwise pass unnoticed.
@@ -959,5 +960,39 @@ func TestDriveUploadFile_AcceptsASymlinkToARegularFile(t *testing.T) {
 	}, nil)
 	if err := env.run("drive", "upload", "file", link, "--space-id", "s1", "--dry-run"); err != nil {
 		t.Errorf("a symlink to a regular file must still be uploadable: %v", err)
+	}
+}
+
+// TestDrive_GeneratedShareLeavesForMCP pins both directions of the share-leaf
+// swap: the CLI gets the hand-written composites (positional file id / whole
+// share URL), while a factory with GeneratedDriveShareLeaves — the MCP server's
+// per-call factory — keeps the generated leaves whose shape matches the
+// published schema.
+func TestDrive_GeneratedShareLeavesForMCP(t *testing.T) {
+	for _, generated := range []bool{false, true} {
+		tf := cmdutil.NewTestFactory()
+		tf.RegistryFunc = registry.MustNew
+		tf.GeneratedDriveShareLeaves = generated
+		root := NewRootCmd(tf.Factory)
+		share := findDriveCmd(findDriveCmd(root, "drive"), "share")
+		if share == nil {
+			t.Fatal("missing drive share")
+		}
+		if findDriveCmd(share, "create") == nil {
+			t.Errorf("generated=%v: the share create composite must always register", generated)
+		}
+		for leaf, compositeUse := range map[string]string{
+			"blob-create": "blob-create <file-id>",
+			"access":      "access <share-url>",
+			"download":    "download <share-url>",
+		} {
+			cmd := findDriveCmd(share, leaf)
+			if cmd == nil {
+				t.Fatalf("generated=%v: missing share %s", generated, leaf)
+			}
+			if isComposite := cmd.Use == compositeUse; isComposite == generated {
+				t.Errorf("generated=%v: share %s Use = %q", generated, leaf, cmd.Use)
+			}
+		}
 	}
 }

@@ -284,6 +284,263 @@
         },
         "responses": { "200": { "description": "Removed" } }
       }
+    },
+    "/v1/bot/groups/{group_no}/mention_pref": {
+      "get": {
+        "operationId": "group.mention-pref",
+        "summary": "Read whether the bot may reply in a group without being @mentioned",
+        "description": "The bot must be a non-deleted member of the group, otherwise not-group-member. no_mention and effective both carry the combined decision (bot owner preference AND the group allow_no_mention switch); group_allow_no_mention is the raw group switch. When effective is false the bot must be @mentioned. App Bot tokens have no group membership and are rejected.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mention preference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "no_mention": { "type": "integer", "enum": [0, 1], "description": "combined decision as 0/1" },
+                    "group_allow_no_mention": { "type": "integer", "description": "raw group-level switch (defaults to 1)" },
+                    "effective": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/incoming-webhooks": {
+      "post": {
+        "operationId": "group.webhook.create",
+        "summary": "Create a group incoming webhook (returns its push token once)",
+        "description": "The bot must be an internal, normal-status member of the group (any member may create; App Bot tokens are rejected as non-members). team container groups (purpose ai_session_container) are rejected. Requires the incomingwebhook.enabled system setting (403 when off) and an active group. Only group owners/managers may set avatar. Per-group, per-creator and total quotas apply. The backend rejects an empty request body and the CLI never sends a bare {}, so pass at least one field (for example --name). The response carries the push token and push URLs; they are returned only here and on regenerate, and anyone holding them can post into the group.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IncomingWebhookCreate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created webhook with its push token",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IncomingWebhookWithToken" } } }
+          }
+        }
+      },
+      "get": {
+        "operationId": "group.webhook.list",
+        "summary": "List the group's incoming webhooks",
+        "description": "Visible to any internal, normal-status group member (App Bot tokens are rejected as non-members). Not gated by the incomingwebhook.enabled switch. Lists group-level webhooks only (thread webhooks are listed under the thread). Never returns tokens or push URLs.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "list": { "type": "array", "items": { "$ref": "#/components/schemas/IncomingWebhook" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/incoming-webhooks/{webhook_id}": {
+      "put": {
+        "operationId": "group.webhook.update",
+        "summary": "Update a group incoming webhook",
+        "description": "Allowed for group owners/managers, or the bot that created the webhook. Requires the incomingwebhook.enabled switch. Only owners/managers may change avatar. Enabling (status=1) requires an active group and a creator still in the group. Omitted fields are left unchanged; mention_uids [] clears targeted mentions. Pass at least one field: an empty body is rejected.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/IncomingWebhookUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated webhook",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IncomingWebhook" } } }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "group.webhook.delete",
+        "summary": "Delete a group incoming webhook",
+        "description": "Soft-deletes the webhook; its push token stops working and it cannot be restored. Allowed for group owners/managers, or the bot that created the webhook. Requires the incomingwebhook.enabled switch.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Deleted" } }
+      }
+    },
+    "/v1/bot/groups/{group_no}/incoming-webhooks/{webhook_id}/regenerate": {
+      "post": {
+        "operationId": "group.webhook.regenerate",
+        "summary": "Rotate a group incoming webhook's push token",
+        "description": "Invalidates the old token and returns a new token and push URLs once. Allowed for group owners/managers, or the bot that created the webhook. Requires the incomingwebhook.enabled switch, an active group, and a creator still in the group.",
+        "x-octo-risk": "high-risk-write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Webhook with its new push token",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/IncomingWebhookWithToken" } } }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/incoming-webhooks/{webhook_id}/deliveries": {
+      "get": {
+        "operationId": "group.webhook.deliveries",
+        "summary": "List recent deliveries of a group incoming webhook",
+        "description": "Allowed for group owners/managers, or the bot that created the webhook. Not gated by the incomingwebhook.enabled switch. Newest first; never includes tokens or caller IPs.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 50, "minimum": 1, "maximum": 100 }, "description": "values above 100 are clamped; missing or non-positive values use 50" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery records",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "list": { "type": "array", "items": { "$ref": "#/components/schemas/IncomingWebhookDelivery" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/groups/{group_no}/incoming-webhooks/{webhook_id}/test": {
+      "post": {
+        "operationId": "group.webhook.test",
+        "summary": "Send a test message through a group incoming webhook",
+        "description": "Posts a fixed test message into the group as the webhook (targeted mentions are rendered, broadcast mentions are not). Allowed for group owners/managers, or the bot that created the webhook. Requires the incomingwebhook.enabled switch, an active group, and a creator still in the group.",
+        "x-octo-risk": "write",
+        "parameters": [
+          { "name": "group_no", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "webhook_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Test message sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "integer" },
+                    "message_id": { "type": "integer", "format": "int64" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "IncomingWebhookCreate": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "maxLength": 64, "description": "display name (trimmed); auto-generated when empty" },
+          "avatar": { "type": "string", "description": "avatar URL; group owners/managers only" },
+          "mention_uids": { "type": "array", "items": { "type": "string" }, "description": "uids the webhook @mentions on every push; each must be a current internal group member; de-duplicated; at most 50 by default (OCTO_INCOMINGWEBHOOK_MAX_MENTION_UIDS)" },
+          "allow_mention_all": { "type": "boolean", "description": "allow @all broadcasts (default false)" },
+          "allow_mention_bots": { "type": "boolean", "description": "allow @all-bots broadcasts (default false)" }
+        }
+      },
+      "IncomingWebhookUpdate": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 64, "description": "new display name (trimmed, must not be blank)" },
+          "avatar": { "type": "string", "description": "avatar URL; group owners/managers only" },
+          "status": { "type": "integer", "enum": [0, 1], "description": "0=disabled, 1=enabled" },
+          "mention_uids": { "type": "array", "items": { "type": "string" }, "description": "replaces targeted mentions; [] clears them; same membership and count rules as create" },
+          "allow_mention_all": { "type": "boolean" },
+          "allow_mention_bots": { "type": "boolean" }
+        }
+      },
+      "IncomingWebhook": {
+        "type": "object",
+        "properties": {
+          "webhook_id": { "type": "string" },
+          "group_no": { "type": "string" },
+          "thread_short_id": { "type": "string", "description": "set only for thread-bound webhooks" },
+          "name": { "type": "string" },
+          "avatar": { "type": "string" },
+          "creator_uid": { "type": "string" },
+          "status": { "type": "integer", "description": "0=disabled, 1=enabled" },
+          "allow_mention_all": { "type": "integer" },
+          "allow_mention_bots": { "type": "integer" },
+          "mention_uids": { "type": "array", "items": { "type": "string" } },
+          "last_used_at": { "type": "integer" },
+          "call_count": { "type": "integer" },
+          "created_at": { "type": "integer" }
+        }
+      },
+      "IncomingWebhookWithToken": {
+        "allOf": [
+          { "$ref": "#/components/schemas/IncomingWebhook" },
+          {
+            "type": "object",
+            "properties": {
+              "token": { "type": "string", "description": "push token (credential); shown only on create/regenerate" },
+              "url": { "type": "string", "description": "host-less native push path embedding the token (credential)" },
+              "urls": { "type": "object", "description": "host-less push paths per adapter, each embedding the token (credential)" },
+              "adapter_examples": { "type": "array", "items": { "type": "object" }, "description": "integration examples built on the same token-bearing paths" }
+            }
+          }
+        ]
+      },
+      "IncomingWebhookDelivery": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "integer" },
+          "reason": { "type": "string" },
+          "http_status": { "type": "integer" },
+          "adapter": { "type": "string" },
+          "byte_size": { "type": "integer" },
+          "message_id": { "type": "integer", "format": "int64" },
+          "created_at": { "type": "integer" }
+        }
+      }
     }
   }
 }

@@ -186,7 +186,7 @@ func apiSecretsForRequest(reg *registry.Registry, method, path string, body any)
 		return secrets, nil
 	}
 	if d := matchOperation(reg, method, path); d != nil && d.RequestBody != nil {
-		found, err := service.CollectBodySecrets(d.RequestBody, body)
+		found, err := service.CollectRequestSecrets(d, body)
 		if err != nil {
 			return nil, output.ErrValidation(fmt.Sprintf("--data: %v", err),
 				"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")

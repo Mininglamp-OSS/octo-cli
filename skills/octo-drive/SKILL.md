@@ -1,6 +1,7 @@
 ---
 name: octo-drive
 version: 0.1.0
+services: ["drive"]
 description: Octo Drive — spaces, folders, file upload/download, online-document mounts, share links, invites, IM-attachment transfer. Works with a bot token or a user API key; the CLI routes by token kind. Load after octo-shared.
 metadata:
   requires:
@@ -313,3 +314,7 @@ drive im-transfer create
 ```
 
 Inspect a command's help before looking up its wire schema: `octo-cli drive <group> <verb> --help` shows the underlying operation ID or IDs. Pass those exact IDs to `octo-cli schema`; do not derive a schema ID from a composite CLI path. For example, `drive download file --help` identifies `drive.download.url`, and `drive share create --help` identifies `drive.file.get` and `drive.share.blob-create`. `drive upload file --help` lists its underlying `drive.upload.*` operations; look up those IDs rather than inventing `drive.upload.file`.
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.

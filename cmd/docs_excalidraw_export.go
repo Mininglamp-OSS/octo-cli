@@ -55,6 +55,10 @@ This format reads the live scene even during --dry-run.`
 			return err
 		}
 		if strings.TrimSpace(outputPath) == "" {
+			// The MCP server has no output path; it asks for the file inline.
+			if f.InlineBinaryLimit > 0 {
+				return runDocsExcalidrawExportInline(cmd, f, args[0])
+			}
 			return output.ErrValidation("--output is required when --image-format is excalidraw", "pass --output/-o with a .excalidraw destination")
 		}
 		return runDocsExcalidrawExport(cmd, f, args[0], outputPath)
@@ -65,22 +69,80 @@ func runDocsExcalidrawExport(cmd *cobra.Command, f *cmdutil.Factory, docID, outp
 	if strings.ToLower(filepath.Ext(outputPath)) != ".excalidraw" {
 		return output.ErrValidation("--output must have the .excalidraw extension", "choose a destination path ending in .excalidraw")
 	}
-	s, err := getScene(cmd, f, docID)
+	data, s, elements, files, err := buildPortableExcalidraw(cmd, f, docID, outputPath)
+	if err != nil || data == nil {
+		return err
+	}
+	if err := client.WriteFileAtomic(outputPath, data, 0o600); err != nil {
+		return err
+	}
+	result, err := json.Marshal(map[string]any{"path": outputPath, "bytes": len(data), "elements": len(elements), "files": len(files), "baseVersion": s.BaseVersion})
 	if err != nil {
 		return err
+	}
+	return f.EmitSuccess(result)
+}
+
+// runDocsExcalidrawExportInline returns the portable Excalidraw file inside the
+// result envelope instead of writing it, under the same bounded-inline rules as
+// a binary response (client.InlineBinaryEnvelope). It is used when the caller
+// has no filesystem destination (the MCP server sets f.InlineBinaryLimit).
+// Dry-run reports what would be exported without reading the scene, so an MCP
+// rehearsal never reaches the network.
+func runDocsExcalidrawExportInline(cmd *cobra.Command, f *cmdutil.Factory, docID string) error {
+	if f.Globals != nil && f.Globals.DryRun {
+		preview, err := json.Marshal(map[string]any{
+			"dry_run":      true,
+			"doc_id":       docID,
+			"image_format": "excalidraw",
+			"inline":       true,
+			"note":         "the live scene and its attachments are read when the call runs",
+		})
+		if err != nil {
+			return err
+		}
+		return f.EmitSuccess(preview)
+	}
+	data, s, elements, files, err := buildPortableExcalidraw(cmd, f, docID, "")
+	if err != nil {
+		return err
+	}
+	env := map[string]any{
+		"status":       200,
+		"content_type": "application/json",
+		"size":         len(data),
+		"elements":     len(elements),
+		"files":        len(files),
+		"baseVersion":  s.BaseVersion,
+	}
+	client.InlineBinaryEnvelope(env, data, f.InlineBinaryLimit)
+	result, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return f.EmitSuccess(result)
+}
+
+// buildPortableExcalidraw assembles the version-2 Excalidraw envelope for the
+// live scene of docID. With --dry-run and a non-empty outputPath it emits the
+// preview itself and returns nil data.
+func buildPortableExcalidraw(cmd *cobra.Command, f *cmdutil.Factory, docID, outputPath string) (data []byte, s *sceneSnapshot, elements []map[string]any, files map[string]any, err error) {
+	s, err = getScene(cmd, f, docID)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
 
 	// clearElementsForExport: drop tombstoned elements and force linear elements'
 	// lastCommittedPoint to null; everything else passes through verbatim (unlike
 	// getVisibleElements, invisibly-small elements are NOT stripped on export).
-	elements := clearElementsForExport(s.Elements)
+	elements = clearElementsForExport(s.Elements)
 
 	// filterOutDeletedFiles: only keep file entries referenced by a surviving
 	// (non-deleted) element via its fileId.
 	referenced := referencedFileIDs(elements)
 	attachments, err := validatePortableAttachmentRefs(s.Files, referenced)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, err
 	}
 
 	if f.Globals != nil && f.Globals.DryRun {
@@ -93,35 +155,28 @@ func runDocsExcalidrawExport(cmd *cobra.Command, f *cmdutil.Factory, docID, outp
 			"baseVersion": s.BaseVersion,
 		})
 		if err != nil {
-			return err
+			return nil, nil, nil, nil, err
 		}
-		return f.EmitSuccess(preview)
+		return nil, nil, nil, nil, f.EmitSuccess(preview)
 	}
 
 	appState := cleanAppStateForExport(s.AppState)
-	files, err := embedPortableAttachments(cmd, f, docID, elements, appState, attachments)
+	files, err = embedPortableAttachments(cmd, f, docID, elements, appState, attachments)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, err
 	}
 
-	data, err := marshalExcalidrawEnvelope(elements, appState, files)
+	data, err = marshalExcalidrawEnvelope(elements, appState, files)
 	if err != nil {
-		return err
+		return nil, nil, nil, nil, err
 	}
 	// The exported file promises immediate compatibility with `docs import`,
 	// whose request/file limit applies to the final JSON bytes after base64
 	// expansion, not to the original attachment byte count.
 	if int64(len(data)) > maxDocsImportBytes {
-		return fmt.Errorf("portable export would be %d bytes and exceed the %d MiB docs import limit", len(data), maxDocsImportBytes>>20)
+		return nil, nil, nil, nil, fmt.Errorf("portable export would be %d bytes and exceed the %d MiB docs import limit", len(data), maxDocsImportBytes>>20)
 	}
-	if err := client.WriteFileAtomic(outputPath, data, 0o600); err != nil {
-		return err
-	}
-	result, err := json.Marshal(map[string]any{"path": outputPath, "bytes": len(data), "elements": len(elements), "files": len(files), "baseVersion": s.BaseVersion})
-	if err != nil {
-		return err
-	}
-	return f.EmitSuccess(result)
+	return data, s, elements, files, nil
 }
 
 // excalidrawExportedAppStateKeys is the export allowlist from Excalidraw's

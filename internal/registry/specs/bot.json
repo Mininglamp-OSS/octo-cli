@@ -180,6 +180,237 @@
         "x-octo-risk": "write",
         "responses": { "200": { "description": "Heartbeat recorded" } }
       }
+    },
+    "/v1/bot/resolve/targets": {
+      "get": {
+        "operationId": "bot.resolve-targets",
+        "summary": "Resolve groups and threads the bot belongs to by name",
+        "description": "Substring (SQL LIKE) match on group and thread names, limited to groups where the calling bot is a non-deleted group member (no space filter, so cross-space external groups are included; team container groups (purpose ai_session_container) are excluded). Threads are returned only when active or archived. An exact name match sorts first. App Bot tokens pass authentication but have no group membership, so they always resolve to an empty list.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "name", "in": "query", "required": true, "schema": { "type": "string" }, "description": "name fragment to match (blank is rejected)" },
+          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["all", "group", "thread"], "default": "all" }, "description": "restrict candidates to groups or threads" },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 20, "minimum": 1, "maximum": 50 }, "description": "per-kind cap; values above 50 are clamped, missing or non-positive values use 20" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "candidates": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": { "type": "string", "enum": ["group", "thread"] },
+                          "channel_id": { "type": "string", "description": "group_no for a group; thread channel id for a thread" },
+                          "channel_type": { "type": "integer", "description": "2=group, 5=thread" },
+                          "name": { "type": "string" },
+                          "group_no": { "type": "string" },
+                          "short_id": { "type": "string", "description": "thread only" },
+                          "parent_name": { "type": "string", "description": "thread only: parent group name" }
+                        }
+                      }
+                    },
+                    "total": { "type": "integer" },
+                    "truncated": { "type": "boolean", "description": "true when more matches exist than the limit" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/users/batch": {
+      "post": {
+        "operationId": "bot.users-batch",
+        "summary": "Resolve minimal identity info for a batch of user UIDs",
+        "description": "Returns only uid, status, name and robot flag (no contact data). uids must be non-empty, unique, at most 200 entries and at most 64 characters each; the request body is capped at 32 KiB. Space-prefixed uids (s<digits>_<uid>) are resolved by their base uid and echoed back as sent. Unknown or non-live accounts are listed in missing_uids. Protected by an always-on per-IP rate limit in addition to the bot limiter.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["uids"],
+                "properties": {
+                  "uids": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string", "minLength": 1, "maxLength": 64 }, "description": "unique user uids (duplicates are rejected)" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Resolved users in request order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "uid": { "type": "string" },
+                          "status": { "type": "integer" },
+                          "name": { "type": "string" },
+                          "robot": { "type": "integer", "description": "1 when the uid is a bot" }
+                        }
+                      }
+                    },
+                    "missing_uids": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/space/principals/{uid}": {
+      "get": {
+        "operationId": "bot.space-principal",
+        "summary": "Resolve one principal inside an explicit space (User Bot only)",
+        "description": "User Bot (bf_) only; App Bot tokens are rejected. space_id is mandatory and never inferred. The space must be active, the calling bot and its creator must be eligible members of that space, and the target must be a live human member or an active User Bot whose creator is a member. Every ineligible case returns the same user-not-found error.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "uid", "in": "path", "required": true, "schema": { "type": "string" }, "description": "target principal uid" },
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "space to resolve the principal in" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Principal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "uid": { "type": "string" },
+                    "principal_type": { "type": "string", "enum": ["human", "user_bot"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/card/profile": {
+      "get": {
+        "operationId": "bot.card-profile",
+        "summary": "Read the card capability manifest and the bot's effective card settings",
+        "description": "Returns 200 with the full manifest even when cards are disabled; enabled reflects the deployment card switch AND OCTO_BOT_CARD_ENABLED. config is the calling bot's effective card policy; a failure to read it returns 500 rather than defaults. The response is per-bot and sent with Cache-Control: private, no-store.",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Card capability manifest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "card_version": { "type": "string" },
+                    "profiles": { "type": "array", "items": { "type": "string" } },
+                    "elements": { "type": "array", "items": { "type": "string" } },
+                    "inputs": { "type": "array", "items": { "type": "string" } },
+                    "actions": { "type": "array", "items": { "type": "string" } },
+                    "config": {
+                      "type": "object",
+                      "properties": {
+                        "card_enabled": { "type": "boolean" },
+                        "display_enabled": { "type": "boolean" },
+                        "interaction_enabled": { "type": "boolean" },
+                        "reasoning_enabled": { "type": "boolean" },
+                        "reasoning_template_ref": { "type": ["object", "null"] }
+                      }
+                    },
+                    "templating": { "type": "object" },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "max_payload_bytes": { "type": "integer" },
+                        "max_nodes": { "type": "integer" },
+                        "max_depth": { "type": "integer" },
+                        "max_input_text_bytes": { "type": "integer" },
+                        "max_inputs_bytes": { "type": "integer" },
+                        "max_copy_text_bytes": { "type": "integer" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/obo-grant": {
+      "get": {
+        "operationId": "bot.obo-grant",
+        "summary": "Read the active on-behalf-of grant whose grantee is the calling bot",
+        "description": "The bot uid is taken from the token only. Returns 404 when the bot has no usable grant (never granted, paused, revoked or expired); treat that as no persona to apply.",
+        "x-octo-risk": "read",
+        "responses": {
+          "200": {
+            "description": "Active grant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grantor_uid": { "type": "string" },
+                    "persona_prompt": { "type": "string" },
+                    "active": { "type": "boolean" },
+                    "global_enabled": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/obo-grants/self": {
+      "get": {
+        "operationId": "bot.obo-grants-self",
+        "summary": "Read the bot's policy grant status in one space (User Bot only, advisory)",
+        "description": "User Bot (bf_) only; App Bot tokens get 401. space_id is a required query parameter (exact value, no surrounding whitespace); the X-Space-Id header is not consulted. The bot user must be active, the space active, and the bot an active member of that space, otherwise 401. Returns an empty array when the bot has no owner or no grant from its owner. Advisory only; the server re-checks grants on every OBO action.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "space_id", "in": "query", "required": true, "schema": { "type": "string" }, "description": "space the bot acts in" }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant status list (zero or one entry)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "grantor_uid": { "type": "string" },
+                      "grant_state": { "type": "string", "enum": ["ACTIVE", "PAUSED", "REVOKED", "EXPIRED"] },
+                      "global_enabled": { "type": "boolean" },
+                      "scopes": { "type": "array", "items": { "type": "string" } },
+                      "policy_version": { "type": "integer" },
+                      "expires_at": { "type": "string", "format": "date-time" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

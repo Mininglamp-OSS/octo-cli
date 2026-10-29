@@ -70,6 +70,8 @@ const transferDialAttemptTimeout = 10 * time.Second
 // access` and `share download` keep their spec operations (so `octo-cli schema
 // drive.share.access` still describes the real endpoint) but their CLI surface
 // is the hand-written one, which takes a positional file id / whole share URL.
+// A factory with GeneratedDriveShareLeaves (the MCP server) keeps the generated
+// leaves instead.
 func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 	drive := service.FindChild(root, "drive")
 	if drive == nil {
@@ -82,10 +84,15 @@ func registerDriveCmds(root *cobra.Command, f *cmdutil.Factory) {
 		download.AddCommand(newDriveDownloadFileCmd(f))
 	}
 	if share := service.FindChild(drive, "share"); share != nil {
+		share.AddCommand(newDriveShareCreateCmd(f))
+		// The MCP server executes operations by their published schema, so it
+		// keeps the generated leaves; the CLI swaps in the composites.
+		if f.GeneratedDriveShareLeaves {
+			return
+		}
 		service.RemoveLeaf(share, "blob-create")
 		service.RemoveLeaf(share, "access")
 		service.RemoveLeaf(share, "download")
-		share.AddCommand(newDriveShareCreateCmd(f))
 		share.AddCommand(newDriveShareBlobCreateCmd(f))
 		share.AddCommand(newDriveShareAccessCmd(f))
 		share.AddCommand(newDriveShareDownloadCmd(f))

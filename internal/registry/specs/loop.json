@@ -58,6 +58,10 @@
       "description": "Scheduled and event-driven task or direct-execution dispatch."
     },
     {
+      "name": "capabilities",
+      "description": "Portable capability definitions and atomic installation."
+    },
+    {
       "name": "projects",
       "description": "Loop projects inside a workspace; distinct from octo-server Project/Workspace identity."
     }
@@ -69,9 +73,7 @@
   ],
   "security": [
     {
-      "bearer_auth": [
-
-      ]
+      "bearer_auth": []
     }
   ],
   "x-common-errors": {
@@ -2900,6 +2902,122 @@
         "x-octo-risk": "read"
       }
     },
+    "/fleet/api/v1/capabilities/install": {
+      "post": {
+        "summary": "Install a capability definition",
+        "description": "Atomically materialize a versioned capability definition as skills, one expert, or an expert team in the workspace. Requires workspace membership; runtime bindings must name runtimes in the workspace that the caller may use (private runtimes need their owner or a workspace admin). Skill-only definitions need no bindings. The body is decoded strictly (unknown fields are rejected) and limited to 32 MiB. Replaying an identical Idempotency-Key and body within 24 hours returns the original result. Task credentials are rejected; issued Loop credentials need the capability.install action. This route always uses the public contract.",
+        "tags": [
+          "capabilities"
+        ],
+        "operationId": "capability.install",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityInstallationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "description": "RATE_LIMITED - capability installation rate exceeded the configured limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "409": {
+            "description": "DUPLICATE - the Idempotency-Key was reused with a different request, an expert name already exists, or a caller-owned same-name skill has different content.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "PAYLOAD_TOO_LARGE - the body exceeds 32 MiB or a definition limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "UNSUPPORTED_MEDIA_TYPE - Content-Type must be application/json.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "UPSTREAM_UNAVAILABLE - a required verifier or identity store is unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Capability resources were created, or the original result was replayed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CapabilityInstallation"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "write"
+      },
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/WorkspaceIDHeader"
+        }
+      ]
+    },
     "/fleet/api/v1/workspaces": {
       "get": {
         "summary": "List workspaces",
@@ -3236,12 +3354,19 @@
                       },
                       "role": {
                         "type": "integer",
-                        "enum": [0, 1, 2],
+                        "enum": [
+                          0,
+                          1,
+                          2
+                        ],
                         "description": "Project role: 0 common member, 1 admin, 2 owner."
                       },
                       "robot": {
                         "type": "integer",
-                        "enum": [0, 1],
+                        "enum": [
+                          0,
+                          1
+                        ],
                         "description": "0 for a person, 1 for a Bot. Bot seats remain visible in member listings."
                       },
                       "id": {
@@ -3264,9 +3389,282 @@
           }
         },
         "x-octo-risk": "read"
+      },
+      "post": {
+        "summary": "Add workspace member",
+        "description": "Add a member to a legacy workspace. Requires the workspace owner or admin role; project workspaces return 409. The request mode is chosen by its fields: principal_type and principal_id add a same-Space Octo user or bot directly (the principal must be on the Space roster and its type must match; requires Octo authentication and returns 200), while email creates a pending email invitation (returns 201). Email and principal fields cannot be combined. When sent, X-Workspace-ID must equal workspace_id.",
+        "tags": [
+          "workspaces"
+        ],
+        "operationId": "workspace.member.add",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "principal_type": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "bot"
+                    ],
+                    "description": "Principal mode: Octo principal type; must match the Space roster entry."
+                  },
+                  "principal_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Principal mode: Octo uid of the user or bot."
+                  },
+                  "email": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Invitation mode: invitee email address."
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "admin",
+                      "member"
+                    ],
+                    "default": "member",
+                    "description": "Member role; owner is rejected. Defaults to member."
+                  }
+                },
+                "oneOf": [
+                  {
+                    "title": "Principal member",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "principal_type",
+                      "principal_id"
+                    ],
+                    "properties": {
+                      "principal_type": {
+                        "type": "string",
+                        "enum": [
+                          "user",
+                          "bot"
+                        ]
+                      },
+                      "principal_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "admin",
+                          "member"
+                        ],
+                        "default": "member",
+                        "description": "Member role; owner is rejected. Defaults to member."
+                      }
+                    }
+                  },
+                  {
+                    "title": "Email invitation",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "email"
+                    ],
+                    "properties": {
+                      "email": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "admin",
+                          "member"
+                        ],
+                        "default": "member",
+                        "description": "Member role; owner is rejected. Defaults to member."
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "409": {
+            "description": "CONFLICT - the workspace is a project workspace whose membership is managed by octo-server, the user is already a member, an invitation is already pending, or the Octo identity exists with a different principal type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE - Octo integration is not configured or the Space roster lookup failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Principal member added (principal mode); body is the member without a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "workspace_id",
+                    "user_id",
+                    "role",
+                    "principal_type"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "workspace_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "user_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "avatar_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "principal_type": {
+                      "type": "string",
+                      "enum": [
+                        "user",
+                        "bot"
+                      ]
+                    },
+                    "octo_uid": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Invitation created (email mode); body is the invitation without a data envelope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "workspace_id",
+                    "inviter_id",
+                    "invitee_email",
+                    "role",
+                    "status",
+                    "expires_at"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "workspace_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "inviter_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "invitee_email": {
+                      "type": "string"
+                    },
+                    "invitee_user_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "created_at": {
+                      "type": "string"
+                    },
+                    "updated_at": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-octo-risk": "high-risk-write"
       }
     },
-
     "/fleet/api/v1/labels": {
       "get": {
         "summary": "List labels",
@@ -4785,7 +5183,7 @@
             "$ref": "#/components/responses/Resource"
           }
         },
-        "x-octo-risk": "write"
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -5142,7 +5540,7 @@
             "$ref": "#/components/responses/Resource"
           }
         },
-        "x-octo-risk": "write"
+        "x-octo-risk": "high-risk-write"
       },
       "parameters": [
         {
@@ -6200,8 +6598,8 @@
     },
     "/fleet/api/v1/tasks/{task_id}/expert_team_evaluations": {
       "post": {
-        "summary": "Evaluate a task as expert team leader",
-        "description": "Record the authenticated Expert Team Leader's evaluation outcome for the current Task execution.",
+        "summary": "Record expert team evaluation",
+        "description": "Record the expert team leader's evaluation outcome for the current execution of the task. The task must be assigned to an expert team, the caller must act as that team's leader expert, and the X-Task-ID execution must belong to the task (task credentials supply it automatically). Task-credential only: a Bot token cannot use this operation, because the CLI never sends caller-supplied X-Agent-ID or X-Task-ID headers, so a Bot call is rejected with 403.",
         "tags": [
           "tasks"
         ],
@@ -6238,7 +6636,7 @@
                   },
                   "reason": {
                     "type": "string",
-                    "description": "Optional rationale for the evaluation outcome."
+                    "description": "Short explanation of the outcome."
                   }
                 }
               }
@@ -6265,7 +6663,39 @@
             "$ref": "#/components/responses/InternalError"
           },
           "201": {
-            "$ref": "#/components/responses/Resource"
+            "description": "Evaluation recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "action",
+                        "created_at"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "created_at": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "x-octo-risk": "write"
@@ -7255,6 +7685,18 @@
           "format": "uuid"
         }
       },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "Caller-generated key retained for 24 hours; replaying the same key with the same request returns the original result.",
+        "x-octo-flag": "idempotency-key",
+        "schema": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
       "TaskProjectID": {
         "name": "project_id",
         "in": "query",
@@ -7500,6 +7942,7 @@
               "properties": {
                 "custom_env": {
                   "type": "object",
+                  "x-octo-secret": true,
                   "additionalProperties": {
                     "type": "string"
                   }
@@ -9393,6 +9836,926 @@
           },
           "pagination": {
             "$ref": "#/components/schemas/OffsetPagination"
+          }
+        }
+      },
+      "WorkspaceDetail": {
+        "type": "object",
+        "description": "Workspace object returned without a data envelope by workspace create and update.",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "issue_prefix",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "context": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "settings": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "repos": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "issue_prefix": {
+            "type": "string"
+          },
+          "avatar_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WorkspaceRuntime": {
+        "type": "object",
+        "description": "Workspace runtime instance.",
+        "required": [
+          "runtime_id",
+          "workspace_id",
+          "name",
+          "runtime_mode",
+          "provider",
+          "status",
+          "visibility",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "daemon_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "custom_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime_mode": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "launch_header": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "device_info": {
+            "type": "string"
+          },
+          "metadata": {},
+          "owner_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ]
+          },
+          "can_bind": {
+            "type": "boolean"
+          },
+          "profile_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_seen_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RuntimeUpdateRequest": {
+        "type": "object",
+        "required": [
+          "runtime_update_id",
+          "runtime_id",
+          "status",
+          "target_version",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "runtime_update_id": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "timeout"
+            ]
+          },
+          "target_version": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RuntimeModelRequest": {
+        "type": "object",
+        "required": [
+          "model_request_id",
+          "runtime_id",
+          "status",
+          "supported",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "model_request_id": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "timeout"
+            ]
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "default": {
+                  "type": "boolean"
+                },
+                "thinking": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RuntimeLocalSkillRequest": {
+        "type": "object",
+        "required": [
+          "local_skill_request_id",
+          "runtime_id",
+          "status",
+          "supported",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "local_skill_request_id": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "timeout"
+            ]
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "name",
+                "source_path",
+                "provider",
+                "file_count"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "source_path": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "file_count": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "supported": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RuntimeLocalSkillImport": {
+        "type": "object",
+        "required": [
+          "local_skill_import_id",
+          "runtime_id",
+          "skill_key",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "local_skill_import_id": {
+            "type": "string"
+          },
+          "runtime_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skill_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "target_skill_id": {
+            "type": "string"
+          },
+          "supports_conflict": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "timeout",
+              "conflict"
+            ]
+          },
+          "skill": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "conflict": {
+            "type": "object",
+            "properties": {
+              "existing_skill_id": {
+                "type": "string"
+              },
+              "existing_created_by": {
+                "type": "string"
+              },
+              "can_overwrite": {
+                "type": "boolean"
+              }
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CapabilityEnvironmentVariables": {
+        "type": "object",
+        "description": "Environment variables. Names must match ^[A-Za-z_][A-Za-z0-9_]*$; values are sensitive.",
+        "x-octo-secret": true,
+        "maxProperties": 100,
+        "propertyNames": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 1048576
+        }
+      },
+      "CapabilityMCPStdioServer": {
+        "type": "object",
+        "description": "MCP server launched as a local child process.",
+        "additionalProperties": false,
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "args": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "$ref": "#/components/schemas/CapabilityEnvironmentVariables"
+          }
+        }
+      },
+      "CapabilityMCPRemoteServer": {
+        "type": "object",
+        "description": "MCP server reached through HTTP streaming or SSE. Omitted type defaults to http.",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "http",
+              "sse",
+              "streamable-http"
+            ],
+            "default": "http"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://",
+            "x-octo-secret": true
+          },
+          "headers": {
+            "type": "object",
+            "x-octo-secret": true,
+            "maxProperties": 100,
+            "propertyNames": {
+              "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "CapabilityMCPConfig": {
+        "type": "object",
+        "description": "Portable MCP configuration persisted per expert. Environment values, headers, and embedded credentials are sensitive.",
+        "additionalProperties": false,
+        "required": [
+          "mcpServers"
+        ],
+        "properties": {
+          "mcpServers": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 100,
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CapabilityMCPStdioServer"
+                },
+                {
+                  "$ref": "#/components/schemas/CapabilityMCPRemoteServer"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "CapabilitySkill": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "content"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1048576
+          },
+          "config": {},
+          "files": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "source"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "content"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "inline_text"
+                    },
+                    "content": {
+                      "type": "string",
+                      "maxLength": 1048576
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CapabilityExpert": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 1048576
+          },
+          "avatar_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "runtime_config": {},
+          "custom_env": {
+            "$ref": "#/components/schemas/CapabilityEnvironmentVariables"
+          },
+          "custom_args": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string"
+            }
+          },
+          "mcp_config": {
+            "$ref": "#/components/schemas/CapabilityMCPConfig"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ],
+            "default": "workspace",
+            "description": "Retained for compatibility. Installed experts always have workspace visibility."
+          },
+          "max_concurrent_tasks": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 6
+          },
+          "model": {
+            "type": "string"
+          },
+          "thinking_level": {
+            "type": "string",
+            "description": "Must be supported by the bound runtime's provider."
+          },
+          "skill_names": {
+            "type": "array",
+            "maxItems": 20,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      },
+      "CapabilityExpertTeam": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "members"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 1048576
+          },
+          "avatar_url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 30,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expert_name",
+                "is_leader"
+              ],
+              "properties": {
+                "expert_name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "role": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500,
+                  "default": "member"
+                },
+                "is_leader": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CapabilityDefinition": {
+        "type": "object",
+        "description": "Portable declaration of skills, experts, and an optional expert team (schema_version 1.0). At least one of skills or experts must be non-empty.",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "name"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": "1.0"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 600,
+            "items": {
+              "$ref": "#/components/schemas/CapabilitySkill"
+            }
+          },
+          "experts": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "$ref": "#/components/schemas/CapabilityExpert"
+            }
+          },
+          "expert_team": {
+            "$ref": "#/components/schemas/CapabilityExpertTeam"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "skills"
+            ],
+            "properties": {
+              "skills": {
+                "minItems": 1
+              }
+            }
+          },
+          {
+            "required": [
+              "experts"
+            ],
+            "properties": {
+              "experts": {
+                "minItems": 1
+              }
+            }
+          }
+        ]
+      },
+      "CapabilityInstallationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "definition"
+        ],
+        "properties": {
+          "definition": {
+            "$ref": "#/components/schemas/CapabilityDefinition"
+          },
+          "bindings": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "experts": {
+                "type": "array",
+                "description": "Runtime selection for every expert in the definition. Omit for skill-only definitions.",
+                "maxItems": 30,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "expert_name",
+                    "runtime_id"
+                  ],
+                  "properties": {
+                    "expert_name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "description": "References exactly one expert in definition.experts."
+                    },
+                    "runtime_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CapabilityInstallation": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "experts",
+          "skills"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "skills",
+              "expert",
+              "expert_team"
+            ]
+          },
+          "expert_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "expert_team_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "leader_expert_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "experts": {
+            "type": "array",
+            "maxItems": 30,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expert_id",
+                "name",
+                "skill_ids"
+              ],
+              "properties": {
+                "expert_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "is_leader": {
+                  "type": "boolean"
+                },
+                "skill_ids": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          },
+          "skills": {
+            "type": "array",
+            "maxItems": 600,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "skill_id",
+                "name",
+                "created"
+              ],
+              "properties": {
+                "skill_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "created": {
+                  "type": "boolean"
+                }
+              }
+            }
           }
         }
       },

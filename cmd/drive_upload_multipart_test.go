@@ -678,6 +678,9 @@ func TestDriveUploadFile_CompleteErrorDoesNotLeakSignedURL(t *testing.T) {
 	if ee == nil {
 		t.Fatalf("expected structured error, got %v", err)
 	}
+	if ee.Code != "RESULT_UNKNOWN" || ee.HTTPStatus != http.StatusInternalServerError || !ee.OutcomeUnknown() {
+		t.Fatalf("completion may have committed before the 500: %+v", ee)
+	}
 	var structured map[string]any
 	if decodeErr := json.Unmarshal(env.tf.ErrOut.Bytes(), &structured); decodeErr != nil {
 		t.Fatalf("parse structured stderr: %v (%s)", decodeErr, env.tf.ErrOut.String())
@@ -692,8 +695,8 @@ func TestDriveUploadFile_CompleteErrorDoesNotLeakSignedURL(t *testing.T) {
 	if got := completeCalls.Load(); got != multipartCompleteAttempts {
 		t.Errorf("complete calls = %d, want finite retry total %d", got, multipartCompleteAttempts)
 	}
-	if aborts.Load() != 1 {
-		t.Errorf("aborts = %d, want 1 after explicit 5xx retries are exhausted", aborts.Load())
+	if aborts.Load() != 0 {
+		t.Errorf("aborts = %d, want 0 because completion may already have succeeded", aborts.Load())
 	}
 }
 

@@ -1,6 +1,7 @@
 ---
 name: octo-files
 version: 0.4.0
+services: ["file", "bot"]
 description: File operations (upload/download, presigned S3 credentials) plus bot housekeeping (register, set-commands, user-info, space-members, typing, heartbeat). Load after octo-shared.
 metadata:
   requires:
@@ -133,3 +134,7 @@ octo-cli schema file.download
 octo-cli schema bot.register
 octo-cli schema bot.user-info
 ```
+
+## More Bot API operations
+
+Additional Bot-callable operations (with their roles, server-side switches and risk) are listed in `bot-api.md`. Load it before using an operation that is not described above.

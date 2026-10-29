@@ -74,9 +74,6 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// A Workspace path flag and its binding header share one selector. Resolve
 	// both from the same value so Fleet can authorize before route dispatch.
 	headers = bindWorkspacePathHeader(rt, pathValues, headers)
-	if err := applyLoopProjectQuery(cobraCmd, rt, q); err != nil {
-		return emitAndReturn(f, err)
-	}
 	if err := applyTaskAssigneeQuery(cobraCmd, f, rt, q, headers); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
@@ -110,10 +107,16 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	if rt.outputPath != nil {
 		req.OutputPath = *rt.outputPath
 	}
+	if d.BinaryBody {
+		req.InlineBinaryLimit = f.InlineBinaryLimit
+	}
 	if err := attachRequestBody(f, cobraCmd, rt, &req); err != nil {
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err
 		return err
 	}
+	// Forwarding an idempotency key is not proof that the backend deduplicates
+	// a resend, so only a verified contract keeps the automatic retries.
+	req.ReplaySafe = replayDeduplicated(rt, &req)
 
 	// Pagination loop (--page-all). Only for operations declaring pagination.
 	if rt.pageAll != nil && *rt.pageAll && (f.Globals == nil || !f.Globals.DryRun) {
@@ -146,6 +149,9 @@ func buildQueryAndHeaders(cobraCmd *cobra.Command, rt *operationRuntime, positio
 		return nil, nil, err
 	}
 	if err := validateSheetReadSelection(rt, q); err != nil {
+		return nil, nil, err
+	}
+	if err := applyLoopProjectQuery(cobraCmd, rt, q); err != nil {
 		return nil, nil, err
 	}
 	return q, headers, nil
@@ -211,12 +217,20 @@ func emitAndReturn(f *cmdutil.Factory, err *output.ExitError) error {
 	return err
 }
 
-// attachRequestBody selects the multipart or JSON encoder.
+// attachRequestBody selects the multipart, raw-body or JSON encoder.
 func attachRequestBody(f *cmdutil.Factory, cmd *cobra.Command, rt *operationRuntime, req *client.Request) error {
+	if rt.detail.RawBody {
+		raw, err := buildRawBody(rt, f.MultipartFile)
+		if err != nil {
+			return err
+		}
+		req.RawBody, req.ContentType = raw, rt.detail.RawBodyContentType
+		return nil
+	}
 	if !rt.detail.Multipart {
 		return attachJSONBody(f, cmd, rt, req)
 	}
-	raw, contentType, err := buildMultipartBody(cmd, rt)
+	raw, contentType, err := buildMultipartBody(cmd, rt, f.MultipartFile)
 	if err != nil {
 		return err
 	}
@@ -246,7 +260,7 @@ func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRu
 	if body == nil || rt.detail.RequestBody == nil {
 		return nil
 	}
-	bodySecrets, err := CollectBodySecrets(rt.detail.RequestBody, body)
+	bodySecrets, err := CollectRequestSecrets(rt.detail, body)
 	if err != nil {
 		return output.ErrValidation(fmt.Sprintf("--data: %v", err),
 			"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")
@@ -922,9 +936,9 @@ func validateRequiredBodyFields(rt *operationRuntime, base map[string]any) error
 	if rt.detail == nil || rt.detail.RequestBody == nil {
 		return nil
 	}
-	// Multipart bodies are assembled separately from base. Their required
-	// binary part is validated by buildMultipartBody.
-	if rt.detail.Multipart {
+	// Multipart and raw-body uploads are assembled separately from base. Their
+	// required binary part is validated by buildMultipartBody / buildRawBody.
+	if rt.detail.Multipart || rt.detail.RawBody {
 		return nil
 	}
 	enforcePublicAPIConstraints := rt.detail.Service == "loop" || rt.detail.StrictRequestSchema
@@ -1412,6 +1426,34 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 			strings.ReplaceAll(field, "_", "-"), key)
 	}
 	return exit
+}
+
+// verifiedReplayDedup lists the operations whose backend is verified to
+// deduplicate every resend of the same request carrying the same idempotency
+// key, whatever resource it targets. Only these POSTs are resent after an
+// attempt that may have taken effect. An operation is absent when its key is
+// honoured only for some resources (docs.create, docs.comments.add and the
+// docs.versions writes: octo-docs-backend reads Idempotency-Key on html_ppt
+// paths only and ignores it for every other document type) or when its backend
+// contract has not been verified (summary.create, html.publish and
+// html.draft.create).
+var verifiedReplayDedup = map[string]bool{
+	// octo-fleet CreateCapabilityInstallation requires the key and claims it in
+	// capability_installation_receipt (primary key workspace, owner, key) inside
+	// the install transaction; a repeat within 24 hours replays the stored
+	// receipt, and a different request under the same key is refused with 409.
+	"capability.install": true,
+}
+
+// replayDeduplicated reports whether req may be resent after an ambiguous
+// failure: its operation has a verified deduplication contract and the request
+// carries a key.
+func replayDeduplicated(rt *operationRuntime, req *client.Request) bool {
+	if rt == nil || rt.detail == nil || !verifiedReplayDedup[rt.detail.ID] {
+		return false
+	}
+	_, key := requestIdempotencyKey(rt, req)
+	return strings.TrimSpace(key) != ""
 }
 
 func requestIdempotencyKey(rt *operationRuntime, req *client.Request) (field, key string) {
