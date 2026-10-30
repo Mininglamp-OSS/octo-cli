@@ -8,8 +8,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
@@ -58,6 +60,8 @@ func ParseFacade(s string) (facadeMode, bool) {
 // bearer instead of the process env (stdio). baseGlobals carries the operator's
 // parsed serve-time globals (credential selector + limits) into each call.
 type Server struct {
+	admission       *Admission
+	apiOrigin       string
 	secretDownloads *SecretDownloads
 	reg             *registry.Registry
 	mapping         *Mapping
@@ -225,6 +229,9 @@ func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer
 	f.Globals.NoRetry = s.baseGlobals.NoRetry
 	f.Globals.DryRun = s.baseGlobals.DryRun
 	f.Globals.Space = tc.SpaceID
+	if s.apiOrigin != "" {
+		f.ConfigFunc = func() (*config.Config, error) { return &config.Config{APIBaseURL: s.apiOrigin}, nil }
+	}
 	if s.httpMode {
 		tok := s.credentialToken
 		space := tc.SpaceID
@@ -248,12 +255,42 @@ func (s *Server) makeFactory(tc TrustedContext) (*cmdutil.Factory, *bytes.Buffer
 // Dispatch handles one JSON-RPC message and returns the response plus whether
 // there is one. A JSON-RPC notification (no id) NEVER receives a response, for
 // any method, so the id check comes first.
-func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, bool) { //nolint:gocritic // request snapshot is immutable during dispatch
+func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, bool) { //nolint:gocritic,gocyclo // immutable RPC snapshot with one branch per accepted protocol method
+	if !validRPCID(req.ID) {
+		return newErrorResponse(nil, codeInvalidRequest, "INVALID_REQUEST"), true
+	}
 	if req.isNotification() {
+		meta, err := paramsMeta(req.Params)
+		if err != nil {
+			return rpcResponse{}, false
+		}
+		if _, err = parseDeclaredSource(meta); err != nil {
+			return rpcResponse{}, false
+		}
 		return rpcResponse{}, false
 	}
 	if req.Jsonrpc != jsonrpcVersion && req.Jsonrpc != "" {
 		return newErrorResponse(req.ID, codeInvalidRequest, "unsupported jsonrpc version"), true
+	}
+	if req.Method != "tools/call" {
+		switch req.Method {
+		case "initialize", "ping", "tools/list", "resources/list", "resources/read":
+			if s.trusted.OnBehalfOf != "" {
+				return admissionResponse(req.ID, admissionFailure(-32005, "OBO_FORBIDDEN")), true
+			}
+			if s.httpMode {
+				if _, _, _, _, err := s.verify(ctx, false); err != nil {
+					return admissionResponse(req.ID, err), true
+				}
+			}
+			meta, err := paramsMeta(req.Params)
+			if err == nil {
+				_, err = parseDeclaredSource(meta)
+			}
+			if err != nil {
+				return admissionResponse(req.ID, err), true
+			}
+		}
 	}
 	switch req.Method {
 	case "initialize":
@@ -269,11 +306,13 @@ func (s *Server) Dispatch(ctx context.Context, req rpcRequest) (rpcResponse, boo
 	case "resources/read":
 		return s.handleResourceRead(req), true
 	default:
-		return newErrorResponse(req.ID, codeMethodNotFound, "unknown method: "+req.Method), true
+		return newErrorResponse(req.ID, codeMethodNotFound, "METHOD_NOT_FOUND"), true
 	}
 }
 
 func (s *Server) handleInitialize(params json.RawMessage) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var p struct {
 		ProtocolVersion string `json:"protocolVersion"`
 		Capabilities    struct {
@@ -302,6 +341,7 @@ func (s *Server) handleInitialize(params json.RawMessage) map[string]any {
 type toolCallParams struct {
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments"`
+	Meta      json.RawMessage `json:"_meta,omitempty"`
 }
 
 func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic,gocyclo // request snapshot is immutable during dispatch; one branch per tool
@@ -310,13 +350,75 @@ func (s *Server) handleToolCall(ctx context.Context, req rpcRequest) rpcResponse
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid tools/call params: "+err.Error())
 	}
 	if !s.toolEnabled(p.Name) {
-		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool: "+p.Name)
+		return newErrorResponse(req.ID, codeInvalidParams, "unknown tool")
 	}
 	// An arguments value that is present but not a JSON object is an invalid
 	// shape: return -32602 rather than silently degrading to empty args.
 	if len(p.Arguments) > 0 && !isJSONObject(p.Arguments) {
 		return newErrorResponse(req.ID, codeInvalidParams, "tool arguments must be a JSON object")
 	}
+	var shapeErr error
+	switch p.Name {
+	case "execute":
+		shapeErr = validateExecuteKeys(p.Arguments)
+	case "call_op":
+		shapeErr = validateClosedKeys(p.Arguments, callOpArgumentNames)
+	case "get_skill":
+		shapeErr = validateClosedKeys(p.Arguments, getSkillArgumentNames)
+	}
+	if shapeErr != nil {
+		return newErrorResponse(req.ID, codeInvalidParams, "invalid "+p.Name+" arguments: "+shapeErr.Error())
+	}
+	if p.Name == "execute" || p.Name == "call_op" {
+		var wrapper struct {
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if err := json.Unmarshal(p.Arguments, &wrapper); err != nil {
+			return newErrorResponse(req.ID, codeInvalidParams, "invalid operation arguments")
+		}
+		var basicErr error
+		if ctx.Err() != nil {
+			basicErr = errArgumentsCancelled{ctx.Err()}
+		} else if isJSONObject(wrapper.Arguments) {
+			count := 0
+			basicErr = visitObjectMembers(wrapper.Arguments, func(string, json.RawMessage) error {
+				count++
+				if count%64 == 0 && ctx.Err() != nil {
+					return errArgumentsCancelled{ctx.Err()}
+				}
+				return nil
+			})
+			if basicErr == nil && count > maxArgumentNames {
+				basicErr = fmt.Errorf("too many arguments: %d names exceed the limit of %d", count, maxArgumentNames)
+			}
+		}
+		if basicErr != nil {
+			ee := argvError(basicErr, "")
+			env := synthErrorEnvelope(ee)
+			if p.Name == "execute" {
+				return newResultResponse(req.ID, jsonToolResult(map[string]any{"status": "validation_error", "envelope": decodeEnvelope(env), "error": ee}, true))
+			}
+			return newResultResponse(req.ID, rawToolResult(env, true))
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	received := req.receivedAt
+	if received.IsZero() {
+		received = time.Now()
+	}
+	call, release, err := s.admitToolCall(ctx, req, p, received)
+	if err != nil {
+		return admissionResponse(req.ID, err)
+	}
+	defer release()
+	if ctx.Err() != nil {
+		return admissionResponse(req.ID, logUnavailable())
+	}
+	return call.handleAdmittedToolCall(ctx, req, p)
+}
+
+func (s *Server) handleAdmittedToolCall(ctx context.Context, req rpcRequest, p toolCallParams) rpcResponse { //nolint:gocritic,gocyclo // immutable request snapshots are copied at this boundary; one branch per admitted facade tool
 	switch p.Name {
 	case "get_secret_download_url":
 		return newResultResponse(req.ID, s.secretDownloadTool(ctx, p.Arguments))
@@ -442,6 +544,8 @@ func decodeToolCallParams(raw json.RawMessage, p *toolCallParams) error {
 			return json.Unmarshal(value, &p.Name)
 		case "arguments":
 			p.Arguments = value
+		case "_meta":
+			p.Meta = value
 		}
 		return nil
 	})

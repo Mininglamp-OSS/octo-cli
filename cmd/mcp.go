@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,7 +37,7 @@ func newMCPCmd(f *cmdutil.Factory) *cobra.Command {
 
 func rejectMCPBareParent(cmd *cobra.Command, _ []string) error { return cmd.Help() }
 
-func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
+func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command { //nolint:gocyclo // operator startup validation is ordered before any service resources or listener
 	var (
 		httpAddr         string
 		forceChannelID   string
@@ -44,6 +45,8 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command {
 		forceOnBehalfOf  string
 		allowLocalUpload bool
 		facade           string
+		policyDebug      bool
+		policyDebugFile  string
 	)
 	serve := &cobra.Command{
 		Use:   "serve",
@@ -82,8 +85,9 @@ Deployment (HTTP):
     the loopback default, so list your loopback origin too if you still use it.
     This is an origin gate, not browser CORS support; OPTIONS preflight is not
     implemented. Use a non-browser client or a proxy that implements CORS.
-  - initialize / tools/list / search_ops / describe_op / resources/read need no
-    bearer, so any peer that can reach the port can enumerate the catalog.
+  - Every HTTP protocol request requires a bf_ User Bot bearer. Every tool
+    call, including discovery and direct secret access, verifies Bot identity
+    and the current per-Bot policy before proceeding.
 
 Multipart file_path uploads (file.upload, html.asset.add, attachment.upload)
 are default-deny on BOTH transports so a model cannot read an arbitrary local
@@ -93,18 +97,48 @@ or, on stdio only, pass
 --allow-local-upload to allow unconfined uploads on a trusted-local host. HTTP
 never allows unconfined uploads.
 
-Over-privilege protection: for stdio the forced space / channel / on-behalf-of
+Over-privilege protection: for stdio the forced space / channel
 values come from --space / --force-* flags (or OCTO_SPACE_ID / OCTO_FORCE_*
 env); HTTP uses the same operator config and a separate Authorization bearer
 per request. Unconfigured business target arguments remain caller-supplied
 inputs subject to backend authorization; they do not become trusted context.
 
---dry-run turns the whole server into a rehearsal: every call_op prints the
-request it would send (method, url, masked headers, body) as a "dry_run": true
-envelope and performs no backend mutation for the server's lifetime.`,
+Strict policy requires params._meta.octo on every tools/call. This is a client
+source declaration, never an execution identity or a business destination.
+OBO flags, environment configuration and delegation arguments are forbidden.
+
+OCTO_MCP_REQUEST_LOG_DIR must name a pre-created private POSIX directory (0700).
+Every admitted tool request is projected to the closed request-only schema and
+fsynced before execution. Logging failures block business execution.
+
+Production consumes the opt-in verify-bot policy response. Operators can select
+--policy-debug --policy-debug-file /absolute/private/policy.json to replace only
+the policy source; authentication and durable logging remain mandatory. The
+0600 file is validated once at startup; restart to change the snapshot.
+
+Serve-time --dry-run is rejected locally. execute.dry_run=true previews the
+business request after real authentication, policy checks and request logging.
+See docs/mcp-context-admission.md for wire and compatibility details.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{"skipValidation": "true"},
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+			if forceOnBehalfOf != "" || os.Getenv("OCTO_FORCE_ON_BEHALF_OF") != "" {
+				return output.ErrValidation("OBO_FORBIDDEN", "")
+			}
+			if f.Globals.DryRun {
+				return output.ErrValidation("MCP_OFFLINE_POLICY_UNAVAILABLE", "")
+			}
+			if !policyDebug && cmd.Flags().Changed("policy-debug-file") || policyDebug && policyDebugFile == "" {
+				return output.ErrValidation("DEBUG_POLICY_FLAG_INVALID", "")
+			}
+			var debug *mcp.DebugPolicy
+			if policyDebug {
+				var err error
+				debug, err = mcp.LoadDebugPolicyFile(policyDebugFile)
+				if err != nil {
+					return output.ErrValidation(err.Error(), "")
+				}
+			}
 			fac, ok := mcp.ParseFacade(facade)
 			if !ok {
 				return output.ErrValidation(fmt.Sprintf("invalid --facade %q", facade), "choose one of: three, two, both")
@@ -135,9 +169,14 @@ envelope and performs no backend mutation for the server's lifetime.`,
 				DryRun:  f.Globals.DryRun,
 			}
 			build := NewRootCmd
+			admission, err := mcp.NewAdmission(os.Getenv("OCTO_MCP_REQUEST_LOG_DIR"), debug)
+			if err != nil {
+				return output.ErrValidation(err.Error(), "")
+			}
+			defer func() { runErr = errors.Join(runErr, admission.Close()) }()
 
 			if httpAddr != "" {
-				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut, facade)
+				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut, facade, admission)
 			}
 			srv, err := mcp.NewServer(build)
 			if err != nil {
@@ -148,7 +187,7 @@ envelope and performs no backend mutation for the server's lifetime.`,
 				downloads = mcp.SecretDownloadsFromEnv()
 			}
 			defer downloads.Close()
-			srv.WithSecretDownloads(downloads).WithFacade(fac).WithTrustedContext(tc).WithBaseGlobals(base).
+			srv.WithAdmission(admission).WithSecretDownloads(downloads).WithFacade(fac).WithTrustedContext(tc).WithBaseGlobals(base).
 				WithUploadPolicy(os.Getenv("OCTO_MCP_UPLOAD_ROOT"), allowLocalUpload)
 			return srv.ServeStdio(cmd.Context(), f.IOStreams.In, f.IOStreams.Out)
 		},
@@ -156,9 +195,11 @@ envelope and performs no backend mutation for the server's lifetime.`,
 	serve.Flags().StringVar(&httpAddr, "http", "", "serve HTTP (JSON-RPC over POST) on this address (e.g. :8080); default transport is stdio")
 	serve.Flags().StringVar(&forceChannelID, "force-channel-id", "", "force this channel_id on session-bound message ops (stdio + HTTP)")
 	serve.Flags().StringVar(&forceChannelType, "force-channel-type", "", "force this channel_type on session-bound message ops (stdio + HTTP)")
-	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "force this on_behalf_of identity (stdio + HTTP)")
+	serve.Flags().StringVar(&forceOnBehalfOf, "force-on-behalf-of", "", "unsupported for MCP: any nonempty delegation setting is rejected")
 	serve.Flags().BoolVar(&allowLocalUpload, "allow-local-upload", false, "stdio only: allow unconfined multipart file_path uploads (trusted-local hosts); default-deny unless OCTO_MCP_UPLOAD_ROOT is set")
 	serve.Flags().StringVar(&facade, "facade", "three", "tool surface: three (default), two (get_skill + execute), or both")
+	serve.Flags().BoolVar(&policyDebug, "policy-debug", false, "operator only: use an immutable local policy file; real Bot authentication remains required")
+	serve.Flags().StringVar(&policyDebugFile, "policy-debug-file", "", "absolute path to the private policy file; requires --policy-debug")
 	return serve
 }
 
@@ -167,9 +208,12 @@ envelope and performs no backend mutation for the server's lifetime.`,
 // dropped mid-flight. Read/Idle timeouts bound a slow or idle client;
 // WriteTimeout is left unset because a legitimate --page-all response can be
 // long, and per-call bounding is the operator's --timeout instead.
-func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer, facade string) error { //nolint:gocritic // capture operator globals by value for connection isolation
+func serveHTTP(ctx context.Context, addr string, build mcp.RootBuilder, tc mcp.TrustedContext, base cmdutil.GlobalOptions, warn io.Writer, facade string, admission ...*mcp.Admission) error { //nolint:gocritic // capture operator globals by value for connection isolation
 	fac, _ := mcp.ParseFacade(facade)
-	h, err := mcp.NewHTTPHandler(build, tc, base, fac)
+	if len(admission) == 0 || admission[0] == nil {
+		return output.ErrValidation("REQUEST_LOG_STARTUP_FAILED", "")
+	}
+	h, err := mcp.NewHTTPHandlerWithAdmission(build, tc, base, admission[0], fac)
 	if err != nil {
 		return err
 	}

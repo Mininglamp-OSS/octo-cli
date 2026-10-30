@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -74,18 +73,9 @@ func TestCallOp_ProfilePropagated_RealMakeFactory(t *testing.T) {
 	s := newTestServer(t)
 	s.baseGlobals = cmdutil.GlobalOptions{Profile: "ghost"}
 
-	res := callTool(t, s, "call_op", map[string]any{
-		"operation_id": "message.send",
-		"arguments":    map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}},
-	})
-	if !res.IsError {
-		t.Fatalf("a nonexistent --profile must fail closed, got success: %s", res.Content[0].Text)
-	}
+	expectAdmissionRPC(t, s, "call_op", map[string]any{"operation_id": "message.send", "arguments": map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}}}, -32001)
 	if be.path != "" {
-		t.Errorf("no request should reach the backend when the selected profile is missing, path=%q", be.path)
-	}
-	if !strings.Contains(res.Content[0].Text, "ghost") {
-		t.Errorf("error should name the missing profile, got %s", res.Content[0].Text)
+		t.Fatal("missing profile reached backend")
 	}
 }
 
@@ -179,11 +169,11 @@ func TestHTTP_EndToEnd_NoAuthFailsClosed_RealMakeFactory(t *testing.T) {
 	t.Setenv("OCTO_TOKEN", "bf_ambient") // server env credential must NOT be inherited
 	t.Setenv("OCTO_CONFIG_DIR", t.TempDir())
 
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	ts := httptest.NewServer(h)
+	ts := policyFixtureServer(h)
 	t.Cleanup(ts.Close)
 
 	// No Authorization header, real makeFactory (no factoryFn override): the
@@ -192,18 +182,8 @@ func TestHTTP_EndToEnd_NoAuthFailsClosed_RealMakeFactory(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"call_op","arguments":{"operation_id":"message.send","arguments":{"channel_id":"c1","channel_type":1,"payload":{"text":"x"}}}}}`)
 
 	var resp rpcResponse
-	if err := json.Unmarshal([]byte(body), &resp); err != nil || resp.Error != nil {
-		t.Fatalf("bad rpc response: %v (%s)", err, body)
-	}
-	var res toolResult
-	_ = json.Unmarshal(resp.Result, &res)
-	if !res.IsError {
-		t.Fatalf("no-auth HTTP call must fail closed, got %s", res.Content[0].Text)
-	}
-	var env map[string]any
-	_ = json.Unmarshal([]byte(res.Content[0].Text), &env)
-	if e, _ := env["error"].(map[string]any); e == nil || e["type"] != "auth_error" {
-		t.Errorf("expected auth_error, got %v", env)
+	if err := json.Unmarshal([]byte(body), &resp); err != nil || resp.Error == nil || resp.Error.Code != -32001 {
+		t.Fatalf("expected admission auth failure: %s", body)
 	}
 	if be.path != "" {
 		t.Errorf("backend must not be reached without a bearer, path=%q", be.path)
@@ -265,11 +245,11 @@ func dataFlag(argv []string) string {
 // --- HTTP oversized body ---
 
 func TestHTTPTransport_OversizedBodyRejected(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	ts := httptest.NewServer(h)
+	ts := policyFixtureServer(h)
 	t.Cleanup(ts.Close)
 
 	// A >8 MiB body of valid-JSON prefix + padding must be rejected, not truncated.

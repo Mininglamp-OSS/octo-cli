@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
@@ -19,7 +18,7 @@ import (
 func TestXIN2438ForcedFieldLookalikeRefused(t *testing.T) {
 	var hits int
 	var lastBody []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
 		lastBody, _ = io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "application/json")

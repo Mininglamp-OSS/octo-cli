@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -43,7 +42,7 @@ func TestBuiltBinary_MisplacedSafetyFieldsNeverRunLive(t *testing.T) {
 		for _, transport := range []string{"stdio", "http"} {
 			t.Run(facade+"/"+transport, func(t *testing.T) {
 				var hits atomic.Int32
-				backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					hits.Add(1)
 					w.Header().Set("Content-Type", "application/json")
 					_, _ = w.Write([]byte(`{"data":{"message_id":"m1"}}`))

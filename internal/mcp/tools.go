@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -394,6 +395,9 @@ func (s *Server) describeOp(operationID string) toolResult {
 
 // callOp handles the call_op tool.
 func (s *Server) callOp(ctx context.Context, operationID string, arguments map[string]any) toolResult {
+	if s.trusted.OnBehalfOf != "" {
+		return rawToolResult(synthErrorEnvelope(output.ErrValidation("OBO_FORBIDDEN", "")), true)
+	}
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
 		return jsonToolResult(unknownOperationPayload(s.reg, operationID, s.hintDiscover()), true)

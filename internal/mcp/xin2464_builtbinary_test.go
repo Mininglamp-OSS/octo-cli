@@ -43,7 +43,7 @@ type xin2464Backend struct {
 func newXIN2464Backend(t *testing.T, actions ...string) *xin2464Backend {
 	t.Helper()
 	b := &xin2464Backend{actions: actions}
-	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b.srv = binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")

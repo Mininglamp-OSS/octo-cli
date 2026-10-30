@@ -107,6 +107,10 @@ func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forc
 // its argv is byte-for-byte what it was; the two-tool execute facade uses this
 // to honour dry-run without a second request-assembly path.
 func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) {
+	if err := guardOperationArguments(ctx, detail.ID, arguments); err != nil {
+		ee := output.ErrValidation(err.Error(), "")
+		return synthErrorEnvelope(ee), false, ee
+	}
 	outBuf.Reset()
 	errBuf.Reset()
 	pol.dryRun = effectiveDryRun(pol.dryRun || f.Globals.DryRun, globalFlags)

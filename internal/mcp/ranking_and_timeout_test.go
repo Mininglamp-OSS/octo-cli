@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -53,7 +52,7 @@ func TestUnknownOperationPayload_TruncatesEchoedID(t *testing.T) {
 // TestHTTPHandler_RequestTimeoutConfigured pins that a per-request timeout is
 // wired (env override honored, sane default otherwise).
 func TestHTTPHandler_RequestTimeoutConfigured(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -61,7 +60,7 @@ func TestHTTPHandler_RequestTimeoutConfigured(t *testing.T) {
 		t.Errorf("a per-request timeout must be set, got %v", h.requestTimeout)
 	}
 	t.Setenv("OCTO_MCP_HTTP_REQUEST_TIMEOUT", "17s")
-	h2, _ := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h2, _ := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if h2.requestTimeout != 17*time.Second {
 		t.Errorf("env override must be honored, got %v", h2.requestTimeout)
 	}
@@ -71,11 +70,11 @@ func TestHTTPHandler_RequestTimeoutConfigured(t *testing.T) {
 // DoS guard: an unauthenticated POST carrying a large operation_id to
 // describe_op returns promptly (bounded ranking) rather than pinning a core.
 func TestHTTPTransport_UnauthenticatedDescribeOpHugeIDIsBounded(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	ts := httptest.NewServer(h)
+	ts := policyFixtureServer(h)
 	t.Cleanup(ts.Close)
 
 	huge := strings.Repeat("z", 2<<20) // 2 MiB operation_id, no bearer

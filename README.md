@@ -500,6 +500,22 @@ octo-cli group list --page-all --page-limit 20
 octo-cli group list --format table
 ```
 
+## MCP server
+
+`octo-cli mcp serve` serves newline-delimited stdio; `--http 127.0.0.1:8080`
+serves JSON-RPC over POST. Each tool call authenticates a `bf_` User Bot,
+resolves its context policy and durably records the permitted request fields
+before execution. Strict policy requires a complete `params._meta.octo`
+source declaration, including directory tools. HTTP protocol methods also
+require a request bearer. OBO and serve-time offline `--dry-run` are rejected.
+
+Operators must provide a private request log directory through
+`OCTO_MCP_REQUEST_LOG_DIR`. The optional `--policy-debug` and
+`--policy-debug-file` flags select a private startup policy snapshot while
+retaining real authentication and logging. See the
+[MCP context admission contract](docs/mcp-context-admission.md) for the wire,
+filesystem requirements and compatibility limits.
+
 ## Agent Skills
 
 Machine-readable usage docs for AI Agents live under [`skills/`](./skills/):
