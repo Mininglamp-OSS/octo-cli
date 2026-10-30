@@ -25,7 +25,7 @@ type xin2532BinBackend struct {
 func newXIN2532BinBackend(t *testing.T) *xin2532BinBackend {
 	t.Helper()
 	b := &xin2532BinBackend{}
-	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b.srv = binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		b.hits = append(b.hits, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery+" ws="+r.Header.Get("X-Workspace-ID"))
 		b.mu.Unlock()

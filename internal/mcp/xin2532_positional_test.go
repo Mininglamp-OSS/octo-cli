@@ -49,7 +49,7 @@ type xin2532Backend struct {
 
 func (b *xin2532Backend) server(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		b.reqs = append(b.reqs, xin2532Request{r.Method, r.URL.Path, r.URL.Query(), r.Header.Get("X-Workspace-ID")})
 		b.mu.Unlock()

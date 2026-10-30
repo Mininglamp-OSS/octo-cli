@@ -149,6 +149,9 @@ func (s *Server) describeSkill(operationID, depth string) toolResult {
 // assembly / identity / validation / transport / envelope backend and adds a
 // structured status classification, honest dry-run, and schema-drift detection.
 func (s *Server) execute(ctx context.Context, operationID string, arguments map[string]any, dryRun bool, fingerprint string) toolResult {
+	if s.trusted.OnBehalfOf != "" {
+		return jsonToolResult(map[string]any{"status": "validation_error", "error": map[string]string{"code": "OBO_FORBIDDEN"}}, true)
+	}
 	detail, ok := s.reg.GetOperation(operationID)
 	if !ok {
 		p := unknownOperationPayload(s.reg, operationID, s.hintDiscover())

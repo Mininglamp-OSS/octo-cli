@@ -40,7 +40,7 @@ type xin2453Backend struct {
 func newXIN2453Backend(t *testing.T) *xin2453Backend {
 	t.Helper()
 	b := &xin2453Backend{}
-	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b.srv = binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.ReadAll(r.Body)
 		b.mu.Lock()
 		b.hits++

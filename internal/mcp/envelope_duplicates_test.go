@@ -16,7 +16,7 @@ import (
 
 func TestXIN2549EnvelopeDuplicates(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Write([]byte(`{"data":{"message_id":"fixture"}}`))
 	}))
@@ -54,7 +54,7 @@ func TestXIN2549EnvelopeDuplicates(t *testing.T) {
 							t.Fatal(err)
 						}
 						t.Logf("deliveries=%d response_id=%s rpc_error=%t", hits.Load()-before, response.ID, response.Error != nil)
-						if hits.Load() != before || response.Error == nil || len(response.ID) != 0 {
+						if hits.Load() != before || response.Error == nil || string(response.ID) != "null" {
 							t.Error("duplicate envelope member must fail before dispatch")
 						}
 					})
@@ -71,7 +71,7 @@ func xin2549Dispatch(t *testing.T, transport, wire, url string, facades ...facad
 		facade = facades[0]
 	}
 	if transport == "http" {
-		h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facade)
+		h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facade)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func xin2549Dispatch(t *testing.T, transport, wire, url string, facades ...facad
 
 func TestXIN2549EnvelopeControls(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.Write([]byte(`{"data":{"message_id":"fixture"}}`))
 	}))

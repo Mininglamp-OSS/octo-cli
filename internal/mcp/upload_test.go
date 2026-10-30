@@ -161,7 +161,7 @@ func TestUpload_PinnedHandleReachesMultipart(t *testing.T) {
 				t.Run(tool+"/"+transport+"/"+swap, func(t *testing.T) {
 					root, outside := uploadFixture(t)
 					received := make(chan string, 1)
-					backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						mr, err := r.MultipartReader()
 						if err != nil {
 							http.Error(w, err.Error(), 400)
@@ -212,7 +212,7 @@ func TestUpload_PinnedHandleReachesMultipart(t *testing.T) {
 						raw = out.Bytes()
 					} else {
 						t.Setenv("OCTO_MCP_UPLOAD_ROOT", root)
-						h, err := NewHTTPHandler(build, TrustedContext{}, cmdutil.GlobalOptions{}, facadeBoth)
+						h, err := testHTTPHandler(t, build, TrustedContext{}, cmdutil.GlobalOptions{}, facadeBoth)
 						if err != nil {
 							t.Fatal(err)
 						}

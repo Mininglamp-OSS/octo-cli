@@ -20,7 +20,7 @@ import (
 
 func TestXIN2607RPCFoldTransportSafety(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); _, _ = w.Write([]byte(`{}`)) }))
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); _, _ = w.Write([]byte(`{}`)) }))
 	defer backend.Close()
 	t.Setenv("OCTO_API_BASE_URL", backend.URL)
 	for _, transport := range []string{"http", "stdio"} {
@@ -30,7 +30,7 @@ func TestXIN2607RPCFoldTransportSafety(t *testing.T) {
 		}{{facadeTwo, "execute"}, {facadeThree, "call_op"}, {facadeBoth, "execute"}, {facadeBoth, "call_op"}} {
 			s := newTestServer(t).WithFacade(mode.facade)
 			s.factoryFn = fakeBackendFactory(backend.URL, "bf_fixture")
-			h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, mode.facade)
+			h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, mode.facade)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestXIN2607UploadDryRunShared(t *testing.T) {
 func TestXIN2607ArrayBridge(t *testing.T) {
 	var mu sync.Mutex
 	var received []string
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
 		key := "tag"

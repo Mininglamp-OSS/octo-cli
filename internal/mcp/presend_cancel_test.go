@@ -17,7 +17,7 @@ import (
 
 func TestXIN2549MCPAfterValidationCancellation(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.Write([]byte(`{}`)) }))
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.Write([]byte(`{}`)) }))
 	defer backend.Close()
 	t.Setenv("OCTO_API_BASE_URL", backend.URL)
 	for _, transport := range []string{"http", "stdio"} {
@@ -31,7 +31,7 @@ func TestXIN2549MCPAfterValidationCancellation(t *testing.T) {
 				var out bytes.Buffer
 				before := hits.Load()
 				if transport == "http" {
-					h, err := NewHTTPHandler(build, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facadeBoth)
+					h, err := testHTTPHandler(t, build, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facadeBoth)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -45,7 +45,7 @@ func TestXIN2549MCPAfterValidationCancellation(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					s.WithFacade(facadeBoth)
+					s.WithFacade(facadeBoth).WithAdmission(testAdmission(t))
 					s.factoryFn = fakeBackendFactory(backend.URL, "bf_fixture")
 					if err := s.ServeStdio(ctx, strings.NewReader(wire+"\n"), &out); err != nil {
 						t.Fatal(err)
@@ -63,7 +63,7 @@ func TestXIN2549MCPAfterValidationCancellation(t *testing.T) {
 
 func TestXIN2549MCPPreSendCancellation(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.Write([]byte(`{}`)) }))
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.Write([]byte(`{}`)) }))
 	defer backend.Close()
 	t.Setenv("OCTO_API_BASE_URL", backend.URL)
 	for _, transport := range []string{"http", "stdio"} {
@@ -81,7 +81,7 @@ func TestXIN2549MCPPreSendCancellation(t *testing.T) {
 					before := hits.Load()
 					var out bytes.Buffer
 					if transport == "http" {
-						h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facadeBoth)
+						h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{NoRetry: true}, facadeBoth)
 						if err != nil {
 							t.Fatal(err)
 						}

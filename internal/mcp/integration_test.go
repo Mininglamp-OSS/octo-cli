@@ -23,7 +23,7 @@ type backend struct {
 
 func (b *backend) server(t *testing.T) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.path = r.URL.Path
 		b.auth = r.Header.Get("Authorization")
 		b.space = r.Header.Get("X-Space-Id")

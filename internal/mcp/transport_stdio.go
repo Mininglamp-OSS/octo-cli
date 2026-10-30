@@ -22,6 +22,15 @@ const maxStdioMessageBytes = 8 << 20
 // bearer token sits in the process env, reachable by a shell-capable host, so
 // the over-privilege protection here rests on an external trust assumption. HTTP is the production transport.
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
+	if s.trusted.OnBehalfOf != "" {
+		return errors.New("OBO_FORBIDDEN")
+	}
+	if s.baseGlobals.DryRun {
+		return errors.New("MCP_OFFLINE_POLICY_UNAVAILABLE")
+	}
+	if s.admission == nil {
+		return errors.New("REQUEST_LOG_STARTUP_FAILED")
+	}
 	r := bufio.NewReaderSize(in, 64*1024)
 	for {
 		line, oversized, err := readStdioMessage(r)

@@ -12,8 +12,8 @@ import (
 // Even noncanonical Header maps supplied by an embedding handler must not
 // promote caller input to trusted provenance. Wire-level cases use the binary.
 func TestXIN2544HTTPContextHeadersFailClosed(t *testing.T) {
-	for _, tc := range []TrustedContext{{}, {SpaceID: "operator-space", ChannelID: "operator-channel", ChannelType: "1", OnBehalfOf: "operator-person"}} {
-		h, err := NewHTTPHandler(testRoot, tc, cmdutil.GlobalOptions{})
+	for _, tc := range []TrustedContext{{}, {SpaceID: "operator-space", ChannelID: "operator-channel", ChannelType: "1"}} {
+		h, err := testHTTPHandler(t, testRoot, tc, cmdutil.GlobalOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

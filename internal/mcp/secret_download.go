@@ -174,6 +174,9 @@ func parseSecretToolArgs(raw json.RawMessage) (secretToolArgs, bool) {
 }
 
 func (s *Server) secretDownloadTool(ctx context.Context, raw json.RawMessage) toolResult {
+	if s.trusted.OnBehalfOf != "" {
+		return jsonToolResult(map[string]string{"error": "OBO_FORBIDDEN"}, true)
+	}
 	a, ok := parseSecretToolArgs(raw)
 	if !ok {
 		return secretFailure("validation_error")
@@ -212,7 +215,11 @@ func (s *Server) secretDownloadTool(ctx context.Context, raw json.RawMessage) to
 func (s *Server) resolveSecret(ctx context.Context, d *SecretDownloads, query string) ([]byte, toolResult) {
 	// Resolve the same ordinary stdio credential selectors, with HTTP's pinned
 	// bearer override. No shared client or verbose engine output is involved.
-	f, _, _ := s.makeFactory(s.trusted)
+	fn := s.factoryFn
+	if fn == nil {
+		fn = s.makeFactory
+	}
+	f, _, _ := fn(s.trusted)
 	cred, err := f.CredentialFunc()
 	if err != nil || cred == nil || !strings.HasPrefix(cred.Token, "bf_") {
 		return nil, secretFailure("auth_error")

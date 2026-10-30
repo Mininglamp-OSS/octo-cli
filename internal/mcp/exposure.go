@@ -60,7 +60,9 @@ func loadExposure(raw []byte) map[string]bool {
 }
 
 // mcpExposed reports whether operationID is classified for MCP exposure.
-func mcpExposed(operationID string) bool { return exposedOps[operationID] }
+func mcpExposed(operationID string) bool {
+	return exposedOps[operationID] && !oboOperation(operationID)
+}
 
 // unclassifiedOpError reports an operation absent from the MCP table's allowed
 // classes. The CLI may still reach it; MCP refuses until exposure is approved.
