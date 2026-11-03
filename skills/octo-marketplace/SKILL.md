@@ -41,10 +41,10 @@ Use immutable `plugin_id` and `review_id` values, never names.
 ## Save, publish, and review lifecycle
 
 Creating with `plugin upsert` or skill `plugin import` saves a **draft** and a
-version snapshot; it does not expose the plugin to the Space catalog. Updates
-preserve the current listing state: draft/delisted content remains editable,
-published private content remains owner-only, and published Space content
-rejects direct edits and must use review. Version labels use
+version snapshot; it does not expose the plugin to the Space catalog. Saving an owner's draft for a version-managed Skill,
+Expert, or Expert Team leaves its published version in place. For a published
+Space listing, submit the draft for review to release the changes. Published
+Space connectors use the reviewed update route. Version labels use
 `MAJOR.MINOR.PATCH` (each numeric component is 1–9 digits) and may not move
 backward.
 

@@ -310,7 +310,7 @@ func TestMarketplaceDraftRevisionRoundTrip(t *testing.T) {
 		args                                              []string
 	}{
 		{"read", "GET", "/market/api/v1/plugins/p1/draft", "", before, []string{"draft", "get", "--plugin-id", "p1"}},
-		{"save", "POST", "/market/api/v1/plugins/upsert", before, saved, []string{"upsert", "--data", fmt.Sprintf(`{"plugin":{"plugin_id":"p1","plugin_type":"expert","plugin_name":"name","visibility":"private","manifest_json":{},"plugin_json":{}},"expected_draft_revision":"%s","relations":[]}`, before)}},
+		{"save", "POST", "/market/api/v1/plugins/upsert", before, saved, []string{"upsert", "--data", fmt.Sprintf(`{"plugin":{"plugin_id":"p1","plugin_type":"expert","plugin_name":"name","visibility":"private","manifest_json":{},"plugin_json":{}},"expected_draft_revision":%q,"relations":[]}`, before)}},
 		{"publish", "POST", "/market/api/v1/plugins/publish", saved, "", []string{"publish", "--plugin-id", "p1", "--version", "1.2.0", "--expected-draft-revision", saved}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
