@@ -132,9 +132,9 @@ fields with `mcp probe` first.
 > history and the creator identity. An omitted `category_id`, `publisher` or
 > `icon` is accepted as empty and **clears the stored value** — so a
 > "metadata-only" edit that sends just the changed field wipes the others.
-> Read-modify-write with `plugin get` and resubmit the complete document.
+> For an editable draft, read it with `plugin draft get --plugin-id <id>` and resubmit the complete write document with `--expected-draft-revision <revision-from-read>`.
 
-Re-read with `plugin get --plugin-id <id>` and verify the `${VAR}` placeholders
+Re-read the saved draft with `plugin draft get --plugin-id <id>` and verify the `${VAR}` placeholders
 round-trip. Then run `plugin publish --plugin-id <id> --version <x.y.z>`. A
 private connector is listed immediately and remains owner-only. A Space-visible
 connector follows the authenticated Space's review policy: automatic approval

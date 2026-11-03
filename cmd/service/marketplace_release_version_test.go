@@ -302,3 +302,40 @@ func TestMarketplaceVersionErrorHintAnnotationIsScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestMarketplaceDraftRevisionRoundTrip(t *testing.T) {
+	before, saved := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	for _, tc := range []struct {
+		name, method, path, inputRevision, outputRevision string
+		args                                              []string
+	}{
+		{"read", "GET", "/market/api/v1/plugins/p1/draft", "", before, []string{"draft", "get", "--plugin-id", "p1"}},
+		{"save", "POST", "/market/api/v1/plugins/upsert", before, saved, []string{"upsert", "--data", fmt.Sprintf(`{"plugin":{"plugin_id":"p1","plugin_type":"expert","plugin_name":"name","visibility":"private","manifest_json":{},"plugin_json":{}},"expected_draft_revision":"%s","relations":[]}`, before)}},
+		{"publish", "POST", "/market/api/v1/plugins/publish", saved, "", []string{"publish", "--plugin-id", "p1", "--version", "1.2.0", "--expected-draft-revision", saved}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			root, tf, _ := rootWithServiceSpaced(t, "qa", func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.Method != tc.method || r.URL.Path != tc.path || r.Header.Get("X-Space-Id") != "qa" {
+					t.Errorf("unexpected %s %s or Space", r.Method, r.URL.Path)
+				}
+				if tc.inputRevision != "" {
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["expected_draft_revision"] != tc.inputRevision {
+						t.Errorf("conditional body = %v, err = %v", body, err)
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"data":{"draft_revision":%q}}`, tc.outputRevision)
+			})
+			root.SetArgs(append([]string{"marketplace", "plugin"}, tc.args...))
+			if err := root.Execute(); err != nil || calls != 1 {
+				t.Fatalf("calls = %d, err = %v", calls, err)
+			}
+			if tc.outputRevision != "" && !strings.Contains(tf.Out.String(), tc.outputRevision) {
+				t.Error("response did not preserve the revision for the next command")
+			}
+		})
+	}
+}

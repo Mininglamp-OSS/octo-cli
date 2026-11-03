@@ -227,6 +227,18 @@
         }
       }
     },
+    "/market/api/v1/plugins/{plugin_id}/draft": {
+      "get": {
+        "operationId": "plugin.draft.get",
+        "summary": "Read the editable plugin draft and its revision",
+        "description": "Return the owner's current draft, including plugin, relations, draft_changelog and draft_revision. Use this as the baseline for a full replacement. A released detail or historical version is not the editable draft.",
+        "x-octo-risk": "read",
+        "parameters": [
+          { "name": "plugin_id", "in": "path", "required": true, "x-octo-flag": "plugin-id", "schema": { "type": "string" }, "description": "Plugin id" }
+        ],
+        "responses": { "200": { "description": "Current draft and conditional-write revision", "content": { "application/json": { "schema": { "type": "object" } } } } }
+      }
+    },
     "/market/api/v1/plugins/detail": {
       "get": {
         "operationId": "plugin.get",
@@ -507,6 +519,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "expected_draft_revision": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "Revision returned by the successful save. Refuse publication if the draft changed since that save." },
                   "plugin_id": { "type": "string", "minLength": 1, "description": "Nonblank plugin id" },
                   "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Required explicit MAJOR.MINOR.PATCH release label for skill, expert and expert_team (private or Space). Chosen at publication time and may differ from the draft label. Never inferred from the draft or auto-incremented. Connector behavior is unchanged. Omitted or malformed labels trigger a read-only plugin-type lookup before a live publication; dry-run previews without this lookup." },
                   "changelog": { "type": "string", "description": "Optional review changelog, at most 1000 Unicode characters on the Space-review branch; ignored for private publish" }
@@ -675,7 +688,7 @@
         "operationId": "plugin.upsert",
         "x-octo-validate-marketplace-relations": true,
         "summary": "Create or update a plugin (every save is a version snapshot)",
-        "description": "Create (plugin.plugin_id empty) or update an editable plugin. A create is a draft; an update preserves the current listing state. Published Space plugins reject direct edits and must submit a frozen review request instead. Every accepted save appends a plugin_versions snapshot. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skill drafts prefer upload+import.",
+        "description": "Create (plugin.plugin_id empty) or update an editable plugin. A create is a draft; an update preserves the current listing state. With version management enabled, listed Skills, Experts and Expert Teams can save a draft independently of publication. Listed Space connectors require reviewed updates. Every accepted save appends a plugin_versions snapshot. Pass --data with the full write document {\"plugin\":{...},\"relations\":[...]}. For skill drafts prefer upload+import.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "requestBody": {
@@ -686,10 +699,12 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
+                  "expected_draft_revision": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "For updates, pass the draft_revision read from plugin draft get. A stale revision conflicts. Omit on creation." },
+                  "changelog": { "type": "string", "description": "Draft release notes. Preserve the current draft_changelog when editing other fields." },
                   "plugin": {
                     "type": "object",
                     "additionalProperties": false,
-                    "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin get -> edit the document -> plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save appends an internal snapshot; plugin.version is an optional draft display label, defaults to 1.0.0, and is preserved when left blank on update. The formal release label is explicitly chosen later at publication, independently of the draft label.",
+                    "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin draft get -> edit the write fields -> conditional plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save appends an internal snapshot; plugin.version is an optional draft display label, defaults to 1.0.0, and is preserved when left blank on update. The formal release label is explicitly chosen later at publication, independently of the draft label.",
                     "properties": {
                       "plugin_id": {
                         "type": "string",

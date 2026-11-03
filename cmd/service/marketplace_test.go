@@ -25,6 +25,7 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		path   string
 	}{
 		"plugin.list":                   {http.MethodGet, "/market/api/v1/plugins"},
+		"plugin.draft.get":              {http.MethodGet, "/market/api/v1/plugins/{plugin_id}/draft"},
 		"plugin.get":                    {http.MethodGet, "/market/api/v1/plugins/detail"},
 		"plugin.version.list":           {http.MethodGet, "/market/api/v1/plugins/versions"},
 		"plugin.skillmd":                {http.MethodGet, "/market/api/v1/plugins/skill_md"},

@@ -108,13 +108,31 @@ plugin editable and eligible for a later publish:
 octo-cli marketplace plugin delist --plugin-id <plugin-id> --reason "Policy or maintenance reason"
 ```
 
-An already-published Space plugin cannot be edited through `upsert` or skill
-`import`; the backend rejects that bypass. Submit the full frozen upgrade with
-`review-request create`: a listed upgrade must carry either `parse_task_id` for
-a freshly parsed skill archive or both `manifest_json` + `plugin_json` for
-declared documents. Only an unlisted Space-intent first submission may omit
-content and snapshot its live draft. A present `relations` array replaces the
-frozen graph; omitting it inherits the live graph.
+### Edit and publish the draft you actually read
+
+For a version-managed Skill, Expert or Expert Team (including a published Space
+resource), read the owner's editable draft, save conditionally, then publish
+the **revision returned by that save**. Published Space connectors still use
+the reviewed update route. An older server without the draft endpoint cannot
+run this workflow.
+
+```bash
+set -e
+octo-cli marketplace plugin draft get --plugin-id "$id" > current.json
+before=$(jq -er '(.data.data // .data).draft_revision' current.json)
+# Build edit.json from this draft's writable plugin fields and complete relations.
+# Preserve attachments, relation IDs, pins and draft_changelog unless intentionally edited.
+octo-cli marketplace plugin upsert --data @edit.json --expected-draft-revision "$before" > saved.json
+saved=$(jq -er '(.data.data // .data).draft_revision' saved.json)
+octo-cli marketplace plugin publish --plugin-id "$id" --version "$version" \
+  --changelog "$notes" --expected-draft-revision "$saved"
+```
+
+Stop if a command fails or the revision is missing. On a conflict, read the
+draft again and reconcile the competing edits before saving or publishing. Do
+not retry with the check removed or use another editor's newer revision to
+publish your old edits. Read `plugin get` after publication to verify the
+released content (or check the review if the submission is pending).
 
 ## Retry and recovery
 
@@ -136,7 +154,7 @@ state before retrying:
   ambiguous and ask the user which `plugin_id` is authoritative; never pick a
   row automatically. Retry the create only after the relevant scan reaches a
   short page with zero exact matches;
-- update/import of an existing id: `plugin get --plugin-id <id>` and compare the
+- update/import of an existing id: `plugin draft get --plugin-id <id>` and compare the
   intended version, hashes, and content; use `plugin version list` where useful;
 - publish: `plugin get --plugin-id <id>` and inspect `display_status` /
   `review_id`, then list owned review requests;

@@ -156,8 +156,7 @@ First inspect `display_status` with `plugin get`:
   import --plugin-id <plugin-id> --parse-task-id <parse-task-id> ...`, omitting
   `--plugin-name` to retain the current title unless the user explicitly
   requested a rename, then run `plugin publish` as in the initial flow.
-- For an already-published Space skill, **do not call import or upsert**: direct
-  edits are rejected so live content cannot bypass review. Upload and parse the
+- To submit an archive directly for review instead of editing a draft, use the frozen review workflow. Upload and parse the
   new archive, then submit that fresh parse task as the frozen upgrade:
 
 ```bash
@@ -190,10 +189,7 @@ request and continue through a short page to inspect every version.
 ## Update metadata / manage owned skills
 
 Metadata edits on a draft, delisted plugin, or published-private plugin go
-through `plugin upsert` with the existing `plugin.plugin_id`. A published Space
-plugin rejects direct metadata edits. Because review snapshots content rather
-than arbitrary market metadata, a Space owner/admin must delist it first; then
-the owner may edit and publish it for review again.
+through `plugin upsert` with the existing `plugin.plugin_id`. Version-managed published Space Skills can use the same conditional draft workflow in SKILL.md.
 `plugin import` is **not** a metadata-only path: its `--parse-task-id` is
 required, so reusing it always means a fresh upload+parse cycle to ship new
 package content.
@@ -203,7 +199,7 @@ package content.
 > your document, keeping only `created_at`, the version history and the creator
 > identity. An omitted `category_id`, `publisher` or `icon` is accepted as empty
 > and **clears the stored value** — editing one field by sending only that field
-> silently wipes the rest. Always read-modify-write: `plugin get --plugin-id
+> silently wipes the rest. Always read-modify-write: `plugin draft get --plugin-id
 > <id>` first, rebuild the full write document from what it returns (the read
 > shape is flat; the write shape is `{"plugin":{...},"relations":[...]}`), change
 > the one field, and send the whole document via `--data @plugin.json`.
