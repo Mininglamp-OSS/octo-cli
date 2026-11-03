@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync/atomic"
@@ -23,7 +22,7 @@ func TestBuiltBinary_XIN2544Committed429(t *testing.T) {
 				}
 				t.Run(transport+"/"+tool+map[bool]string{false: "/default", true: "/no-retry"}[noRetry], func(t *testing.T) {
 					var committed atomic.Int32
-					backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						body, _ := io.ReadAll(r.Body)
 						if r.Method != http.MethodPost || !strings.Contains(string(body), `"channel_id":"c1"`) {
 							t.Errorf("unexpected mutation: %s %s", r.Method, body)

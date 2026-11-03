@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,80 @@ func isolatedEnv(t *testing.T) []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env, "OCTO_CONFIG_DIR="+t.TempDir(), "OCTO_BOT_TOKEN=bf_smoke")
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := os.MkdirTemp(wd, ".binary-request-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(logs) })
+	identity := binaryPolicyFixtureServer(http.NotFoundHandler())
+	t.Cleanup(identity.Close)
+	return append(env, "OCTO_CONFIG_DIR="+t.TempDir(), "OCTO_BOT_TOKEN=bf_smoke", "OCTO_MCP_REQUEST_LOG_DIR="+logs, "OCTO_API_BASE_URL="+identity.URL)
+}
+
+func independentRequestLogEnv(t *testing.T, env []string) []string {
+	t.Helper()
+	wd, e := os.Getwd()
+	if e != nil {
+		t.Fatal(e)
+	}
+	dir, e := os.MkdirTemp(wd, ".binary-request-test-")
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if !strings.HasPrefix(kv, "OCTO_MCP_REQUEST_LOG_DIR=") {
+			out = append(out, kv)
+		}
+	}
+	return append(out, "OCTO_MCP_REQUEST_LOG_DIR="+dir)
+}
+
+type pacedReader struct{ data []byte }
+
+func (p *pacedReader) Read(dst []byte) (int, error) {
+	if len(p.data) == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(130 * time.Millisecond)
+	end := bytes.IndexByte(p.data, '\n') + 1
+	if end == 0 {
+		end = len(p.data)
+	}
+	if end > len(dst) {
+		end = len(dst)
+	}
+	n := copy(dst, p.data[:end])
+	p.data = p.data[n:]
+	return n, nil
+}
+
+func binaryPolicyFixtureServer(next http.Handler) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/verify-bot" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var body struct {
+			Token  string `json:"bot_token"`
+			Policy bool   `json:"include_mcp_policy"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !strings.HasPrefix(body.Token, "bf_") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if body.Policy {
+			_, _ = io.WriteString(w, `{"bot_uid":"bot_fixture","mcp_policy":{"version":1,"context_mode":"compatible","override":null,"stage_default":"compatible","source":"stage_default","generation":"7","bot_revision":null}}`)
+		} else {
+			_, _ = io.WriteString(w, `{"bot_uid":"bot_fixture"}`)
+		}
+	}))
 }
 
 func toolNamesFromToolsList(t *testing.T, raw []byte) []string {
@@ -124,7 +198,7 @@ func TestBuiltBinary_HTTPFacadeToolsList(t *testing.T) {
 			body := waitPostJSON(t, url, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, 10*time.Second)
 			got := toolNamesFromToolsList(t, body)
 			if strings.Join(got, ",") != strings.Join(facadeWant[facade], ",") {
-				t.Errorf("http facade %q tools = %v, want %v (stderr: %s)", facade, got, facadeWant[facade], errBuf.String())
+				t.Errorf("http facade %q tools = %v, want %v", facade, got, facadeWant[facade])
 			}
 		})
 	}
@@ -147,6 +221,8 @@ func TestBuiltBinary_InvalidFacadeRejected(t *testing.T) {
 
 func TestBuiltBinary_FacadeExecutionSmoke(t *testing.T) {
 	bin := buildOctoCLI(t)
+	backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, r.Body) }))
+	defer backend.Close()
 	for _, facade := range []string{"three", "two", "both"} {
 		for _, transport := range []string{"stdio", "http"} {
 			t.Run(facade+"/"+transport, func(t *testing.T) {
@@ -159,20 +235,21 @@ func TestBuiltBinary_FacadeExecutionSmoke(t *testing.T) {
 					`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"` + tool + `","arguments":{"operation_id":"message.send","arguments":{"channel_id":"model-channel","channel_type":1,"payload":{"text":"preview"}}}}}`,
 				}
 				if facade != "three" {
+					requests[1] = strings.Replace(requests[1], `"operation_id":"message.send",`, `"operation_id":"message.send","dry_run":true,`, 1)
 					requests = append(requests,
-						`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute","arguments":{"operation_id":"file.upload","arguments":{"file_path":"missing.bin"}}}}`,
+						`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute","arguments":{"operation_id":"file.upload","dry_run":true,"arguments":{"file_path":"missing.bin"}}}}`,
 						`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"execute","arguments":{"operation_id":"message.send","schema_fingerprint":"stale"}}}`,
 						`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"execute","arguments":{"operation_id":"html.asset.add","arguments":{"file_path":"missing.bin"}}}}`)
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				args := []string{"mcp", "serve", "--facade", facade, "--dry-run", "--force-channel-id", "forced-channel"}
+				args := []string{"mcp", "serve", "--facade", facade, "--force-channel-id", "forced-channel"}
 				addr := freeAddr(t)
 				if transport == "http" {
 					args = append(args, "--http", addr)
 				}
 				cmd := exec.CommandContext(ctx, bin, args...)
-				cmd.Env = append(isolatedEnv(t), "OCTO_MCP_UPLOAD_ROOT="+t.TempDir()+"/absent/root")
+				cmd.Env = append(isolatedEnv(t), "OCTO_API_BASE_URL="+backend.URL, "OCTO_MCP_UPLOAD_ROOT="+t.TempDir()+"/absent/root")
 				var raw []byte
 				if transport == "stdio" {
 					cmd.Stdin = strings.NewReader(strings.Join(requests, "\n") + "\n")
@@ -221,6 +298,9 @@ func TestBuiltBinary_FacadeExecutionSmoke(t *testing.T) {
 					}
 					text := resp.Result.Content[0].Text
 					want := []string{"message.send", `"dry_run": true`, `"multipart": true`, `"schema_drift"`, `"validation_error"`}[i]
+					if facade == "three" && i == 1 {
+						want = `"ok": true`
+					}
 					if !strings.Contains(text, want) {
 						t.Fatalf("response %d missing %q: %s", i+1, want, text)
 					}
@@ -254,6 +334,7 @@ func waitPostJSON(t *testing.T, url, payload string, timeout time.Duration) []by
 		req, _ := http.NewRequest("POST", url, strings.NewReader(payload))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Origin", "http://localhost")
+		req.Header.Set("Authorization", "Bearer bf_smoke")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			lastErr = err

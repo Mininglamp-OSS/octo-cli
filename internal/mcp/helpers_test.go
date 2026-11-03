@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,7 +38,11 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	_ = os.Setenv("OCTO_CONFIG_DIR", dir)
+	identity := policyFixtureServer(http.NotFoundHandler())
+	_ = os.Setenv("OCTO_BOT_TOKEN", "bf_fixture")
+	_ = os.Setenv("OCTO_API_BASE_URL", identity.URL)
 	code := m.Run()
+	identity.Close()
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
@@ -93,7 +100,42 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	srv.WithAdmission(testAdmission(t))
 	return srv
+}
+
+// Historical facade fixtures now include the approved read-only policy wire.
+// Authentication traffic is kept separate from business-delivery counters.
+func policyFixtureServer(next http.Handler) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/verify-bot" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		var body struct {
+			Token  string `json:"bot_token"`
+			Policy bool   `json:"include_mcp_policy"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || !strings.HasPrefix(body.Token, "bf_") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if body.Policy {
+			_, _ = io.WriteString(w, `{"bot_uid":"bot_fixture","mcp_policy":`+compatiblePolicy+`}`)
+		} else {
+			_, _ = io.WriteString(w, `{"bot_uid":"bot_fixture"}`)
+		}
+	}))
+}
+
+func testHTTPHandler(t *testing.T, build RootBuilder, tc TrustedContext, base cmdutil.GlobalOptions, facades ...facadeMode) (*HTTPHandler, error) { //nolint:gocritic // copy operator globals to match the production constructor boundary
+	t.Helper()
+	h, e := NewHTTPHandlerWithAdmission(build, tc, base, testAdmission(t), facades...)
+	if e == nil {
+		t.Cleanup(h.Close)
+	}
+	return h, e
 }
 
 // toolText decodes the JSON text payload of a tool result into a map.
@@ -115,6 +157,12 @@ func callTool(t *testing.T, s *Server, name string, args any) toolResult {
 	argsRaw, _ := json.Marshal(args)
 	params, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(argsRaw)})
 	resp, has := s.Dispatch(context.Background(), rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
+	// Inventory tests intentionally issue many sequential calls. Respect the
+	// production admission budget while preserving every business assertion.
+	for resp.Error != nil && resp.Error.Code == -32006 {
+		time.Sleep(130 * time.Millisecond)
+		resp, has = s.Dispatch(context.Background(), rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
+	}
 	if !has {
 		t.Fatalf("tools/call produced no response")
 	}
@@ -126,4 +174,14 @@ func callTool(t *testing.T, s *Server, name string, args any) toolResult {
 		t.Fatalf("decode result: %v", err)
 	}
 	return res
+}
+
+func expectAdmissionRPC(t *testing.T, s *Server, name string, args any, code int) {
+	t.Helper()
+	raw, _ := json.Marshal(args)
+	params, _ := json.Marshal(map[string]any{"name": name, "arguments": json.RawMessage(raw)})
+	r, _ := s.Dispatch(context.Background(), rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params})
+	if r.Error == nil || r.Error.Code != code {
+		t.Fatalf("expected admission %d, got %+v", code, r)
+	}
 }

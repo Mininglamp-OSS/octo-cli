@@ -29,7 +29,7 @@ func xin2424Backend(t *testing.T) (srv *httptest.Server, requests func() []recor
 	t.Helper()
 	var mu sync.Mutex
 	var seen []recordedRequest
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv = binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		seen = append(seen, recordedRequest{

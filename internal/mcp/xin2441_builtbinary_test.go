@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync"
@@ -59,7 +58,7 @@ func TestBuiltBinary_XIN2441BoundedValidationAndSecretAliases(t *testing.T) {
 	bin := buildOctoCLI(t)
 	var mu sync.Mutex
 	var hits []string
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		hits = append(hits, r.Method+" "+r.URL.Path)
 		mu.Unlock()

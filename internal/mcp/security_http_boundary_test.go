@@ -32,18 +32,7 @@ func TestHTTP_MissingBearerCannotExecute_RealMakeFactory(t *testing.T) {
 
 	s := httpModeServer(t, "") // no/empty bearer
 
-	res := callTool(t, s, "call_op", map[string]any{
-		"operation_id": "message.send",
-		"arguments":    map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}},
-	})
-	if !res.IsError {
-		t.Fatalf("HTTP call with no bearer must fail closed, got success: %s", res.Content[0].Text)
-	}
-	env := toolText(t, res)
-	errObj, _ := env["error"].(map[string]any)
-	if errObj == nil || errObj["type"] != "auth_error" {
-		t.Errorf("expected an auth_error envelope, got %v", env)
-	}
+	expectAdmissionRPC(t, s, "call_op", map[string]any{"operation_id": "message.send", "arguments": map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}}}, -32001)
 	if be.path != "" {
 		t.Errorf("no request may reach the backend without a connection bearer, path=%q", be.path)
 	}
@@ -60,12 +49,9 @@ func TestHTTP_MalformedAuthCannotExecute_RealMakeFactory(t *testing.T) {
 	// token via bearerToken; the connection therefore fails closed.
 	s := httpModeServer(t, "")
 
-	res := callTool(t, s, "call_op", map[string]any{
-		"operation_id": "message.send",
-		"arguments":    map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}},
-	})
-	if !res.IsError || be.path != "" {
-		t.Errorf("malformed auth must fail closed with no backend hit; isError=%v path=%q", res.IsError, be.path)
+	expectAdmissionRPC(t, s, "call_op", map[string]any{"operation_id": "message.send", "arguments": map[string]any{"channel_id": "c1", "channel_type": 1, "payload": map[string]any{"text": "x"}}}, -32001)
+	if be.path != "" {
+		t.Fatal("business request reached backend")
 	}
 }
 
@@ -93,7 +79,7 @@ func TestHTTP_ValidBearerUsesConnectionCredential_RealMakeFactory(t *testing.T) 
 // --- trusted-context precedence + case-insensitive Bearer ---
 
 func TestConnectionServer_OnlyOperatorSuppliesTrustedContext(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "op-space", OnBehalfOf: "op-obo"}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{SpaceID: "op-space"}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -109,8 +95,8 @@ func TestConnectionServer_OnlyOperatorSuppliesTrustedContext(t *testing.T) {
 	if srv.trusted.SpaceID != "op-space" {
 		t.Errorf("operator-forced SpaceID must win, got %q", srv.trusted.SpaceID)
 	}
-	if srv.trusted.OnBehalfOf != "op-obo" {
-		t.Errorf("operator-forced OnBehalfOf must win, got %q", srv.trusted.OnBehalfOf)
+	if srv.trusted.OnBehalfOf != "" {
+		t.Errorf("OBO must remain unset, got %q", srv.trusted.OnBehalfOf)
 	}
 	if srv.trusted.ChannelID != "" {
 		t.Errorf("unforced field must remain unset despite the header, got %q", srv.trusted.ChannelID)

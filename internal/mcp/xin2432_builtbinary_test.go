@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync"
@@ -58,7 +57,7 @@ func TestBuiltBinary_XIN2432HiddenLoopOperationsRefused(t *testing.T) {
 	t.Run("task-credential", func(t *testing.T) {
 		var mu sync.Mutex
 		hits := 0
-		backend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		backend := binaryPolicyFixtureServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			mu.Lock()
 			hits++
 			mu.Unlock()
@@ -109,7 +108,7 @@ func TestBuiltBinary_XIN2432HiddenLoopOperationsRefused(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			var mu sync.Mutex
 			var seen []string
-			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				seen = append(seen, r.Method+" "+r.URL.Path)
 				mu.Unlock()
@@ -143,7 +142,7 @@ func TestBuiltBinary_XIN2432HiddenLoopOperationsRefused(t *testing.T) {
 				for _, s := range steps {
 					in.WriteString(s.request + "\n")
 				}
-				cmd.Stdin = strings.NewReader(in.String())
+				cmd.Stdin = &pacedReader{data: []byte(in.String())}
 				out, err := cmd.Output()
 				if err != nil {
 					t.Fatalf("stdio server: %v", err)
@@ -156,6 +155,7 @@ func TestBuiltBinary_XIN2432HiddenLoopOperationsRefused(t *testing.T) {
 				defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 				waitPostJSON(t, "http://"+addr, `{"jsonrpc":"2.0","id":0,"method":"ping"}`, 10*time.Second)
 				for _, s := range steps {
+					time.Sleep(130 * time.Millisecond)
 					req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr, strings.NewReader(s.request))
 					req.Header.Set("Authorization", "Bearer bf_smoke")
 					resp, err := http.DefaultClient.Do(req)

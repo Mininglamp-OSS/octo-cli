@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -16,7 +17,7 @@ func multipartDryRunServer(t *testing.T) *Server {
 	t.Helper()
 	s := facadeServer(t, facadeTwo)
 	s.allowLocalUpload = true
-	s.factoryFn = fakeBackendFactory("http://127.0.0.1:1", "bf_test")
+	s.factoryFn = fakeBackendFactory(os.Getenv("OCTO_API_BASE_URL"), "bf_test")
 	return s
 }
 
@@ -28,13 +29,10 @@ func TestXIN2438MultipartDryRunResolvesIdentity(t *testing.T) {
 
 	// An HTTP connection without a bearer: the real call is an auth_error, so
 	// the dry run must not hand back an ok plan.
-	res := callTool(t, s, "execute", args)
-	if out := toolText(t, res); !res.IsError || out["status"] != "auth_error" {
-		t.Fatalf("dry run without a credential must be auth_error, got %s", res.Content[0].Text)
-	}
+	expectAdmissionRPC(t, s, "execute", args, -32001)
 	// With a bearer, the same plan succeeds.
 	s.credentialToken = "bf_test"
-	res = callTool(t, s, "execute", args)
+	res := callTool(t, s, "execute", args)
 	if out := toolText(t, res); res.IsError || out["status"] != "ok" {
 		t.Fatalf("dry run with a credential must plan, got %s", res.Content[0].Text)
 	}

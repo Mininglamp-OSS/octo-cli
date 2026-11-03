@@ -6,7 +6,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"sync"
@@ -20,7 +19,7 @@ func TestBuiltBinary_XIN2544HTTPContextProvenance(t *testing.T) {
 		t.Run(map[bool]string{false: "unforced", true: "operator-forced"}[forced], func(t *testing.T) {
 			var mu sync.Mutex
 			var deliveries []string
-			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				mu.Lock()
 				deliveries = append(deliveries, r.Header.Get("Authorization")+" space="+r.Header.Get("X-Space-Id")+" "+string(body))
@@ -34,7 +33,7 @@ func TestBuiltBinary_XIN2544HTTPContextProvenance(t *testing.T) {
 			addr := freeAddr(t)
 			args := []string{"mcp", "serve", "--http", addr, "--facade", "both"}
 			if forced {
-				args = append(args, "--space", "operator-space", "--force-channel-id", "operator-channel", "--force-channel-type", "2", "--force-on-behalf-of", "operator-person")
+				args = append(args, "--space", "operator-space", "--force-channel-id", "operator-channel", "--force-channel-type", "2")
 			}
 			cmd := exec.CommandContext(ctx, bin, args...)
 			cmd.Env = append(isolatedEnv(t), "OCTO_API_BASE_URL="+backend.URL)
@@ -81,6 +80,12 @@ func TestBuiltBinary_XIN2544HTTPContextProvenance(t *testing.T) {
 					}
 					body, _ := io.ReadAll(resp.Body)
 					_ = resp.Body.Close()
+					if token == "" {
+						if count() != before || !strings.Contains(string(body), "BOT_AUTH_REQUIRED") {
+							t.Fatal("missing bearer inherited host credential")
+						}
+						continue
+					}
 					text := xin2453Text(t, string(body))
 					if token == "" {
 						if count() != before || !strings.Contains(text, "auth_error") {
@@ -96,7 +101,7 @@ func TestBuiltBinary_XIN2544HTTPContextProvenance(t *testing.T) {
 					mu.Unlock()
 					want := []string{"Bearer " + token}
 					if forced {
-						want = append(want, "space=operator-space", `"channel_id":"operator-channel"`, `"channel_type":2`, `"on_behalf_of":"operator-person"`)
+						want = append(want, "space=operator-space", `"channel_id":"operator-channel"`, `"channel_type":2`)
 					} else {
 						want = append(want, `"channel_id":"c1"`, `"channel_type":1`)
 						if strings.Contains(wire, "on_behalf_of") || strings.Contains(wire, "operator-") {

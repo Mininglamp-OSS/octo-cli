@@ -79,11 +79,11 @@ func decodeSearchResponse(t *testing.T, raw []byte) toolResult {
 }
 
 func TestSearchOps_TransportBounds(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(h)
+	ts := policyFixtureServer(h)
 	defer ts.Close()
 	cli := &http.Client{Timeout: 2 * time.Second}
 	for _, transport := range []string{"http", "stdio"} {
@@ -104,7 +104,9 @@ func TestSearchOps_TransportBounds(t *testing.T) {
 				start := time.Now()
 				if transport == "http" {
 					// Real bearer-free HTTP path, including request timeout wiring.
-					resp, err := cli.Post(ts.URL, "application/json", bytes.NewReader(request))
+					httpReq, _ := http.NewRequest("POST", ts.URL, bytes.NewReader(request))
+					httpReq.Header.Set("Authorization", "Bearer bf_fixture")
+					resp, err := cli.Do(httpReq)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -215,26 +217,30 @@ func TestMatchOp_CancellationBetweenTerms(t *testing.T) {
 }
 
 func TestSearchOps_HTTPRequestCancellation(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, mode := range []string{"client-cancel", "request-timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			req := httptest.NewRequest("POST", "/", bytes.NewReader(searchRequest("send message")))
+			req.Header.Set("Authorization", "Bearer bf_fixture")
 			if mode == "client-cancel" {
 				ctx, cancel := context.WithCancel(req.Context())
 				cancel()
 				req = req.WithContext(ctx)
 			} else {
-				h.requestTimeout = -time.Second
+				h.requestTimeout = time.Nanosecond
 			}
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
 			if w.Code != 200 {
 				t.Fatalf("HTTP %d", w.Code)
 			}
-			assertSearchCancelled(t, decodeSearchResponse(t, w.Body.Bytes()))
+			var resp rpcResponse
+			if e := json.Unmarshal(w.Body.Bytes(), &resp); e != nil || resp.Error == nil || resp.Error.Code != -32002 {
+				t.Fatalf("cancelled admission must not run search: %s", w.Body.String())
+			}
 		})
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -31,7 +30,7 @@ func TestXIN2432LoopManagementOperationsDeniedOverMCP(t *testing.T) {
 		t.Run(token, func(t *testing.T) {
 			var mu sync.Mutex
 			hits := 0
-			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			srv := policyFixtureServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				mu.Lock()
 				hits++
 				mu.Unlock()
@@ -48,6 +47,11 @@ func TestXIN2432LoopManagementOperationsDeniedOverMCP(t *testing.T) {
 					cred.BotKind = "agent_task"
 				}
 				return f, out, errOut
+			}
+
+			if token == "mat_task" {
+				expectAdmissionRPC(t, s, "search_ops", map[string]any{"domain": "loop"}, -32001)
+				return
 			}
 
 			discovery := []string{
@@ -104,7 +108,7 @@ func TestXIN2432DocsExportsOverMCP(t *testing.T) {
 	big := bytes.Repeat([]byte("<p>slide</p>"), (maxInlineBinaryBytes/12)+2)
 	var mu sync.Mutex
 	var seen []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
 		mu.Unlock()

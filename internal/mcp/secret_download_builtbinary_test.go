@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,7 +63,7 @@ func secretHTTP(t *testing.T, bin, addr, facade string, env []string, extra ...s
 	t.Helper()
 	args := append([]string{"mcp", "serve", "--http", addr, "--facade", facade, "--verbose"}, extra...)
 	cmd := exec.Command(bin, args...)
-	cmd.Env = env
+	cmd.Env = independentRequestLogEnv(t, env)
 	logs := &secretLogs{}
 	cmd.Stdout = logs
 	cmd.Stderr = logs
@@ -88,7 +87,7 @@ func secretRPC(t *testing.T, bin, transport, facade, addr string, env []string, 
 	if transport == "stdio" {
 		args := append([]string{"mcp", "serve", "--facade", facade, "--verbose"}, globals...)
 		cmd := exec.Command(bin, args...)
-		cmd.Env = env
+		cmd.Env = independentRequestLogEnv(t, env)
 		cmd.Stdin = strings.NewReader(wire + "\n")
 		var diagnostics bytes.Buffer
 		cmd.Stderr = &diagnostics
@@ -113,12 +112,20 @@ func secretRPC(t *testing.T, bin, transport, facade, addr string, env []string, 
 		out, _ = io.ReadAll(resp.Body)
 	}
 	var rpc struct {
-		Error  any `json:"error"`
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
 		Result struct {
 			Content []struct {
 				Text string `json:"text"`
 			} `json:"content"`
 		} `json:"result"`
+	}
+	if json.Unmarshal(out, &rpc) == nil && rpc.Error != nil && rpc.Error.Code == -32001 {
+		return map[string]any{"status": "auth_error", "rpc_code": rpc.Error.Code}
+	}
+	if rpc.Error != nil && rpc.Error.Code == -32602 {
+		return map[string]any{"status": "validation_error", "rpc_code": rpc.Error.Code}
 	}
 	if json.Unmarshal(out, &rpc) != nil || rpc.Error != nil || len(rpc.Result.Content) != 1 {
 		t.Fatal("dedicated secret tool unavailable or invalid response")
@@ -139,7 +146,7 @@ func TestBuiltBinary_SecretDownloadCrossReplica(t *testing.T) {
 	var hits atomic.Int32
 	var rotated atomic.Bool
 	canary := []byte("fixture-private-value\x00\nUTF8-密钥")
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		if r.Method != "POST" || r.URL.Path != "/v1/bot/secrets/resolve" {
 			t.Error("unexpected resolve route")
@@ -189,12 +196,12 @@ func TestBuiltBinary_SecretDownloadCrossReplica(t *testing.T) {
 						t.Fatal("strict input sent a request")
 					}
 				}
-				globalAddr := freeAddr(t)
-				secretHTTP(t, bin, globalAddr, facade, env, "--dry-run")
-				global := secretRPC(t, bin, transport, facade, globalAddr, env, `{"query":"alias"}`, "bf_smoke", "--dry-run")
-				if global["status"] != "dry_run" || hits.Load() != before {
-					t.Fatal("global dry run sent work")
+				globalCmd := exec.Command(bin, "mcp", "serve", "--dry-run")
+				globalCmd.Env = independentRequestLogEnv(t, env)
+				if out, e := globalCmd.CombinedOutput(); e == nil || !bytes.Contains(out, []byte("MCP_OFFLINE_POLICY_UNAVAILABLE")) || hits.Load() != before {
+					t.Fatal("serve dry-run must fail locally without business I/O")
 				}
+
 				result := secretRPC(t, bin, transport, facade, addrA, env, `{"query":"alias"}`, "bf_smoke")
 				link, ok := result["download_url"].(string)
 				if !ok || !strings.HasPrefix(link, "http://"+addrB+"/mcp/secret-download/") {
@@ -279,13 +286,13 @@ func TestBuiltBinary_SecretDownloadCrossReplica(t *testing.T) {
 	// Explicit stored-profile selection must override an unrelated ambient token
 	// and API origin; all storage is in this fixture config directory.
 	profileEnv := append(append([]string{}, env...), "OCTO_TOKEN=bf_bad_ambient", "OCTO_API_BASE_URL=http://127.0.0.1:1")
-	login := exec.Command(bin, "auth", "login", "--profile", "fixture", "--bot-id", "fixture-bot", "--with-token", "--api-base-url", backend.URL)
+	login := exec.Command(bin, "auth", "login", "--profile", "fixture", "--bot-id", "bot_fixture", "--with-token", "--api-base-url", backend.URL)
 	login.Env = profileEnv
 	login.Stdin = strings.NewReader("bf_smoke\n")
 	if _, err := login.Output(); err != nil {
 		t.Fatal("fixture profile setup failed")
 	}
-	for _, selector := range [][]string{{"--profile", "fixture"}, {"--bot-id", "fixture-bot"}} {
+	for _, selector := range [][]string{{"--profile", "fixture"}, {"--bot-id", "bot_fixture"}} {
 		result := secretRPC(t, bin, "stdio", "both", "", profileEnv, `{"query":"id1"}`, "", selector...)
 		if result["status"] != "ok" {
 			t.Fatal("stdio credential selector was lost")

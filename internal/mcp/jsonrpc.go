@@ -19,6 +19,7 @@ package mcp
 import (
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/foldkey"
 )
@@ -31,10 +32,11 @@ const jsonrpcVersion = "2.0"
 // rpcRequest is an inbound JSON-RPC request or notification. A notification has
 // no id; requests carry one that must be echoed on the response.
 type rpcRequest struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
+	receivedAt time.Time
+	Jsonrpc    string          `json:"jsonrpc"`
+	ID         json.RawMessage `json:"id,omitempty"`
+	Method     string          `json:"method"`
+	Params     json.RawMessage `json:"params,omitempty"`
 }
 
 // decodeRPCRequest rejects repeated logical members before they can overwrite
@@ -42,6 +44,7 @@ type rpcRequest struct {
 // nested values retain their original JSON without repeated grammar scans.
 // Keep the existing decoder's case aliases, extension fields and shape rules.
 func decodeRPCRequest(raw []byte, req *rpcRequest) error {
+	req.receivedAt = time.Now()
 	if !isJSONObject(raw) {
 		return json.Unmarshal(raw, req)
 	}
@@ -109,6 +112,9 @@ func newResultResponse(id json.RawMessage, result any) rpcResponse {
 }
 
 func newErrorResponse(id json.RawMessage, code int, message string) rpcResponse {
+	if len(id) == 0 {
+		id = json.RawMessage("null")
+	}
 	return rpcResponse{
 		Jsonrpc: jsonrpcVersion,
 		ID:      id,

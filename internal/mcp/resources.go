@@ -38,13 +38,18 @@ type resourceAnnotations struct {
 func (s *Server) listResources() map[string]any {
 	var out []resourceEntry
 	for _, meta := range s.mapping.enabledSkillMetas() {
+		mainBytes, readErr := skills.FS.ReadFile(meta.Name + "/SKILL.md")
+		if readErr != nil {
+			continue
+		}
+		mainBytes = mcpSkillBytes(mainBytes)
 		out = append(out, resourceEntry{
 			URI:      skillResourceURI(meta.Name),
 			Name:     meta.Name + "/SKILL.md",
 			MimeType: "text/markdown",
 			Annotations: resourceAnnotations{
 				Skill: meta.Name, Kind: "SKILL.md", Version: meta.Version,
-				Etag: meta.Etag, SizeBytes: meta.SizeBytes,
+				Etag: etag12(mainBytes), SizeBytes: len(mainBytes),
 				Services: meta.Services, Requires: meta.Requires,
 			},
 		})
@@ -59,6 +64,7 @@ func (s *Server) listResources() map[string]any {
 			if err != nil {
 				continue
 			}
+			b = mcpSkillBytes(b)
 			out = append(out, resourceEntry{
 				URI:      refResourceURI(meta.Name, base),
 				Name:     meta.Name + "/" + base,
@@ -102,9 +108,25 @@ func (s *Server) readResource(uri string) (map[string]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unknown skill resource %q", uri)
 	}
+	b = mcpSkillBytes(b)
 	return map[string]any{
 		"contents": []resourceContent{{URI: uri, MimeType: "text/markdown", Text: string(b)}},
 	}, nil
+}
+
+// Ordinary CLI skills can describe delegation features. MCP navigation must
+// not advertise those calls as available in its Bot-only execution surface.
+func mcpSkillBytes(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "obo-grant") || strings.Contains(lower, "on_behalf_of") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n"))
 }
 
 func etag12(b []byte) string {

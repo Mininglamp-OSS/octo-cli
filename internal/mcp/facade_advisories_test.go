@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 )
 
@@ -26,7 +27,7 @@ func TestExecute_MultipartDryRunRequiresNonemptyStringBinding(t *testing.T) {
 	s := facadeServer(t, facadeTwo)
 	s.allowLocalUpload = true
 	// The dry run resolves the credential first (XIN-2438); give it one.
-	s.factoryFn = fakeBackendFactory("http://127.0.0.1:1", "bf_test")
+	s.factoryFn = fakeBackendFactory(os.Getenv("OCTO_API_BASE_URL"), "bf_test")
 	for _, value := range []any{nil, "", "   ", 12, true, map[string]any{}, []any{}} {
 		res := callTool(t, s, "execute", map[string]any{"operation_id": "file.upload", "dry_run": true,
 			"arguments": map[string]any{"file_path": value}})

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,7 +11,7 @@ import (
 
 func TestEnvelopeReverseAndEqualDuplicates(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -60,7 +59,7 @@ func TestEnvelopeReverseAndEqualDuplicates(t *testing.T) {
 
 func TestEnvelopeCompatibility(t *testing.T) {
 	var hits atomic.Int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		_, _ = w.Write([]byte(`{}`))
 	}))

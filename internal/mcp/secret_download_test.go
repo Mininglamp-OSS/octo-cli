@@ -126,7 +126,7 @@ func TestSecretFailuresAndBounds(t *testing.T) {
 	var hits atomic.Int32
 	var mode atomic.Int32
 	const canary = "private-upstream-canary"
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	backend := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		switch mode.Load() {
 		case 1:

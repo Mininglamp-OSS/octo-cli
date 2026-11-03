@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -209,7 +208,7 @@ func TestXIN2424CoverageManifestRowsResolve(t *testing.T) {
 			if reg.ServiceDisabled(d.Service) {
 				t.Errorf("%s: operation %q belongs to a disabled service", row.RowID, id)
 			}
-			if !mcpExposed(id) {
+			if !mcpExposed(id) && !oboOperation(id) {
 				t.Errorf("%s: operation %q is not classified for MCP exposure", row.RowID, id)
 			}
 			if strings.EqualFold(d.Method, row.Method) && routeMatches(row.Path, d.Path) {
@@ -349,7 +348,7 @@ func TestExposure_EveryEnabledOperationIsClassified(t *testing.T) {
 	enabled := map[string]bool{}
 	for _, op := range reg.EnabledOperations() {
 		enabled[op.ID] = true
-		if _, withheld := f.Withheld[op.ID]; !mcpExposed(op.ID) && !withheld {
+		if _, withheld := f.Withheld[op.ID]; !mcpExposed(op.ID) && !withheld && !oboOperation(op.ID) {
 			t.Errorf("enabled operation %q is not classified for MCP exposure", op.ID)
 		}
 	}
@@ -412,7 +411,7 @@ func TestExposure_UnclassifiedOperationIsDenied(t *testing.T) {
 
 	s := facadeServer(t, facadeBoth)
 	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	srv := policyFixtureServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer srv.Close()
 	s.factoryFn = fakeBackendFactory(srv.URL, "bf_test")
 
@@ -606,7 +605,7 @@ func pathParam(d *registry.OperationDetail, name string) *registry.ParamInfo {
 // the planned method, path and masked Bot credential. Dry-run never reaches
 // the backend; uploads are described from metadata only.
 func TestXIN2424ExecuteDryRunAssemblesEveryApprovedOperation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("dry-run reached the backend")
 	}))
 	defer srv.Close()
@@ -623,6 +622,11 @@ func TestXIN2424ExecuteDryRunAssemblesEveryApprovedOperation(t *testing.T) {
 	}
 	for _, id := range ids {
 		t.Run(id, func(t *testing.T) {
+			if oboOperation(id) {
+				expectAdmissionRPC(t, s, "execute", map[string]any{"operation_id": id, "dry_run": true}, -32005)
+				return
+			}
+
 			d, _ := reg.GetOperation(id)
 			desc := toolText(t, callTool(t, s, "get_skill", map[string]any{"intent": "describe", "operation_id": id}))
 			fp, _ := desc["schema_fingerprint"].(string)
@@ -673,7 +677,7 @@ func TestXIN2424ExecuteDryRunAssemblesEveryApprovedOperation(t *testing.T) {
 // required path argument are refused locally, before any request.
 func TestXIN2424ExecuteRejectsMalformedAndUnknownArguments(t *testing.T) {
 	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
+	srv := policyFixtureServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits++ }))
 	defer srv.Close()
 	s := facadeServer(t, facadeTwo)
 	s.factoryFn = fakeBackendFactory(srv.URL, "bf_test")
@@ -704,7 +708,7 @@ func TestXIN2424ExecuteRejectsMalformedAndUnknownArguments(t *testing.T) {
 func TestXIN2424ExecuteReturnsBinaryInline(t *testing.T) {
 	big := bytes.Repeat([]byte{0xff}, maxInlineBinaryBytes+1)
 	media := []byte{0x89, 'P', 'N', 'G', 0, 1, 2}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/v/3"):
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -762,7 +766,7 @@ func TestXIN2424ExecuteRawBodyUploadIsConfined(t *testing.T) {
 	var mu sync.Mutex
 	var gotBody []byte
 	var gotHeaders http.Header
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		gotBody, _ = io.ReadAll(r.Body)
 		gotHeaders = r.Header.Clone()
@@ -825,7 +829,7 @@ func TestXIN2424ForcedContextWinsOnNewSessionBoundOperations(t *testing.T) {
 	var mu sync.Mutex
 	var got []*http.Request
 	var bodies []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		mu.Lock()
 		got = append(got, r.Clone(context.Background()))
@@ -867,7 +871,7 @@ func TestXIN2424ForcedContextWinsOnNewSessionBoundOperations(t *testing.T) {
 }
 
 func TestXIN2424AuthFailureIsClassified(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":"invalid bot token"}`))
@@ -892,7 +896,7 @@ func TestXIN2424AuthFailureIsClassified(t *testing.T) {
 func TestXIN2424DriveShareOpsCallableOverMCP(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		paths = append(paths, r.Method+" "+r.URL.Path)
 		mu.Unlock()

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,7 +142,7 @@ func asCancelled(err error, target *errArgumentsCancelled) bool {
 func TestXIN2441ToolCallsBoundedBeforeAuth(t *testing.T) {
 	var mu sync.Mutex
 	hits := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := policyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		hits++
 		mu.Unlock()

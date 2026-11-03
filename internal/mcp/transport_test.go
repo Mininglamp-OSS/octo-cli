@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -74,11 +73,11 @@ func TestHTTPTransport_PerRequestCredentialAndOperatorContext(t *testing.T) {
 	t.Setenv("OCTO_API_BASE_URL", backendSrv.URL)
 	t.Setenv("OCTO_CONFIG_DIR", t.TempDir())
 
-	h, err := NewHTTPHandler(testRoot, TrustedContext{SpaceID: "operator-space"}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{SpaceID: "operator-space"}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
-	mcpSrv := httptest.NewServer(h)
+	mcpSrv := policyFixtureServer(h)
 	t.Cleanup(mcpSrv.Close)
 
 	// tools/list works with no auth.
@@ -133,12 +132,12 @@ func TestOriginAllowed(t *testing.T) {
 }
 
 func TestHTTPTransport_RejectsCrossOrigin(t *testing.T) {
-	h, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
+	h, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{})
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
 	h.allowedOrigins = nil // default: loopback-only
-	srv := httptest.NewServer(h)
+	srv := policyFixtureServer(h)
 	t.Cleanup(srv.Close)
 
 	// Cross-origin browser request is refused before any dispatch.

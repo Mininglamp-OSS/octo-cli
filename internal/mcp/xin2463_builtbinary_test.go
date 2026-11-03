@@ -43,7 +43,7 @@ type xin2463Backend struct {
 func newXIN2463Backend(t *testing.T) *xin2463Backend {
 	t.Helper()
 	b := &xin2463Backend{}
-	b.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	b.srv = binaryPolicyFixtureServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.ReadAll(r.Body)
 		if r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
@@ -254,9 +254,9 @@ func TestBuiltBinary_XIN2463KeyedWritesAndAttemptHistory(t *testing.T) {
 				}
 			})
 			t.Run(transport+"/history/"+c.tool+"/all dials refused", func(t *testing.T) {
-				text := xin2453Text(t, xin2453Serve(t, bin, transport, c.facade, "http://"+xin2463ClosedAddr(t), call))
-				if !strings.Contains(text, c.definite) || strings.Contains(text, "RESULT_UNKNOWN") || strings.Contains(text, "result_unknown") {
-					t.Errorf("want %q and no unknown result: %.600s", c.definite, text)
+				text := xin2453Serve(t, bin, transport, c.facade, "http://"+xin2463ClosedAddr(t), call)
+				if !strings.Contains(text, "BOT_VERIFICATION_UNAVAILABLE") || strings.Contains(text, "RESULT_UNKNOWN") || strings.Contains(text, "result_unknown") {
+					t.Errorf("unreachable identity service must stop admission before business: %.600s", text)
 				}
 			})
 		}

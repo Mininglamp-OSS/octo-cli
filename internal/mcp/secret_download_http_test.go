@@ -48,7 +48,13 @@ func TestSecretDownloadHTTPUnavailable(t *testing.T) {
 			if scenario == "missing origin" {
 				t.Setenv("OCTO_MCP_SECRET_PUBLIC_ORIGIN", "")
 			}
-			handler, err := NewHTTPHandler(testRoot, TrustedContext{}, cmdutil.GlobalOptions{DryRun: scenario == "global dry run"})
+			handler, err := testHTTPHandler(t, testRoot, TrustedContext{}, cmdutil.GlobalOptions{DryRun: scenario == "global dry run"})
+			if scenario == "global dry run" {
+				if err == nil || err.Error() != "MCP_OFFLINE_POLICY_UNAVAILABLE" {
+					t.Fatal("serve dry-run must fail locally")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

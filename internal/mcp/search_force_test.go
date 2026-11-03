@@ -31,12 +31,11 @@ func TestCallOp_SearchFamily_ForcedValuesReachWire(t *testing.T) {
 			srv := be.server(t)
 			s := newTestServer(t)
 			s.factoryFn = fakeBackendFactory(srv.URL, "bf_search")
-			s.trusted = TrustedContext{ChannelID: "C-forced", ChannelType: "1", OnBehalfOf: "O-forced"}
+			s.trusted = TrustedContext{ChannelID: "C-forced", ChannelType: "1"}
 
 			args := map[string]any{
 				"channel_id":   "attacker-c",
 				"channel_type": 9,
-				"on_behalf_of": "attacker-obo",
 			}
 			for k, v := range tc.extraArgs {
 				args[k] = v
@@ -55,8 +54,8 @@ func TestCallOp_SearchFamily_ForcedValuesReachWire(t *testing.T) {
 					t.Errorf("channel_type = %v, want 1 (integer, operator value must win)", be.body["channel_type"])
 				}
 			}
-			if tc.declareOBO && be.body["on_behalf_of"] != "O-forced" {
-				t.Errorf("on_behalf_of = %v, want O-forced", be.body["on_behalf_of"])
+			if be.body["on_behalf_of"] != nil {
+				t.Errorf("Bot-only call must omit on_behalf_of")
 			}
 
 			// The audit trail must disclose exactly the enforced fields.
@@ -69,8 +68,8 @@ func TestCallOp_SearchFamily_ForcedValuesReachWire(t *testing.T) {
 			if tc.declareChan && (!got["channel_id"] || !got["channel_type"]) {
 				t.Errorf("_forced_arguments must disclose channel fields, got %v", forced)
 			}
-			if tc.declareOBO && !got["on_behalf_of"] {
-				t.Errorf("_forced_arguments must disclose on_behalf_of, got %v", forced)
+			if got["on_behalf_of"] {
+				t.Errorf("Bot-only call must not force OBO, got %v", forced)
 			}
 		})
 	}
@@ -87,7 +86,6 @@ func TestCallOp_SearchFamily_EmptyContextKeepsModelValues(t *testing.T) {
 			args := map[string]any{
 				"channel_id":   "model-chan",
 				"channel_type": 9,
-				"on_behalf_of": "model-obo",
 			}
 			for k, v := range tc.extraArgs {
 				args[k] = v
@@ -101,8 +99,8 @@ func TestCallOp_SearchFamily_EmptyContextKeepsModelValues(t *testing.T) {
 					t.Errorf("empty context must keep model values: channel_id=%v channel_type=%v", be.body["channel_id"], be.body["channel_type"])
 				}
 			}
-			if tc.declareOBO && be.body["on_behalf_of"] != "model-obo" {
-				t.Errorf("empty context must keep model on_behalf_of, got %v", be.body["on_behalf_of"])
+			if be.body["on_behalf_of"] != nil {
+				t.Errorf("Bot-only call must omit on_behalf_of")
 			}
 			if env := toolText(t, res); env["_forced_arguments"] != nil {
 				t.Errorf("unforced call must not carry _forced_arguments, got %v", env["_forced_arguments"])
@@ -116,7 +114,7 @@ func TestCallOp_SearchFamily_EmptyContextKeepsModelValues(t *testing.T) {
 // message.search* op.
 func TestDescribeOp_SearchFamily_ReportsServerManaged(t *testing.T) {
 	s := newTestServer(t)
-	s.trusted = TrustedContext{ChannelID: "C-forced", ChannelType: "1", OnBehalfOf: "O-forced"}
+	s.trusted = TrustedContext{ChannelID: "C-forced", ChannelType: "1"}
 	for _, tc := range searchFamilyOps {
 		t.Run(tc.opID, func(t *testing.T) {
 			res := callTool(t, s, "describe_op", map[string]any{"operation_id": tc.opID})
@@ -132,8 +130,8 @@ func TestDescribeOp_SearchFamily_ReportsServerManaged(t *testing.T) {
 			if tc.declareChan && (!got["channel_id"] || !got["channel_type"]) {
 				t.Errorf("describe_op must mark channel fields server-managed, got %v", managed)
 			}
-			if tc.declareOBO && !got["on_behalf_of"] {
-				t.Errorf("describe_op must mark on_behalf_of server-managed, got %v", managed)
+			if got["on_behalf_of"] {
+				t.Errorf("Bot-only discovery must not mark OBO as managed, got %v", managed)
 			}
 		})
 	}
