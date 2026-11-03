@@ -117,11 +117,12 @@ Do not search the machine or guess a path.
 
    ```bash
    octo-cli marketplace plugin publish --plugin-id <plugin-id> \
-     --version <imported-version> --changelog "<matching release notes>"
+     --version <release-version> --changelog "<matching release notes>"
    ```
 
-   Use exactly the version submitted to import (for example, `1.0.0` on create
-   or `<next-version>` on update) and a changelog matching that version.
+   Choose the formal version when publishing. You may reuse the imported label
+   or choose a different release label without re-importing the draft. For an
+   update, use a version higher than the last release and describe its changes.
    A Space-visible Skill follows the authenticated Space's review policy:
    automatic approval is enabled by default when no override is stored and
    publishes immediately. When disabled, the draft remains `pending_review`;
