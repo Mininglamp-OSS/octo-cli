@@ -48,6 +48,24 @@ rejects direct edits and must use review. Version labels use
 `MAJOR.MINOR.PATCH` (each numeric component is 1–9 digits) and may not move
 backward.
 
+Draft saves (`plugin upsert`) and Skill imports (`plugin import`) may omit
+`version`: create uses the existing default/package selection and update preserves
+the backend's draft-selection rules. For `skill`, `expert` and `expert_team`,
+formal publication (`plugin publish` or `plugin review-request create`) requires
+an explicit `MAJOR.MINOR.PATCH` version, including private publication. Choose it
+at publication time: it may differ from the provisional draft label. The CLI
+does not copy a label from the draft or auto-increment it. The server checks
+release collisions, upgrade ordering and authorization. Connector behavior is
+unchanged.
+
+Before a live publish/review with an omitted or malformed label, the CLI reads
+`plugin get` to identify the resource type and refuses versioned types before
+sending the write. A lookup error or unknown type also stops the write. Valid
+explicit labels need no extra read. `--dry-run` remains a network-free preview;
+resource-type validation is deferred until execution. If a server rejects a
+legacy write with `versioned_api_required`, follow its hint to update octo-cli
+and use the Plugin APIs; neither the error nor this CLI updates itself.
+
 After verifying a saved draft, publish it explicitly:
 
 ```bash

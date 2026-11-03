@@ -407,6 +407,10 @@ type OperationDetail struct {
 	// matrix (connector pinned to a version, missing pin field type, duplicate
 	// target, invalid team wiring) before the request is sent.
 	ValidateMarketplaceRelations bool `json:"validate_marketplace_relations,omitempty"`
+
+	// ValidateMarketplaceReleaseVersion opts into resource-specific publication
+	// preflight. Draft operations never set this extension.
+	ValidateMarketplaceReleaseVersion bool `json:"validate_marketplace_release_version,omitempty"`
 	// RetryMode captures the optional x-octo-retry operation extension. Empty
 	// keeps the transport default; "never" disables automatic retries for the
 	// individual request. This is required for non-idempotent external side
@@ -573,6 +577,7 @@ func buildDetail(service string, doc map[string]any, pathStr, method string, op 
 	d.BinaryResponse = boolOf(op["x-octo-binary-response"])
 	d.ValidateElementsIndex = boolOf(op["x-octo-validate-elements-index"])
 	d.ValidateMarketplaceRelations = boolOf(op["x-octo-validate-marketplace-relations"])
+	d.ValidateMarketplaceReleaseVersion = boolOf(op["x-octo-validate-marketplace-release-version"])
 	d.RetryMode = stringOf(op["x-octo-retry"])
 	// Identity routing is declared at the spec top level (every operation in a
 	// domain shares one mount table) but an operation may narrow the allowed

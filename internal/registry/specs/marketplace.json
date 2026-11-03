@@ -494,8 +494,9 @@
     "/market/api/v1/plugins/publish": {
       "post": {
         "operationId": "plugin.publish",
+        "x-octo-validate-marketplace-release-version": true,
         "summary": "Publish a plugin",
-        "description": "Publish a caller-owned plugin. A private plugin is listed immediately but remains owner-only. A Space-visible plugin follows the authenticated Space's review policy: automatic approval is enabled by default when there is no stored override and publishes immediately; when disabled, the plugin remains a draft with a pending review for Space owner/admin approval. The response includes review_id only for the pending-review branch.",
+        "description": "Publish a caller-owned plugin. A private plugin is listed immediately but remains owner-only. A Space-visible plugin follows the authenticated Space's review policy: automatic approval is enabled by default when there is no stored override and publishes immediately; when disabled, the plugin remains a draft with a pending review for Space owner/admin approval. The response includes review_id only for the pending-review branch. Skills, experts and expert teams must explicitly supply version; saving/importing a draft may omit version. The backend determines publication policy and remains authoritative for label collisions, upgrade ordering and permissions.",
         "x-octo-risk": "write",
         "x-octo-retry": "never",
         "requestBody": {
@@ -507,7 +508,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "plugin_id": { "type": "string", "minLength": 1, "description": "Nonblank plugin id" },
-                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Optional MAJOR.MINOR.PATCH label for the Space-review branch; defaults to the draft current version. Ignored when publishing a private plugin." },
+                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Required explicit MAJOR.MINOR.PATCH release label for skill, expert and expert_team (private or Space). Chosen at publication time and may differ from the draft label. Never inferred from the draft or auto-incremented. Connector behavior is unchanged. Omitted or malformed labels trigger a read-only plugin-type lookup before a live publication; dry-run previews without this lookup." },
                   "changelog": { "type": "string", "description": "Optional review changelog, at most 1000 Unicode characters on the Space-review branch; ignored for private publish" }
                 },
                 "required": ["plugin_id"]
@@ -560,6 +561,7 @@
       },
       "post": {
         "operationId": "plugin.review_request.create",
+        "x-octo-validate-marketplace-release-version": true,
         "x-octo-validate-marketplace-relations": true,
         "summary": "Submit a plugin for Space review",
         "description": "Freeze a Space-visible plugin version for review. The authenticated Space's automatic-review policy applies: automatic approval is enabled by default when there is no stored override and publishes immediately; when disabled, the request remains pending for owner/admin approval. Supply parse_task_id for a skill zip, manifest_json plus plugin_json for declared documents, or neither only for the first listing of an unlisted Space-intent draft. parse_task_id is mutually exclusive with the document pair. An omitted relations key inherits the live graph; a present array replaces the reviewed graph.",
@@ -573,7 +575,7 @@
                 "type": "object",
                 "properties": {
                   "plugin_id": { "type": "string", "minLength": 1 },
-                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Required MAJOR.MINOR.PATCH label; must not move backward or duplicate a published version" },
+                  "version": { "type": "string", "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$", "description": "Required explicit MAJOR.MINOR.PATCH formal release label for skill, expert and expert_team; may differ from the draft label, but cannot reuse or regress a published release. Connector review requirements are unchanged." },
                   "changelog": { "type": "string", "maxLength": 1000, "description": "Optional change summary for the submitted version; at most 1000 Unicode characters." },
                   "parse_task_id": { "type": "string", "description": "Completed skill parse task; skill plugins only" },
                   "manifest_json": { "type": "object", "description": "Frozen type-specific manifest; provide together with plugin_json" },
@@ -687,7 +689,7 @@
                   "plugin": {
                     "type": "object",
                     "additionalProperties": false,
-                    "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin get -> edit the document -> plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save is a version snapshot (auto-increment label); plugin.version sets the current_version display label, defaults to 1.0.0, and is preserved when left blank on update.",
+                    "description": "Plugin write document. UPDATE IS A FULL REPLACE, NOT A PATCH: the backend rebuilds the whole row from this document and preserves only created_at, the version history and the creator identity. An omitted category_id, publisher or icon is accepted as empty and CLEARS the stored value — there is no metadata-only PATCH, so always read-modify-write (plugin get -> edit the document -> plugin upsert) rather than sending just the fields you changed. Note plugin.import has the opposite semantics (it falls back to the existing row), so do not carry habits across. manifest_json and plugin_json are required on every write and must agree with the outer fields (see manifest_json). A save appends an internal snapshot; plugin.version is an optional draft display label, defaults to 1.0.0, and is preserved when left blank on update. The formal release label is explicitly chosen later at publication, independently of the draft label.",
                     "properties": {
                       "plugin_id": {
                         "type": "string",
