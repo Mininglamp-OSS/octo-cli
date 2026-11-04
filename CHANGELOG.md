@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Marketplace Skill archive upload** — `marketplace skill-upload file <path>`
+- **Marketplace Skill archive upload** — `marketplace skill-upload create --file <path>`
   initializes and streams a local ZIP to its signed storage target without
   exposing the signed URL or forwarding Octo credentials. The returned upload
   id continues through the existing parse/import/publish commands; `--dry-run`

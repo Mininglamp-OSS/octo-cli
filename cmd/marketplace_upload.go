@@ -22,28 +22,38 @@ func registerMarketplaceUploadCmd(root *cobra.Command, f *cmdutil.Factory) {
 	if market == nil {
 		return
 	}
-	if uploads := service.FindChild(market, "skill-upload"); uploads != nil {
-		uploads.AddCommand(&cobra.Command{
-			Use:   "file <local-path>",
-			Short: "Initialize a Skill ZIP upload and stream its bytes to storage",
-			Long: `Upload a local Skill ZIP without parsing, importing, or publishing it.
+	uploads := service.FindChild(market, "skill-upload")
+	if uploads == nil {
+		return
+	}
+	create := service.FindChild(uploads, "create")
+	if create == nil {
+		return
+	}
+	generatedRun := create.RunE
+	var localPath string
+	create.Flags().StringVar(&localPath, "file", "", "local .zip or .skill archive; derive name/size and upload bytes before returning")
+	create.Long += `
 
-Initializes skill_upload.create with the local filename and exact size, then
-streams the bytes to the signed target on a separate credential-free client.
-The signed URL stays internal and is never printed. Use the returned
-skill_upload_id with skill-upload parse, poll skill-parse-task get, then use
-plugin import and plugin publish to finish the release workflow.
+With --file <path>, derive file_name and file_size from the local archive and
+stream it to storage. Do not combine --file with --data, --file-name or --file-size.
+Without --file, initialization remains metadata-only.
 
---dry-run validates the local file and describes initialization without sending
-any request. A failed PUT does not trigger parse; the pending upload may remain
-because the backend has no cancellation operation. No automatic retry is made.
-
-Underlying operation: skill_upload.create.`,
-			Args: cobra.ExactArgs(1),
-			RunE: func(cmd *cobra.Command, args []string) error {
-				return runMarketplaceSkillUpload(cmd, f, args[0])
-			},
-		})
+The signed URL stays internal on the file path. Use the returned skill_upload_id
+with skill-upload parse, poll skill-parse-task get, then plugin import and publish.
+--dry-run checks the local file without creating an upload or transferring bytes.
+A failed PUT does not trigger parsing. No automatic retry is made; a pending
+upload may remain because the backend has no cancellation operation.`
+	create.RunE = func(cmd *cobra.Command, args []string) error {
+		if !cmd.Flags().Changed("file") {
+			return generatedRun(cmd, args)
+		}
+		for _, flag := range []string{"data", "file-name", "file-size"} {
+			if cmd.Flags().Changed(flag) {
+				return failErr(f, output.ErrValidation("--file cannot be combined with --"+flag, "pass only --file; archive name and size are derived locally"))
+			}
+		}
+		return runMarketplaceSkillUpload(cmd, f, localPath)
 	}
 }
 
@@ -54,7 +64,6 @@ type marketplaceUploadTarget struct {
 	Headers  map[string]string `json:"headers"`
 }
 
-//nolint:gocyclo // linear upload workflow with separate safe error boundaries
 func runMarketplaceSkillUpload(cmd *cobra.Command, f *cmdutil.Factory, path string) error {
 	file, size, err := openMarketplaceArchive(path)
 	if err != nil {
@@ -136,7 +145,7 @@ func openMarketplaceArchive(path string) (*os.File, int64, error) {
 	}
 	info, err = file.Stat()
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 {
-		_ = file.Close()
+		_ = file.Close() //nolint:errcheck // best-effort close of an invalid read-only archive
 		return invalid()
 	}
 	return file, info.Size(), nil
@@ -166,7 +175,7 @@ func marketplaceUploadHeaders(signed map[string]string, size int64) (http.Header
 func marketplaceUploadError(err *output.ExitError, uploadID string) *output.ExitError {
 	// The API has no cancel endpoint; keep the id for diagnosis without claiming
 	// that the pending upload was removed or starting a parse on partial bytes.
-	err.Detail, _ = json.Marshal(map[string]any{"skill_upload_id": uploadID, "upload_confirmed": false})
+	err.Detail, _ = json.Marshal(map[string]any{"skill_upload_id": uploadID, "upload_confirmed": false}) //nolint:errcheck // only JSON scalar values
 	err.Hint = fmt.Sprintf("upload %s was not confirmed; parse was not triggered; inspect the pending upload before retrying", uploadID)
 	return err
 }

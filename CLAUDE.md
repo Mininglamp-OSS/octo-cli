@@ -106,7 +106,7 @@ octo-cli marketplace plugin list|get|version list|skillmd|download|upsert|delete
                plugin-category list
                plugin-tag list
                mcp probe
-               skill-upload create|file|parse
+               skill-upload create|parse
                skill-parse-task get
                skill-icon-upload create
                mcp-icon-upload create

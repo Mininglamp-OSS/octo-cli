@@ -71,7 +71,7 @@ func TestMarketplaceSkillUploadFile(t *testing.T) {
 	cred := &credential.BotCredential{Token: "bf_bot", SpaceID: "test-space", Source: "test"}
 	env.tf.SetCredential(cred)
 	env.tf.SetClient(client.New(cfg, cred, client.Options{Verbose: true, ErrOut: env.tf.ErrOut}))
-	if err := env.run("--verbose", "marketplace", "skill-upload", "file", path); err != nil {
+	if err := env.run("--verbose", "marketplace", "skill-upload", "create", "--file", path); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 || len(env.storeRequests) != 1 {
@@ -106,7 +106,7 @@ func TestMarketplaceSkillUploadDryRunAndInvalidFiles(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			env := newDriveTestEnv(t, "bf_bot", func(http.ResponseWriter, *http.Request) { calls++ }, nil)
-			args := []string{"marketplace", "skill-upload", "file", tc.path}
+			args := []string{"marketplace", "skill-upload", "create", "--file", tc.path}
 			if tc.dry {
 				args = append([]string{"--dry-run"}, args...)
 			}
@@ -132,7 +132,7 @@ func TestMarketplaceSkillUploadFailureDoesNotParse(t *testing.T) {
 				_, _ = w.Write([]byte("storage-secret"))
 			})
 			target = env.store.URL + "/object?signature=storage-secret"
-			err := env.run("marketplace", "skill-upload", "file", marketplaceArchive(t))
+			err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t))
 			if err == nil || calls != 1 || len(env.storeRequests) != 1 || env.tf.Out.Len() != 0 {
 				t.Fatalf("err=%v API=%d storage=%d stdout=%s", err, calls, len(env.storeRequests), env.tf.Out.String())
 			}
@@ -157,7 +157,7 @@ func TestMarketplaceSkillUploadInitializationErrorsAreRedacted(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}, nil)
 			configureDriveResponseSecretTestClient(env, true)
-			err := env.run("--verbose", "marketplace", "skill-upload", "file", marketplaceArchive(t))
+			err := env.run("--verbose", "marketplace", "skill-upload", "create", "--file", marketplaceArchive(t))
 			assertNoResponseSecretVisible(t, env, err, "marketplace-secret-marker")
 			if len(env.storeRequests) != 0 {
 				t.Fatal("storage called after initialization failed")
@@ -183,7 +183,7 @@ func TestMarketplaceSkillUploadRefusesInvalidTargetsAndHeaders(t *testing.T) {
 					UploadID: "upload-1", URL: tc.url, Method: tc.method, Headers: tc.headers,
 				}})
 			}, nil)
-			if err := env.run("marketplace", "skill-upload", "file", marketplaceArchive(t)); err == nil {
+			if err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t)); err == nil {
 				t.Fatal("invalid transfer accepted")
 			}
 			if len(env.storeRequests) != 0 {
@@ -203,7 +203,7 @@ func TestMarketplaceSkillUploadStandalonePrefix(t *testing.T) {
 		skillTarget(w, target, nil)
 	}, nil)
 	target = env.store.URL + "/object"
-	if err := env.run("marketplace", "skill-upload", "file", marketplaceArchive(t)); err != nil {
+	if err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -215,10 +215,53 @@ func TestMarketplaceSkillUploadInitializationIsNotRetried(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":{"code":"UPSTREAM_UNAVAILABLE","message":"temporary failure"}}`))
 	}, nil)
-	if err := env.run("marketplace", "skill-upload", "file", marketplaceArchive(t)); err == nil {
+	if err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t)); err == nil {
 		t.Fatal("initialization failure reported success")
 	}
 	if calls != 1 || len(env.storeRequests) != 0 {
 		t.Fatalf("unsafe initialization retry: API=%d store=%d", calls, len(env.storeRequests))
+	}
+}
+
+func TestMarketplaceSkillUploadMetadataOnlyStillWorks(t *testing.T) {
+	calls := 0
+	env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["file_name"] != "manual.zip" || body["file_size"] != float64(123) {
+			t.Errorf("wrong metadata: %v", body)
+		}
+		skillTarget(w, "https://example.test/upload?X-Amz-Signature=secret", nil)
+	}, nil)
+	if err := env.run("marketplace", "skill-upload", "create", "--file-name", "manual.zip", "--file-size", "123"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(env.storeRequests) != 0 {
+		t.Fatalf("metadata-only unexpectedly uploaded: API=%d storage=%d", calls, len(env.storeRequests))
+	}
+	data, ok := env.data(t)["data"].(map[string]any)
+	if !ok || data["skill_upload_id"] != "upload-1" {
+		t.Fatal("metadata-only response envelope changed")
+	}
+}
+
+func TestMarketplaceSkillUploadRejectsAmbiguousMetadata(t *testing.T) {
+	for _, flag := range []string{"--file-name", "--file-size", "--data"} {
+		t.Run(flag, func(t *testing.T) {
+			calls := 0
+			env := newDriveTestEnv(t, "bf_bot", func(http.ResponseWriter, *http.Request) { calls++ }, nil)
+			value := "other.zip"
+			if flag == "--file-size" {
+				value = "1"
+			}
+			if flag == "--data" {
+				value = `{ "file_name":"other.zip", "file_size":1 }`
+			}
+			err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t), flag, value)
+			if err == nil || calls != 0 || len(env.storeRequests) != 0 {
+				t.Fatalf("error=%v calls=%d", err, calls)
+			}
+		})
 	}
 }
