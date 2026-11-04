@@ -126,7 +126,7 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 > whole plugin from your document, preserving only `created_at`, the version
 > history and the creator identity. An omitted `category_id`, `publisher` or
 > `icon` is accepted as empty and **clears the stored value**. Read-modify-write
-> with `plugin get` and resubmit the complete document on every edit. (`plugin
+> with `plugin draft get --plugin-id <id>` and resubmit the complete document on every edit. (`plugin
 > import` is the opposite — it falls back to the existing row — so do not carry
 > habits between the two paths.)
 
@@ -135,10 +135,10 @@ Set `plugin.plugin_id` to update; omit to create. Inspect history with `plugin v
 > to submitting `[]` and soft-deletes every live relation (team members,
 > attached skills, attached connectors) on save. Nothing validates this locally,
 > so the destruction is silent. Echo `relation_id` for rows you want to keep
-> verbatim.
+> verbatim. Pass the read `draft_revision` to upsert via `--expected-draft-revision`.
 
 After saving, publish with `plugin publish --plugin-id <id> --version <x.y.z>
---changelog "<matching release notes>"`. A private expert/team publishes
+--changelog "<matching release notes>" --expected-draft-revision <revision-from-save>`. A private expert/team publishes
 immediately. A Space-visible plugin follows the authenticated Space's
 automatic-review policy: automatic approval is enabled by default when no
 override is stored and publishes immediately; when disabled, it stays pending

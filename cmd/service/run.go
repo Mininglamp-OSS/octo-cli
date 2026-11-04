@@ -252,7 +252,7 @@ func attachJSONBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRu
 			"quote the value — a declared secret is masked by string rules, and an unquoted one would print in full")
 	}
 	req.SecretValues = append(req.SecretValues, bodySecrets...)
-	return nil
+	return validateMarketplaceReleaseVersion(cobraCmd.Context(), f, rt, req)
 }
 
 // resolvePathValues fills one value per path parameter, in path order. A slot
@@ -1323,6 +1323,7 @@ func emitOnce(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime, req
 	}
 	body, err := cli.Do(ctx, req)
 	if err != nil {
+		err = annotateMarketplaceVersionError(req.Service, err)
 		err = annotateSheetCleaningError(rt, req, err)
 		err = annotateIdempotencyKey(rt, req, err)
 		_ = f.EmitError(err) //nolint:errcheck // best-effort emit before returning err

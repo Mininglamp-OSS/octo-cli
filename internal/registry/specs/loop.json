@@ -92,6 +92,9 @@
     },
     "500": {
       "$ref": "#/components/responses/InternalError"
+    },
+    "503": {
+      "$ref": "#/components/responses/UpstreamUnavailable"
     }
   },
   "paths": {
@@ -2903,7 +2906,7 @@
     "/fleet/api/v1/workspaces": {
       "get": {
         "summary": "List workspaces",
-        "description": "List workspaces in the authenticated workspace.",
+        "description": "List workspaces in the authenticated workspace. Project-backed results may include optional status and external_version lifecycle metadata.",
         "tags": [
           "workspaces"
         ],
@@ -2993,7 +2996,7 @@
       ],
       "get": {
         "summary": "Get workspace",
-        "description": "Get workspace in the authenticated workspace.",
+        "description": "Get workspace in the authenticated workspace. Project-backed results may include optional status and external_version lifecycle metadata.",
         "tags": [
           "workspaces"
         ],
@@ -7672,7 +7675,7 @@
         }
       },
       "Forbidden": {
-        "description": "FORBIDDEN — principal lacks the required action.",
+        "description": "FORBIDDEN — principal lacks the required action. Project Workspace writes return WORKSPACE_ARCHIVED while that Project is archived.",
         "content": {
           "application/json": {
             "schema": {
@@ -7713,6 +7716,16 @@
       },
       "InternalError": {
         "description": "INTERNAL_ERROR — Fleet could not complete the operation.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "UpstreamUnavailable": {
+        "description": "UPSTREAM_UNAVAILABLE — a required verifier or identity store is unavailable. A Project-backed Workspace write can also return PROJECT_WORKSPACE_NOT_READY while authoritative lifecycle state is unavailable or has not been applied by Fleet.",
         "content": {
           "application/json": {
             "schema": {
@@ -7901,6 +7914,8 @@
                   "CLIENT_VERSION_TOO_OLD",
                   "RATE_LIMITED",
                   "INTERNAL_ERROR",
+                  "WORKSPACE_ARCHIVED",
+                  "PROJECT_WORKSPACE_NOT_READY",
                   "UPSTREAM_UNAVAILABLE"
                 ]
               },
@@ -8001,6 +8016,16 @@
               "string",
               "null"
             ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Current Workspace execution status. Project-backed Workspaces use active or archived; older responses may omit this field."
+          },
+          "external_version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "Highest Project lifecycle version applied locally by Fleet; may be omitted from responses produced before lifecycle synchronization was enabled."
           },
           "created_at": {
             "type": "string",

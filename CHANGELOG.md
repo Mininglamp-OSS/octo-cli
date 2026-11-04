@@ -40,6 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   old flag spellings for scripts. Project members use the `uid` from the member
   list; native Workspace members continue to use their `user_id` UUID.
 
+- **Loop Project workspace lifecycle visibility** — `loop workspace list` and
+  `loop workspace get` schemas now describe optional `status` and `external_version` fields
+  without making them required. Existing reads, `--workspace-id` selectors,
+  and API error handling are unchanged; archived writes still surface Fleet's
+  `WORKSPACE_ARCHIVED` / `PROJECT_WORKSPACE_NOT_READY` responses.
+
 - **API base URL precedence** — the active profile's stored `api_base_url` now
   outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored
   profile is routed to the origin it was created against even when the
