@@ -215,6 +215,9 @@ octo-cli docs members set doc-123 --uid u-1 --role writer --principal-space-id s
 octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 
 # Fleet/Loop uses the same gateway under /fleet/api/v1.
+# Workspace state and lifecycle discovery.
+octo-cli loop workspace list
+octo-cli loop workspace get <workspace-uuid> --workspace-id <workspace-uuid>
 octo-cli loop task list --workspace-id <workspace-uuid>
 # Multica-style assignment: --to accepts a name with an optional leading @; use --to-id for a complete ID.
 # Automatic name/ID lookup reads at most 10 pages per roster; use explicit typed fields for larger rosters.
@@ -318,6 +321,8 @@ octo-cli html element replace --slug <doc-ref> --aid <content-hash> --new-html '
 octo-cli schema --list              # all operations across all domains
 octo-cli schema --list message      # operations in one domain
 octo-cli schema message.send        # request/response schema for one op
+# Workspace response, including optional lifecycle fields.
+octo-cli schema workspace.list
 octo-cli config show                # resolved config (token masked)
 octo-cli auth update --api-base-url https://octo.example # persist endpoint for the active profile (wins over OCTO_API_BASE_URL)
 octo-cli auth update --clear-api-base-url                # remove the stored endpoint; env or default applies
@@ -327,6 +332,18 @@ octo-cli api GET  /v1/messages --params '{"chat_id":"chat-1"}'
 octo-cli api POST /v1/messages --data @body.json
 octo-cli api GET  /fleet/api/v1/custom --workspace-id <workspace-uuid>
 ```
+
+The existing `loop workspace list` and `loop workspace get` reads can include
+`status` and `external_version` for Project-backed Workspaces. `status` is
+`active` or `archived`; `external_version` is the highest Project lifecycle
+version applied by Fleet. Both are optional response fields for compatibility,
+so their absence is not a command failure. They expose state only: Fleet/Loop
+does not provide a Project archive/restore command. An archived Project rejects
+workspace writes with `WORKSPACE_ARCHIVED` (403); a lifecycle version that is
+not yet applied returns `PROJECT_WORKSPACE_NOT_READY` (503). The CLI surfaces
+these backend codes in its usual stderr error envelope.
+Archive management remains with the current effective human Project owner
+through the Server interface.
 
 ## Authentication
 

@@ -66,6 +66,20 @@ explicitly. Discover available workspaces first:
 octo-cli loop workspace list
 ```
 
+For Project-backed Workspaces, `workspace list` and `workspace get` may expose
+`status` (`active` or `archived`) and `external_version` (the highest Project
+lifecycle version Fleet has applied). Both fields are optional for backward
+compatibility; their absence is not an error. They are read-only visibility,
+not permission to manage a Server Project. Fleet/Loop has no Project
+archive/restore command; use the Server's existing Project management
+interface with the current effective human owner, never a Bot/owner fallback.
+
+Fleet returns `WORKSPACE_ARCHIVED` (403) when an archived Project Workspace
+write is refused, and `PROJECT_WORKSPACE_NOT_READY` (503) when the authoritative
+lifecycle is unavailable or Fleet has not caught up. The CLI returns these
+backend errors in its usual error envelope; do not treat them as local CLI
+validation errors or switch identities to bypass the Project boundary.
+
 ### Loop projects and resources
 
 `loop project` manages the projects shown in the Loop Project tab. Each belongs
