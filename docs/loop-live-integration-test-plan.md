@@ -473,3 +473,57 @@ Final statuses:
   `SKIP` with approved reasons.
 - `FAIL`: assertion, security, cleanup or unexpected server error.
 - `BLOCKED`: Fleet, identity, runtime or daemon prerequisite is unavailable.
+
+## 10. OCTO-59 source-CLI compatibility acceptance (2026-11-04)
+
+This local acceptance is separate from the deployed-environment gate above.
+Both binaries were built from the OCTO-59 CLI worktree: the untouched
+`fad1cccab4218fc88d0c94560f357a483868a4f1` baseline and the contract-only update.
+The update changes the embedded schema and documentation, not CLI request,
+response-validation, credential or error-handling code.
+
+Real components: Fleet public router, signed lifecycle handler and PostgreSQL;
+Drive router/repositories and MySQL; Docs router, Yjs persistence and MySQL;
+the real Docs-to-Drive derived-access HTTP client. Server identity, Project
+membership and lifecycle authority were synthetic fixtures. Docs used its
+single-process empty Redis extension. This run did not start experts, test
+multi-node collaboration, deploy services or write production acceptance data.
+
+| Scenario, exercised with both CLI builds | Observed result |
+|---|---|
+| `loop workspace list`; `loop workspace get "$WS" --workspace-id "$WS"` | Active v1, archived v2 and restored v3 remain readable. Baseline accepts added `status`/`external_version`; updated list schema describes them without adding required fields. |
+| `loop task list/get`, `loop autopilot list`, `loop project get`, `loop project resource list`, each scoped by `--workspace-id "$WS"` | Allowed active and archived reads succeed, exit 0. These Loop project IDs remain distinct from Server Project IDs. |
+| `loop task create`, `loop autopilot update`, `loop project resource add` while archived | HTTP 403, `WORKSPACE_ARCHIVED`, error type `permission`, exit 1. Issue, automation and resource counts remain unchanged. |
+| Task create after authority restores v3, before Fleet applies restore | HTTP 503, `PROJECT_WORKSPACE_NOT_READY`, type `api_error`, exit 1; no issue row added. |
+| Task create after the real signed restore event is applied | Exit 0; each binary adds exactly one unassigned issue. No expert is invoked. |
+| Current member exits; a new member joins | Old identity reads fail with `PROJECT_MEMBERSHIP_REQUIRED`, exit 1. New identity reads and unassigned creates succeed. |
+| `drive browse`; `drive folder create` with only Project permission | Active create returns 201. Archived browse returns 200, create returns 403. Final Project-source removal makes browse return 403. |
+| Independent Drive editor during archive and after Project exit | Folder creates return 201; Docs-derived reads continue. |
+| `docs content get/edit` with only Drive-derived access | Read returns 200, edit returns 403 and adds no document version. Drive contributes reader, not writer. |
+| `docs members set "$DOC" --uid "$UID" --role writer --principal-space-id "$SPACE"`; independent writer edits during archive and after Project exit | Both content edits return 200 and persist. Removing that independent grant restores Drive-only reader behavior; the next edit returns 403. |
+| Project rejoin with the current ordinary-member role | Editor operations succeed; old owner-level member administration returns 403 and adds no member row. |
+
+Fleet SQL checkpoints: one seed issue; two legal active creates give 3 issues;
+all archived and stale-restore writes leave 3; two restored creates give 5;
+two new-member creates give 7. Seeded queued/running execution rows become
+cancelled and stay cancelled after restore. The automation's active state and
+trigger's enabled state are unchanged. This is persisted cancellation proof,
+not a new real-executor interruption test.
+
+Each isolated Drive/Docs run ends with four legal folders, one mounted document,
+one Yjs row and three document versions: the initial owner edit plus the two
+independently authorized writer edits. Denied writes add no folder/version.
+Stateless Docs revocation checks waited 16 seconds for the existing 15-second
+positive cache to expire; this is not an immediate-revocation or WebSocket
+latency claim.
+
+Platform Server Project archive/restore, transfer, leave and archive notices
+remain subject to their existing human-session/current-role authorization.
+Supported `bf_*` OBO Project routes are read-only; `uk_*` is not a human session.
+No management command, credential flow, retry/cache layer or permission bypass
+was added. Server `archive_status` is not sent to Fleet endpoints.
+
+Verification: both builds, `go test -race -count=1 ./...`, `go vet ./...`, and
+Fleet OpenAPI/embedded-registry parsing passed. Additive response fields do not
+require an old-CLI upgrade; schema discovery and documentation are the only
+CLI changes established by this acceptance.
