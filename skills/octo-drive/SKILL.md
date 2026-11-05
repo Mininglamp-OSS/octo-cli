@@ -195,7 +195,7 @@ octo-cli drive creator list --scope all
 octo-cli drive creator list --scope space --space-id "$SPACE"
 ```
 
-The response is `{creator_uids:[...]}`; UIDs may identify a person or a Bot and can be passed verbatim in `filters.creator_uids`. If required Docs metadata is unavailable, the call returns `unavailable` (503).
+The response is `{creator_uids:[...]}`; UIDs may identify a person or a Bot and can be passed verbatim in `filters.creator_uids`. Inaccessible documents and unknown creators are omitted; an empty array means no known readable creators. If the required Docs metadata service fails, the call returns `unavailable` (503).
 
 ## 4. Upload and download in detail
 

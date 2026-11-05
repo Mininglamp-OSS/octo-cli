@@ -734,7 +734,7 @@ func resolveBody(f *cmdutil.Factory, cobraCmd *cobra.Command, rt *operationRunti
 		return nil, err
 	}
 
-	if len(base) == 0 {
+	if len(base) == 0 && !rt.detail.RequestBodyRequired {
 		return nil, nil
 	}
 	return base, nil

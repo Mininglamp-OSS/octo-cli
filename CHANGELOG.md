@@ -42,7 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Drive document actors** — expose the document creator, editor and update
   time contract in Drive schemas and guidance, including exact creator filters
-  and the `drive creator list` command for visible document creators.
+  and the `drive creator list` command for visible document creators. Generated
+  commands send an empty JSON object when a required body has no required fields.
 
 - **API base URL precedence** — the active profile's stored `api_base_url` now
   outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored

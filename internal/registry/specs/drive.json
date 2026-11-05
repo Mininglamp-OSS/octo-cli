@@ -310,11 +310,12 @@
         },
         "responses": {
           "200": {
-            "description": "Deduplicated actual creator UIDs for caller-visible online documents whose Docs metadata is readable; empty when none are available.",
+            "description": "Deduplicated actual creator UIDs for caller-visible online documents whose Docs metadata is readable. Inaccessible documents and unknown creators are omitted; an empty array means no known readable creators. Metadata service failure returns 503 instead.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "required": ["creator_uids"],
                   "properties": {
                     "creator_uids": { "type": "array", "items": { "type": "string" }, "description": "Unique Docs created_by UIDs, including Bot UIDs; unreadable or unknown document creators are omitted." }
                   }

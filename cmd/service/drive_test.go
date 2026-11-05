@@ -288,6 +288,21 @@ func TestDriveCreatorList_RoutesAndSendsScopeBody(t *testing.T) {
 	}
 }
 
+func TestDriveCreatorList_DefaultRequest(t *testing.T) {
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "JSON object required", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"creator_uids":["helper_bot"]}`))
+	})
+	root.SetArgs([]string{"drive", "creator", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("default creator list: %v", err)
+	}
+}
+
 // TestDrive_NoSpaceHeader confirms drive never sends X-Space-Id: the mount's
 // auth middleware derives the tenant from the verified identity, and a
 // client-supplied header that disagrees is rejected server-side (403).
