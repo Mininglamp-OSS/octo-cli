@@ -133,7 +133,9 @@ func openMarketplaceArchive(path string) (*os.File, int64, error) {
 	invalid := func() (*os.File, int64, error) {
 		return nil, 0, output.ErrValidation("<local-path> must be a readable, non-empty regular .zip or .skill file", "pass the Skill ZIP archive path")
 	}
-	// Probe before opening to refuse directories/devices/FIFOs without blocking.
+	// Refuse paths that are already non-regular before opening. This is a
+	// best-effort input check, not isolation from concurrent path replacement
+	// by the same OS user. Validate the opened descriptor again below.
 	info, err := os.Stat(path)
 	ext := strings.ToLower(filepath.Ext(path))
 	if err != nil || !info.Mode().IsRegular() || (ext != ".zip" && ext != ".skill") {

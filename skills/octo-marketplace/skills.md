@@ -114,8 +114,9 @@ Do not search the machine or guess a path.
    not redact the metadata-only success response. On upload failure no parse is triggered; the backend
    has no cancel operation, so a pending upload may remain. Inspect the reported
    upload id before retrying rather than assuming a failed transfer sent no bytes.
-   If initialization loses its response or receives an ambiguous gateway failure,
-   the command returns `RESULT_UNKNOWN`: a pending upload may exist even though
+   Both create modes disable automatic retries. If initialization loses its
+   response or receives an ambiguous gateway failure, the command returns
+   `RESULT_UNKNOWN`: a pending upload may exist even though
    its ID was not received. Do not retry automatically; inspect server state
    before a manual retry.
 

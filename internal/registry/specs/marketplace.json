@@ -1241,7 +1241,8 @@
         "tags": [
           "skill_upload"
         ],
-        "x-octo-risk": "write"
+        "x-octo-risk": "write",
+        "x-octo-retry": "never"
       }
     },
     "/market/api/v1/skill_uploads/{skill_upload_id}/parse": {

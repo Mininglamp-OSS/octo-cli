@@ -322,6 +322,15 @@ func TestMarketplaceSkillUploadMalformedRedirectDoesNotLeak(t *testing.T) {
 }
 
 func TestMarketplaceSkillUploadInitializationUnknownOutcome(t *testing.T) {
+	testMarketplaceInitializationUnknownOutcome(t, true)
+}
+
+func TestMarketplaceMetadataInitializationUnknownOutcome(t *testing.T) {
+	testMarketplaceInitializationUnknownOutcome(t, false)
+}
+
+func testMarketplaceInitializationUnknownOutcome(t *testing.T, fileMode bool) {
+	t.Helper()
 	for _, status := range []int{0, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusBadRequest} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
 			var accepted atomic.Int32
@@ -341,7 +350,13 @@ func TestMarketplaceSkillUploadInitializationUnknownOutcome(t *testing.T) {
 				w.WriteHeader(status)
 				_, _ = w.Write([]byte(`{"error":{"code":"VALIDATION_ERROR","message":"request failed"}}`))
 			}, nil)
-			err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t))
+			args := []string{"marketplace", "skill-upload", "create"}
+			if fileMode {
+				args = append(args, "--file", marketplaceArchive(t))
+			} else {
+				args = append(args, "--file-name", "manual.zip", "--file-size", "123")
+			}
+			err := env.run(args...)
 			ee := output.AsExitError(err)
 			if ee == nil {
 				t.Fatal("initialization failure reported success")
