@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and API error handling are unchanged; archived writes still surface Fleet's
   `WORKSPACE_ARCHIVED` / `PROJECT_WORKSPACE_NOT_READY` responses.
 
+- **Drive document actors** — expose the document creator, editor and update
+  time contract in Drive schemas and guidance, including exact creator filters
+  and the `drive creator list` command for visible document creators.
+
 - **API base URL precedence** — the active profile's stored `api_base_url` now
   outranks `OCTO_API_BASE_URL`, which outranks the production default. A stored
   profile is routed to the origin it was created against even when the

@@ -10,7 +10,7 @@ metadata:
 
 # octo-drive — network drive operations
 
-49 commands over one backend. Everything is scoped to a **drive space**: either your personal space or a shared one you are a member of.
+50 commands over one backend. Everything is scoped to a **drive space**: either your personal space or a shared one you are a member of.
 
 ## 1. Credentials — nothing drive-specific
 
@@ -181,9 +181,21 @@ octo-cli drive folder move "$FOLDER_NODE" --target-space-id "$TARGET_SPACE" --pa
 octo-cli drive search --q "报销单"                              # all visible spaces
 octo-cli drive search --q "预算" --scope space --space-id "$SPACE"
 octo-cli drive search --q "合同" --data '{"filters":{"types":["blob"],"owner_scope":"me"}}'
+octo-cli drive search --q "合同" --data '{"filters":{"types":["doc"],"creator_uids":["<creator-uid>"]}}'
 ```
 
-Advanced filters are the nested `filters` object in request JSON passed with `--data`; there is no `--filters` flag. `filters.types` is an array of `folder`, `doc`, and/or `blob` values (missing or empty means no type restriction); `owner_scope` is `me|others`; `updated_after` is an RFC3339 timestamp; `size_min`/`size_max` are byte bounds (`uint64`, with minimum no greater than maximum). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, and `owner_uid`/`updater_uid` (resolve display names via the message/group commands — search returns uids, not names). Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
+Advanced filters are the nested `filters` object in request JSON passed with `--data`; there is no `--filters` flag. `filters.types` is an array of `folder`, `doc`, and/or `blob` values (missing or empty means no type restriction); `filters.creator_uids` is an array of exact creator UIDs, for people or Bots (a Bot matches by its own UID, not its owner's UID); `owner_scope` is `me|others`, based on the actual creator, with `me` matching only the active caller's UID; `updated_after` is an RFC3339 timestamp; `size_min`/`size_max` are byte bounds (`uint64`, with minimum no greater than maximum). Each hit carries `file_id`, `path` (breadcrumb), `type`, `highlights.{name,body}` with `<mark>` fragments, `creator_uid`, `owner_uid`, `updater_uid`, and `updated_at` (resolve display names via the message/group commands — search returns UIDs, not names). For online documents, `creator_uid` is `Docs.created_by`; `updater_uid` and `updated_at` map to `Docs.updated_by` and `Docs.updated_at`. Unknown document updater values are empty, not inferred. For ordinary files, `creator_uid` is `owner_uid`; `owner_uid` remains the drive ownership/permission identity and is not replaced by a document's creator. Requires the server's search backend to be configured; otherwise the call returns `unavailable` (503).
+
+### List creator candidates
+
+`drive creator list` returns the distinct creator UIDs found among documents the active identity can read; it does not enumerate identities or documents outside that readable set. It sends `POST /search/creators` with `{scope,space_id}`: `--scope all` searches readable documents across all visible drive spaces, while `--scope space --space-id "$SPACE"` limits candidates to readable documents in that drive space. `--space-id` is the drive space ID (not a document's `doc_space_id`) and is required for `scope=space`.
+
+```bash
+octo-cli drive creator list --scope all
+octo-cli drive creator list --scope space --space-id "$SPACE"
+```
+
+The response is `{creator_uids:[...]}`; UIDs may identify a person or a Bot and can be passed verbatim in `filters.creator_uids`. If required Docs metadata is unavailable, the call returns `unavailable` (503).
 
 ## 4. Upload and download in detail
 
@@ -299,6 +311,7 @@ octo-cli drive folder delete "$FOLDER" --dry-run
 ```
 drive browse
 drive search
+drive creator     list
 drive space       create | list | ensure-personal | get | rename | delete
 drive member      list | add | set-role | remove
 drive folder      create | list | rename | move | delete
