@@ -853,8 +853,9 @@ func assertSafeTransferTarget(field string, u *url.URL, loopbackAPI bool) *outpu
 // URL a short-lived bearer credential for that object — and *url.Error.Error()
 // embeds it, so formatting the error straight into an envelope publishes it on
 // stderr with no --verbose needed. The host is the part that carries the
-// diagnostic value ("can I reach storage at all"), and the unwrapped cause keeps
-// the actual reason (connection refused, TLS failure, timeout).
+// diagnostic value ("can I reach storage at all"). Even unwrapped errors can
+// contain credentials, e.g. a malformed redirect Location, so only fixed error
+// categories may be emitted.
 //
 // A rejection raised by our own CheckRedirect arrives wrapped in *url.Error;
 // that ExitError is returned as-is so an unsafe redirect keeps reporting
@@ -868,8 +869,18 @@ func transferNetworkError(op string, u *url.URL, err error) *output.ExitError {
 	if u != nil && u.Host != "" {
 		host = strconv.Quote(u.Host)
 	}
+	reason := "transport error"
+	var networkError net.Error
+	switch {
+	case errors.Is(cause, context.Canceled):
+		reason = "request canceled"
+	case errors.Is(cause, context.DeadlineExceeded):
+		reason = "request timed out"
+	case errors.As(cause, &networkError) && networkError.Timeout():
+		reason = "request timed out"
+	}
 	return output.ErrNetwork(
-		fmt.Sprintf("%s against %s failed: %v", op, host, cause),
+		fmt.Sprintf("%s against %s failed: %s", op, host, reason),
 		"check network access to object storage")
 }
 

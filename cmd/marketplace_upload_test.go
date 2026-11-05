@@ -49,7 +49,7 @@ func TestMarketplaceSkillUploadFile(t *testing.T) {
 		if body["file_name"] != "skill.zip" || body["file_size"] != float64(len("skill archive bytes")) {
 			t.Errorf("unexpected initialization body: %v", body)
 		}
-		skillTarget(w, targetURL, map[string]string{"Content-Type": "application/zip", "X-Amz-Meta-Test": "signed-value"})
+		skillTarget(w, targetURL, map[string]string{"Content-Type": "application/zip", "X-Amz-Meta-Test": "signed-value", "X-Amz-Security-Token": "signed-session-token"})
 	}, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		if r.Method != "PUT" || string(body) != "skill archive bytes" || r.ContentLength != int64(len(body)) {
@@ -58,7 +58,7 @@ func TestMarketplaceSkillUploadFile(t *testing.T) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("X-Space-Id") != "" || r.Header.Get("Cookie") != "" {
 			t.Errorf("Octo credentials leaked to storage: %v", r.Header)
 		}
-		if r.Header.Get("Content-Type") != "application/zip" || r.Header.Get("X-Amz-Meta-Test") != "signed-value" {
+		if r.Header.Get("Content-Type") != "application/zip" || r.Header.Get("X-Amz-Meta-Test") != "signed-value" || r.Header.Get("X-Amz-Security-Token") != "signed-session-token" {
 			t.Errorf("signed headers not echoed: %v", r.Header)
 		}
 		if r.URL.Query().Get("X-Amz-Credential") != "full-test-credential" {
@@ -82,7 +82,7 @@ func TestMarketplaceSkillUploadFile(t *testing.T) {
 		t.Errorf("unexpected result: %v", data)
 	}
 	visible := env.tf.Out.String() + env.tf.ErrOut.String()
-	for _, secret := range []string{targetURL, "full-test-credential", "full-test-signature", "signed-value"} {
+	for _, secret := range []string{targetURL, "full-test-credential", "full-test-signature", "signed-value", "signed-session-token"} {
 		if strings.Contains(visible, secret) {
 			t.Errorf("output exposed transfer secret %q", secret)
 		}
@@ -261,6 +261,60 @@ func TestMarketplaceSkillUploadRejectsAmbiguousMetadata(t *testing.T) {
 			err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t), flag, value)
 			if err == nil || calls != 0 || len(env.storeRequests) != 0 {
 				t.Fatalf("error=%v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestMarketplaceSkillUploadSignedHeaderErrorRedaction(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprint(verbose), func(t *testing.T) {
+			const marker = "temporary-storage-token-marker"
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = fmt.Fprintf(w, `{"error":{"code":"VALIDATION_ERROR","message":"rejected token %s","details":{"wrapped":{"headers":{"X-Amz-Security-Token":"%s","nested":{"token":"%s"}},"presigned_url":"https://example.test/object?signature=url-marker"},"copy":"copied %s"}}}`, marker, marker, marker, marker)
+			}, nil)
+			configureDriveResponseSecretTestClient(env, verbose)
+			args := []string{"marketplace", "skill-upload", "create", "--file", marketplaceArchive(t)}
+			if verbose {
+				args = append([]string{"--verbose"}, args...)
+			}
+			err := env.run(args...)
+			if err == nil {
+				t.Fatal("initialization error accepted")
+			}
+			assertNoResponseSecretVisible(t, env, err, marker)
+			assertNoResponseSecretVisible(t, env, err, "url-marker")
+			if len(env.storeRequests) != 0 {
+				t.Fatal("failed initialization attempted PUT")
+			}
+		})
+	}
+}
+
+func TestMarketplaceSkillUploadMalformedRedirectDoesNotLeak(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		t.Run(fmt.Sprint(verbose), func(t *testing.T) {
+			const marker = "malformed-location-signature-marker"
+			var target string
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, _ *http.Request) { skillTarget(w, target, nil) }, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Location", "https://storage.example/%zz?X-Amz-Signature="+marker)
+				w.WriteHeader(http.StatusFound)
+			})
+			target = env.store.URL + "/object"
+			configureDriveResponseSecretTestClient(env, verbose)
+			args := []string{"marketplace", "skill-upload", "create", "--file", marketplaceArchive(t)}
+			if verbose {
+				args = append([]string{"--verbose"}, args...)
+			}
+			err := env.run(args...)
+			if err == nil {
+				t.Fatal("malformed redirect accepted")
+			}
+			assertNoResponseSecretVisible(t, env, err, marker)
+			if len(env.storeRequests) != 1 || env.tf.Out.Len() != 0 {
+				t.Fatal("redirect was followed or reported success")
 			}
 		})
 	}

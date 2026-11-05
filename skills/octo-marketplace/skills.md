@@ -108,8 +108,10 @@ Do not search the machine or guess a path.
    derives its name and size, and performs initialization + streaming PUT using
    the signed headers. It does not parse, import, or publish automatically.
    `--dry-run` validates locally without creating an upload. The low-level
-   `skill-upload create` without `--file` remains metadata-only; do not try to PUT to a URL copied
-   from its redacted output. On upload failure no parse is triggered; the backend
+   `skill-upload create` without `--file` remains metadata-only and its successful
+   output contains a sensitive presigned URL; do not share that output. Only the
+   `--file` workflow keeps the target internal. Diagnostic/error redaction does
+   not redact the metadata-only success response. On upload failure no parse is triggered; the backend
    has no cancel operation, so a pending upload may remain. Inspect the reported
    upload id before retrying rather than assuming a failed transfer sent no bytes.
 

@@ -1923,7 +1923,8 @@
             "additionalProperties": {
               "type": "string"
             },
-            "type": "object"
+            "type": "object",
+            "x-octo-secret": true
           },
           "method": {
             "type": "string"
