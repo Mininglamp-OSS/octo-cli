@@ -20,7 +20,7 @@ import (
 )
 
 // The drive domain is spec-driven except for six composite leaves registered in
-// package cmd. These tests pin the generated 40 against the octo-drive routes
+// package cmd. These tests pin the generated 41 against the octo-drive routes
 // verified in the drive worktree, and pin the identity routing (bot mount vs
 // user-API-key mount) that x-octo-mount-by-token-kind introduces.
 
@@ -70,6 +70,8 @@ func TestDrive_RegistryShape(t *testing.T) {
 		"drive.browse": {"GET", "/v1/bot/drive/browse"},
 		// search (1)
 		"drive.search": {"POST", "/v1/bot/drive/search"},
+		// creator picker (1)
+		"drive.creator.list": {"POST", "/v1/bot/drive/search/creators"},
 		// folder (5)
 		"drive.folder.create": {"POST", "/v1/bot/drive/folders"},
 		"drive.folder.list":   {"GET", "/v1/bot/drive/folders/{space_id}/{parent_id}"},
@@ -250,6 +252,54 @@ func TestDrive_MountByTokenKind(t *testing.T) {
 				t.Errorf("Authorization: got %q, want the active credential", gotAuth)
 			}
 		})
+	}
+}
+
+// TestDriveCreatorList_RoutesAndSendsScopeBody pins the new candidate-list leaf
+// to the shared request contract and both identity-specific mounts.
+func TestDriveCreatorList_RoutesAndSendsScopeBody(t *testing.T) {
+	cases := []struct {
+		name, token, wantPath string
+	}{
+		{"bot credential uses bot mount", "bf_bot", "/v1/bot/drive/search/creators"},
+		{"user key uses user mount", "uk_person", "/v1/user/drive/search/creators"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotBody string
+			root, _ := rootWithDriveToken(t, tc.token, func(w http.ResponseWriter, r *http.Request) {
+				gotMethod = r.Method
+				gotPath = r.URL.Path
+				raw, _ := io.ReadAll(r.Body)
+				gotBody = string(raw)
+				w.WriteHeader(http.StatusNoContent)
+			})
+			root.SetArgs([]string{"drive", "creator", "list", "--scope", "space", "--space-id", "shared:s1"})
+			if err := root.Execute(); err != nil {
+				t.Fatalf("drive creator list: %v", err)
+			}
+			if gotMethod != http.MethodPost || gotPath != tc.wantPath {
+				t.Errorf("request = %s %s, want POST %s", gotMethod, gotPath, tc.wantPath)
+			}
+			if gotBody != `{"scope":"space","space_id":"shared:s1"}` {
+				t.Errorf("body = %s, want {\"scope\":\"space\",\"space_id\":\"shared:s1\"}", gotBody)
+			}
+		})
+	}
+}
+
+func TestDriveCreatorList_DefaultRequest(t *testing.T) {
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "JSON object required", http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"creator_uids":["helper_bot"]}`))
+	})
+	root.SetArgs([]string{"drive", "creator", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("default creator list: %v", err)
 	}
 }
 
@@ -493,6 +543,36 @@ func TestDriveSearch_NullFiltersAreForwarded(t *testing.T) {
 	}
 }
 
+func TestDriveSearch_CreatorUIDsAreForwarded(t *testing.T) {
+	const requestBody = `{"q":"audit","filters":{"creator_uids":["alice","helper_bot"]}}`
+	var gotBody string
+	root, _ := rootWithDriveToken(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	root.SetArgs([]string{"drive", "search", "--data", requestBody})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("drive.search with creator_uids: %v", err)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(gotBody), &body); err != nil {
+		t.Fatalf("decode request body %q: %v", gotBody, err)
+	}
+	var filters map[string]json.RawMessage
+	if err := json.Unmarshal(body["filters"], &filters); err != nil {
+		t.Fatalf("decode filters from request body %q: %v", gotBody, err)
+	}
+	var creators []string
+	if err := json.Unmarshal(filters["creator_uids"], &creators); err != nil {
+		t.Fatalf("decode creator_uids from request body %q: %v", gotBody, err)
+	}
+	if len(creators) != 2 || creators[0] != "alice" || creators[1] != "helper_bot" {
+		t.Errorf("filters.creator_uids = %v, want [alice helper_bot]", creators)
+	}
+}
+
 func TestDriveSearch_Uint64FilterBoundariesRemainLossless(t *testing.T) {
 	const maxUint64 = "18446744073709551615"
 	const requestBody = `{"q":"audit","filters":{"size_min":0,"size_max":` + maxUint64 + `}}`
@@ -532,6 +612,7 @@ func TestDriveSearch_InvalidFiltersAreRejectedLocally(t *testing.T) {
 		{"size exceeds uint64", `{"q":"audit","filters":{"size_max":18446744073709551616}}`},
 		{"fractional size", `{"q":"audit","filters":{"size_min":1.5}}`},
 		{"unknown owner scope", `{"q":"audit","filters":{"owner_scope":"everyone"}}`},
+		{"creator_uids is not an array", `{"q":"audit","filters":{"creator_uids":"alice"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

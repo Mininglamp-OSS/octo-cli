@@ -101,7 +101,7 @@ func (e *driveTestEnv) data(t *testing.T) map[string]any {
 
 // --- command tree ---
 
-// TestDrive_CommandCount pins the 49-command surface: 43 generated leaves plus
+// TestDrive_CommandCount pins the 50-command surface: 44 generated leaves plus
 // six composites (three of which replace generated leaves). A drift here means
 // either a spec op was added without a decision or a composite stopped
 // registering.
@@ -116,6 +116,7 @@ func TestDrive_CommandCount(t *testing.T) {
 	}
 	want := map[string][]string{
 		"":            {"browse", "search"},
+		"creator":     {"list"},
 		"space":       {"create", "list", "ensure-personal", "get", "rename", "delete"},
 		"member":      {"list", "add", "set-role", "remove"},
 		"folder":      {"create", "list", "rename", "move", "delete"},
@@ -145,8 +146,8 @@ func TestDrive_CommandCount(t *testing.T) {
 			}
 		}
 	}
-	if total != 49 {
-		t.Errorf("expected 49 drive commands, the table lists %d", total)
+	if total != 50 {
+		t.Errorf("expected 50 drive commands, the table lists %d", total)
 	}
 	// Nothing beyond the table: a stray leaf (e.g. a duplicate generated
 	// `share access`) would otherwise pass unnoticed.

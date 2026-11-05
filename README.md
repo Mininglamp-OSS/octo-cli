@@ -39,7 +39,7 @@ Key properties:
 |-----------|-----|----------------------------------------------------------------|
 | `docs`    | 45  | Documents, spreadsheets, whiteboards & PPT — lifecycle, full-text search, body content, worksheet discovery and scoped/paged reads, sheet edits (atomic replace, conditional formats, split/deduplication), board scenes, members, comments, versions, attachments |
 | `html`    | 22  | Interactive HTML documents (octo-doc, **separate backend** from `docs`) — read source with its version, publish immutable versions, drafts, per-doc share codes & per-uid grants, media assets, inline comments, agent element read/replace |
-| `drive`   | 46  | Network drive — spaces & members, folder/file tree, full-text search, single-part and resumable-style multipart blob upload, signed download, online-document mounts, share links, invites, IM-attachment transfer. Six hand-written composites bring the command tree to 49 leaves |
+| `drive`   | 47  | Network drive — spaces & members, folder/file tree, full-text search and creator selection, single-part and resumable-style multipart blob upload, signed download, online-document mounts, share links, invites, IM-attachment transfer. Six hand-written composites bring the command tree to 50 leaves |
 | `matter`  | 14  | Todos/tasks — **temporarily withheld** while the backend API stabilizes |
 | `summary` | 4   | Personal-bot summaries — create owner-only summaries from explicit sources, then discover/read/cite. **Temporarily withheld** while the create backend (Mininglamp-OSS/octo-smart-summary#181) is merged, deployed, and enabled |
 | `group`   | 9   | Groups — list, get, members, metadata; create/update (User Bot)|

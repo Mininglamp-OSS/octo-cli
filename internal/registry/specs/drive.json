@@ -243,7 +243,7 @@
       "post": {
         "operationId": "drive.search",
         "summary": "Full-text search files, folders and mounted documents across the caller's drive spaces",
-        "description": "Full-text search over the caller's visible drive. Matches file/folder names and blob/doc bodies (OCR/extracted text) via OpenSearch, gated by the spaces the caller is a member of. Same command for a real person (uk_, routed to /v1/user/drive/search) and a bot (bf_/app_, routed to /v1/bot/drive/search); results are always scoped to what the active identity's uid can see, so a bot only sees spaces it was added to. Scalar request fields use flags; advanced filtering is a nested `filters` object in the request JSON supplied with --data, not a separate --filters flag. Requires the drive search backend (OpenSearch) to be configured on the server, otherwise it returns 503 unavailable.",
+        "description": "Full-text search over the caller's visible drive. Matches file/folder names and blob/doc bodies (OCR/extracted text) via OpenSearch, gated by visible spaces. For online documents, creator/updater/time metadata is projected only when readable through the caller's Docs ACL; unavailable metadata is empty and never grants access. `filters.creator_uids` matches exact actual creator UIDs; `owner_scope` uses actual creator semantics (`me` is only the caller's exact UID), while `owner_uid` remains the Drive-row owner for ownership and permission checks. Scalar request fields use flags; advanced filtering is nested in --data. Requires OpenSearch to be configured on the server, otherwise it returns 503 unavailable.",
         "x-octo-risk": "read",
         "x-octo-lossless-id-fields": ["items[].file_id", "items[].parent_id"],
         "requestBody": {
@@ -261,11 +261,12 @@
                   "page_size": { "type": "integer", "default": 20, "description": "page size (server caps to its max, default max 50)" },
                   "filters": {
                     "type": "object",
-                    "description": "Advanced search filters, nested under filters in the request JSON passed with --data. Example: --data '{\"filters\":{\"types\":[\"blob\"],\"owner_scope\":\"me\"}}'.",
+                    "description": "Advanced filters live under `filters` in the JSON passed with --data, e.g. --data '{\"filters\":{\"creator_uids\":[\"helper_bot\"]}}'. `creator_uids` matches exact creator UIDs; `owner_scope` uses the same actual creator semantics (`me` is only the current UID, not assistant/Bot aliases).",
                     "properties": {
                       "types": { "type": "array", "description": "Include only these node types; absent or empty means no type restriction.", "items": { "type": "string", "enum": ["folder", "doc", "blob"] } },
-                      "owner_scope": { "type": ["string", "null"], "enum": ["", "me", "others", null], "description": "Filter by whether the caller owns the item; omitted, empty, or null means no ownership restriction." },
-                      "updated_after": { "type": "string", "format": "date-time", "description": "Match items updated at or after this RFC3339 timestamp." },
+                      "owner_scope": { "type": ["string", "null"], "enum": ["", "me", "others", null], "description": "Filter by actual creator UID, not Drive row ownership for online documents. `me` means only the caller's exact UID (never assistant/Bot aliases); omitted, empty, or null means no creator restriction." },
+                      "creator_uids": { "type": "array", "items": { "type": "string" }, "description": "Exact actual creator UID match, including human and Bot UIDs. Online documents use Docs created_by; other items use owner_uid. Absent or empty means no creator restriction." },
+                      "updated_after": { "type": "string", "format": "date-time", "description": "Match items updated at or after this RFC3339 timestamp; online documents use Docs updated_at and other items use the Drive row update time." },
                       "size_min": { "type": ["integer", "null"], "format": "uint64", "description": "Minimum size in bytes; null means no lower bound. Must not exceed size_max when both are supplied." },
                       "size_max": { "type": ["integer", "null"], "format": "uint64", "description": "Maximum size in bytes; null means no upper bound. Must be at least size_min when both are supplied." }
                     }
@@ -281,6 +282,44 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/SearchResult" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/bot/drive/search/creators": {
+      "post": {
+        "operationId": "drive.creator.list",
+        "summary": "List creator UIDs from readable online documents",
+        "description": "Returns unique actual creator UIDs from online documents in the requested search scope. Results are limited to caller-visible Drive spaces and documents whose metadata the caller may read through the Docs ACL. Bot identities and user API keys use their authenticated identity. Scope `all` is the default; scope `space` requires a visible `space_id`.",
+        "x-octo-risk": "read",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": { "type": "string", "enum": ["", "all", "space"], "default": "all", "description": "search radius: omitted, empty or all selects caller-visible spaces; space requires space_id" },
+                  "space_id": { "type": "string", "description": "visible Drive space to restrict to; required when scope=space and ignored otherwise" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deduplicated actual creator UIDs for caller-visible online documents whose Docs metadata is readable. Inaccessible documents and unknown creators are omitted; an empty array means no known readable creators. Metadata service failure returns 503 instead.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["creator_uids"],
+                  "properties": {
+                    "creator_uids": { "type": "array", "items": { "type": "string" }, "description": "Unique Docs created_by UIDs, including Bot UIDs; unreadable or unknown document creators are omitted." }
+                  }
+                }
               }
             }
           }
@@ -1206,7 +1245,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "description": "one search hit. file_id and parent_id are emitted as decimal strings (see x-octo-lossless-id-fields) because the backend uses uint64; size is a plain integer (files are capped well below 2^53). Display names for owner/updater/space are NOT included — resolve uid via octo-server the same way browse does.",
+              "description": "one search hit. file_id and parent_id are emitted as decimal strings (see x-octo-lossless-id-fields) because the backend uses uint64; size is a plain integer (files are capped well below 2^53). Display names for creator/owner/updater/space are NOT included — resolve the UIDs via octo-server the same way browse does.",
               "properties": {
                 "file_id": { "type": "string", "description": "unified drive node id, decimal string" },
                 "space_id": { "type": "string", "description": "drive space id the hit lives in" },
@@ -1216,10 +1255,11 @@
                 "type": { "type": "string", "enum": ["folder", "doc", "blob"] },
                 "ext": { "type": "string", "description": "file extension, when known" },
                 "size": { "type": "integer", "format": "uint64", "description": "byte count; absent/0 for folders and docs. uint64 on the wire but files are capped well below 2^53, so it is emitted as a plain JSON number (not a lossless decimal string)" },
-                "owner_uid": { "type": "string" },
-                "updater_uid": { "type": "string", "description": "uid of last editor; empty string means never edited" },
-                "created_at": { "type": "string" },
-                "updated_at": { "type": "string" },
+                "owner_uid": { "type": "string", "description": "Drive row owner UID; remains the ownership and permission subject." },
+                "creator_uid": { "type": "string", "description": "Actual creator UID: Docs created_by for online documents and owner_uid for other items. Empty when unknown or Docs metadata is unreadable." },
+                "updater_uid": { "type": "string", "description": "Actual last editor UID from Docs updated_by for online documents; other items retain the Drive row updater. Empty means unknown or unreadable, not that no edit occurred." },
+                "created_at": { "type": "string", "description": "Drive row creation time; for online documents this is mount creation, not Docs creation." },
+                "updated_at": { "type": "string", "description": "Docs updated_at for online documents; Drive row update time for other items. Empty when unknown or Docs metadata is unreadable." },
                 "highlights": {
                   "type": "object",
                   "description": "matched fragments with <mark>…</mark> around hits",
@@ -1257,9 +1297,11 @@
           "size": { "type": "integer", "description": "byte count; 0 for folders and documents" },
           "content_type": { "type": "string" },
           "source": { "type": "string", "enum": ["user-upload", "im-transfer", "user-mount", "docs-sync"] },
-          "owner_uid": { "type": "string" },
-          "created_at": { "type": "string" },
-          "updated_at": { "type": "string" }
+          "owner_uid": { "type": "string", "description": "Drive row owner UID; remains the ownership and permission subject." },
+          "creator_uid": { "type": "string", "description": "Actual creator UID: Docs created_by for online documents and owner_uid for other entries. Empty when unknown or Docs metadata is unreadable." },
+          "updater_uid": { "type": "string", "description": "Actual last editor UID from Docs updated_by for online documents; other entries retain the Drive row updater. Empty means unknown or unreadable, not that no edit occurred." },
+          "created_at": { "type": "string", "description": "Drive row creation time; for online documents this is mount creation, not Docs creation." },
+          "updated_at": { "type": "string", "description": "Docs updated_at for online documents; Drive row update time for other entries. Empty when unknown or Docs metadata is unreadable." }
         }
       },
       "FileNode": {
@@ -1301,9 +1343,10 @@
           "doc_space_id": { "type": "string", "description": "the document's real Octo Space id; absent on rows mounted before drive captured it" },
           "title": { "type": "string", "description": "authoritative title read from the document metadata" },
           "source": { "type": "string" },
-          "owner_uid": { "type": "string" },
-          "created_at": { "type": "string" },
-          "updated_at": { "type": "string" }
+          "owner_uid": { "type": "string", "description": "Drive mount owner UID; retains ownership and permission semantics, not the online document's creator." },
+          "creator_uid": { "type": "string", "description": "Actual Docs created_by UID; empty when unknown or metadata is unreadable. Never substitute owner_uid." },
+          "created_at": { "type": "string", "description": "Drive mount row creation time, not the Docs document creation time." },
+          "updated_at": { "type": "string", "description": "Current Docs updated_at, or empty when unknown or metadata is unreadable." }
         }
       },
       "MountableDoc": {
