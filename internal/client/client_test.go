@@ -1382,3 +1382,16 @@ func TestDo_NonLoopUnstructuredNotFoundRemainsNotFound(t *testing.T) {
 		t.Fatalf("code = %q, want NOT_FOUND", ee.Code)
 	}
 }
+
+func TestRedactBackendErrorBodySecretObjectValues(t *testing.T) {
+	body := []byte(`{"error":{"message":"session-one and nested-two","details":{"wrapped":{"headers":{"X-Amz-Security-Token":"session-one","other":[{"value":"nested-two"}]}},"copy":"nested-two"}}}`)
+	for _, path := range []string{"headers", "data.headers"} {
+		got := string(redactBackendErrorBody(body, nil, []string{path}))
+		if strings.Contains(got, "session-one") || strings.Contains(got, "nested-two") {
+			t.Fatalf("secret object values escaped redaction for %s: %s", path, got)
+		}
+		if !json.Valid([]byte(got)) {
+			t.Fatal("redaction broke JSON")
+		}
+	}
+}

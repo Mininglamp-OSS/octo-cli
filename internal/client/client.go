@@ -1125,6 +1125,11 @@ func redactBackendErrorBody(body []byte, requestSecrets, responseSecretFields []
 	secrets := append([]string(nil), requestSecrets...)
 	for _, field := range responseSecretFields {
 		secrets = append(secrets, responseSecretValues(parsed, field)...)
+		// Error details may contain the response data directly, without the
+		// success envelope's data property.
+		if strings.HasPrefix(field, "data.") {
+			secrets = append(secrets, responseSecretValues(parsed, strings.TrimPrefix(field, "data."))...)
+		}
 	}
 	collectURLValues(parsed, &secrets)
 	return redactResponseBody(body, secrets)
@@ -1159,7 +1164,21 @@ func valuesAtResponsePath(node any, segments []string) []string {
 		if value, ok := node.(string); ok && value != "" {
 			return []string{value}
 		}
-		return nil
+		// A secret object (for example signed request headers) contains dynamic
+		// string-valued properties. Collect their values for redaction in both
+		// the object and any free-form message that repeats those credentials.
+		var values []string
+		switch typed := node.(type) {
+		case map[string]any:
+			for _, child := range typed {
+				values = append(values, valuesAtResponsePath(child, nil)...)
+			}
+		case []any:
+			for _, child := range typed {
+				values = append(values, valuesAtResponsePath(child, nil)...)
+			}
+		}
+		return values
 	}
 	object, ok := node.(map[string]any)
 	if !ok {

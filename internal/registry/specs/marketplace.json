@@ -1241,7 +1241,8 @@
         "tags": [
           "skill_upload"
         ],
-        "x-octo-risk": "write"
+        "x-octo-risk": "write",
+        "x-octo-retry": "never"
       }
     },
     "/market/api/v1/skill_uploads/{skill_upload_id}/parse": {
@@ -1923,13 +1924,15 @@
             "additionalProperties": {
               "type": "string"
             },
-            "type": "object"
+            "type": "object",
+            "x-octo-secret": true
           },
           "method": {
             "type": "string"
           },
           "presigned_url": {
-            "type": "string"
+            "type": "string",
+            "x-octo-secret": true
           },
           "skill_upload_id": {
             "type": "string"

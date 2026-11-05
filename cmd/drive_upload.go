@@ -318,20 +318,28 @@ func runDriveUploadFile(cmd *cobra.Command, f *cmdutil.Factory, localPath string
 // A transport failure is reported through transferNetworkError, which names the
 // host but never the URL: the presigned signature is in the query string.
 func putObject(cmd *cobra.Command, f *cmdutil.Factory, file *os.File, size int64, prepared *prepareUploadResponse, target *url.URL, loopbackAPI bool) *output.ExitError {
+	headers := make(http.Header)
+	if prepared.ContentType != "" {
+		headers.Set("Content-Type", prepared.ContentType)
+	}
+	if prepared.ContentDisposition != "" {
+		headers.Set("Content-Disposition", prepared.ContentDisposition)
+	}
+	return putPresignedObject(cmd, f, file, size, target, headers, loopbackAPI)
+}
+
+// putPresignedObject shares the credential-free, guarded streaming PUT between
+// Drive and Marketplace. Callers validate any backend-supplied headers first.
+func putPresignedObject(cmd *cobra.Command, f *cmdutil.Factory, file *os.File, size int64, target *url.URL, headers http.Header, loopbackAPI bool) *output.ExitError {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return output.ErrValidation(fmt.Sprintf("<local-path>: %v", err), "check the path and permissions")
 	}
-	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPut, prepared.UploadURL, file)
+	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPut, target.String(), io.LimitReader(file, size))
 	if err != nil {
 		return transferNetworkError("upload", target, err)
 	}
 	req.ContentLength = size
-	if prepared.ContentType != "" {
-		req.Header.Set("Content-Type", prepared.ContentType)
-	}
-	if prepared.ContentDisposition != "" {
-		req.Header.Set("Content-Disposition", prepared.ContentDisposition)
-	}
+	req.Header = headers.Clone()
 
 	resp, err := transferClient("upload_url", loopbackAPI, nil, verboseNoter(f)).Do(req)
 	if err != nil {
@@ -361,7 +369,7 @@ func putObject(cmd *cobra.Command, f *cmdutil.Factory, file *os.File, size int64
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return output.ErrWithHint("api_error", "UPLOAD_NOT_CONFIRMED",
 				fmt.Sprintf("object storage returned status %d, which does not confirm the object was stored", resp.StatusCode),
-				"only 200 or 201 is evidence the bytes landed; the pending row was cancelled, so re-run the upload")
+				"only 200 or 201 confirms storage; inspect the upload before retrying")
 		}
 		return output.ErrWithHint("api_error", "UPLOAD_FAILED",
 			fmt.Sprintf("object storage returned status %d", resp.StatusCode),

@@ -102,6 +102,7 @@ func TestMarketplaceRegistryShape(t *testing.T) {
 		"plugin.review_request.approve": true,
 		"plugin.review_request.reject":  true,
 		"plugin.review_request.cancel":  true,
+		"skill_upload.create":           true,
 		"skill_upload.parse":            true,
 	}
 	for id := range wants {

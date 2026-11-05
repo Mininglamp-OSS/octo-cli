@@ -90,8 +90,8 @@ Do not search the machine or guess a path.
 5. Presign + upload + parse + import:
 
    ```bash
-   octo-cli marketplace skill-upload create --file-name "<file>.zip" --file-size <bytes>
-   # PUT the bytes to the returned presigned_url with its method/headers
+   octo-cli marketplace skill-upload create --file "./<file>.zip"
+   # Returns skill_upload_id after uploading the bytes; the signed URL stays internal.
    octo-cli marketplace skill-upload parse <skill_upload_id>
    octo-cli marketplace skill-parse-task get <parse_task_id>   # poll until success
    # create: pass `--plugin-name` and omit `--plugin-id`
@@ -103,6 +103,22 @@ Do not search the machine or guess a path.
      --parse-task-id <parse_task_id> --name "<skill-name>" \
      --visibility space --version <next-version>
    ```
+
+   `skill-upload create --file` accepts a local non-empty `.zip` or `.skill` archive,
+   derives its name and size, and performs initialization + streaming PUT using
+   the signed headers. It does not parse, import, or publish automatically.
+   `--dry-run` validates locally without creating an upload. The low-level
+   `skill-upload create` without `--file` remains metadata-only and its successful
+   output contains a sensitive presigned URL; do not share that output. Only the
+   `--file` workflow keeps the target internal. Diagnostic/error redaction does
+   not redact the metadata-only success response. On upload failure no parse is triggered; the backend
+   has no cancel operation, so a pending upload may remain. Inspect the reported
+   upload id before retrying rather than assuming a failed transfer sent no bytes.
+   Both create modes disable automatic retries. If initialization loses its
+   response or receives an ambiguous gateway failure, the command returns
+   `RESULT_UNKNOWN`: a pending upload may exist even though
+   its ID was not received. Do not retry automatically; inspect server state
+   before a manual retry.
 
    `--plugin-name` is the visible Marketplace title; `--name` is the stable
    machine name from `SKILL.md`. `plugin import` builds the attachment tree and
