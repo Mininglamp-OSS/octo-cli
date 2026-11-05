@@ -93,6 +93,9 @@ octo-cli loop project list --workspace-id <ws> --status planned
 octo-cli loop project search "release plan" --workspace-id <ws>
 octo-cli loop project get <project-id> --workspace-id <ws>
 octo-cli loop project create --workspace-id <ws> --title "Release plan" --status planned
+# When an agent may need to recover an unknown create outcome, supply a stable key:
+octo-cli loop project create --workspace-id <ws> --title "Release plan" \
+  --status planned --idempotency-key "release-plan-create-001"
 octo-cli loop project update <project-id> --workspace-id <ws> --status in_progress
 octo-cli loop project resource list <project-id> --workspace-id <ws>
 octo-cli loop project resource add <project-id> --workspace-id <ws> --type github_repo --ref '{"url":"https://github.com/org/repo","default_branch_hint":"main"}'
@@ -107,6 +110,26 @@ complete JSON object and cannot be mixed with `resource_ref` in `--data`.
 Changing a resource reference replaces the full reference; preserve the repo
 URL or the local directory's path and daemon ID. Nested initial `resources`
 can be supplied in project create's `--data` for atomic creation.
+For `project create`, `--idempotency-key` is optional and sent only as the
+`Idempotency-Key` HTTP header, not in the JSON body. Rely on this guarantee only
+after the full Fleet rollout is deployed, idempotency is enabled, and the
+configured key retention is confirmed to be 24 hours. Use a unique key for
+every new operation; never reuse a key for a different create.
+
+Fleet retains a successful receipt for at least 24 hours from commit, not from
+the CLI invocation. The CLI's local send-time cutoff stops an automatic retry
+when `Retry-After` would reach or exceed its local 24-hour window and reports
+`RESULT_UNKNOWN`. It cannot guarantee that a request already sent will arrive
+before the Fleet receipt expires: network delay or gateway queueing can hold an
+in-flight retry past expiry, when the server no longer guarantees deduplication
+and may create another project. A shorter `Retry-After` does not eliminate this
+in-flight risk.
+
+If an agent cannot determine whether a create succeeded, inspect the project
+state first. Replay only when the Fleet receipt is known to remain valid; keep
+the same workspace, authenticated principal, exact key, and exact request body.
+If expiry cannot be confirmed, do not claim the replay is safe. Omitting the
+flag preserves the existing no-key behavior.
 
 Project statuses are `planned`, `in_progress`, `paused`, `completed`, and
 `cancelled`; priorities are `urgent`, `high`, `medium`, `low`, and `none`.

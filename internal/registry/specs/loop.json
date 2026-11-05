@@ -6422,6 +6422,19 @@
           "projects"
         ],
         "operationId": "project.create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "x-octo-flag": "idempotency-key",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Optional stable key for safely replaying a project creation after an uncertain outcome."
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {

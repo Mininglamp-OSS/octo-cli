@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -102,6 +103,10 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 		SensitiveJSONFields:            writeOnlyBodyFields(d.RequestBody),
 		ResponseUnwrap:                 d.ResponseUnwrap,
 		UnwrapRequiredFields:           d.UnwrapRequiredFields,
+	}
+
+	if d.Service == "loop" && d.ID == "project.create" && headers["Idempotency-Key"] != "" {
+		req.IdempotencyKeyRetryWindow = 24 * time.Hour
 	}
 	// Path, query, and header secrets do not depend on the merged body.
 	req.SecretValues = collectParameterSecrets(cobraCmd, rt, pathValues, positionalQueryValues)
@@ -1391,7 +1396,7 @@ func annotateIdempotencyKey(rt *operationRuntime, req *client.Request, err error
 	merged := map[string]json.RawMessage{}
 	if len(exit.Detail) > 0 {
 		// A non-object payload is kept intact under a sibling key.
-		if json.Unmarshal(exit.Detail, &merged) != nil {
+		if json.Unmarshal(exit.Detail, &merged) != nil || merged == nil {
 			merged = map[string]json.RawMessage{"response": exit.Detail}
 		}
 	}

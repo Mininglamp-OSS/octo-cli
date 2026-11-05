@@ -219,6 +219,19 @@ octo-cli docs members remove doc-123 u-1 --principal-space-id space-2
 octo-cli loop workspace list
 octo-cli loop workspace get <workspace-uuid> --workspace-id <workspace-uuid>
 octo-cli loop task list --workspace-id <workspace-uuid>
+# Rely on idempotency only after the full Fleet rollout is deployed, the feature
+# is enabled, and its 24-hour key retention is confirmed. Use a unique key for
+# each new operation. Fleet retains a successful receipt for at least 24 hours
+# from commit. The CLI's local send-time cutoff cannot guarantee a request arrives
+# before server expiry: network or gateway delay/queueing can leave a retry in
+# flight past expiry, after which it may create a duplicate.
+# The CLI stops when Retry-After would reach its local 24-hour window and reports
+# RESULT_UNKNOWN; this does not protect an already-sent request. For an unknown
+# result, inspect state and replay only if the server receipt is known valid,
+# preserving the same workspace, principal, key, and exact request body.
+# Omitting the flag preserves the existing behavior.
+octo-cli loop project create --workspace-id <workspace-uuid> --title "Release plan" \
+  --status planned --idempotency-key "release-plan-create-001"
 # Multica-style assignment: --to accepts a name with an optional leading @; use --to-id for a complete ID.
 # Automatic name/ID lookup reads at most 10 pages per roster; use explicit typed fields for larger rosters.
 octo-cli loop task assign TASK-42 --workspace-id <workspace-uuid> --to "@Alice"

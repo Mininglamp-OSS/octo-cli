@@ -1,11 +1,17 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
 
 const (
@@ -46,6 +52,9 @@ func TestLoopProjectRequests(t *testing.T) {
 				if r.Header.Get("Accept") != "application/vnd.octo+json" {
 					t.Error("public API negotiation missing")
 				}
+				if keys := r.Header.Values("Idempotency-Key"); len(keys) != 0 {
+					t.Errorf("keyless %s request sent Idempotency-Key %v", tt.name, keys)
+				}
 				if tt.body != "" {
 					var got, want map[string]any
 					if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -69,6 +78,162 @@ func TestLoopProjectRequests(t *testing.T) {
 				t.Fatalf("requests=%d want 1", requests)
 			}
 		})
+	}
+}
+
+func TestLoopProjectCreateReusesIdempotencyKeyOnRetry(t *testing.T) {
+	const idempotencyKey = "project-create-request-2026-11-05"
+	type observedRequest struct {
+		method    string
+		path      string
+		workspace string
+		keys      []string
+		body      string
+	}
+
+	var calls atomic.Int32
+	seen := make(chan observedRequest, 2)
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		attempt := calls.Add(1)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		seen <- observedRequest{
+			method:    r.Method,
+			path:      r.URL.Path,
+			workspace: r.Header.Get("X-Workspace-ID"),
+			keys:      r.Header.Values("Idempotency-Key"),
+			body:      string(body),
+		}
+		if attempt == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	})
+	root.SetArgs([]string{
+		"loop", "project", "create",
+		"--title", "Retry-safe project",
+		"--workspace-id", "workspace-1",
+		"--idempotency-key", idempotencyKey,
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute project create: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("project create attempts = %d, want 2 after one retry", got)
+	}
+
+	const wantBody = `{"title":"Retry-safe project"}`
+	for attempt := 1; attempt <= 2; attempt++ {
+		got := <-seen
+		if got.method != http.MethodPost || got.path != "/fleet/api/v1/projects" || got.workspace != "workspace-1" {
+			t.Errorf("attempt %d request = %s %s workspace=%q", attempt, got.method, got.path, got.workspace)
+		}
+		if !reflect.DeepEqual(got.keys, []string{idempotencyKey}) {
+			t.Errorf("attempt %d Idempotency-Key = %v, want [%q]", attempt, got.keys, idempotencyKey)
+		}
+		if got.body != wantBody {
+			t.Errorf("attempt %d body = %s, want %s", attempt, got.body, wantBody)
+		}
+	}
+}
+
+func TestLoopProjectCreateWithNullErrorDetailReturnsStructuredError(t *testing.T) {
+	const key = "project-create-null-detail"
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Idempotency-Key"); got != key {
+			t.Errorf("Idempotency-Key = %q, want %q", got, key)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("null"))
+	})
+	root.SetArgs([]string{
+		"loop", "project", "create",
+		"--title", "Null detail",
+		"--workspace-id", "workspace-1",
+		"--idempotency-key", key,
+	})
+
+	err := root.Execute()
+	exit := output.AsExitError(err)
+	if exit == nil || exit.HTTPStatus != http.StatusInternalServerError {
+		t.Fatalf("project create error = %#v, want structured HTTP 500 error", err)
+	}
+	var detail map[string]json.RawMessage
+	if err := json.Unmarshal(exit.Detail, &detail); err != nil {
+		t.Fatalf("error detail = %s, want JSON object: %v", exit.Detail, err)
+	}
+	if got := string(detail["response"]); got != "null" {
+		t.Errorf("detail.response = %s, want preserved JSON null", got)
+	}
+	var gotKey string
+	if err := json.Unmarshal(detail["idempotency_key"], &gotKey); err != nil || gotKey != key {
+		t.Errorf("detail.idempotency_key = %q, decode error %v; want %q", gotKey, err, key)
+	}
+}
+
+func TestLoopProjectCreateStopsRetryBeforeIdempotencyWindowExpires(t *testing.T) {
+	const key = "project-create-long-retry-after"
+	var calls atomic.Int32
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "86401")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"UPSTREAM_UNAVAILABLE","message":"retry later"}}`))
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	root.SetContext(ctx)
+	root.SetArgs([]string{
+		"loop", "project", "create",
+		"--title", "Retry window",
+		"--workspace-id", "workspace-1",
+		"--idempotency-key", key,
+	})
+
+	err := root.Execute()
+	exit := output.AsExitError(err)
+	if exit == nil || exit.Code != "RESULT_UNKNOWN" {
+		t.Fatalf("project create error = %#v, want RESULT_UNKNOWN when Retry-After exceeds the key window", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("project create attempts = %d, want 1 without retrying after the key window", got)
+	}
+	var detail map[string]json.RawMessage
+	if err := json.Unmarshal(exit.Detail, &detail); err != nil {
+		t.Fatalf("error detail = %s, want JSON object: %v", exit.Detail, err)
+	}
+	var gotKey string
+	if err := json.Unmarshal(detail["idempotency_key"], &gotKey); err != nil || gotKey != key {
+		t.Errorf("detail.idempotency_key = %q, decode error %v; want %q", gotKey, err, key)
+	}
+}
+
+func TestLoopProjectCreateWithoutKeyKeepsDefaultRetries(t *testing.T) {
+	var calls atomic.Int32
+	root, _, _ := rootWithService(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	})
+	root.SetArgs([]string{
+		"loop", "project", "create",
+		"--title", "No key retry",
+		"--workspace-id", "workspace-1",
+	})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("project create without a key: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("project create attempts = %d, want the existing default retry behavior", got)
 	}
 }
 

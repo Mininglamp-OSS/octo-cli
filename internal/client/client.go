@@ -87,6 +87,9 @@ type Request struct {
 	// It is independent of the global --no-retry switch and deliberately lives
 	// on Request so operation metadata can enforce the safety contract.
 	DisableRetry bool
+	// IdempotencyKeyRetryWindow caps automatic retries to the key's retention
+	// period. Zero leaves the shared retry policy unchanged.
+	IdempotencyKeyRetryWindow time.Duration
 	// UnknownOutcomeOnNetworkFailure changes a transport failure or an ambiguous
 	// gateway 502/503/504 into a machine-readable RESULT_UNKNOWN error. It is for
 	// side effects where the server may have accepted the request before the
@@ -914,6 +917,10 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 	}
 
 	var lastErr error
+	var retryDeadline time.Time
+	if req.IdempotencyKeyRetryWindow > 0 && maxRetries > 0 {
+		retryDeadline = time.Now().Add(req.IdempotencyKeyRetryWindow)
+	}
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoffDelay(attempt)
@@ -922,6 +929,12 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 			// lastRetryAfter below.
 			if d, ok := extractRetryAfterFromErr(lastErr); ok {
 				delay = d
+			}
+			if !retryDeadline.IsZero() {
+				remaining := time.Until(retryDeadline)
+				if remaining <= 0 || delay >= remaining {
+					return nil, idempotencyRetryWindowExceeded(lastErr)
+				}
 			}
 			// Redacted here, not relied on later: the masking boundary is on Do's
 			// *return* value, and lastErr inside this loop has not passed through it
@@ -934,6 +947,9 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 			case <-ctx.Done():
 				return nil, output.ErrNetwork(ctx.Err().Error(), "request cancelled")
 			case <-time.After(delay):
+				if !retryDeadline.IsZero() && !time.Now().Before(retryDeadline) {
+					return nil, idempotencyRetryWindowExceeded(lastErr)
+				}
 			}
 		}
 
@@ -945,6 +961,14 @@ func (c *Client) doWithRetry(ctx context.Context, req *Request, urlStr string, b
 
 		if !isRetryable(err) {
 			return nil, err
+		}
+	}
+	if maxRetries > 0 && !retryDeadline.IsZero() {
+		if delay, ok := extractRetryAfterFromErr(lastErr); ok {
+			remaining := time.Until(retryDeadline)
+			if remaining <= 0 || delay >= remaining {
+				return nil, idempotencyRetryWindowExceeded(lastErr)
+			}
 		}
 	}
 	return nil, lastErr
@@ -1417,6 +1441,25 @@ func markResultUnknown(err error) error {
 	unknown.Message = "the request may have been accepted, but no definitive response was received"
 	unknown.Hint = "do not retry automatically; inspect current server state before any manual retry"
 	return &unknown
+}
+
+func idempotencyRetryWindowExceeded(err error) error {
+	unknown := output.AsExitError(err)
+	if unknown == nil {
+		return output.ErrWithHint(
+			"network",
+			"RESULT_UNKNOWN",
+			"the request may have been accepted; automatic retry stopped before the idempotency key's validity window expires",
+			"inspect the project state; if retrying while the key is still valid, preserve the same workspace, principal, key, and body",
+		)
+	}
+	result := *unknown
+	result.Type = "network"
+	result.Code = "RESULT_UNKNOWN"
+	result.Message = "the request may have been accepted; automatic retry stopped before the idempotency key's validity window expires"
+	result.Hint = "inspect the project state; if retrying while the key is still valid, preserve the same workspace, principal, key, and body"
+	result.HTTPStatus = 0
+	return &result
 }
 
 func isRetryableStatus(status int) bool {

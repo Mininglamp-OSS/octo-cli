@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New reads: `plugin version get`, `plugin version download` (requires
   `--path`; use `-o` for bytes), `plugin dependents list` and
   `plugin graph get` (`/detail_graph`).
+- **Loop project-create idempotency** — `loop project create` accepts the
+  optional `--idempotency-key` flag and sends it as `Idempotency-Key`. Automatic
+  retries reuse the key and stop with `RESULT_UNKNOWN` when `Retry-After` reaches
+  the CLI's local 24-hour send window. This cannot guarantee an already-sent
+  request arrives before Fleet receipt expiry; network/gateway delay can leave it
+  unprotected after expiry. Use only with enabled, fully deployed Fleet, one
+  unique key per operation, and the same workspace, principal, key, and body
+  when resolving an unknown outcome.
 - **Loop projects restored** — `loop project list/search/get/create/update/delete`
   and `resource list/create/update/delete` use the existing Fleet Public API.
   Resource `add`/`remove` aliases and JSON `--ref` input follow Multica's command
