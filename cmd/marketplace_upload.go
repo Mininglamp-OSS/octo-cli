@@ -95,7 +95,7 @@ func runMarketplaceSkillUpload(cmd *cobra.Command, f *cmdutil.Factory, path stri
 	}
 	raw, err := cli.Do(cmd.Context(), &client.Request{
 		Service: serviceName, Method: http.MethodPost, Path: requestPath, Body: body,
-		ResponseSecretFields: secrets, DisableRetry: true,
+		ResponseSecretFields: secrets, DisableRetry: true, UnknownOutcomeOnNetworkFailure: true,
 	})
 	if err != nil {
 		return failErr(f, err)

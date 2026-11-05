@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
@@ -315,6 +316,45 @@ func TestMarketplaceSkillUploadMalformedRedirectDoesNotLeak(t *testing.T) {
 			assertNoResponseSecretVisible(t, env, err, marker)
 			if len(env.storeRequests) != 1 || env.tf.Out.Len() != 0 {
 				t.Fatal("redirect was followed or reported success")
+			}
+		})
+	}
+}
+
+func TestMarketplaceSkillUploadInitializationUnknownOutcome(t *testing.T) {
+	for _, status := range []int{0, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusBadRequest} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var accepted atomic.Int32
+			env := newDriveTestEnv(t, "bf_bot", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				accepted.Add(1)
+				if status == 0 {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Errorf("hijack: %v", err)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"error":{"code":"VALIDATION_ERROR","message":"request failed"}}`))
+			}, nil)
+			err := env.run("marketplace", "skill-upload", "create", "--file", marketplaceArchive(t))
+			ee := output.AsExitError(err)
+			if ee == nil {
+				t.Fatal("initialization failure reported success")
+			}
+			wantUnknown := status != http.StatusBadRequest
+			if (ee.Code == "RESULT_UNKNOWN") != wantUnknown {
+				t.Fatalf("code=%s want unknown=%t", ee.Code, wantUnknown)
+			}
+			if wantUnknown && !strings.Contains(ee.Hint, "do not retry automatically") {
+				t.Fatal("missing unknown-outcome recovery hint")
+			}
+			if accepted.Load() != 1 || len(env.storeRequests) != 0 || env.tf.Out.Len() != 0 {
+				t.Fatalf("requests=%d PUTs=%d stdout=%s", accepted.Load(), len(env.storeRequests), env.tf.Out.String())
 			}
 		})
 	}
