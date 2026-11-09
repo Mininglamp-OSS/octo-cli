@@ -1,6 +1,9 @@
 package permission
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestCatalogTemplateReservedKeysAndInheritedSlotDomains(t *testing.T) {
 	t.Run("reserved_key", func(t *testing.T) {
@@ -22,6 +25,14 @@ func TestCatalogTemplateReservedKeysAndInheritedSlotDomains(t *testing.T) {
 		slot := CatalogSlot{Domain: "facade_hint", ID: "arguments", Pointer: "/arguments", MaxLength: 65536}
 		if _, err := catalogRenderTemplate(raw, []CatalogSlot{slot}, map[string]any{"arguments": []string{"hint"}}); err == nil {
 			t.Fatal("facade hint accepted a non-string value")
+		}
+	})
+	t.Run("source_value_type", func(t *testing.T) {
+		slot := CatalogSlot{Domain: "facade_hint", ID: "arguments", Pointer: "/arguments", MaxLength: 65536}
+		for _, value := range []any{string([]byte{0xff}), json.RawMessage(`"hint"`)} {
+			if _, err := catalogRenderTemplate(raw, []CatalogSlot{slot}, map[string]any{"arguments": value}); err == nil {
+				t.Fatal("source slot value was coerced to its JSON rendering")
+			}
 		}
 	})
 }

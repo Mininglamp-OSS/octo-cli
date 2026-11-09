@@ -104,25 +104,27 @@ type CatalogLedger struct {
 // VerifiedCatalog is an immutable, complete structural snapshot. A private
 // support registry additionally requires publisher/source and bound evidence.
 type VerifiedCatalog struct {
-	pin         CatalogPin
-	files       map[string][]byte
-	entries     map[string]CatalogEntry
-	content     map[string]map[string]any
-	owners      map[string]string
-	roots       map[string]catalogRoot
-	rows        map[string]catalogRow
-	raw         map[string][]byte
-	profiles    map[string]map[string]any
-	schemas     map[string]string
-	discovery   map[string]string
-	static      map[string]string
-	uses        map[string][]catalogUse
-	index       map[string]any
-	manifest    map[string]any
-	ledger      CatalogLedger
-	semantic    []byte
-	renderedMax map[string]int
-	slots       CatalogSlotValues
+	pin           CatalogPin
+	files         map[string][]byte
+	entries       map[string]CatalogEntry
+	content       map[string]map[string]any
+	owners        map[string]string
+	roots         map[string]catalogRoot
+	rows          map[string]catalogRow
+	raw           map[string][]byte
+	profiles      map[string]map[string]any
+	schemas       map[string]string
+	discovery     map[string]string
+	static        map[string]string
+	uses          map[string][]catalogUse
+	index         map[string]any
+	manifest      map[string]any
+	ledger        CatalogLedger
+	semantic      []byte
+	renderedMax   map[string]int
+	slots         CatalogSlotValues
+	frozenSlots   map[string][]byte
+	renderedSlots map[string]string
 }
 
 // Pin returns the exact immutable package commitment.
@@ -180,6 +182,10 @@ func catalogCell(prefix string, c CatalogConfig) string {
 	}
 	return fmt.Sprintf("%s/%d/%d/%d", prefix, r, c.ManagedMask, c.Facade)
 }
+
+func catalogSlotCell(template, operation string, c CatalogConfig) string {
+	return catalogCell(template+"|"+operation, c)
+}
 func catalogCells(selector catalogSelector, discovery bool) []CatalogConfig {
 	out := []CatalogConfig{}
 	for r := 0; r < 2; r++ {
@@ -210,6 +216,7 @@ func VerifyCatalogPackage(ctx context.Context, files map[string][]byte, expected
 	if err := v.verifyExpansion(ctx); err != nil {
 		return nil, err
 	}
+	v.slots = nil // Published snapshots use detached verified values only.
 	v.semantic = v.semanticView()
 	if err := ctx.Err(); err != nil {
 		return nil, err

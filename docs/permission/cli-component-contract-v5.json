@@ -19,7 +19,7 @@
     "version": "octo-capabilities-v1-xin2748-v4",
     "manifest": "catalog-package-v2/manifest.json",
     "manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
-    "semantic_sha256": "3d45ecfcb681e9a973979f051d16a115a1fa36d5257e49da302f9248ec4019f5",
+    "semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
     "status": "VERIFIED_CANDIDATE_NOT_ALLOWLISTED",
     "ledger": {
       "stored_bytes": 7823327,
@@ -72,7 +72,7 @@
     "client": "same original deadline; no redirect/compression; exact media/length/hash; no partial snapshot or grants"
   },
   "runtime": "coordinator immutable snapshot; fresh F/B before actual cached schema/discovery/static read; existing fresh output and physical HTTP/stdio execute/call_op boundaries",
-  "compatibility": "complete representation-neutral equality plus explicit privately approved direction; atomic snapshot registry; no inferred reverse, latest fallback or policy rewrite; server owns migrate_catalog CAS",
+  "compatibility": "complete representation-neutral equality including frozen joint-cell rendered hashes plus explicit privately approved direction; atomic snapshot registry; published snapshots never reconsult source callbacks; no inferred reverse, latest fallback or policy rewrite; server owns migrate_catalog CAS",
   "supported_pins": [],
   "approved_directed_compatible_pairs": [],
   "schema": "internal/permission/contracts/permission-catalog-package-v2.schema.json",

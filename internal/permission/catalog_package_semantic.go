@@ -77,5 +77,5 @@ func (v *VerifiedCatalog) semanticView() []byte { //nolint:gocyclo // normalize 
 			businessLimits[key] = value
 		}
 	}
-	return catalogEncode(map[string]any{"entries": entries, "content": descriptors, "selectors": selectors, "profiles": v.index["profiles"], "source_files": v.index["source_files"], "exceptions": v.index["exceptions"], "source_heads": v.manifest["source_heads"], "normalization": v.manifest["normalization"], "semantics_version": v.manifest["semantics_version"], "limits": businessLimits})
+	return catalogEncode(map[string]any{"entries": entries, "content": descriptors, "selectors": selectors, "rendered_slots": v.renderedSlots, "profiles": v.index["profiles"], "source_files": v.index["source_files"], "exceptions": v.index["exceptions"], "source_heads": v.manifest["source_heads"], "normalization": v.manifest["normalization"], "semantics_version": v.manifest["semantics_version"], "limits": businessLimits})
 }

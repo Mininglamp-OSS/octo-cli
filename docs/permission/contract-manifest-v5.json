@@ -7,15 +7,15 @@
   "files": {
     "docs/permission/catalog-package-report-v5.json": {
       "bytes": 1914,
-      "sha256": "1884848f621b7e71d199502938ef3d3e7f80810ed9b8a87a437a836239be9933"
+      "sha256": "7257dfef2ed8d48844f9a97335926109f4b49e85b4eb233ba593202375e85caf"
     },
     "docs/permission/cli-component-contract-v5.json": {
-      "bytes": 7254,
-      "sha256": "4243fb70f4ac0f72f674c38323c97813b8841fcf9e2e6ca1e9e735a7c098d211"
+      "bytes": 7352,
+      "sha256": "1d37f1f3533ef9b5dd3ff053f0dd97588e2eb752f0c3de9c6a849267acce7f0e"
     },
     "docs/permission/catalog-package-v2.md": {
-      "bytes": 14891,
-      "sha256": "81ac25d02169b12f3d45c4c07c7032ff1c0e6e4301e00dce01d7e7828fc1d271"
+      "bytes": 15233,
+      "sha256": "eecaf98135d2a7c88b5592e9afda8f10de4a26cf277236ed3c9317a54d967cf8"
     },
     "docs/permission/catalog-package-v2/manifest.json": {
       "bytes": 4934,

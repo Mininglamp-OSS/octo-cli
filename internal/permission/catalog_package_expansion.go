@@ -1,6 +1,7 @@
 package permission
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"sort"
@@ -8,6 +9,8 @@ import (
 )
 
 func (v *VerifiedCatalog) verifyExpansion(ctx context.Context) error { //nolint:gocyclo // separate stored/pre/post bounds count every semantic payload occurrence
+	v.frozenSlots = map[string][]byte{}
+	v.renderedSlots = map[string]string{}
 	multiplicity := map[string]int{}
 	isJSON := map[string]bool{}
 	for _, m := range v.content {
@@ -149,7 +152,11 @@ func (v *VerifiedCatalog) verifyExpansion(ctx context.Context) error { //nolint:
 				return catalogInvalid("template has no finite source assignments")
 			}
 			maximumBytes, maximumNodes := 0, 0
-			assignments := map[string]bool{}
+			type verifiedAssignment struct {
+				values []byte
+				hash   string
+			}
+			assignments := map[string]verifiedAssignment{}
 			for _, use := range uses {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -165,11 +172,29 @@ func (v *VerifiedCatalog) verifyExpansion(ctx context.Context) error { //nolint:
 						return err
 					}
 				}
+				if len(values) != len(slots) {
+					return catalogInvalid("source joint assignment count")
+				}
+				for _, slot := range slots {
+					if !catalogSlotInput(slot.Domain, values[slot.ID]) {
+						return catalogInvalid("source slot input domain")
+					}
+				}
 				assignment := string(catalogEncode(values))
-				if assignments[assignment] {
+				cell := catalogSlotCell(hash, use.Operation, use.Config)
+				if prior, ok := v.frozenSlots[cell]; ok && !bytes.Equal(prior, []byte(assignment)) {
+					return catalogInvalid("source joint assignment equivocation")
+				}
+				if prior, ok := assignments[assignment]; ok {
+					v.frozenSlots[cell] = prior.values
+					v.renderedSlots[cell] = prior.hash
 					continue
 				}
-				assignments[assignment] = true
+				frozen := []byte(assignment)
+				values = map[string]any{}
+				if json.Unmarshal(frozen, &values) != nil {
+					return ErrInvalid
+				}
 				rendered, err := catalogRenderTemplate(v.raw[root], slots, values)
 				if err != nil {
 					return err
@@ -181,6 +206,10 @@ func (v *VerifiedCatalog) verifyExpansion(ctx context.Context) error { //nolint:
 				maximumBytes = max(maximumBytes, len(rendered))
 				maximumNodes = max(maximumNodes, w.Nodes)
 				v.ledger.MaxDepth = max(v.ledger.MaxDepth, w.Depth)
+				renderedHash := catalogHash(rendered)
+				assignments[assignment] = verifiedAssignment{frozen, renderedHash}
+				v.frozenSlots[cell] = frozen
+				v.renderedSlots[cell] = renderedHash
 			}
 			v.renderedMax[hash] = maximumBytes
 			if err := charge(maximumBytes, maximumNodes); err != nil {

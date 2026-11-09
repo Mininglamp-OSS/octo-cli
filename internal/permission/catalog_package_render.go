@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type catalogSpan struct {
@@ -188,7 +189,7 @@ func catalogRenderTemplate(raw []byte, slots []CatalogSlot, values map[string]an
 	for _, slot := range slots {
 		value, ok := values[slot.ID]
 		span, found := spans[slot.Pointer]
-		if !ok || !found || span.marker != slot.ID || !catalogPointerUnique(spans, slot.Pointer) {
+		if !ok || !found || span.marker != slot.ID || !catalogPointerUnique(spans, slot.Pointer) || !catalogSlotInput(slot.Domain, value) {
 			return nil, catalogInvalid("slot assignment/pointer")
 		}
 		replacement, err := json.Marshal(value)
@@ -207,6 +208,33 @@ func catalogRenderTemplate(raw []byte, slots []CatalogSlot, values map[string]an
 		out = next
 	}
 	return json.MarshalIndent(json.RawMessage(out), "", "  ")
+}
+
+func catalogSlotInput(domain string, value any) bool {
+	if domain == "facade_hint" {
+		s, ok := value.(string)
+		return ok && utf8.ValidString(s)
+	}
+	if domain != "server_managed_argument_names" {
+		return false
+	}
+	switch names := value.(type) {
+	case []string:
+		for _, name := range names {
+			if !utf8.ValidString(name) {
+				return false
+			}
+		}
+	case []any:
+		for _, value := range names {
+			if s, ok := value.(string); !ok || !utf8.ValidString(s) {
+				return false
+			}
+		}
+	default:
+		return false
+	}
+	return true
 }
 
 func catalogSlotDomain(domain string, raw []byte) bool {
@@ -294,9 +322,9 @@ func (v *VerifiedCatalog) render(hash, operation string, c CatalogConfig) ([]byt
 	values := map[string]any{}
 	var err error
 	if len(slots) > 0 {
-		values, err = v.slots(operation, c, append([]byte(nil), raw...), slots)
-		if err != nil {
-			return nil, err
+		frozen, ok := v.frozenSlots[catalogSlotCell(hash, operation, c)]
+		if !ok || json.Unmarshal(frozen, &values) != nil {
+			return nil, ErrUnavailable
 		}
 	}
 	out, err := catalogRenderTemplate(raw, slots, values)
