@@ -79,12 +79,17 @@ type nativeGeneration struct {
 // NativeReader consumes the existing exact-Bot native-facts contract. It does
 // not provide the server's native authority, disclosure or checkpoint methods.
 type NativeReader struct {
-	self        *SelfPolicyReader
-	pins        map[string]AuthorityPin
-	profiles    map[string][]string
-	mu          sync.Mutex
-	reads       map[string]bool
-	generations map[string]nativeGeneration
+	self         *SelfPolicyReader
+	pins         map[string]AuthorityPin
+	profiles     map[string][]string
+	mu           sync.Mutex
+	reads        map[string]bool
+	generations  map[string]nativeGeneration
+	observations map[headerKey]Observation
+}
+type headerKey struct {
+	Key
+	reference string
 }
 
 // NewNativeReader fixes authority pins and the exact unchanged predicate table.
@@ -105,7 +110,7 @@ func NewNativeReader(self *SelfPolicyReader, pins map[string]AuthorityPin) (*Nat
 	if json.Unmarshal(nativeSharedContract, &shared) != nil || len(shared.Profiles) != 10 {
 		return nil, ErrUnavailable
 	}
-	return &NativeReader{self: self, pins: copyPins, profiles: shared.Profiles, reads: map[string]bool{}, generations: map[string]nativeGeneration{}}, nil
+	return &NativeReader{self: self, pins: copyPins, profiles: shared.Profiles, reads: map[string]bool{}, generations: map[string]nativeGeneration{}, observations: map[headerKey]Observation{}}, nil
 }
 
 func token(s string) bool {
@@ -312,7 +317,37 @@ func (r *NativeReader) Resolve(ctx context.Context, key Key, purpose string, ref
 		r.reads[n] = true
 	}
 	r.reads[readID] = true
+	for j := range observations {
+		o := &observations[j]
+		k := headerKey{o.key, o.header.Reference}
+		if prior, ok := r.observations[k]; ok && !bytes.Equal(prior.raw, o.raw) {
+			return nil, ErrUnavailable
+		}
+	}
+	for j := range observations {
+		o := &observations[j]
+		k := headerKey{o.key, o.header.Reference}
+		r.observations[k] = *o
+	}
 	return observations, nil
+}
+
+// ObservedHeader joins an endpoint's exact Header to a native-issued delivery
+// reference previously resolved by this host. Header and delivery tokens are
+// never treated as interchangeable. Unseen historical headers need the actual
+// native reference bridge; a declaration cannot manufacture that proof.
+func (r *NativeReader) ObservedHeader(key Key, value any) (Observation, error) {
+	h, raw, err := parseNativeHeader(value)
+	if err != nil {
+		return Observation{}, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, ok := r.observations[headerKey{key, h.Reference}]
+	if !ok || !bytes.Equal(o.raw, raw) {
+		return Observation{}, ErrUnavailable
+	}
+	return o, nil
 }
 
 // BindGeneration records the complete host-owned original union before relay

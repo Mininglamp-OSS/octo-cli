@@ -3,6 +3,7 @@ package permission
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"io"
 	"net"
@@ -238,7 +239,16 @@ func (c *Call) PublishConnection(ctx context.Context, conn net.Conn, payload []b
 	if refusal := c.Refused(); refusal != nil {
 		return refusal
 	}
-	err := c.coordinator.firstWrite(ctx, c.invocation, c.capability, &wireCapture{Conn: conn}, sealed)
+	var err error
+	if secured, ok := conn.(*tls.Conn); ok {
+		wire, owned := secured.NetConn().(*wireCapture)
+		if !owned {
+			return PolicyUnavailable()
+		}
+		err = c.coordinator.firstWriteEncoding(ctx, c.invocation, c.capability, wire, func() ([]byte, error) { return sealWire(secured, wire, sealed) }, true)
+	} else {
+		err = c.coordinator.firstWrite(ctx, c.invocation, c.capability, &wireCapture{Conn: conn}, sealed)
+	}
 	c.record(err)
 	return err
 }

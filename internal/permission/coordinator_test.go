@@ -155,6 +155,12 @@ func TestSharedRevisionEquivocationAndEpochRegression(t *testing.T) {
 	p.ContextEpoch = "1"
 	raw = encode(t, p)
 	category(t, c.atBoundary(context.Background(), i, testCap, nil), "context_untrusted")
+	// Epoch mismatch permanently retires the old handle. A fresh handle still
+	// shares the accepted scope watermark and must reject epoch regression.
+	i, err := c.Register(i.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p.Revision = "2"
 	p.ContextEpoch = "0"
 	raw = encode(t, p)

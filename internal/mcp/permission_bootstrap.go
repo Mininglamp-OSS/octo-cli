@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,13 +42,21 @@ func LoadPermissionHostConfig(path string) (PermissionHostConfig, error) {
 	if err != nil || len(b) > 16384 {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
-	if _, err = strictObject(b, "version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins"); err != nil {
+	if _, err = strictObject(b, "version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins", "ready_path", "relay_executable"); err != nil {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if json.Unmarshal(b, &cfg) != nil || cfg.Version != 1 {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
+	u, err := url.Parse(cfg.RelayURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !filepath.IsAbs(cfg.ReadyPath) {
+		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
 	return cfg, nil
+}
+
+func permissionReadiness(incarnation string) ([]byte, error) {
+	return permission.PrivateJSON(map[string]any{"control_version": 1, "coordinator_incarnation": incarnation})
 }
 
 // ReadSupportedRelease requires a complete immutable release and the exact
@@ -137,7 +146,7 @@ func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token st
 	if !roots.AppendCertsFromPEM(ca) {
 		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
 	}
-	control, err := tls.Listen("tcp", cfg.ControlAddress, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
+	control, err := tls.Listen("tcp", cfg.ControlAddress, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
 	if err != nil {
 		return err
 	}
@@ -147,7 +156,13 @@ func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token st
 		return err
 	}
 	defer closePermissionIO(relay)
-	return host.serve(ctx, control, relay)
+	cleanup, err := writePermissionReadiness(cfg.ReadyPath, host.Incarnation())
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	secured := permission.PublicationTLSListener(relay, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}})
+	return host.serve(ctx, control, secured)
 }
 
 func (h *PermissionHost) serve(ctx context.Context, control, relay net.Listener) error {

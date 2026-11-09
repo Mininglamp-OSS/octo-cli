@@ -242,11 +242,13 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 		f, err := c.facts.Recheck(ctx, b, need)
 		if err != nil || !f.Complete {
 			if IsRefusal(err) {
+				i.invalidateFor(err)
 				return err
 			}
 			return refuse("policy_unavailable")
 		}
 		if f.Subject != b.Subject {
+			i.Close()
 			return refuse("context_untrusted")
 		}
 		raw, err := c.policies.ReadBundle(ctx, b.Key)
@@ -284,6 +286,7 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 			return err
 		}
 		if p.ContextEpoch != b.ContextEpoch {
+			i.Close()
 			s.Unlock()
 			return refuse("context_untrusted")
 		}
@@ -307,11 +310,29 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 		} else {
 			err = start()
 		}
+		i.invalidateLocked(err)
 		i.mu.Unlock()
 		s.Unlock()
 		return err
 	}
 	return refuse("policy_unavailable")
+}
+
+// Known invalid context/Stage 1 facts retire this generation permanently.
+// A later grant cannot make previously contributing state eligible again.
+// Stage 2 refusals and temporary authority failures do not retire the context.
+func (i *Invocation) invalidateLocked(err error) {
+	var refusal *Refusal
+	if errors.As(err, &refusal) && (refusal.Category == "context_untrusted" || refusal.Category == "invocation_denied") {
+		i.closed = true
+		i.cancel()
+	}
+}
+
+func (i *Invocation) invalidateFor(err error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.invalidateLocked(err)
 }
 
 // IsRefusal identifies a typed nonretryable permission refusal.

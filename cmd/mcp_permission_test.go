@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/mcp"
 	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
@@ -136,5 +137,16 @@ func TestManagedPortableCommandPositiveAndChildDenial(t *testing.T) {
 				t.Fatal("portable positive", out.String(), reads.Load())
 			}
 		})
+	}
+}
+
+func TestTaskModeCannotEnterPrivateTurnRelay(t *testing.T) {
+	t.Setenv(config.EnvCredentialMode, config.CredentialModeTask)
+	f := newTestFactoryWithReg()
+	root := NewRootCmd(f.Factory)
+	root.SetArgs([]string{"--turn-relay", "invalid"})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "OCTO_CREDENTIAL_MODE=task only allows Loop commands") {
+		t.Fatal("private relay bypassed task command boundary", err)
 	}
 }

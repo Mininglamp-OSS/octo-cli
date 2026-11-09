@@ -40,6 +40,14 @@ func sealWire(conn net.Conn, wire *wireCapture, plain []byte) ([]byte, error) {
 // RawConn callback always returns true: EAGAIN cannot enter an implicit poll /
 // resend cycle. Remaining bytes of an already-started sealed request are in flight.
 func (c *Coordinator) firstWrite(ctx context.Context, i *Invocation, capability string, wire *wireCapture, sealed []byte) error {
+	return c.firstWriteEncoding(ctx, i, capability, wire, func() ([]byte, error) { return sealed, nil }, false)
+}
+
+// A hijacked TLS response has one exclusive writer. Its record encoder writes
+// only to RAM inside this boundary, with no network/poll/queue or other TLS
+// writer. Policy refusal precedes encoding, preserving the TLS sequence for a
+// fixed refusal. An encoding/IO failure after entry closes as result unknown.
+func (c *Coordinator) firstWriteEncoding(ctx context.Context, i *Invocation, capability string, wire *wireCapture, encode func() ([]byte, error), encodeAtBoundary bool) error { //nolint:gocyclo // the final gate, one raw write and uncertainty handling retain one critical section
 	socket, ok := wire.Conn.(syscall.Conn)
 	if !ok {
 		return PolicyUnavailable()
@@ -50,11 +58,22 @@ func (c *Coordinator) firstWrite(ctx context.Context, i *Invocation, capability 
 	}
 	var boundaryErr error
 	sent := 0
+	var sealed []byte
+	if encodeAtBoundary {
+		defer func() { clear(sealed) }()
+	}
 	err = raw.Write(func(fd uintptr) bool {
 		boundaryErr = c.atBoundary(ctx, i, capability, func() error {
 			var err error
+			sealed, err = encode()
+			if err != nil {
+				return ErrAttemptUnknown
+			}
 			sent, err = writeNonblocking(fd, sealed)
 			if wouldBlock(err) && sent == 0 {
+				if encodeAtBoundary {
+					return ErrAttemptUnknown
+				}
 				return PolicyUnavailable()
 			}
 			if err != nil || sent == 0 {

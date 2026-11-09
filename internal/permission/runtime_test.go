@@ -65,6 +65,28 @@ func (f *runtimeFixture) deny() {
 	f.p.Capability = Stage{"E", []Rule{}}
 }
 
+func TestInvalidContributorCannotReviveContextGeneration(t *testing.T) {
+	p := fixture(t)
+	p.Invocation = Stage{"E", []Rule{rule("admit", "allow", "alice", "group", "", false)}}
+	p.Capability = Stage{"U", []Rule{}}
+	eligible := true
+	c, i := testCoordinator(t, p, policyFunc(func(context.Context, Key) ([]byte, error) {
+		return encode(t, p), nil
+	}), factFunc(func(ctx context.Context, b Binding, n Needs) (Facts, error) {
+		f, err := allFacts(ctx, b, n)
+		f.Contributors = []ContributorFact{{Subject: b.Subject, Eligible: eligible}}
+		return f, err
+	}))
+	ctx := context.Background()
+	if err := c.Admit(ctx, i); err != nil {
+		t.Fatal(err)
+	}
+	eligible = false
+	category(t, c.Admit(ctx, i), "context_untrusted")
+	eligible = true
+	category(t, c.Admit(ctx, i), "context_untrusted")
+}
+
 func TestRuntimeSourceTargetsPagesReadAndPublication(t *testing.T) {
 	f := newRuntimeFixture(t, testCap)
 	if err := f.c.ConfigurePageBounds(map[string]PageBound{testCap: {Items: 2, Pages: 2}}); err != nil {

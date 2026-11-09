@@ -59,6 +59,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
 	}
 
 	pf := root.PersistentFlags()
@@ -91,6 +92,7 @@ func NewRootCmd(f *cmdutil.Factory) *cobra.Command {
 	registerDriveCmds(root, f)
 	withholdDisabledServices(root, f)
 
+	bindTurnRelayRoot(root, f)
 	return root
 }
 

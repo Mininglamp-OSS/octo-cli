@@ -3,7 +3,6 @@ package mcp
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,12 +23,11 @@ type ManagedTurn struct {
 	mu          sync.Mutex
 	negotiated  bool
 	closed      bool
-	requests    map[[32]byte]bool
 }
 
 // NewManagedTurn binds a host-admitted invocation to its exact native source.
 func NewManagedTurn(c *permission.Coordinator, i *permission.Invocation, source permission.DeclarationV2) *ManagedTurn {
-	return &ManagedTurn{coordinator: c, invocation: i, source: source, requests: map[[32]byte]bool{}}
+	return &ManagedTurn{coordinator: c, invocation: i, source: source}
 }
 
 // WithManagedTurn enables enforcement on this connection with no downgrade.
@@ -141,17 +139,9 @@ func (s *Server) dispatchManaged(ctx context.Context, req rpcRequest) (rpcRespon
 	if err != nil {
 		return permissionResponse(req.ID, permission.CapabilityDenied()), true, nil
 	}
-	// Native delivery replay is handled before admission by the endpoint. This
-	// separate turn-local request record prevents retransmitted RPC envelopes
-	// from creating a second dispatch; JSON-RPC IDs never become action IDs.
-	sum := sha256.Sum256(append(append([]byte(req.Method), req.ID...), req.Params...))
-	m.mu.Lock()
-	replayed := m.requests[sum]
-	m.requests[sum] = true
-	m.mu.Unlock()
-	if replayed {
-		return permissionResponse(req.ID, permission.ContextUntrusted()), true, nil
-	}
+	// Native-delivery replay is fenced at ingress. RPC IDs correlate replies;
+	// equal arguments or reused RPC IDs may be legitimate new logical calls.
+	// BeginCall mints a fresh private call ID, and each prepared attempt is one-use.
 	ctx, err = m.coordinator.BeginCall(ctx, m.invocation, capability, req.Params, children, s.requestTargets(capability, children)...)
 	call := permission.BoundCall(ctx)
 	if err != nil {

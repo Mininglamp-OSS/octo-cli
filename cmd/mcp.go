@@ -9,12 +9,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/mcp"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
@@ -324,4 +327,35 @@ func newMCPRelayCmd(f *cmdutil.Factory) *cobra.Command {
 	}}
 	cmd.Flags().IntVar(&ticketFD, "ticket-fd", -1, "inherited anonymous host ticket descriptor; contains only one turn relay endpoint/token")
 	return cmd
+}
+
+func bindTurnRelayRoot(root *cobra.Command, f *cmdutil.Factory) {
+	var handle string
+	root.Flags().StringVar(&handle, "turn-relay", "", "serve one endpoint-issued private turn handle over stdio")
+	ordinary := root.PersistentPreRunE
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if handle != "" {
+			f.ConfigFunc = func() (*config.Config, error) { return &config.Config{}, nil }
+			f.CredentialFunc = func() (*credential.BotCredential, error) {
+				return nil, output.ErrAuth("RELAY_CREDENTIALS_UNAVAILABLE", "")
+			}
+			if strings.EqualFold(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)), config.CredentialModeTask) {
+				return fmt.Errorf("%s=task only allows Loop commands", config.EnvCredentialMode)
+			}
+			if cmd != root || len(args) != 0 || cmd.Flags().NFlag() != 1 {
+				return fmt.Errorf("RELAY_FLAGS_INVALID")
+			}
+			return nil
+		}
+		if cmd == root && len(args) == 0 {
+			return nil
+		}
+		return ordinary(cmd, args)
+	}
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if handle == "" {
+			return cmd.Help()
+		}
+		return mcp.ServeTurnRelayHandle(cmd.Context(), handle, f.IOStreams.In, f.IOStreams.Out)
+	}
 }

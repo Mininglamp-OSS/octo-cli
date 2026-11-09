@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -240,7 +241,7 @@ func sendRequest(t *testing.T, id int, tool string, source permission.Declaratio
 	return req
 }
 
-func TestManagedMCPRealHTTPAndStdioPositiveDeniedAndReplay(t *testing.T) {
+func TestManagedMCPRealHTTPAndStdioPositiveDeniedAndRepeatedCalls(t *testing.T) {
 	for _, transport := range []string{"http", "stdio"} {
 		for _, tool := range []string{"execute", "call_op"} {
 			t.Run(transport+"/"+tool, func(t *testing.T) {
@@ -281,8 +282,8 @@ func TestManagedMCPRealHTTPAndStdioPositiveDeniedAndReplay(t *testing.T) {
 				if f.business.Load() != 1 || bytes.Contains(positive.Result, []byte(`"isError":true`)) {
 					t.Fatal("positive failed", string(positive.Result), f.business.Load())
 				}
-				if replay := run(req); replay.Error == nil || replay.Error.Code != -32007 || f.business.Load() != 1 {
-					t.Fatal("replay reached business", replay)
+				if repeated := run(sendRequest(t, 42, tool, turn.source)); repeated.Error != nil || f.business.Load() != 2 {
+					t.Fatal("legitimate repeated call refused", repeated.Error, f.business.Load())
 				}
 				f.mu.Lock()
 				f.bundle.Revision = "1"
@@ -290,7 +291,7 @@ func TestManagedMCPRealHTTPAndStdioPositiveDeniedAndReplay(t *testing.T) {
 				f.save()
 				f.mu.Unlock()
 				denied := run(sendRequest(t, 3, tool, turn.source))
-				if denied.Error == nil || denied.Error.Code != -32007 || f.business.Load() != 1 || !strings.Contains(fmt.Sprint(denied.Error.Data), "capability_denied") {
+				if denied.Error == nil || denied.Error.Code != -32007 || f.business.Load() != 2 || !strings.Contains(fmt.Sprint(denied.Error.Data), "capability_denied") {
 					t.Fatal("denial", denied, f.business.Load())
 				}
 				if f.nativeReads.Load() < 4 || f.policyReads.Load() < 4 {
@@ -335,7 +336,7 @@ func controlCertificates(t *testing.T) (serverCert, clientCert tls.Certificate, 
 	roots.AddCert(ca)
 	makeCert := func(serial int64, usage x509.ExtKeyUsage) tls.Certificate {
 		pub, key, _ := ed25519.GenerateKey(rand.Reader)
-		template := &x509.Certificate{SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: "synthetic-peer"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
+		template := &x509.Certificate{SerialNumber: big.NewInt(serial), Subject: pkix.Name{CommonName: "synthetic-peer"}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, DNSNames: []string{"localhost"}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{usage}}
 		der, err := x509.CreateCertificate(rand.Reader, template, ca, pub, caKey)
 		if err != nil {
 			t.Fatal(err)
@@ -402,15 +403,17 @@ func TestManagedPrivateControlToHTTPRelay(t *testing.T) {
 	request("hello", map[string]any{"versions": []int{2}, "metadata_versions": []int{2}, "identity_versions": []int{2}, "endpoint_incarnation": cfg.EndpointIncarnation, "configured_origin": cfg.Origin, "recipient_id": cfg.RecipientID})
 	ingress := request("register_ingress", map[string]any{"key": f.bundle.Key, "delivery_reference": "delivery", "stream": f.header.Delivery, "payload_sha256": f.header.PayloadSHA256})
 	contextID := permission.NewID()
-	admitted := request("admit", map[string]any{"ingress_id": ingress["ingress_id"], "context_id": contextID})
-	manifest := map[string]any{"context_id": contextID, "generation": admitted["generation"], "delivery_references": []string{}}
+	admitted := request("admit", map[string]any{"ingress_id": ingress["ingress_id"], "proposed_context_id": contextID})
+	manifest := map[string]any{"context_id": contextID, "context_generation": admitted["generation"], "originals": []permission.NativeHeader{f.header}}
 	b, _ := permission.PrivateJSON(manifest)
-	request("bind_context", map[string]any{"capsule_id": admitted["capsule_id"], "manifest": manifest, "manifest_sha256": sha256Sum(b)})
+	manifest["bytes"] = len(b)
+	manifest["sha256"] = sha256Sum(b)
+	request("bind_context", map[string]any{"capsule_id": admitted["capsule_id"], "manifest": manifest})
 	opened := request("open_relay", map[string]any{"capsule_id": admitted["capsule_id"], "recipient_id": cfg.RecipientID, "transport": "http", "relay_nonce": permission.NewID()})
 	post := func(req rpcRequest) rpcResponse {
 		raw, _ := json.Marshal(req)
 		request, _ := http.NewRequest("POST", relay.URL, bytes.NewReader(raw))
-		request.Header.Set("Authorization", "Bearer "+opened["token"].(string))
+		request.Header.Set("Authorization", "Bearer "+opened["handle"].(string))
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
@@ -429,7 +432,7 @@ func TestManagedPrivateControlToHTTPRelay(t *testing.T) {
 		t.Fatal(r, f.business.Load())
 	}
 	// The worker receives only the relay ticket, never the host/Bot secret.
-	ticket, _ := json.Marshal(map[string]any{"endpoint": relay.URL, "token": opened["token"]})
+	ticket, _ := json.Marshal(map[string]any{"endpoint": relay.URL, "token": opened["handle"]})
 	workerRequest := sendRequest(t, 3, "call_op", permission.DeclarationV2{Sender: "alice", Channel: "group", ChannelType: 2, SpaceID: "space", MessageID: "42"})
 	workerBytes, _ := json.Marshal(workerRequest)
 	var workerOutput bytes.Buffer
@@ -484,7 +487,7 @@ func TestPrivateManifestDescriptorSupportsMaximumAndRejectsReplacement(t *testin
 		if end > len(manifest) {
 			end = len(manifest)
 		}
-		p := map[string]any{"manifest_sha256": digest, "manifest_chunk": map[string]any{"offset": json.Number(strconv.Itoa(offset)), "total_bytes": json.Number(strconv.Itoa(len(manifest))), "data_base64": base64.StdEncoding.EncodeToString(manifest[offset:end])}}
+		p := map[string]any{"manifest": map[string]any{"carrier": "canonical-json-chunks-v1", "bytes": json.Number(strconv.Itoa(len(manifest))), "sha256": digest, "offset": json.Number(strconv.Itoa(offset)), "data_base64": base64.StdEncoding.EncodeToString(manifest[offset:end])}}
 		b, pending, err := h.contextManifest(c, p)
 		if err != nil || pending != (end < len(manifest)) || len(b) != end {
 			t.Fatal(offset, pending, len(b), err)
@@ -503,5 +506,66 @@ func TestUnprovenCatalogCannotBeEnabledByOperatorHash(t *testing.T) {
 	}
 	if _, err := ReadSupportedRelease(path, sha256Sum(candidate)); err == nil {
 		t.Fatal("operator hash promoted unsupported source")
+	}
+}
+
+func TestPrivateReadinessDoesNotReuseAnExistingBootRecord(t *testing.T) {
+	dir := secureTestDir(t)
+	path := filepath.Join(dir, "ready.json")
+	id := permission.NewID()
+	cleanup, err := writePermissionReadiness(path, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	b, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(b, []byte(id)) {
+		t.Fatal(err)
+	}
+	if _, err := writePermissionReadiness(path, permission.NewID()); err == nil {
+		t.Fatal("stale readiness record replaced")
+	}
+}
+
+func TestManagedTransientFailureDoesNotLatchRPCIdentifier(t *testing.T) {
+	f := newManagedFixture(t)
+	turn := f.turn()
+	defer turn.Close()
+	s := f.server(turn)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	s.Dispatch(ctx, initializedRequest())
+	request := sendRequest(t, 2, "execute", turn.source)
+	f.badAuthority.Store(true)
+	denied, _ := s.Dispatch(ctx, request)
+	if denied.Error == nil || f.business.Load() != 0 {
+		t.Fatal("transient authority fixture did not refuse before dispatch")
+	}
+	f.badAuthority.Store(false)
+	retried, _ := s.Dispatch(ctx, request)
+	if retried.Error != nil || f.business.Load() != 1 {
+		t.Fatal("transient failure permanently latched RPC retry", retried.Error, f.business.Load())
+	}
+}
+
+func TestControlSessionReclaimsIngressButPreservesDeliveryFence(t *testing.T) {
+	var fence [32]byte
+	fence[0] = 1
+	h := &PermissionHost{ingress: map[string]*hostIngress{"session:one": {}, "other:two": {}}, capsules: map[string]*hostCapsule{}, seenDeliveries: map[[32]byte]bool{fence: true}}
+	h.closeSession("session")
+	if len(h.ingress) != 1 || h.ingress["other:two"] == nil {
+		t.Fatal("closed session retained ingress handles")
+	}
+	if !h.seenDeliveries[fence] {
+		t.Fatal("ingress cleanup erased native delivery fence")
+	}
+}
+
+func TestTurnRelayTokenCannotBeAnOrdinaryBearer(t *testing.T) {
+	if !validRelayToken(strings.Repeat("a", 64)) {
+		t.Fatal("host-issued turn token refused")
+	}
+	if validRelayToken("bf_" + strings.Repeat("a", 61)) {
+		t.Fatal("ordinary bearer accepted as turn credential")
 	}
 }

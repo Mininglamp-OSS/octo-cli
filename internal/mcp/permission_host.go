@@ -14,6 +14,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,8 @@ type PermissionHostConfig struct {
 	PeerCA              string                             `json:"peer_ca"`
 	ReleasePath         string                             `json:"release_path"`
 	ReleaseSHA256       string                             `json:"release_sha256"`
+	ReadyPath           string                             `json:"ready_path"`
+	RelayExecutable     string                             `json:"relay_executable"`
 	AuthorityPins       map[string]permission.AuthorityPin `json:"authority_pins"`
 }
 
@@ -66,21 +70,22 @@ type hostRelay struct {
 // PermissionHost owns all sessions/turn relays and one process-wide coordinator.
 // It has no fallback from a failed managed session to the unmanaged MCP server.
 type PermissionHost struct {
-	config         PermissionHostConfig
-	coordinator    *permission.Coordinator
-	policies       permission.PolicyReader
-	native         *permission.NativeReader
-	incarnation    string
-	macKey         [32]byte
-	mu             sync.Mutex
-	sessions       map[string]bool
-	ingress        map[string]*hostIngress
-	capsules       map[string]*hostCapsule
-	relays         map[string]*hostRelay
-	seenDeliveries map[[32]byte]bool
-	server         func(*ManagedTurn) *Server
-	handlers       sync.WaitGroup
-	closing        bool
+	config                    PermissionHostConfig
+	coordinator               *permission.Coordinator
+	policies                  permission.PolicyReader
+	native                    *permission.NativeReader
+	incarnation               string
+	macKey                    [32]byte
+	mu                        sync.Mutex
+	sessions                  map[string]bool
+	ingress                   map[string]*hostIngress
+	capsules                  map[string]*hostCapsule
+	relays                    map[string]*hostRelay
+	seenDeliveries            map[[32]byte]bool
+	server                    func(*ManagedTurn) *Server
+	handlers                  sync.WaitGroup
+	closing                   bool
+	executable, executableSHA string
 }
 
 // NewPermissionHost composes delivered readers; neither a fake provider nor a
@@ -99,8 +104,40 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 	if _, err := rand.Read(h.macKey[:]); err != nil {
 		return nil, err
 	}
+	executable, err := os.Executable()
+	if cfg.RelayExecutable != "" {
+		executable = cfg.RelayExecutable
+		err = nil
+	}
+	if !filepath.IsAbs(executable) {
+		return nil, errors.New("RELAY_EXECUTABLE_UNAVAILABLE")
+	}
+	if err != nil {
+		return nil, errors.New("RELAY_EXECUTABLE_UNAVAILABLE")
+	}
+	f, err := os.Open(executable)
+	if err != nil {
+		return nil, errors.New("RELAY_EXECUTABLE_UNAVAILABLE")
+	}
+	defer closePermissionIO(f)
+	stat, err := f.Stat()
+	if err != nil || !stat.Mode().IsRegular() || stat.Mode().Perm()&0o022 != 0 || stat.Mode().Perm()&0o111 == 0 {
+		return nil, errors.New("RELAY_EXECUTABLE_UNAVAILABLE")
+	}
+	hash := sha256.New()
+	if _, err = io.Copy(hash, f); err != nil {
+		return nil, errors.New("RELAY_EXECUTABLE_UNAVAILABLE")
+	}
+	h.executable = executable
+	h.executableSHA = hex.EncodeToString(hash.Sum(nil))
+	if _, err = TurnRelayHandle(cfg.RelayURL, strings.Repeat("a", 64)); err != nil {
+		return nil, err
+	}
 	return h, nil
 }
+
+// Incarnation is a private launcher readiness value, never a worker grant.
+func (h *PermissionHost) Incarnation() string { return h.incarnation }
 
 func controlUnavailable(f permission.ControlFrame, reason string, hello bool) map[string]any {
 	m := map[string]any{"control_version": 1, "request_id": f.RequestID, "status": "unavailable", "payload": map[string]any{"reason": reason}}
@@ -136,7 +173,7 @@ func (h *PermissionHost) ServeControl(ctx context.Context, conn *tls.Conn) error
 		return err
 	}
 	state := conn.ConnectionState()
-	if len(state.VerifiedChains) == 0 || len(state.PeerCertificates) == 0 {
+	if state.Version < tls.VersionTLS13 || len(state.VerifiedChains) == 0 || len(state.PeerCertificates) == 0 {
 		return errors.New("HOST_AUTH_REQUIRED")
 	}
 	sum := sha256.Sum256(state.PeerCertificates[0].Raw)
@@ -254,15 +291,20 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		delivery := sha256.Sum256(identity)
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if h.seenDeliveries[delivery] || len(h.ingress) >= 100000 {
+		if h.seenDeliveries[delivery] {
 			return controlUnavailable(f, "authority_conflict", false)
+		}
+		// Handles are reclaimed below; replay tombstones are not. Until a real
+		// native no-redelivery fence exists, retain them and stop at the bound.
+		if len(h.seenDeliveries) >= 100000 {
+			return controlUnavailable(f, "budget_exhausted", false)
 		}
 		h.seenDeliveries[delivery] = true
 		id := permission.NewID()
 		h.ingress[owner+":"+id] = &hostIngress{observation: observed[0]}
 		return controlOK(f, map[string]any{"ingress_id": id})
 	case "admit":
-		if !permission.Fields(p, "ingress_id", "context_id") || !controlID(controlString(p, "context_id")) {
+		if !permission.Fields(p, "ingress_id", "proposed_context_id") || !controlID(controlString(p, "proposed_context_id")) {
 			return controlUnavailable(f, "predicate_unsupported", false)
 		}
 		h.mu.Lock()
@@ -272,6 +314,7 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 			return controlUnavailable(f, "authority_conflict", false)
 		}
 		ingress.admitted = true
+		delete(h.ingress, owner+":"+controlString(p, "ingress_id"))
 		h.mu.Unlock()
 		header := ingress.observation.Header()
 		key := permission.Key{Origin: h.config.Origin, BotUID: h.config.BotUID, SpaceID: header.SpaceID}
@@ -304,7 +347,7 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 			h.native.ForgetGeneration(generation)
 			return controlError(f, err)
 		}
-		capsule := &hostCapsule{id: permission.NewID(), turnID: permission.NewID(), generation: generation, contextID: controlString(p, "context_id"), owner: owner, ingressID: controlString(p, "ingress_id"), header: header, invocation: inv}
+		capsule := &hostCapsule{id: permission.NewID(), turnID: permission.NewID(), generation: generation, contextID: controlString(p, "proposed_context_id"), owner: owner, ingressID: controlString(p, "ingress_id"), header: header, invocation: inv}
 		lease, hard := inv.Deadlines()
 		now := hard.Add(-30 * time.Minute)
 		capsule.sealed, err = permission.PrivateJSON(map[string]any{"binding_version": 2, "capsule_id": capsule.id, "turn_id": capsule.turnID, "coordinator_incarnation": h.incarnation, "endpoint_incarnation": h.config.EndpointIncarnation, "recipient_id": h.config.RecipientID, "key": key, "scope_incarnation": bundle.Incarnation, "context_epoch": bundle.ContextEpoch, "author_uid": header.AuthorUID, "author_kind": header.AuthorKind, "Header": header, "context_id": capsule.contextID, "context_generation": generation, "created_at": now.UTC().Format(time.RFC3339Nano), "lease_expires_at": lease.UTC().Format(time.RFC3339Nano), "hard_deadline": hard.UTC().Format(time.RFC3339Nano)})
@@ -321,7 +364,7 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		h.mu.Unlock()
 		return controlOK(f, map[string]any{"capsule_id": capsule.id, "turn_id": capsule.turnID, "generation": generation})
 	case "bind_context":
-		if !permission.Fields(p, "capsule_id", "manifest", "manifest_sha256") && !permission.Fields(p, "capsule_id", "manifest_chunk", "manifest_sha256") {
+		if !permission.Fields(p, "capsule_id", "manifest") {
 			return controlUnavailable(f, "predicate_unsupported", false)
 		}
 		c := h.capsule(owner, controlString(p, "capsule_id"))
@@ -330,33 +373,55 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		}
 		manifest, pending, err := h.contextManifest(c, p)
 		if pending && err == nil {
-			return controlOK(f, map[string]any{"staged_bytes": len(manifest)})
+			return controlOK(f, map[string]any{"accepted_bytes": len(manifest)})
 		}
-		if err != nil || len(manifest) > 1<<20 || sha256Sum(manifest) != p["manifest_sha256"] {
-			return controlUnavailable(f, "authority_conflict", false)
+		if err != nil {
+			return controlError(f, err)
 		}
-		var m struct {
-			ContextID  string   `json:"context_id"`
-			Generation string   `json:"generation"`
-			References []string `json:"delivery_references"`
-		}
-		obj, parseErr := strictObject(manifest, "context_id", "generation", "delivery_references")
-		if parseErr != nil || len(obj) != 3 || json.Unmarshal(manifest, &m) != nil || m.ContextID != c.contextID || m.Generation != c.generation || m.References == nil || len(m.References) > 256 {
+		obj, err := strictObject(manifest, "context_id", "context_generation", "originals")
+		if err != nil {
 			return controlUnavailable(f, "predicate_unsupported", false)
 		}
-		var originals []permission.Observation
-		for start := 0; start < len(m.References); start += 32 {
-			end := start + 32
-			if end > len(m.References) {
-				end = len(m.References)
-			}
-			batch, err := h.native.Resolve(ctx, permission.Key{Origin: h.config.Origin, BotUID: h.config.BotUID, SpaceID: c.header.SpaceID}, "contributor", m.References[start:end])
+		var contextID, generation string
+		if json.Unmarshal(obj["context_id"], &contextID) != nil || json.Unmarshal(obj["context_generation"], &generation) != nil || contextID != c.contextID || generation != c.generation {
+			return controlUnavailable(f, "authority_conflict", false)
+		}
+		var originals []map[string]any
+		if json.Unmarshal(obj["originals"], &originals) != nil || len(originals) < 1 || len(originals) > 256 {
+			return controlUnavailable(f, "predicate_unsupported", false)
+		}
+		// Decode through the strict canonical decoder to retain integer lexemes.
+		core, err := permission.DecodeManifest(manifest)
+		if err != nil {
+			return controlError(f, err)
+		}
+		values, ok := core["originals"].([]any)
+		if !ok {
+			return controlUnavailable(f, "predicate_unsupported", false)
+		}
+		observed := make([]permission.Observation, 0, len(values))
+		originalIncluded := false
+		expected, err := permission.PrivateJSON(c.header)
+		if err != nil {
+			return controlError(f, err)
+		}
+		key := permission.Key{Origin: h.config.Origin, BotUID: h.config.BotUID, SpaceID: c.header.SpaceID}
+		for _, value := range values {
+			o, err := h.native.ObservedHeader(key, value)
 			if err != nil {
 				return controlError(f, err)
 			}
-			originals = append(originals, batch...)
+			raw, err := permission.PrivateJSON(value)
+			if err != nil {
+				return controlError(f, err)
+			}
+			originalIncluded = originalIncluded || bytes.Equal(raw, expected)
+			observed = append(observed, o)
 		}
-		if err = h.native.AttachContributors(c.generation, originals); err == nil {
+		if !originalIncluded {
+			return controlUnavailable(f, "authority_conflict", false)
+		}
+		if err = h.native.AttachContributors(c.generation, observed); err == nil {
 			err = h.coordinator.Admit(ctx, c.invocation)
 		}
 		if err != nil {
@@ -364,12 +429,11 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 			return controlError(f, err)
 		}
 		h.mu.Lock()
+		defer h.mu.Unlock()
 		if h.capsules[c.id] != c {
-			h.mu.Unlock()
 			return controlUnavailable(f, "authority_conflict", false)
 		}
 		c.bound = true
-		h.mu.Unlock()
 		return controlOK(f, map[string]any{"context_generation": c.generation})
 	case "open_relay":
 		if !permission.Fields(p, "capsule_id", "recipient_id", "transport", "relay_nonce") || !controlID(controlString(p, "relay_nonce")) {
@@ -398,7 +462,16 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		relay := &hostRelay{token: permission.NewID() + permission.NewID(), turn: NewManagedTurn(h.coordinator, c.invocation, source), capsule: c}
 		c.relay = relay
 		h.relays[relay.token] = relay
-		return controlOK(f, map[string]any{"relay_id": controlString(p, "relay_nonce"), "transport": transport, "endpoint": h.config.RelayURL, "token": relay.token})
+		if transport == "http" {
+			return controlOK(f, map[string]any{"transport": "http", "url": h.config.RelayURL, "handle": relay.token})
+		}
+		handle, err := TurnRelayHandle(h.config.RelayURL, relay.token)
+		if err != nil {
+			delete(h.relays, relay.token)
+			c.relay = nil
+			return controlError(f, err)
+		}
+		return controlOK(f, map[string]any{"transport": "stdio", "executable": h.executable, "executableSha256": h.executableSHA, "handle": handle})
 	case "renew":
 		if !permission.Fields(p, "capsule_id", "generation", "ingress_id") {
 			return controlUnavailable(f, "predicate_unsupported", false)
@@ -485,6 +558,11 @@ func (h *PermissionHost) closeCapsule(c *hostCapsule) {
 }
 func (h *PermissionHost) closeSession(session string) {
 	h.mu.Lock()
+	for key := range h.ingress {
+		if strings.HasPrefix(key, session+":") {
+			delete(h.ingress, key)
+		}
+	}
 	var all []*hostCapsule
 	for _, c := range h.capsules {
 		if c.owner == session {
@@ -500,41 +578,52 @@ func (h *PermissionHost) closeSession(session string) {
 // contextManifest stages only inert private metadata. Chunk offsets, size and
 // digest are fixed by the first descriptor; no paths, URLs or content bodies
 // are accepted. This preserves the 1 MiB manifest domain over 64 KiB frames.
-func (h *PermissionHost) contextManifest(c *hostCapsule, p map[string]any) (dataBytes []byte, pending bool, failure error) { //nolint:gocyclo // closed fixed-program branches retain explicit checks in security order
+func (h *PermissionHost) contextManifest(c *hostCapsule, p map[string]any) (dataBytes []byte, pending bool, failure error) { //nolint:gocyclo // one immutable descriptor is assembled before any context binding
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.capsules[c.id] != c || c.bound {
 		return nil, false, permission.ContextUntrusted()
 	}
-	if value, inline := p["manifest"]; inline {
-		if c.manifestSize != 0 {
-			return nil, false, permission.ContextUntrusted()
-		}
-		b, err := permission.PrivateJSON(value)
-		return b, false, err
-	}
-	chunk, ok := p["manifest_chunk"].(map[string]any)
-	if !ok || !permission.Fields(chunk, "offset", "total_bytes", "data_base64") || !controlHash(controlString(p, "manifest_sha256")) {
+	m, ok := p["manifest"].(map[string]any)
+	if !ok {
 		return nil, false, permission.ContextUntrusted()
 	}
-	parse := func(key string) (int64, error) {
-		n, ok := chunk[key].(json.Number)
+	number := func(key string) (int64, error) {
+		n, ok := m[key].(json.Number)
 		if !ok {
-			return 0, errors.New("invalid chunk")
+			return 0, errors.New("invalid descriptor")
 		}
 		return n.Int64()
 	}
-	offset, err := parse("offset")
-	total, totalErr := parse("total_bytes")
-	data, decodeErr := base64.StdEncoding.Strict().DecodeString(controlString(chunk, "data_base64"))
-	if err != nil || totalErr != nil || decodeErr != nil || offset < 0 || total < 1 || total > 1<<20 || len(data) == 0 || offset+int64(len(data)) > total {
+	total, totalErr := number("bytes")
+	hash := controlString(m, "sha256")
+	if totalErr != nil || total < 1 || total > 1<<20 || !controlHash(hash) {
+		return nil, false, permission.ContextUntrusted()
+	}
+	if _, chunk := m["carrier"]; !chunk {
+		if !permission.Fields(m, "context_id", "context_generation", "originals", "bytes", "sha256") || c.manifestSize != 0 {
+			return nil, false, permission.ContextUntrusted()
+		}
+		core := map[string]any{"context_id": m["context_id"], "context_generation": m["context_generation"], "originals": m["originals"]}
+		b, err := permission.PrivateJSON(core)
+		if err != nil || int64(len(b)) != total || sha256Sum(b) != hash {
+			return nil, false, permission.ContextUntrusted()
+		}
+		return b, false, nil
+	}
+	if !permission.Fields(m, "carrier", "bytes", "sha256", "offset", "data_base64") || m["carrier"] != "canonical-json-chunks-v1" {
+		return nil, false, permission.ContextUntrusted()
+	}
+	offset, err := number("offset")
+	data, decodeErr := base64.StdEncoding.Strict().DecodeString(controlString(m, "data_base64"))
+	if err != nil || decodeErr != nil || offset < 0 || offset > total || len(data) == 0 || int64(len(data)) > total-offset {
 		return nil, false, permission.ContextUntrusted()
 	}
 	if c.manifestSize == 0 {
 		c.manifestSize = int(total)
-		c.manifestHash = controlString(p, "manifest_sha256")
+		c.manifestHash = hash
 	}
-	if int64(c.manifestSize) != total || c.manifestHash != p["manifest_sha256"] || offset != int64(len(c.manifest)) {
+	if int64(c.manifestSize) != total || c.manifestHash != hash || offset != int64(len(c.manifest)) {
 		return nil, false, permission.ContextUntrusted()
 	}
 	c.manifest = append(c.manifest, data...)

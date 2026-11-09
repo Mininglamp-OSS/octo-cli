@@ -4,14 +4,41 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 )
+
+// TurnRelayHandle is the endpoint e4601041 worker ABI. It contains only a
+// relay address and one-turn bearer, never Bot/control credentials or paths.
+func TurnRelayHandle(endpoint, token string) (string, error) {
+	b, err := json.Marshal(map[string]string{"endpoint": endpoint, "token": token})
+	if err != nil {
+		return "", err
+	}
+	handle := base64.RawURLEncoding.EncodeToString(b)
+	if len(handle) > 512 {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	return handle, nil
+}
+
+// ServeTurnRelayHandle serves the pinned executable's --turn-relay entry point.
+func ServeTurnRelayHandle(ctx context.Context, handle string, in io.Reader, out io.Writer) error {
+	if len(handle) < 1 || len(handle) > 512 {
+		return errors.New("RELAY_HANDLE_INVALID")
+	}
+	b, err := base64.RawURLEncoding.Strict().DecodeString(handle)
+	if err != nil {
+		return errors.New("RELAY_HANDLE_INVALID")
+	}
+	defer clear(b)
+	return ServeTurnRelay(ctx, bytes.NewReader(b), in, out)
+}
 
 // ServeTurnRelay bridges worker stdio to one private host-issued HTTP turn
 // channel. The inherited ticket contains no Bot/owner/control credential. The
@@ -114,5 +141,5 @@ func relayNegotiation(req *rpcRequest) error {
 }
 
 func validRelayToken(token string) bool {
-	return len(token) == 64 && !strings.ContainsAny(token, "\r\n \t")
+	return controlHash(token)
 }

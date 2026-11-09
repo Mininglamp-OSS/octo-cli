@@ -1,0 +1,90 @@
+{
+  "format": "permission-cli-endpoint-abi-v1",
+  "endpoint_head": "e4601041bd9bab186e4122fb8c76a3444bd1da62",
+  "control": "TLS 1.3 mutual authentication and exact peer certificate pin; uint32 BE canonical JSON <=65536 bytes; unchanged eight methods",
+  "readiness": {
+    "config_key": "ready_path",
+    "record": {
+      "control_version": 1,
+      "coordinator_incarnation": "32-hex fresh process ID"
+    },
+    "lifetime": "private 0600 exclusive-create, fsync before serving, refuse existing record; endpoint launcher supplies this exact boot ID to its pinned consumer"
+  },
+  "admit": {
+    "request": [
+      "ingress_id",
+      "proposed_context_id"
+    ],
+    "reply": [
+      "capsule_id",
+      "turn_id",
+      "generation"
+    ]
+  },
+  "bind_context": {
+    "request": [
+      "capsule_id",
+      "manifest"
+    ],
+    "inline_manifest": [
+      "context_id",
+      "context_generation",
+      "originals",
+      "bytes",
+      "sha256"
+    ],
+    "core_hash": "bytes/sha256 cover canonical JSON of exactly context_id, context_generation, originals; originals are complete native Headers, including the invoking original",
+    "limits": {
+      "originals": 256,
+      "core_bytes": 1048576,
+      "control_frame_bytes": 65536
+    },
+    "chunk_manifest": [
+      "carrier",
+      "bytes",
+      "sha256",
+      "offset",
+      "data_base64"
+    ],
+    "carrier": "canonical-json-chunks-v1",
+    "chunk_semantics": "each bind_context frame uses manifest containing the chunk descriptor; bytes/hash fixed on first chunk, offset exactly accepted length, standard base64 <=32768 decoded bytes recommended; no truncation/replacement/path/URL; canonical full core verified before binding",
+    "intermediate_reply": [
+      "accepted_bytes"
+    ],
+    "final_reply": [
+      "context_generation"
+    ]
+  },
+  "open_relay": {
+    "request": [
+      "capsule_id",
+      "recipient_id",
+      "transport",
+      "relay_nonce"
+    ],
+    "http_reply": [
+      "transport",
+      "url",
+      "handle"
+    ],
+    "stdio_reply": [
+      "transport",
+      "executable",
+      "executableSha256",
+      "handle"
+    ],
+    "http": "production URL is HTTPS; handle is only a turn bearer",
+    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed endpoint/token JSON ticket <=512 characters; contains no Bot/control credential; endpoint launcher verifies absolute executable/hash",
+    "relay_executable": "private config may name the pinned CLI; empty selects this executable; absolute regular non-writable executable required",
+    "bearer_domain": "64 lowercase hex characters; ordinary bf_/app_/uk_ credentials are rejected by the relay ticket parser"
+  },
+  "current_native_header_join": "CLI only joins a complete Header to the same exact native observation and delivery reference already resolved by this host; then fresh contributor facts/Stage1 are required",
+  "history_prerequisite": "Header references and delivery references are distinct opaque domains. Unseen history Headers need a recognized native reference bridge/current-access port; no token alias is guessed. Actual native producer remains missing.",
+  "source_control_client": {
+    "path": "src/permissions/control-client.ts",
+    "bytes": 11683,
+    "sha256": "e390188ce11fc5c22041feff24119f81b7fa3a3a8efb6555b9fb7328dd676fbe"
+  },
+  "verification": "exact pinned endpoint control source exercised over mTLS with standard fixture-only parameter-property lowering for Node strip mode, then actual CLI --turn-relay process and real synthetic TLS business receiver; not native/provider/OS acceptance",
+  "rpc_identity": "JSON-RPC IDs only correlate replies; equal parameters and reused IDs may be legitimate new logical calls. Each BeginCall mints a private call ID and each prepared physical attempt is one-use. Native delivery replay is separately fenced; no argument-based idempotency is invented."
+}

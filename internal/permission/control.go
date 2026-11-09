@@ -18,6 +18,9 @@ func ParseControlFrame(raw []byte) (ControlFrame, error) {
 	if err != nil {
 		return ControlFrame{}, ErrInvalid
 	}
+	if !bytes.Equal(raw, canonical(v)) {
+		return ControlFrame{}, ErrInvalid
+	}
 	m := object(v)
 	if !fields(m, "control_version", "request_id", "session_id", "method", "payload") || m["control_version"] != json.Number("1") || !validHex(text(m["request_id"]), 32) || !validHex(text(m["session_id"]), 32) || object(m["payload"]) == nil {
 		return ControlFrame{}, ErrInvalid
@@ -46,6 +49,15 @@ func CanonicalManifest(raw []byte) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	return canonical(v), nil
+}
+
+// DecodeManifest retains the canonical native Header integer domains.
+func DecodeManifest(raw []byte) (map[string]any, error) {
+	v, err := decodeStrict(bytes.NewReader(raw), 1<<20)
+	if err != nil || object(v) == nil {
+		return nil, ErrInvalid
+	}
+	return object(v), nil
 }
 
 // NewID creates an unpredictable private control/capsule/action identifier.

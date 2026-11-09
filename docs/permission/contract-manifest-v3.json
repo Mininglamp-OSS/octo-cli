@@ -1,0 +1,24 @@
+{
+  "format": "permission-cli-contract-manifest-v3",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "retained_artifacts_and_unchanged_contracts": "contract-manifest-v2.json -> contract-manifest-v1.json",
+  "files": {
+    "docs/permission/endpoint-abi-v1.json": {
+      "bytes": 3923,
+      "sha256": "d0b055d6070545c749a08dfb49cabbd7d6fa15758328c111c20d1d881d20c835"
+    },
+    "docs/permission/cli-component-contract-v3.json": {
+      "bytes": 4548,
+      "sha256": "4b456058c0a9d2f4c7c5743473ae0f467dc79c13521f6ce6723207d91dc44b84"
+    },
+    "docs/permission/remaining-producers-v3.json": {
+      "bytes": 5416,
+      "sha256": "1a5e351eacbfebc745e0c24d49ee575eb39e7fff1757df87989d5fb8b887b79f"
+    },
+    "docs/permission/contract-manifest-v2.json": {
+      "bytes": 1472,
+      "sha256": "9a47a46bd0a3bff246d5669e104bc7cc3dac627ba319cda9ab40467006210418"
+    }
+  }
+}
