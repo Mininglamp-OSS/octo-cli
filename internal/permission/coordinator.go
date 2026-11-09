@@ -129,15 +129,16 @@ type scopeKey struct {
 // facade and sink must share this instance; a new per-request instance is not
 // a permission enforcement composition.
 type Coordinator struct {
-	mu         sync.Mutex
-	scopes     map[scopeKey]*scope
-	policies   PolicyReader
-	facts      FactReader
-	catalog    Catalog
-	caps       map[string]bool
-	tlsConfig  *tls.Config
-	attempts   chan struct{}
-	pageBounds map[string]PageBound
+	mu             sync.Mutex
+	scopes         map[scopeKey]*scope
+	policies       PolicyReader
+	facts          FactReader
+	catalog        Catalog
+	caps           map[string]bool
+	tlsConfig      *tls.Config
+	attempts       chan struct{}
+	pageBounds     map[string]PageBound
+	packageCatalog *VerifiedCatalog
 }
 
 // PageBound is a source-proven count contract from the supported release.

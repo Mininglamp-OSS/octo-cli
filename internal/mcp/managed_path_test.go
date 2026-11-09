@@ -350,6 +350,11 @@ func controlCertificates(t *testing.T) (serverCert, clientCert tls.Certificate, 
 
 func TestManagedPrivateControlToHTTPRelay(t *testing.T) {
 	f := newManagedFixture(t)
+	runManagedPrivateControlToHTTPRelay(t, f)
+}
+
+func runManagedPrivateControlToHTTPRelay(t *testing.T, f *managedFixture) {
+	t.Helper()
 	serverCert, clientCert, roots, peerHash := controlCertificates(t)
 	cfg := PermissionHostConfig{Version: 1, Origin: f.backend.URL, BotUID: "bot", RecipientID: "endpoint-1", EndpointIncarnation: strings.Repeat("5", 32), PeerSHA256: peerHash}
 	host, err := NewPermissionHost(cfg, f.coordinator, f.policies, f.reader, f.server)
@@ -441,6 +446,41 @@ func TestManagedPrivateControlToHTTPRelay(t *testing.T) {
 	}
 	if f.business.Load() != 2 || !json.Valid(bytes.TrimSpace(workerOutput.Bytes())) {
 		t.Fatal("stdio relay", workerOutput.String(), f.business.Load())
+	}
+	if f.coordinator.CatalogPackage() != nil {
+		source := newTestServer(t).WithFacade(facadeBoth).WithTrustedContext(TrustedContext{SpaceID: "space"})
+		cases := []struct {
+			method string
+			params any
+			want   any
+		}{
+			{"tools/call", map[string]any{"name": "describe_op", "arguments": map[string]any{"operation_id": "message.send"}}, source.describeOp("message.send")},
+			{"tools/call", map[string]any{"name": "get_skill", "arguments": map[string]any{"intent": "describe", "operation_id": "message.send", "depth": "summary"}}, source.describeSkill("message.send", "summary")},
+			{"tools/call", map[string]any{"name": "search_ops", "arguments": map[string]any{"query": " "}}, source.searchOps(context.Background(), "", " ")},
+			{"tools/call", map[string]any{"name": "get_skill", "arguments": map[string]any{"intent": "search", "domain": "message", "query": "send"}}, source.searchOps(context.Background(), "message", "send")},
+			{"resources/list", map[string]any{}, source.listResources()},
+		}
+		resource, err := source.readResource("octo://skills/octo-messaging/SKILL.md#source")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cases = append(cases, struct {
+			method string
+			params any
+			want   any
+		}{"resources/read", map[string]any{"uri": "octo://skills/octo-messaging/SKILL.md#source"}, resource})
+		for n, item := range cases {
+			params, err := json.Marshal(item.params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(fmt.Sprint(20 + n)), Method: item.method, Params: params}
+			got := post(req)
+			want, err := json.Marshal(item.want)
+			if err != nil || got.Error != nil || !bytes.Equal(got.Result, want) {
+				t.Fatalf("verified package transport/source mismatch %s: %v", item.method, got.Error)
+			}
+		}
 	}
 	forged := sendRequest(t, 4, "execute", permission.DeclarationV2{Sender: "mallory", Channel: "group", ChannelType: 2, SpaceID: "space", MessageID: "42"})
 	if result := post(forged); result.Error == nil || result.Error.Code != -32007 || f.business.Load() != 2 {

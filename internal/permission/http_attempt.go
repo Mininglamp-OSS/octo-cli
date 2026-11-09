@@ -33,7 +33,7 @@ type PreparedHTTP struct {
 // Helper URL requests use the separate owned transfer sink with their existing
 // SSRF/credential-forwarding contracts; this method grants none.
 func PrepareHTTP(ctx context.Context, key Key, method, target string, headers http.Header, body []byte, tlsConfig *tls.Config, deadline time.Time) (*PreparedHTTP, error) { //nolint:gocyclo // all target, immutable spool and TLS checks must precede the first application write
-	if !key.Valid() || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || len(body) > 16<<20 || deadline.IsZero() || !deadline.After(time.Now()) {
+	if !key.Valid() || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || deadline.IsZero() || !deadline.After(time.Now()) {
 		return nil, ErrInvalid
 	}
 	u, err := url.Parse(key.Origin + target)
@@ -47,7 +47,7 @@ func PrepareHTTP(ctx context.Context, key Key, method, target string, headers ht
 	req.Header = headers.Clone()
 	req.Close = true
 	var sealed bytes.Buffer
-	if err = req.Write(&sealed); err != nil || sealed.Len() > 16<<20 {
+	if err = req.Write(&sealed); err != nil {
 		return nil, ErrInvalid
 	}
 	conf := &tls.Config{MinVersion: tls.VersionTLS12}
@@ -196,8 +196,8 @@ func prepareRequest(ctx context.Context, key Key, req *http.Request, conf *tls.C
 	if req.Body != nil {
 		defer closeOwned(req.Body)
 		var err error
-		body, err = io.ReadAll(io.LimitReader(req.Body, (16<<20)+1))
-		if err != nil || len(body) > 16<<20 {
+		body, err = io.ReadAll(req.Body)
+		if err != nil {
 			return nil, ErrInvalid
 		}
 	}

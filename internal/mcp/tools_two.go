@@ -52,7 +52,7 @@ func (s *Server) getSkill(ctx context.Context, intent, domain, query, operationI
 	switch intent {
 	case "search":
 		// Reuse the exact same discovery backend as search_ops (contract parity).
-		return s.searchOps(ctx, domain, query)
+		return s.searchOpsFacade(ctx, domain, query, "get_skill_search")
 	case "describe":
 		if operationID == "" {
 			return jsonToolResult(map[string]any{
@@ -64,7 +64,7 @@ func (s *Server) getSkill(ctx context.Context, intent, domain, query, operationI
 				},
 			}, true)
 		}
-		return s.describeSkill(operationID, depth)
+		return s.describeSkillContext(ctx, operationID, depth)
 	default:
 		return jsonToolResult(map[string]any{
 			"status": "validation_error",

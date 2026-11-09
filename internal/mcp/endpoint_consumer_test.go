@@ -27,11 +27,15 @@ func TestEndpointE460ControlAndActualTurnRelayExecutable(t *testing.T) {
 	if err != nil || sha256Sum(source) != "e390188ce11fc5c22041feff24119f81b7fa3a3a8efb6555b9fb7328dd676fbe" {
 		t.Fatal("endpoint source pin mismatch", err)
 	}
+	runPinnedEndpointControlAndActualTurnRelayExecutable(t, newManagedFixture(t), source)
+}
+
+func runPinnedEndpointControlAndActualTurnRelayExecutable(t *testing.T, f *managedFixture, source []byte) {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Fatal("Node required for opted-in endpoint consumer fixture")
 	}
-	f := newManagedFixture(t)
 	dir := secureTestDir(t)
 	sourceCopy := filepath.Join(dir, "control-client.ts")
 	if err := os.WriteFile(sourceCopy, source, 0o600); err != nil {

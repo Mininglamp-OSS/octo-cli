@@ -1,0 +1,46 @@
+{
+  "format": "permission-cli-contract-manifest-v5",
+  "status": "VERIFIED_V2_CANDIDATE_SOURCE_SUPPORT_NOT_APPROVED",
+  "catalog_digest": null,
+  "candidate_manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+  "retained_artifacts_and_unchanged_contracts": "contract-manifest-v4.json -> v3 -> v2 -> v1; original template/wire schemas and engineering artifacts unchanged",
+  "files": {
+    "docs/permission/catalog-package-report-v5.json": {
+      "bytes": 1914,
+      "sha256": "1884848f621b7e71d199502938ef3d3e7f80810ed9b8a87a437a836239be9933"
+    },
+    "docs/permission/cli-component-contract-v5.json": {
+      "bytes": 7254,
+      "sha256": "4243fb70f4ac0f72f674c38323c97813b8841fcf9e2e6ca1e9e735a7c098d211"
+    },
+    "docs/permission/catalog-package-v2.md": {
+      "bytes": 14891,
+      "sha256": "81ac25d02169b12f3d45c4c07c7032ff1c0e6e4301e00dce01d7e7828fc1d271"
+    },
+    "docs/permission/catalog-package-v2/manifest.json": {
+      "bytes": 4934,
+      "sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc"
+    },
+    "docs/permission/source-slot-witness-v5.json.gz": {
+      "bytes": 12562,
+      "sha256": "0c5da173bd0f53c64562a70a5c5feebc955ad111bbe84ed11f5588c08b4b9c0b"
+    },
+    "internal/permission/contracts/permission-catalog-package-v2.schema.json": {
+      "bytes": 58587,
+      "sha256": "c27a2ab4ad8419e3166e41d143c4897a30be53a1216da858c64eef8d6dd9a7f1"
+    },
+    "internal/permission/contracts/permission-wire-v1-package-v2.schema.json": {
+      "bytes": 14163,
+      "sha256": "17abec79cc96a75e8ba9d1843dbde109dbcab1b8bbc93a18ecbcad6a5996b8d3"
+    },
+    "internal/mcp/catalog_sources/source-files-v6.tar": {
+      "bytes": 2037760,
+      "sha256": "0fa35acb36a3d785b812a2b1d68afca30e1f19cd599c18667abd75a504e8634f"
+    },
+    "docs/permission/contract-manifest-v4.json": {
+      "bytes": 2041,
+      "sha256": "dddff79aa3438e31b66afb74ef4cb0f88f417577c95adc55a50903cb8f99e766"
+    }
+  },
+  "package_files": "catalog-package-v2/manifest.json commits the complete remaining inventory; no unlisted package files"
+}

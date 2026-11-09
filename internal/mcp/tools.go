@@ -134,7 +134,11 @@ func refResourceURI(name, file string) string { return "octo://skills/" + name +
 // tokenising and the scan consults ctx (HTTP request timeout / client
 // cancellation), because search_ops is reachable without a bearer and the scan
 // cost is terms × operations.
-func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult { //nolint:gocyclo // bounded discovery handles domain filtering, cancellation and truncation
+func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult {
+	return s.searchOpsFacade(ctx, domain, query, "search_ops")
+}
+
+func (s *Server) searchOpsFacade(ctx context.Context, domain, query, discoveryFacade string) toolResult { //nolint:gocyclo // both discovery facades retain identical validated query behavior
 	cancelled := func(err error) toolResult {
 		return jsonToolResult(map[string]any{
 			"operations": []any{},
@@ -145,6 +149,9 @@ func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult
 		return cancelled(err)
 	}
 	if domain == "" && query == "" {
+		if s.catalogPackage() != nil {
+			return s.catalogModuleMap(ctx)
+		}
 		return jsonToolResult(s.moduleMap(), false)
 	}
 	if domain != "" && s.reg.ServiceDisabled(domain) {
@@ -155,6 +162,9 @@ func (s *Server) searchOps(ctx context.Context, domain, query string) toolResult
 	}
 
 	var candidates []registry.OperationInfo
+	if s.catalogPackage() != nil && (domain == "" || s.reg.GetSpec(domain) != nil) {
+		return s.catalogSearch(ctx, domain, query, discoveryFacade)
+	}
 	if domain != "" {
 		candidates = s.reg.ListOperations(domain)
 		if len(candidates) == 0 && s.reg.GetSpec(domain) == nil {

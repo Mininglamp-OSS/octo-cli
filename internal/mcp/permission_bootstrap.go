@@ -62,6 +62,33 @@ func permissionReadiness(incarnation string) ([]byte, error) {
 // ReadSupportedRelease requires a complete immutable release and the exact
 // operator allowlisted byte digest. Candidate/index/partial artifacts refuse.
 func ReadSupportedRelease(path, expected string) (permission.Catalog, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	catalog, _, err := readPermissionRelease(ctx, path, expected, supportedPermissionPackages)
+	return catalog, err
+}
+
+func readPermissionRelease(ctx context.Context, path, expected string, packages map[string]permission.CatalogPin) (permission.Catalog, *permission.VerifiedCatalog, error) {
+	if pin, ok := packages[expected]; ok {
+		if pin.Digest != expected || !filepath.IsAbs(path) || filepath.Base(path) != "manifest.json" {
+			return permission.Catalog{}, nil, errors.New("PERMISSION_RELEASE_UNAVAILABLE")
+		}
+		baseline, err := PermissionCatalogBaseline()
+		if err != nil {
+			return permission.Catalog{}, nil, err
+		}
+		snapshot, err := permission.ReadCatalogPackageDirectory(ctx, filepath.Dir(path), pin, baseline, PermissionCatalogSlotValues)
+		if err != nil {
+			return permission.Catalog{}, nil, err
+		}
+		catalog := snapshot.Catalog()
+		return catalog, snapshot, nil
+	}
+	catalog, err := readSupportedLegacyRelease(path, expected)
+	return catalog, nil, err
+}
+
+func readSupportedLegacyRelease(path, expected string) (permission.Catalog, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return permission.Catalog{}, errors.New("PERMISSION_RELEASE_UNAVAILABLE")
@@ -89,8 +116,10 @@ func ReadSupportedRelease(path, expected string) (permission.Catalog, error) {
 
 // ServePermissionHost runs the private authenticated control and turn relay
 // inside the existing MCP host process. No second unmanaged endpoint is opened.
-func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token string, build RootBuilder, admission *Admission, facade facadeMode, base cmdutil.GlobalOptions, uploadRoot string, downloads *SecretDownloads) error { //nolint:gocritic // immutable protocol/config snapshots must be detached by value
-	catalog, err := ReadSupportedRelease(cfg.ReleasePath, cfg.ReleaseSHA256)
+func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token string, build RootBuilder, admission *Admission, facade facadeMode, base cmdutil.GlobalOptions, uploadRoot string, downloads *SecretDownloads) error { //nolint:gocritic,gocyclo // immutable startup inputs and complete verification/readiness ordering stay together
+	startup, cancelStartup := context.WithTimeout(ctx, 120*time.Second)
+	catalog, snapshot, err := readPermissionRelease(startup, cfg.ReleasePath, cfg.ReleaseSHA256, supportedPermissionPackages)
+	cancelStartup()
 	if err != nil {
 		return err
 	}
@@ -105,6 +134,11 @@ func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token st
 	coordinator, err := permission.NewCoordinator(catalog, policies, native)
 	if err != nil {
 		return err
+	}
+	if snapshot != nil {
+		if err := coordinator.ConfigureCatalogPackage(snapshot); err != nil {
+			return err
+		}
 	}
 	if err := coordinator.ConfigurePageBounds(supportedPermissionReleases[catalog.Digest].pageBounds); err != nil {
 		return err
@@ -235,3 +269,10 @@ type supportedPermissionRelease struct {
 // No synthetic, partial, identity-only, or over-limit source artifact is a
 // supported release. Add only complete source-compatible reviewed releases.
 var supportedPermissionReleases = map[string]supportedPermissionRelease{}
+
+// Versioned package pins are independent reviewed support inputs. Endpoint
+// descriptor v2 binds release_path to this exact manifest.json and release_sha256
+// to its raw canonical bytes. No format is guessed from a model or file prefix.
+// Source-compatible docs/search/byte contracts and independent gates are still
+// missing, so a structurally verified candidate is not added to this table.
+var supportedPermissionPackages = map[string]permission.CatalogPin{}

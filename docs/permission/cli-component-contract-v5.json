@@ -1,0 +1,139 @@
+{
+  "format": "permission-cli-component-handoff-v5",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "supersedes": "cli-component-contract-v3.json",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "status": "V42_PACKAGE_AND_CHECKED_RUNTIME_DELIVERED_SOURCE_SUPPORT_BLOCKED",
+  "normative_addendum": {
+    "attachment_id": "01a1bfb4-aeef-7497-8f7f-268335e0b0fa",
+    "bytes": 70457,
+    "sha256": "f8bcf1af183fcb69b5c40575d26e21b8a37e7e8fb6720b53e4013924ad078725"
+  },
+  "catalog_digest": null,
+  "candidate": {
+    "format": "permission-catalog-package-v2",
+    "contract_revision": 3,
+    "semantics_version": "1",
+    "version": "octo-capabilities-v1-xin2748-v4",
+    "manifest": "catalog-package-v2/manifest.json",
+    "manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+    "semantic_sha256": "3d45ecfcb681e9a973979f051d16a115a1fa36d5257e49da302f9248ec4019f5",
+    "status": "VERIFIED_CANDIDATE_NOT_ALLOWLISTED",
+    "ledger": {
+      "stored_bytes": 7823327,
+      "pre_bytes": 10202896,
+      "post_bytes": 11603961,
+      "metadata_nodes": 158934,
+      "pre_nodes": 399778,
+      "post_nodes": 398617,
+      "max_depth": 15,
+      "files": 30,
+      "roots": 4128,
+      "shared_rows": 1179,
+      "content_records": 5481,
+      "parts_total": 15649,
+      "max_parts_per_root": 25,
+      "schema_cells": 56592,
+      "discovery_cells": 156,
+      "static_cells": 1248
+    },
+    "source_conformance": {
+      "discovery_cells": 156,
+      "discovery_source_observations": 1248,
+      "schema_cells": 56592,
+      "static_cells": 1248
+    }
+  },
+  "private_bootstrap": {
+    "host_config_version": 1,
+    "hello": "UNCHANGED",
+    "format_selection": "private compiled digest-to-approved-pin map; never MCP/model input",
+    "release_path_v2": "absolute path to manifest.json in an isolated immutable directory",
+    "release_sha256_v2": "raw canonical manifest bytes, not decoded JSON or concatenated package hash",
+    "ordering": "verify every listed byte, typed edge, ownership, slot and selector budget; install detached snapshot before existing listeners/readiness",
+    "v1": "existing legacy startup remains; no historical engineering report becomes a supported v1 release"
+  },
+  "private_catalog_reads": {
+    "manifest": "/v1/bot/permission-bundle/v1/catalog",
+    "listed_file": "/v1/bot/permission-bundle/v1/catalog/file",
+    "query": [
+      "format",
+      "catalog_version",
+      "catalog_digest",
+      "space_id"
+    ],
+    "listed_file_additional_query": [
+      "path"
+    ],
+    "format": "permission-catalog-package-v2",
+    "authorization": "server independently checks exact self Bot/Space eligibility for every GET; listed immutable paths only",
+    "client": "same original deadline; no redirect/compression; exact media/length/hash; no partial snapshot or grants"
+  },
+  "runtime": "coordinator immutable snapshot; fresh F/B before actual cached schema/discovery/static read; existing fresh output and physical HTTP/stdio execute/call_op boundaries",
+  "compatibility": "complete representation-neutral equality plus explicit privately approved direction; atomic snapshot registry; no inferred reverse, latest fallback or policy rewrite; server owns migrate_catalog CAS",
+  "supported_pins": [],
+  "approved_directed_compatible_pairs": [],
+  "schema": "internal/permission/contracts/permission-catalog-package-v2.schema.json",
+  "wire_discriminator": "internal/permission/contracts/permission-wire-v1-package-v2.schema.json",
+  "server_dependency": {
+    "head": "ff4d43c403083fd059ec2e6ef6e0d6d505228d48",
+    "handoff": "pkg/permissionbundle/contracts/handoff-v4.json",
+    "bytes": 8285,
+    "sha256": "c226b46007904c37ef5b46f78b587cd734f4ac4ccf8c739f786e87cfe4573791",
+    "manifest_bytes": 5067,
+    "manifest_sha256": "39b138a4f689f3695c087ceab0598b4da74a632ec6276ee159b6c5c586c0f230",
+    "delivered": "independent v2 verifier/registry/private-read components with synthetic fixtures; new schema and wire definition shapes agree",
+    "next": "bind external source witness to SlotValues(ctx, SlotCell), verify this exact actual package independently; actual storage/startup/support pairs and migration CAS composition"
+  },
+  "source_slot_witness": {
+    "path": "source-slot-witness-v5.json.gz",
+    "bytes": 12562,
+    "sha256": "0c5da173bd0f53c64562a70a5c5feebc955ad111bbe84ed11f5588c08b4b9c0b",
+    "decoded_bytes": 843132,
+    "decoded_sha256": "0dac894681aa7f4f8810f5fa5574d68ce071f2a401df4a99da4a92e7a43e7c5b",
+    "schema_source_cells": 56592,
+    "slot_bearing_cells": 29070,
+    "groups": 2700,
+    "selection": "exact external pin plus schema EntryID/facade and disjoint resources_bits/managed_bits/facade_bits; facade order three/two/both; missing/overlap refuses",
+    "values": "domain keys from actual source-rendered output for one joint cell; map slot IDs only inside CLI renderer; static templates have no slots",
+    "trust": "external source evidence, never package metadata oracle or support approval; gzip evidence container only"
+  },
+  "endpoint_dependency": {
+    "head": "afb732b20e63baf8acf06c4726a66e290b98e1b6",
+    "path": "docs/permission-endpoint-handoff-v4.json",
+    "bytes": 6435,
+    "sha256": "cc193256548ecb3b5c09b0a739f1cd5a7ca5503b1fb66e2a7bd5684ddcbd4671",
+    "control_client_bytes": 11710,
+    "control_client_sha256": "4e40ee144b5eec7ef645be92948dd6b1f36a838d1fb82e6b471a59e820c99bef",
+    "tested": "exact client drives actual built Go executable with complete package over synthetic real mTLS/HTTP/stdio",
+    "remaining": "native history reference bridge, prior-generation reuse, dependent physical import/publication, actual OS containment"
+  },
+  "remaining_dependencies": [
+    {
+      "owner": "PjM and docs source owner",
+      "required": "selected compatible docs provenance representation; docs-search maximum and independent returned-count validation; four selected docs page contracts"
+    },
+    {
+      "owner": "PjM and existing source owners, then CLI integration",
+      "required": "compatible per-entry finite profile/response acquisition and aggregation contracts; package expansion ceilings are not business response caps"
+    },
+    {
+      "owner": "XIN-2793 server",
+      "required": "trusted external source witness binding and independent actual-package conformance using delivered v4 components; actual storage/startup/support pairs and atomic migration CAS integration"
+    },
+    {
+      "owner": "existing native/SQL/recovery owners and endpoint",
+      "required": "real delivered-Header/current-access/history disclosure/replay/elected-current recovery producers and dependent lifecycle/physical/OS integration"
+    }
+  ],
+  "acceptance": {
+    "source_native": "NOT_RUN",
+    "browser": "NOT_RUN",
+    "supported_os_containment": "NOT_RUN",
+    "real_cross_repository": "NOT_RUN"
+  },
+  "next_step": "consume exact complete package/ABI; resolve remaining source contracts; CLI integrates source support and pin/pair approval evidence on same Draft branch; no formal review/deployment gate release",
+  "rollback": "revert Draft changes and keep managed mode disabled; preserve journals, epochs and fences"
+}

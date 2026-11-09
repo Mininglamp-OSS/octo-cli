@@ -85,14 +85,18 @@ func pairedEscapes(b []byte) bool { //nolint:gocyclo // validate every surrogate
 	return !inside
 }
 
-func value(d *json.Decoder, depth int) (any, error) { //nolint:gocyclo // recursive JSON token alternatives enforce duplicate keys, closed depth and exact delimiters
+func value(d *json.Decoder, depth int) (any, error) {
+	return valueLimited(d, depth, 12)
+}
+
+func valueLimited(d *json.Decoder, depth, maximum int) (any, error) { //nolint:gocyclo // policy and catalog retain independently selected depth domains
 	t, err := d.Token()
 	if err != nil {
 		return nil, err
 	}
 	switch t {
 	case json.Delim('{'):
-		if depth >= 12 {
+		if depth >= maximum {
 			return nil, ErrInvalid
 		}
 		m := map[string]any{}
@@ -108,7 +112,7 @@ func value(d *json.Decoder, depth int) (any, error) { //nolint:gocyclo // recurs
 			if _, ok := m[key]; ok {
 				return nil, ErrInvalid
 			}
-			v, err := value(d, depth+1)
+			v, err := valueLimited(d, depth+1, maximum)
 			if err != nil {
 				return nil, err
 			}
@@ -120,12 +124,12 @@ func value(d *json.Decoder, depth int) (any, error) { //nolint:gocyclo // recurs
 		}
 		return m, nil
 	case json.Delim('['):
-		if depth >= 12 {
+		if depth >= maximum {
 			return nil, ErrInvalid
 		}
 		a := []any{}
 		for d.More() {
-			v, err := value(d, depth+1)
+			v, err := valueLimited(d, depth+1, maximum)
 			if err != nil {
 				return nil, err
 			}

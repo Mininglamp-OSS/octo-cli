@@ -17,9 +17,8 @@ type wireCapture struct {
 
 func (c *wireCapture) Write(b []byte) (int, error) {
 	if c.capturing {
-		if c.buffer.Len()+len(b) > 17<<20 {
-			return 0, ErrInvalid
-		}
+		// The complete source-sealed body is already prepared. Local-input and
+		// package expansion ceilings do not bound serialized/TLS bytes.
 		return c.buffer.Write(b)
 	}
 	return c.Conn.Write(b)

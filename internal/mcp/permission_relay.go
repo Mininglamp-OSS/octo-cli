@@ -75,13 +75,15 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 			}
 			req.Header.Set("Authorization", "Bearer "+token)
 			req.Header.Set("Content-Type", "application/json")
-			resp, err := client.Do(req) //nolint:bodyclose // response body is closed immediately after bounded acquisition
+			resp, err := client.Do(req) //nolint:bodyclose // source response is fully acquired and closed under the existing request deadline
 			if err != nil {
 				return errors.New("RELAY_UNAVAILABLE")
 			}
-			data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodyBytes+1))
+			// maxHTTPBodyBytes is the existing incoming-request bound. Ordinary
+			// MCP responses have their own source semantics and may exceed it.
+			data, readErr := io.ReadAll(resp.Body)
 			closePermissionIO(resp.Body)
-			if readErr != nil || len(data) > maxHTTPBodyBytes || resp.StatusCode != 200 && resp.StatusCode != 202 {
+			if readErr != nil || resp.StatusCode != 200 && resp.StatusCode != 202 {
 				return errors.New("RELAY_UNAVAILABLE")
 			}
 			if len(bytes.TrimSpace(data)) > 0 {

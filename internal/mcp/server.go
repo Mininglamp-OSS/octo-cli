@@ -14,6 +14,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -304,9 +305,16 @@ func (s *Server) dispatchRaw(ctx context.Context, req rpcRequest) (rpcResponse, 
 	case "tools/call":
 		return s.handleToolCall(ctx, req), true
 	case "resources/list":
+		if s.catalogPackage() != nil {
+			value, err := s.catalogResourceList(ctx)
+			if err != nil {
+				return permissionResponse(req.ID, permission.PolicyUnavailable()), true
+			}
+			return newResultResponse(req.ID, value), true
+		}
 		return newResultResponse(req.ID, s.listResources()), true
 	case "resources/read":
-		return s.handleResourceRead(req), true
+		return s.handleResourceReadContext(ctx, req), true
 	default:
 		return newErrorResponse(req.ID, codeMethodNotFound, "METHOD_NOT_FOUND"), true
 	}
@@ -443,7 +451,7 @@ func (s *Server) handleAdmittedToolCall(ctx context.Context, req rpcRequest, p t
 		if a.OperationID == "" {
 			return newResultResponse(req.ID, jsonToolResult(missingArg("operation_id"), true))
 		}
-		return newResultResponse(req.ID, s.describeOp(a.OperationID))
+		return newResultResponse(req.ID, s.describeOpContext(ctx, a.OperationID))
 	case "call_op":
 		if err := validateClosedKeys(p.Arguments, callOpArgumentNames); err != nil {
 			return newErrorResponse(req.ID, codeInvalidParams, "invalid call_op arguments: "+err.Error())
@@ -660,14 +668,14 @@ func isJSONObject(raw json.RawMessage) bool {
 	return false
 }
 
-func (s *Server) handleResourceRead(req rpcRequest) rpcResponse { //nolint:gocritic // request snapshot is immutable during dispatch
+func (s *Server) handleResourceReadContext(ctx context.Context, req rpcRequest) rpcResponse { //nolint:gocritic // request is a detached transport snapshot
 	var a struct {
 		URI string `json:"uri"`
 	}
 	if err := json.Unmarshal(req.Params, &a); err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, "invalid resources/read params: "+err.Error())
 	}
-	res, err := s.readResource(a.URI)
+	res, err := s.readResourceContext(ctx, a.URI)
 	if err != nil {
 		return newErrorResponse(req.ID, codeInvalidParams, err.Error())
 	}
