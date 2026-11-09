@@ -89,7 +89,7 @@ func TestPermissionSourceMaterializationCoverageAndContent(t *testing.T) {
 }
 
 func TestPermissionContinuationArtifactsMatchCompleteRendering(t *testing.T) {
-	manifestBytes, err := os.ReadFile("../../docs/permission/contract-manifest-v2.json")
+	manifestBytes, err := os.ReadFile("../../docs/permission/contract-manifest-v4.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestPermissionContinuationArtifactsMatchCompleteRendering(t *testing.T) {
 		}
 		decoded[filepath.Base(path)] = raw
 	}
-	for name, generate := range map[string]func() ([]byte, error){"content-v2.json.gz": MaterializePermissionContent, "release-assembly-report.json.gz": AssemblePermissionRelease} {
+	for name, generate := range map[string]func() ([]byte, error){"content-v4.json.gz": MaterializePermissionContent, "release-assembly-report-v4.json.gz": AssemblePermissionRelease} {
 		fresh, err := generate()
 		if err != nil {
 			t.Fatal(err)
@@ -143,7 +143,7 @@ func TestPermissionContinuationArtifactsMatchCompleteRendering(t *testing.T) {
 		Bytes         int `json:"assembled_bytes"`
 		Limit         int `json:"artifact_limit"`
 	}
-	if json.Unmarshal(decoded["release-assembly-report.json.gz"], &report) != nil || report.CatalogDigest != nil || report.Bytes <= report.Limit || len(supportedPermissionReleases) != 0 {
+	if json.Unmarshal(decoded["release-assembly-report-v4.json.gz"], &report) != nil || report.CatalogDigest != nil || report.Bytes <= report.Limit || len(supportedPermissionReleases) != 0 {
 		t.Fatal("engineering report promoted to supported release")
 	}
 }

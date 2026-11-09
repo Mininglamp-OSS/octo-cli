@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 type catalogSlot struct {
@@ -101,11 +103,26 @@ func templateFor(raw []byte) (schemaTemplate, error) {
 			slots = append(slots, catalogSlot{"facade_hint", "resource_hint", 65536, "/skill/hint"})
 		}
 	}
-	return schemaTemplate{"template", sha256Sum(raw), "application/json", "go-json-marshalindent-2sp-html-escape-v1", base64.StdEncoding.EncodeToString(raw), slots}, nil
+	t := schemaTemplate{"template", "", "application/json", "go-json-marshalindent-2sp-html-escape-v1", base64.StdEncoding.EncodeToString(raw), slots}
+	t.SHA = templateDigest(&t)
+	return t, nil
 }
+
+func templateDigest(t *schemaTemplate) string {
+	return sha256Sum(catalogCanonicalJSON(map[string]any{"kind": t.Kind, "media_type": t.Media, "renderer": t.Renderer, "value_base64": t.Value, "slots": t.Slots}))
+}
+
+func catalogCanonicalJSON(v any) []byte {
+	b, err := permission.CanonicalSourceValue(v)
+	if err != nil {
+		panic("registry catalog record is not canonicalizable: " + err.Error())
+	}
+	return b
+}
+
 func renderTemplate(template *schemaTemplate, s *Server, operationID string) ([]byte, error) {
 	b, err := base64.StdEncoding.DecodeString(template.Value)
-	if err != nil || sha256Sum(b) != template.SHA {
+	if err != nil || templateDigest(template) != template.SHA {
 		return nil, fmt.Errorf("template digest mismatch")
 	}
 	for _, slot := range template.Slots {
@@ -180,7 +197,7 @@ func MaterializePermissionContent() ([]byte, error) { //nolint:gocyclo // closed
 		if !ok {
 			return nil, fmt.Errorf("missing operation %s", op)
 		}
-		truth := catalogJSON(detail)
+		truth := catalogCanonicalJSON(detail)
 		truthHash := sha256Sum(truth)
 		truths[truthHash] = truth
 		for _, resources := range []bool{false, true} {
@@ -280,5 +297,5 @@ func MaterializePermissionContent() ([]byte, error) { //nolint:gocyclo // closed
 		}
 	}
 
-	return json.Marshal(map[string]any{"format": "permission-content-materialization-v2", "status": "CONTENT_VARIANTS_MATERIALIZED_NOT_A_SUPPORTED_RELEASE", "catalog_version": index.CatalogVersion, "catalog_digest": nil, "parameter_truths": truths, "templates": ordered, "schema_variants": variants, "discovery_indices": discovery, "conformance": map[string]int{"operations": len(truths), "base_facade_variants": 1179, "served_configuration_observations": observations}, "source_entry_index_sha256": sha256Sum(catalogSourceIndex)})
+	return catalogCanonicalJSON(map[string]any{"format": "permission-content-materialization-v4", "status": "CONTENT_VARIANTS_MATERIALIZED_NOT_A_SUPPORTED_RELEASE", "catalog_version": index.CatalogVersion, "catalog_digest": nil, "parameter_truths": truths, "templates": ordered, "schema_variants": variants, "discovery_indices": discovery, "conformance": map[string]int{"operations": len(truths), "base_facade_variants": 1179, "served_configuration_observations": observations}, "source_entry_index_sha256": sha256Sum(catalogSourceIndex)}), nil
 }

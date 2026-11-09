@@ -252,6 +252,9 @@ func (h *PermissionHost) hello(f permission.ControlFrame) map[string]any {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	// Sessions are replay tombstones, not active-connection accounting.
+	// Hello semantics require retention after disconnect and fail-closed
+	// saturation; teardown cannot evict them to admit reused sessions.
 	if h.sessions[f.SessionID] || len(h.sessions) >= 100000 {
 		return controlUnavailable(f, "authority_conflict", true)
 	}

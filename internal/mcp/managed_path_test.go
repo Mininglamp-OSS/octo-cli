@@ -551,13 +551,16 @@ func TestManagedTransientFailureDoesNotLatchRPCIdentifier(t *testing.T) {
 func TestControlSessionReclaimsIngressButPreservesDeliveryFence(t *testing.T) {
 	var fence [32]byte
 	fence[0] = 1
-	h := &PermissionHost{ingress: map[string]*hostIngress{"session:one": {}, "other:two": {}}, capsules: map[string]*hostCapsule{}, seenDeliveries: map[[32]byte]bool{fence: true}}
+	h := &PermissionHost{sessions: map[string]bool{"session": true}, ingress: map[string]*hostIngress{"session:one": {}, "other:two": {}}, capsules: map[string]*hostCapsule{}, seenDeliveries: map[[32]byte]bool{fence: true}}
 	h.closeSession("session")
 	if len(h.ingress) != 1 || h.ingress["other:two"] == nil {
 		t.Fatal("closed session retained ingress handles")
 	}
 	if !h.seenDeliveries[fence] {
 		t.Fatal("ingress cleanup erased native delivery fence")
+	}
+	if !h.sessions["session"] {
+		t.Fatal("disconnect erased Hello replay tombstone")
 	}
 }
 

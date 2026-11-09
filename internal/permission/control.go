@@ -51,6 +51,24 @@ func CanonicalManifest(raw []byte) ([]byte, error) {
 	return canonical(v), nil
 }
 
+// CanonicalSourceValue encodes trusted in-process source values for offline
+// catalog generation. Opaque OperationDetail JSON schemas can be deeper than
+// the policy wire depth; this is not a decoder for untrusted wire input and
+// does not validate or allowlist any release.
+func CanonicalSourceValue(source any) ([]byte, error) {
+	raw, err := json.Marshal(source)
+	if err != nil {
+		return nil, err
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	var v any
+	if err := d.Decode(&v); err != nil {
+		return nil, err
+	}
+	return canonical(v), nil
+}
+
 // DecodeManifest retains the canonical native Header integer domains.
 func DecodeManifest(raw []byte) (map[string]any, error) {
 	v, err := decodeStrict(bytes.NewReader(raw), 1<<20)

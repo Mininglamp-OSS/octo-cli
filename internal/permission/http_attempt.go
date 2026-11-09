@@ -143,13 +143,39 @@ func (c *Coordinator) Execute(ctx context.Context, i *Invocation, p *PreparedHTT
 		}
 		return AttemptResult{Status: status}, err
 	}
-	resp, err := http.ReadResponse(bufio.NewReader(p.conn), &http.Request{Method: p.method}) //nolint:bodyclose // caller closes the returned connectionBody and its socket
+	// Match the ordinary client's zero MaxResponseHeaderBytes setting in
+	// net/http.Transport (10MiB). This is a header parsing budget, not a new
+	// business response-body limit. Buffered body bytes remain readable after
+	// the parser completes; the caller retains its source-specific body contract.
+	headerReader := &responseHeaderReader{Reader: p.conn, remaining: 10 << 20}
+	resp, err := http.ReadResponse(bufio.NewReader(headerReader), &http.Request{Method: p.method}) //nolint:bodyclose // caller closes the returned connectionBody and its socket
 	if err != nil {
 		closeOwned(p.conn)
 		return AttemptResult{Status: "result_unknown"}, ErrAttemptUnknown
 	}
+	headerReader.remaining = -1
 	resp.Body = &connectionBody{ReadCloser: resp.Body, conn: p.conn}
 	return AttemptResult{Status: "sent", Response: resp}, nil
+}
+
+type responseHeaderReader struct {
+	io.Reader
+	remaining int64
+}
+
+func (r *responseHeaderReader) Read(p []byte) (int, error) {
+	if r.remaining < 0 {
+		return r.Reader.Read(p)
+	}
+	if r.remaining == 0 {
+		return 0, ErrUnavailable
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	n, err := r.Reader.Read(p)
+	r.remaining -= int64(n)
+	return n, err
 }
 
 type connectionBody struct {

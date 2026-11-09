@@ -1,0 +1,89 @@
+{
+  "format": "permission-source-page-witness-v2",
+  "status": "SOURCE_COUNT_WITNESS_NOT_RUNTIME_ACCEPTANCE_OR_A_RELEASE",
+  "server_head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+  "cli_head": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "capabilities": [
+    "octo-cli/message/op/message.search",
+    "octo-cli/message/op/message.search.all",
+    "octo-cli/message/op/message.search.files",
+    "octo-cli/message/op/message.search.media"
+  ],
+  "items_per_page": 100,
+  "mcp_page_limit": 10,
+  "proof": [
+    "validate.go maxPageSize=100 and validateGlobalPageSize share the same limit",
+    "visibility.go paginateWithFilterDepthInstr appends one hit then breaks at len(collected)==pageSize before returning",
+    "search handlers project at most one output row per filtered hit",
+    "CLI buildArgv admits page_all but rejects page-limit; paginationControls defaults to 10 after globals reset",
+    "Exact pinned bot_api/search_route.go mounts the shared /v1/bot/messages subtree; route_subtree.go invokes every mounter; search_media.go registers /_search_media, validates page size, uses the bounded filter and projects at most one MediaHit per hit."
+  ],
+  "sources": [
+    {
+      "path": "modules/messages_search/validate.go",
+      "bytes": 8562,
+      "sha256": "42c58c098a8574de19de9f2264599dcb99662d9dcaddae5af7456263a500737d"
+    },
+    {
+      "path": "modules/messages_search/visibility.go",
+      "bytes": 27607,
+      "sha256": "4451f22911b671edcc74cc005e32e1eec48b60785a3fc237bf05f7ad1d857cc5"
+    },
+    {
+      "path": "modules/messages_search/search_messages.go",
+      "bytes": 13137,
+      "sha256": "4ad4b1dd62425d4d8921c93ed1ee702581b488d02e730d733ac5cc6c04de7270"
+    },
+    {
+      "path": "modules/messages_search/search_all.go",
+      "bytes": 11482,
+      "sha256": "55e8f67bc9178d74a8a5e0223a43732d47d4ca367e84b7012d446e7c0bd265af"
+    },
+    {
+      "path": "modules/messages_search/search_files.go",
+      "bytes": 13712,
+      "sha256": "16a95e490ac66ec9cbba4f66c925513873db28c01b339ddb3ea68765e475e19a"
+    },
+    {
+      "path": "modules/messages_search/search_global.go",
+      "bytes": 52880,
+      "sha256": "8c71901b82fa9dbe0322e73c97083ab9578c9de522b40e1863171804e721e23a"
+    },
+    {
+      "path": "modules/messages_search/search_global_messages.go",
+      "bytes": 17342,
+      "sha256": "3150bfea053393a3d6e5171085e1e491773772371ede8ee08ed32ba6e45bdc3a"
+    },
+    {
+      "path": "modules/messages_search/search_global_files.go",
+      "bytes": 11750,
+      "sha256": "480e450e942b3b298a3d3adcfd643ca6b49fb8b4c019125d334cf8948c524c20"
+    },
+    {
+      "path": "modules/messages_search/search_media.go",
+      "bytes": 6361,
+      "sha256": "3be372e94a28ba64c39b1b5dc26970116da2fbd485b0445daf3fd8355ff74065"
+    },
+    {
+      "path": "modules/bot_api/search_route.go",
+      "bytes": 8080,
+      "sha256": "83d4db8ff193e22ce0e3dbe82d6241a81f338510e9ac93b851edcba4a7f42579"
+    },
+    {
+      "path": "modules/messages_search/route_subtree.go",
+      "bytes": 5464,
+      "sha256": "d5f99523b0f9c1e526a53fe282d98ce8f048a3c3d3b59a7f37c2f06e79724778"
+    }
+  ],
+  "docs_backend_observation": {
+    "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+    "status": "UNSELECTED_SOURCE_NOT_A_NEW_NORMATIVE_PIN",
+    "observed_counts": {
+      "comments.markers": 100,
+      "comments.replies": 25,
+      "recent.list": 100
+    },
+    "search": "depends on search config and repository/OS source contracts",
+    "required": "compatible approved source/proxy mapping and source-head representation before selecting bounds"
+  }
+}

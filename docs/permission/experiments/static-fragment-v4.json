@@ -1,0 +1,12 @@
+{
+  "status": "UNSELECTED_GRAMMAR_EXPERIMENT_NOT_A_RELEASE",
+  "input_shape_bytes": 14127786,
+  "experimental_shape_bytes": 7476486,
+  "all_payload_occurrences": 7174,
+  "distinct_payloads": 3637,
+  "static_fragments": 1441,
+  "exact_payload_byte_roundtrips": 3637,
+  "threshold_bytes": 160,
+  "catalog_digest": null,
+  "limitations": "Not the approved grammar; no supported digest, selector reconciliation, full release validation, decoded-budget or runtime acceptance. Only exact static payload roundtrips and total JSON size measured."
+}

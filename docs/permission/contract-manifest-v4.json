@@ -1,0 +1,48 @@
+{
+  "format": "permission-cli-contract-manifest-v4",
+  "status": "BLOCKED_ENCODING_SELECTORS_AND_DOCS_SOURCE_DISPOSITION",
+  "catalog_digest": null,
+  "retained_artifacts_and_unchanged_contracts": "contract-manifest-v3.json -> v2 -> v1; endpoint/native contracts unchanged",
+  "files": {
+    "docs/permission/content-v4.json.gz": {
+      "bytes": 2407893,
+      "sha256": "7b130ff3c8243aa6b38f93d813f5cd32bc4fa53f43a00e9e649dc3fa5fe7f09c",
+      "decoded_bytes": 12794719,
+      "decoded_sha256": "5a4d521a062e731874a67c37dc19bcbadad76825c48d8fb52101d6a322acb946"
+    },
+    "docs/permission/release-assembly-report-v4.json.gz": {
+      "bytes": 3157896,
+      "sha256": "1b1c75bc582fe8d6df63a0ef40f38472e442f6cc21c08edb81d2c52f74249ba1",
+      "decoded_bytes": 14249430,
+      "decoded_sha256": "e67b30095bb1cc89cd08838f31baf3a62ac8fcf5e80b49cc9acdfe5819f0d03d"
+    },
+    "docs/permission/catalog-disposition-v4.md": {
+      "bytes": 10108,
+      "sha256": "2ffb263e7b70939c6a336d70ffe9facfc3d34f5c8c9f1f60415464e30b142bc8"
+    },
+    "docs/permission/automatic-review-disposition-v4.md": {
+      "bytes": 3950,
+      "sha256": "0f8a30bf6f09935626b94be3b039a8037ac58cc204124958a6366f014d8d4723"
+    },
+    "docs/permission/page-disposition-v4.json": {
+      "bytes": 7815,
+      "sha256": "27fae9f07ab501db64d651c5f70d6c6ebbaad076c72639e0e132b4e4e6e523ed"
+    },
+    "docs/permission/contract-manifest-v3.json": {
+      "bytes": 922,
+      "sha256": "1f494dd1c50b1689af5fcf240f17c41f81af56cbb76fa857c514c018b5f58b8f"
+    },
+    "internal/mcp/catalog_sources/page-bounds-v2.json": {
+      "bytes": 3574,
+      "sha256": "b8d494cd392a5797213b58a612ea8a4653b90ed5aa37f2c79dc625bbdbff1cb6"
+    },
+    "docs/permission/experiments/static-fragment-v4.py": {
+      "bytes": 4330,
+      "sha256": "9e80e60dc0b40a0732d05af57f53fc39b490bbe5a1ca3110a8c50dcfa6b83a08"
+    },
+    "docs/permission/experiments/static-fragment-v4.json": {
+      "bytes": 541,
+      "sha256": "6fb423cb70413344d09640f93b71e9318c5405c244c7a6ce3eead42e93bbd95c"
+    }
+  }
+}

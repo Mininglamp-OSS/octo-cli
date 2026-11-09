@@ -88,10 +88,38 @@ type watermark struct {
 	digest          string
 }
 type scope struct {
-	sync.Mutex
+	gate      chan struct{}
 	seen      bool
 	watermark watermark
 }
+
+// TryLock enters the exact-scope acceptance/first-write critical section.
+func (s *scope) TryLock() bool {
+	select {
+	case s.gate <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// Unlock leaves the exact-scope acceptance/first-write critical section.
+func (s *scope) Unlock() { <-s.gate }
+
+// A contended proof is discarded after joining the current owner. Cancellation
+// must release the waiter even if that owner has not yet finished its boundary.
+func (s *scope) wait(ctx, turn context.Context) error {
+	select {
+	case s.gate <- struct{}{}:
+		s.Unlock()
+		return nil
+	case <-ctx.Done():
+		return refuse("policy_unavailable")
+	case <-turn.Done():
+		return refuse("context_untrusted")
+	}
+}
+
 type scopeKey struct {
 	Key
 	incarnation string
@@ -197,7 +225,7 @@ func (c *Coordinator) scope(b *Binding) *scope {
 	k := scopeKey{b.Key, b.Incarnation}
 	s := c.scopes[k]
 	if s == nil {
-		s = &scope{}
+		s = &scope{gate: make(chan struct{}, 1)}
 		c.scopes[k] = s
 	}
 	return s
@@ -236,6 +264,9 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 	b := i.binding
 	need := Needs{}
 	for round := 0; round < 3; round++ {
+		if i.context.Err() != nil {
+			return refuse("context_untrusted")
+		}
 		if err := ctx.Err(); err != nil {
 			return refuse("policy_unavailable")
 		}
@@ -272,14 +303,14 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 			// Waiting behind another physical write invalidates this F/B. Join
 			// the current owner, then acquire new facts and a new complete P;
 			// never dispatch a queued old positive decision after that wait.
-			s.Lock()
-			cancelled := ctx.Err() != nil
-			s.Unlock()
-			if cancelled {
-				return refuse("policy_unavailable")
+			if err := s.wait(ctx, i.context); err != nil {
+				return err
 			}
 			continue
 		}
+		// A complete authoritative read advances the shared watermark even if
+		// this particular invocation belongs to an obsolete context epoch.
+		// Otherwise another old handle could dispatch using the older policy.
 		err = s.accept(&p)
 		if err != nil {
 			s.Unlock()
