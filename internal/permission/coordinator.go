@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"sync"
+	"time"
 )
 
 // Refusal contains only the closed, public permission error payload. It never
@@ -19,11 +21,14 @@ type Refusal struct {
 
 func (r *Refusal) Error() string { return "PERMISSION_REFUSED" }
 func refuse(category string) *Refusal {
+	return &Refusal{1, category, randomID()}
+}
+func randomID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		panic("permission correlation entropy unavailable")
 	}
-	return &Refusal{1, category, hex.EncodeToString(b[:])}
+	return hex.EncodeToString(b[:])
 }
 
 // Needs describes the independently active stages, not an upstream verdict.
@@ -39,6 +44,13 @@ type Facts struct {
 	Complete           bool
 	InvocationEligible bool
 	CapabilityEligible bool
+	Contributors       []ContributorFact
+}
+
+// ContributorFact is one original's current native and Stage 1 subject tuple.
+type ContributorFact struct {
+	Subject  Subject
+	Eligible bool
 }
 
 // PolicyReader supplies a new complete authoritative P, never a cached allow.
@@ -46,7 +58,7 @@ type PolicyReader interface {
 	ReadBundle(context.Context, Key) ([]byte, error)
 }
 
-// FactReader is the missing private native/provider composition seam.
+// FactReader is the private native/provider composition seam.
 type FactReader interface {
 	Recheck(context.Context, Binding, Needs) (Facts, error)
 }
@@ -89,21 +101,51 @@ type scopeKey struct {
 // facade and sink must share this instance; a new per-request instance is not
 // a permission enforcement composition.
 type Coordinator struct {
-	mu       sync.Mutex
-	scopes   map[scopeKey]*scope
-	policies PolicyReader
-	facts    FactReader
-	catalog  Catalog
-	caps     map[string]bool
+	mu         sync.Mutex
+	scopes     map[scopeKey]*scope
+	policies   PolicyReader
+	facts      FactReader
+	catalog    Catalog
+	caps       map[string]bool
+	tlsConfig  *tls.Config
+	attempts   chan struct{}
+	pageBounds map[string]PageBound
+}
+
+// PageBound is a source-proven count contract from the supported release.
+// A schema page-size input maximum alone is not this response guarantee.
+type PageBound struct{ Items, Pages int }
+
+// ConfigurePageBounds installs immutable release contracts before admission.
+func (c *Coordinator) ConfigurePageBounds(bounds map[string]PageBound) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.scopes) != 0 || c.pageBounds != nil {
+		return ErrConflict
+	}
+	validated := map[string]PageBound{}
+	for capability, bound := range bounds {
+		if !c.caps[capability] || bound.Items < 1 || bound.Items > 1000 || bound.Pages < 1 || bound.Pages > 1000 {
+			return ErrInvalid
+		}
+		validated[capability] = bound
+	}
+	c.pageBounds = validated
+	return nil
 }
 
 // Invocation is an opaque, revocable host handle. Handles from an earlier
 // coordinator/process cannot be used after restart, even for U/U policies.
 type Invocation struct {
-	owner   *Coordinator
-	binding Binding
-	mu      sync.Mutex
-	closed  bool
+	owner        *Coordinator
+	binding      Binding
+	mu           sync.Mutex
+	closed       bool
+	expires      time.Time
+	hardDeadline time.Time
+	calls        chan struct{}
+	context      context.Context
+	cancel       context.CancelFunc
 }
 
 // NewCoordinator copies a prevalidated supported catalog and private readers.
@@ -122,11 +164,17 @@ func NewCoordinator(catalog Catalog, policies PolicyReader, facts FactReader) (*
 		return nil, ErrUnavailable
 	}
 	catalog.Capabilities = nil
-	return &Coordinator{scopes: map[scopeKey]*scope{}, policies: policies, facts: facts, catalog: catalog, caps: caps}, nil
+	c := &Coordinator{scopes: map[scopeKey]*scope{}, policies: policies, facts: facts, catalog: catalog, caps: caps}
+	c.attempts = make(chan struct{}, 4)
+	if provider, ok := facts.(interface{ TLSConfiguration() *tls.Config }); ok {
+		c.tlsConfig = provider.TLSConfiguration()
+	}
+	return c, nil
 }
 
 // Register is a private host-composition seam, not a control protocol or native
-// authentication implementation. Production MCP never calls it today.
+// authentication implementation. The authenticated PermissionHost calls it
+// only after resolving an original through its pinned NativeReader.
 func (c *Coordinator) Register(b Binding) (*Invocation, error) { //nolint:gocritic // freeze a private binding by value so host mutation cannot retarget a handle
 	if !b.Key.Valid() || !validHex(b.Incarnation, 32) || b.Generation == "" || !ValidNativeID(b.Subject.Caller) ||
 		(b.Subject.Kind != "dm" && b.Subject.Kind != "group" && b.Subject.Kind != "thread") || b.Subject.Source == "" {
@@ -135,11 +183,13 @@ func (c *Coordinator) Register(b Binding) (*Invocation, error) { //nolint:gocrit
 	if _, err := U64(b.ContextEpoch); err != nil {
 		return nil, refuse("context_untrusted")
 	}
-	return &Invocation{owner: c, binding: b}, nil
+	now := time.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Invocation{owner: c, binding: b, expires: now.Add(5 * time.Minute), hardDeadline: now.Add(30 * time.Minute), calls: make(chan struct{}, 8), context: ctx, cancel: cancel}, nil
 }
 
 // Close revokes the private handle and joins an owned first write in progress.
-func (i *Invocation) Close() { i.mu.Lock(); defer i.mu.Unlock(); i.closed = true }
+func (i *Invocation) Close() { i.cancel(); i.mu.Lock(); defer i.mu.Unlock(); i.closed = true }
 
 func (c *Coordinator) scope(b *Binding) *scope {
 	c.mu.Lock()
@@ -178,7 +228,7 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 		return refuse("context_untrusted")
 	}
 	i.mu.Lock()
-	closed := i.closed
+	closed := i.closed || i.context.Err() != nil || !time.Now().Before(i.expires) || !time.Now().Before(i.hardDeadline)
 	i.mu.Unlock()
 	if closed {
 		return refuse("context_untrusted")
@@ -191,6 +241,9 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 		}
 		f, err := c.facts.Recheck(ctx, b, need)
 		if err != nil || !f.Complete {
+			if IsRefusal(err) {
+				return err
+			}
 			return refuse("policy_unavailable")
 		}
 		if f.Subject != b.Subject {
@@ -241,11 +294,13 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 			continue // new F then new B; never reuse this P
 		}
 		i.mu.Lock()
-		if i.closed || p.ContextEpoch != b.ContextEpoch {
+		if i.closed || i.context.Err() != nil || !time.Now().Before(i.expires) || !time.Now().Before(i.hardDeadline) || p.ContextEpoch != b.ContextEpoch {
 			err = refuse("context_untrusted")
 		} else if next.Invocation && (!f.InvocationEligible || !stageAllows(p.Invocation, f.Subject, "")) {
 			err = refuse("invocation_denied")
-		} else if !c.caps[capability] || next.Capability && (!f.CapabilityEligible || !stageAllows(p.Capability, f.Subject, capability)) {
+		} else if next.Invocation && !contributorsAllowed(p.Invocation, f.Contributors) {
+			err = refuse("context_untrusted")
+		} else if capability != "" && (!c.caps[capability] || next.Capability && (!f.CapabilityEligible || !stageAllows(p.Capability, f.Subject, capability))) {
 			err = refuse("capability_denied")
 		} else if ctx.Err() != nil {
 			err = refuse("policy_unavailable")
@@ -261,3 +316,62 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 
 // IsRefusal identifies a typed nonretryable permission refusal.
 func IsRefusal(err error) bool { var r *Refusal; return errors.As(err, &r) }
+
+func contributorsAllowed(stage Stage, originals []ContributorFact) bool {
+	for _, o := range originals {
+		if !o.Eligible || !stageAllows(stage, o.Subject, "") {
+			return false
+		}
+	}
+	return true
+}
+
+// Admit checks Stage 1 before the host imports context or starts protected work.
+func (c *Coordinator) Admit(ctx context.Context, i *Invocation) error {
+	return c.atBoundary(ctx, i, "", func() error { return nil })
+}
+
+// Renew never changes source/generation or extends the original hard lifetime.
+func (c *Coordinator) Renew(ctx context.Context, i *Invocation, generation string) error {
+	if i == nil || i.owner != c || i.binding.Generation != generation {
+		return ContextUntrusted()
+	}
+	if err := c.Admit(ctx, i); err != nil {
+		return err
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.closed || i.context.Err() != nil || !time.Now().Before(i.expires) || !time.Now().Before(i.hardDeadline) {
+		return ContextUntrusted()
+	}
+	next := time.Now().Add(5 * time.Minute)
+	if next.After(i.hardDeadline) {
+		next = i.hardDeadline
+	}
+	i.expires = next
+	return nil
+}
+
+// ContextUntrusted creates the fixed public binding refusal.
+func ContextUntrusted() *Refusal { return refuse("context_untrusted") }
+
+// CapabilityDenied creates the fixed public capability refusal.
+func CapabilityDenied() *Refusal { return refuse("capability_denied") }
+
+// PolicyUnavailable creates the fixed public authority refusal.
+func PolicyUnavailable() *Refusal { return refuse("policy_unavailable") }
+
+// Deadlines returns the private current lease and immutable hard deadline.
+func (i *Invocation) Deadlines() (lease, hard time.Time) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.expires, i.hardDeadline
+}
+
+// TLSConfiguration returns a detached private authority TLS configuration.
+func (c *Coordinator) TLSConfiguration() *tls.Config {
+	if c.tlsConfig == nil {
+		return nil
+	}
+	return c.tlsConfig.Clone()
+}

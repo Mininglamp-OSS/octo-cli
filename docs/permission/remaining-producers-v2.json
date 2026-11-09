@@ -1,0 +1,86 @@
+{
+  "format": "permission-cli-remaining-producers-v2",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "cli_owned": {
+    "producer": "XIN-2794",
+    "required_output": "one supported immutable release/non-null shared digest and old/target semantic equivalence",
+    "source_count_witness": "internal/mcp/catalog_sources/page-bounds-v1.json",
+    "known_message_item_bound": 100,
+    "known_mcp_page_limit": 10,
+    "unproved_page_contracts": [
+      {
+        "capability": "octo-cli/docs/op/docs.comments.markers",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/{docId}/comments/markers",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.comments.replies",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/{docId}/comments/{id}/replies",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.recent.list",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/recent",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.search",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "POST",
+        "path": "/v1/bot/docs/search",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/message/op/message.search.media",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "POST",
+        "path": "/v1/bot/messages/_search_media",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      }
+    ],
+    "byte_contract": "ordinary client.Request.MaxResponseBytes remains unset; managed request spool/relay output limits need source-equivalence disposition",
+    "shape_bytes": 14128923,
+    "shape_sha256_not_catalog_digest": "bfbe803223910066d393f2005da9b077c5dd0a7da6eda667c3fb6a5e4098e647",
+    "approved_artifact_limit": 8388608,
+    "selector_correlations": [
+      "schema_variant has no resource-negotiation/managed-field selector; the report retains all distinct templates under the same facade",
+      "discovery_index has no server-facade/resource-negotiation selector; all distinct actual navigation rows are retained",
+      "profile exemplars do not supply selected per-entry pagination declarations or response-acquisition bounds"
+    ],
+    "unblocking_input": "compatible approved source/count/byte/selector/encoding contracts; PjM handles any evidenced unavoidable departure, without silently widening the format or selecting a new pin"
+  },
+  "external": {
+    "server": {
+      "head": "1fae0db209d656a4b60562e14b71aeb23ad8e87b",
+      "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v2.json",
+      "manifest_bytes": 1816,
+      "manifest_sha256": "276cd8cb80c9b7f2d04ab2a835927454d75663f96ce611ccd47b2a8a05993780",
+      "producer_path": "pkg/permissionbundle/contracts/remaining-producers-v1.json",
+      "producer_bytes": 5153,
+      "producer_sha256": "53f29a0e572cf240584511627236489658089bfcf70598a56216d545730f6a52",
+      "required": "actual NativeFactSource, FencedAuthority and startup; server retains adapters and Releases.Load/Compatible/SameIntent"
+    },
+    "endpoint": {
+      "head": "c152cb54df8e3fb822288933e39cf6dcad4b9335",
+      "path": "docs/permission-component-contract.json",
+      "bytes": 2422,
+      "sha256": "3235d448421f4bfd34977d474a9a0568d720dfe8d12c825085eef463b6d13e83",
+      "required": "native Header/current access/disclosure/body/checkpoint/fence; durable pre-ACK journal binding; private host worker containment; admission/context import/native publication"
+    }
+  },
+  "not_run": [
+    "native business/provider acceptance",
+    "current writer/read/recovery-fence acceptance",
+    "durable pre-ACK/no-redelivery horizon acceptance",
+    "real worker OS/process/fs/network containment",
+    "browser and cross-repository end-to-end acceptance"
+  ],
+  "rollback": "revert Draft commits; leave managed mode disabled; do not erase policy epochs/incarnations/fences or replay journals"
+}

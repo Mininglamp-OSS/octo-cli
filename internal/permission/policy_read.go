@@ -20,8 +20,17 @@ type SelfPolicyReader struct {
 // NewSelfPolicyReader requires a private host's independently verified v2 Bot
 // identity. The constructor does not authenticate that identity itself. TLS
 // roots are an in-process composition option, never a model argument.
-func NewSelfPolicyReader(origin, botUID, token string, conf *tls.Config) (*SelfPolicyReader, error) {
+func NewSelfPolicyReader(origin, botUID, token string, conf *tls.Config, allowedOrigins ...string) (*SelfPolicyReader, error) { //nolint:gocyclo // closed fixed-program branches retain explicit checks in security order
 	if !ValidOrigin(origin) || !ValidNativeID(botUID) || !strings.HasPrefix(token, "bf_") || strings.ContainsAny(token, "\r\n\t ") {
+		return nil, ErrInvalid
+	}
+	allowed := false
+	for _, configured := range allowedOrigins {
+		if origin == configured {
+			allowed = true
+		}
+	}
+	if !allowed {
 		return nil, ErrInvalid
 	}
 	if conf == nil {
@@ -29,9 +38,17 @@ func NewSelfPolicyReader(origin, botUID, token string, conf *tls.Config) (*SelfP
 	} else {
 		conf = conf.Clone()
 	}
-	if conf.InsecureSkipVerify {
+	u, err := url.Parse(origin)
+	if err != nil {
 		return nil, ErrInvalid
 	}
+	if conf.InsecureSkipVerify || conf.ServerName != "" && conf.ServerName != u.Hostname() || conf.MaxVersion != 0 && conf.MaxVersion < tls.VersionTLS12 {
+		return nil, ErrInvalid
+	}
+	if conf.MinVersion < tls.VersionTLS12 {
+		conf.MinVersion = tls.VersionTLS12
+	}
+	conf.ServerName = u.Hostname()
 	transport := &http.Transport{TLSClientConfig: conf, DisableCompression: true, DisableKeepAlives: true}
 	return &SelfPolicyReader{origin, botUID, token, &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }

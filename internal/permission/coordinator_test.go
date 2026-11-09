@@ -25,7 +25,7 @@ func (f factFunc) Recheck(c context.Context, b Binding, n Needs) (Facts, error) 
 	return f(c, b, n)
 }
 func allFacts(_ context.Context, b Binding, _ Needs) (Facts, error) { //nolint:gocritic // detached native fixture binding matches the private adapter interface
-	return Facts{b.Subject, true, true, true}, nil
+	return Facts{b.Subject, true, true, true, nil}, nil
 }
 func encode(t *testing.T, p Bundle) []byte { //nolint:gocritic // test fixtures are intentionally detached immutable snapshots
 	t.Helper()

@@ -2,6 +2,7 @@ package permission
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,7 +34,7 @@ func TestSelfPolicyAcquisitionCompleteNoCacheNoRedirect(t *testing.T) {
 	raw = encode(t, p)
 	conf := srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
 	conf.InsecureSkipVerify = false
-	r, err := NewSelfPolicyReader(p.Key.Origin, p.Key.BotUID, "bf_synthetic", conf)
+	r, err := NewSelfPolicyReader(p.Key.Origin, p.Key.BotUID, "bf_synthetic", conf, p.Key.Origin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,5 +71,25 @@ func TestSelfPolicyAcquisitionCompleteNoCacheNoRedirect(t *testing.T) {
 	before := reads.Load()
 	if _, err = r.ReadBundle(ctx, key); err == nil || reads.Load() != before {
 		t.Fatal("alternate Bot dispatched")
+	}
+}
+
+func TestPolicyReaderRequiresTrustedOriginAndPinsTLSHostname(t *testing.T) {
+	for _, origin := range []string{"https://127.0.0.1", "https://169.254.169.254", "https://10.0.0.1", "https://unconfigured.invalid"} {
+		if _, err := NewSelfPolicyReader(origin, "bot", "bf_synthetic", nil); err == nil {
+			t.Fatal("unconfigured origin accepted", origin)
+		}
+	}
+	origin := "https://configured.invalid"
+	if _, err := NewSelfPolicyReader(origin, "bot", "bf_synthetic", &tls.Config{ServerName: "other.invalid"}, origin); err == nil {
+		t.Fatal("SNI alias accepted")
+	}
+	r, err := NewSelfPolicyReader(origin, "bot", "bf_synthetic", &tls.Config{MinVersion: tls.VersionTLS10}, origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := r.client.Transport.(*http.Transport).TLSClientConfig
+	if conf.MinVersion < tls.VersionTLS12 || conf.ServerName != "configured.invalid" {
+		t.Fatal("TLS baseline not restored")
 	}
 }

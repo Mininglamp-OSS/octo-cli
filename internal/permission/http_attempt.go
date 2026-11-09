@@ -18,19 +18,20 @@ import (
 // PreparedHTTP owns one fresh, already-handshaken HTTP/1.1 connection and one
 // immutable serialized request. There is no http.Transport, pool, redirect,
 // proxy, authentication replay, GetBody callback or retry loop in this sink.
-// It is a component seam, not the business client's production transport.
+// Managed business calls use this sink; ordinary CLI calls retain their client.
 type PreparedHTTP struct {
 	key     Key
 	conn    net.Conn
 	request []byte
 	method  string
+	wire    *wireCapture
 	used    atomic.Bool
 }
 
 // PrepareHTTP finishes connection/TLS and request serialization before F/B.
 // The only accepted target authority is the configured exact policy origin.
-// Redirects and helper URL requests need separate, as-yet-unwired sinks with
-// their existing SSRF/credential-forwarding contracts; this method grants none.
+// Helper URL requests use the separate owned transfer sink with their existing
+// SSRF/credential-forwarding contracts; this method grants none.
 func PrepareHTTP(ctx context.Context, key Key, method, target string, headers http.Header, body []byte, tlsConfig *tls.Config, deadline time.Time) (*PreparedHTTP, error) { //nolint:gocyclo // all target, immutable spool and TLS checks must precede the first application write
 	if !key.Valid() || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || len(body) > 16<<20 || deadline.IsZero() || !deadline.After(time.Now()) {
 		return nil, ErrInvalid
@@ -53,8 +54,11 @@ func PrepareHTTP(ctx context.Context, key Key, method, target string, headers ht
 	if tlsConfig != nil {
 		conf = tlsConfig.Clone()
 	}
-	if conf.InsecureSkipVerify || conf.ServerName != "" && conf.ServerName != u.Hostname() {
+	if conf.InsecureSkipVerify || conf.ServerName != "" && conf.ServerName != u.Hostname() || conf.MaxVersion != 0 && conf.MaxVersion < tls.VersionTLS12 {
 		return nil, ErrInvalid
+	}
+	if conf.MinVersion < tls.VersionTLS12 {
+		conf.MinVersion = tls.VersionTLS12
 	}
 	conf.ServerName = u.Hostname()
 	conf.NextProtos = []string{"http/1.1"}
@@ -64,16 +68,26 @@ func PrepareHTTP(ctx context.Context, key Key, method, target string, headers ht
 	}
 	dialCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	d := tls.Dialer{NetDialer: &net.Dialer{}, Config: conf}
-	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	rawConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", addr)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	if err = conn.SetDeadline(deadline); err != nil {
+	wire := &wireCapture{Conn: rawConn}
+	conn := tls.Client(wire, conf)
+	if err = rawConn.SetDeadline(deadline); err != nil {
+		closeOwned(rawConn)
+		return nil, ErrUnavailable
+	}
+	if err = conn.HandshakeContext(dialCtx); err != nil {
 		closeOwned(conn)
 		return nil, ErrUnavailable
 	}
-	return &PreparedHTTP{key: key, conn: conn, request: sealed.Bytes(), method: method}, nil
+	ciphertext, err := sealWire(conn, wire, sealed.Bytes())
+	if err != nil {
+		closeOwned(conn)
+		return nil, err
+	}
+	return &PreparedHTTP{key: key, conn: conn, request: ciphertext, method: method, wire: wire}, nil
 }
 
 // Abort consumes an unused action and closes its connection. No application
@@ -117,15 +131,7 @@ func (c *Coordinator) Execute(ctx context.Context, i *Invocation, p *PreparedHTT
 	}
 	stop := context.AfterFunc(ctx, func() { closeOwned(p.conn) })
 	defer stop()
-	err := c.atBoundary(ctx, i, capability, func() error {
-		// Deliberately call the connection exactly once. A short write is an
-		// unknown partial attempt, never an instruction to resend the suffix.
-		n, err := p.conn.Write(p.request)
-		if err != nil || n != len(p.request) {
-			return ErrAttemptUnknown
-		}
-		return nil
-	})
+	err := c.firstWrite(ctx, i, capability, p.wire, p.request)
 	if err != nil {
 		closeOwned(p.conn)
 		status := "unavailable"
@@ -155,3 +161,23 @@ type connectionBody struct {
 func (b *connectionBody) Close() error { err := b.ReadCloser.Close(); closeOwned(b.conn); return err }
 
 func closeOwned(c io.Closer) { _ = c.Close() } //nolint:errcheck // best-effort cleanup cannot change permission or erase uncertainty
+
+func prepareRequest(ctx context.Context, key Key, req *http.Request, conf *tls.Config) (*PreparedHTTP, error) {
+	if req.URL == nil || req.URL.Scheme+"://"+req.URL.Host != key.Origin {
+		return nil, refuse("context_untrusted")
+	}
+	var body []byte
+	if req.Body != nil {
+		defer closeOwned(req.Body)
+		var err error
+		body, err = io.ReadAll(io.LimitReader(req.Body, (16<<20)+1))
+		if err != nil || len(body) > 16<<20 {
+			return nil, ErrInvalid
+		}
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, ErrUnavailable
+	}
+	return PrepareHTTP(ctx, key, req.Method, req.URL.RequestURI(), req.Header, body, conf, deadline)
+}

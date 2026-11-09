@@ -60,6 +60,7 @@ func getScene(cmd *cobra.Command, f *cmdutil.Factory, docID string) (*sceneSnaps
 	options.ErrOut = f.ErrOut()
 	readClient := client.New(cfg, cred, options)
 	raw, err := readClient.Do(cmd.Context(), &client.Request{
+		Service: "docs", OperationID: "docs.scene.get",
 		Method:              http.MethodGet,
 		Path:                path,
 		SuppressSpaceHeader: true,

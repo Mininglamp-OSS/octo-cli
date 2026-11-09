@@ -18,6 +18,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 const (
@@ -373,7 +374,7 @@ func resolveAttachmentPayload(cmd *cobra.Command, f *cmdutil.Factory, docID, att
 	if err != nil {
 		return nil, err
 	}
-	result, err := cli.Do(cmd.Context(), &client.Request{Method: http.MethodGet, Path: "/v1/bot/docs/" + docSegment + "/attachments/" + attachSegment, SuppressSpaceHeader: true})
+	result, err := cli.Do(cmd.Context(), &client.Request{Service: "docs", OperationID: "docs.attachments.get", Method: http.MethodGet, Path: "/v1/bot/docs/" + docSegment + "/attachments/" + attachSegment, SuppressSpaceHeader: true})
 	if err != nil {
 		return nil, err
 	}
@@ -408,13 +409,31 @@ func downloadPortableAttachment(cmd *cobra.Command, f *cmdutil.Factory, signedUR
 	if err != nil {
 		return attachmentDataURL{}, errors.New("attachment resolve returned an unusable download URL")
 	}
-	resp, err := transferClient("attachment download URL", loopbackAPI, nil, verboseNoter(f)).Do(req)
+	scoped, err := permission.Child(cmd.Context(), "octo-cli/docs/derived/portable-attachment-bytes")
 	if err != nil {
+		return attachmentDataURL{}, err
+	}
+	req = req.WithContext(scoped)
+	transfer, err := permission.OwnedTransferClient(scoped, transferClient("attachment download URL", loopbackAPI, nil, verboseNoter(f)))
+	if err != nil {
+		return attachmentDataURL{}, err
+	}
+	resp, err := transfer.Do(req)
+	if err != nil {
+		if permission.IsRefusal(permission.TransferFailure(err)) {
+			return attachmentDataURL{}, permission.TransferFailure(err)
+		}
 		return attachmentDataURL{}, transferNetworkError("attachment download", parsed, err)
 	}
 	body, readErr := readPortableAttachmentBody(resp, remainingBytes, declaredMIME)
 	if readErr != nil {
 		return attachmentDataURL{}, readErr
+	}
+	if bound := permission.BoundCall(scoped); bound != nil {
+		body, err = bound.ConsumeBytes(scoped, body)
+		if err != nil {
+			return attachmentDataURL{}, err
+		}
 	}
 	mime, err := verifiedPortableMIME(body, declaredMIME, resp.Header.Get("Content-Type"))
 	if err != nil {

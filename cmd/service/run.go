@@ -21,6 +21,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -82,6 +83,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
+		OperationID:    d.ID,
 		Service:        d.Service,
 		Credential:     d.Credential,
 		Method:         d.Method,
@@ -1647,6 +1649,9 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 		if perr != nil {
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
+		}
+		if err := permission.AdmitPage(ctx, len(data)); err != nil {
+			return err
 		}
 		merged = append(merged, data...)
 		if !hasMore || nextCursor == "" || page+1 >= limit {

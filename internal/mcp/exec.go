@@ -17,6 +17,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/foldkey"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -106,7 +107,7 @@ func applyCallGlobals(g *cmdutil.GlobalOptions, base cmdutil.GlobalOptions, forc
 // before the "--" positional separator. The three-tool call_op passes none, so
 // its argv is byte-for-byte what it was; the two-tool execute facade uses this
 // to honour dry-run without a second request-assembly path.
-func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) {
+func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory, detail *registry.OperationDetail, arguments map[string]any, pol execPolicy, outBuf, errBuf *bytes.Buffer, globalFlags ...string) (envelope []byte, ok bool, exitErr *output.ExitError) { //nolint:gocyclo // closed fixed-program branches retain explicit checks in security order
 	if err := guardOperationArguments(ctx, detail.ID, arguments); err != nil {
 		ee := output.ErrValidation(err.Error(), "")
 		return synthErrorEnvelope(ee), false, ee
@@ -133,13 +134,23 @@ func executeOperation(ctx context.Context, build RootBuilder, f *cmdutil.Factory
 	argv = spliceGlobalFlags(argv, globalFlags)
 	if detail.Multipart || detail.RawBody {
 		if value, ok := arguments["file_path"]; ok && value != nil && fmt.Sprint(value) != "" {
-			file, err := pol.openFile(fmt.Sprint(value))
+			var file *os.File
+			var err error
+			var cleanup func()
+			if bound := permission.BoundCall(ctx); bound != nil {
+				file, cleanup, err = bound.ReadLocal(ctx, func() (*os.File, error) { return pol.openFile(fmt.Sprint(value)) })
+			} else {
+				file, err = pol.openFile(fmt.Sprint(value))
+			}
 			if err != nil {
 				ee := output.ErrValidation(err.Error(), "check the configured upload root and file path")
 				return synthErrorEnvelope(ee), false, ee
 			}
 			f.MultipartFile = file
 			defer func() {
+				if cleanup != nil {
+					cleanup()
+				}
 				_ = file.Close() //nolint:errcheck // read-only descriptor cleanup
 				f.MultipartFile = nil
 			}()

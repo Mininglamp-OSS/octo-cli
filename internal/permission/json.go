@@ -13,6 +13,8 @@ import (
 )
 
 var (
+	// ErrConflict reports a private generation registration conflict.
+	ErrConflict = errors.New("permission: generation conflict")
 	// ErrInvalid reports an invalid lexical or structural value.
 	ErrInvalid = errors.New("permission: invalid bundle")
 	// ErrUnavailable reports unusable complete policy or authority.
