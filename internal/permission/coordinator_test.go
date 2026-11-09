@@ -186,6 +186,7 @@ func TestNativeRevocationWithoutPolicyRevisionAndUnknownCapability(t *testing.T)
 }
 
 func TestOwnedTLSAttemptPositiveRefusalAndResponseLoss(t *testing.T) {
+	requireOwnedPlatform(t)
 	var received atomic.Int32
 	var lose atomic.Bool
 	backend := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

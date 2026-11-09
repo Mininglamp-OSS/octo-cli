@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,6 +53,9 @@ type managedFixture struct {
 
 func newManagedFixture(t *testing.T) *managedFixture {
 	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("managed host private storage and owned sinks require POSIX")
+	}
 	f := &managedFixture{t: t}
 	f.eligible.Store(true)
 	shared, err := osReadSharedProfiles()

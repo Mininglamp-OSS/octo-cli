@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,9 @@ func (f commandPermissionFacts) Recheck(_ context.Context, b permission.Binding,
 // The actual command tree must traverse scene.get under its own capability,
 // even though the logical portable export root is allowed in both cases.
 func TestManagedPortableCommandPositiveAndChildDenial(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("managed host private storage and owned sinks require POSIX")
+	}
 	for _, denyChild := range []bool{false, true} {
 		t.Run(map[bool]string{false: "allow", true: "deny_child"}[denyChild], func(t *testing.T) {
 			var reads atomic.Int32

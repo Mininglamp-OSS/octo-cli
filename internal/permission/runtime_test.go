@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,13 @@ type runtimeFixture struct {
 	p  Bundle
 	c  *Coordinator
 	i  *Invocation
+}
+
+func requireOwnedPlatform(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("owned nonblocking host sink requires Linux or macOS")
+	}
 }
 
 func newRuntimeFixture(t *testing.T, capabilities ...string) *runtimeFixture {
@@ -150,6 +158,7 @@ func TestRuntimePageOverflowChildAndLeaseDoNotBecomeUnlimited(t *testing.T) {
 }
 
 func TestOwnedTransferEveryHopAndRefusedNextHop(t *testing.T) {
+	requireOwnedPlatform(t)
 	const capability = "octo-cli/docs/derived/portable-attachment-bytes"
 	for _, revoke := range []bool{false, true} {
 		t.Run(fmt.Sprint(revoke), func(t *testing.T) {
@@ -207,6 +216,7 @@ func TestOwnedTransferEveryHopAndRefusedNextHop(t *testing.T) {
 }
 
 func TestOwnedRedisFirstWritePositiveAndRevokedBeforeEval(t *testing.T) {
+	requireOwnedPlatform(t)
 	const capability = "octo-cli/bot/secret/get_secret_download_url"
 	f := newRuntimeFixture(t, capability)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -275,6 +285,7 @@ func TestOwnedRedisFirstWritePositiveAndRevokedBeforeEval(t *testing.T) {
 }
 
 func TestOwnedHTTPProxyRetainsProxyAuthWithoutBotCredentials(t *testing.T) {
+	requireOwnedPlatform(t)
 	const capability = "octo-cli/docs/derived/portable-attachment-bytes"
 	f := newRuntimeFixture(t, capability)
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
