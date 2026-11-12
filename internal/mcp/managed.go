@@ -385,7 +385,13 @@ func writeManagedHTTP(ctx context.Context, w http.ResponseWriter, id json.RawMes
 		return permission.PolicyUnavailable()
 	}
 	frame := func(payload []byte) []byte {
-		header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", len(payload))
+		var budgetHeader string
+		if maxBytes := call.MaxAcquisitionBytes(); maxBytes > 0 {
+			budgetHeader = fmt.Sprintf("X-Octo-Acquisition-Budget-Bytes: %d\r\n", maxBytes)
+		} else if hb := strings.TrimSpace(w.Header().Get("X-Octo-Acquisition-Budget-Bytes")); hb != "" {
+			budgetHeader = "X-Octo-Acquisition-Budget-Bytes: " + hb + "\r\n"
+		}
+		header := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n%sContent-Length: %d\r\nConnection: close\r\n\r\n", budgetHeader, len(payload))
 		return append([]byte(header), payload...)
 	}
 	if err = call.PublishConnection(ctx, conn, frame(body)); err == nil {

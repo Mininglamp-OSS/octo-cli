@@ -180,7 +180,11 @@ func servePermissionHostWithPackages(ctx context.Context, cfg PermissionHostConf
 		return errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if cfg.RelayCertSHA256 == "" || cfg.RelayPeerSHA256 == "" || cfg.RelayCASHA256 == "" {
-		if _, err := TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: cfg.RelayCA, CASHA256: caHex, PeerSHA256: leafHex, CertSHA256: leafHex, ServerName: cfg.RelayServerName}); err == nil {
+		var maxResponseBytes int64
+		if cfg.ResponseBudgets != nil {
+			maxResponseBytes = cfg.ResponseBudgets.MaxAcquisitionBytes
+		}
+		if _, err := TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: cfg.RelayCA, CASHA256: caHex, PeerSHA256: leafHex, CertSHA256: leafHex, ServerName: cfg.RelayServerName, MaxResponseBytes: maxResponseBytes}); err == nil {
 			cfg.RelayCASHA256 = caHex
 			cfg.RelayPeerSHA256 = leafHex
 			cfg.RelayCertSHA256 = leafHex

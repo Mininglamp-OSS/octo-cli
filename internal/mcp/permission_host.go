@@ -170,7 +170,11 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 		}
 		permission.RegisterRelayEndpointBudgets(cfg.RelayURL, *cfg.ResponseBudgets)
 	}
-	trust := TurnRelayTrust{CAFile: cfg.RelayCA, CAPEM: caPEM, CASHA256: effectiveCASHA256, PeerSHA256: peerSHA256, CertSHA256: certSHA256, ServerName: cfg.RelayServerName}
+	var maxResponseBytes int64
+	if budgets, ok := c.ResponseBudgets(); ok {
+		maxResponseBytes = budgets.MaxAcquisitionBytes
+	}
+	trust := TurnRelayTrust{CAFile: cfg.RelayCA, CAPEM: caPEM, CASHA256: effectiveCASHA256, PeerSHA256: peerSHA256, CertSHA256: certSHA256, ServerName: cfg.RelayServerName, MaxResponseBytes: maxResponseBytes}
 	h := &PermissionHost{config: cfg, coordinator: c, policies: p, native: n, incarnation: permission.NewID(), sessions: map[string]bool{}, ingress: map[string]*hostIngress{}, capsules: map[string]*hostCapsule{}, contextGenerations: map[string]hostContextGeneration{}, relays: map[string]*hostRelay{}, seenDeliveries: map[[32]byte]bool{}, server: server, relayTrust: trust}
 	if _, err := rand.Read(h.macKey[:]); err != nil {
 		return nil, err
@@ -202,9 +206,6 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 	h.executable = executable
 	h.executableSHA = hex.EncodeToString(hash.Sum(nil))
 	if _, err = TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), h.relayTrust); err != nil {
-		return nil, err
-	}
-	if _, err = TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: h.relayTrust.CAFile, CertSHA256: h.relayTrust.CertSHA256, ServerName: h.relayTrust.ServerName}); err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -652,11 +653,9 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 			return controlOK(f, reply)
 		}
 		stdioTrust := h.relayTrust
-		if includeTLS {
-			stdioTrust = TurnRelayTrust{
-				CAFile:     h.relayTrust.CAFile,
-				CertSHA256: h.relayTrust.CertSHA256,
-				ServerName: h.relayTrust.ServerName,
+		if stdioTrust.MaxResponseBytes == 0 {
+			if budgets, ok := h.coordinator.ResponseBudgets(); ok {
+				stdioTrust.MaxResponseBytes = budgets.MaxAcquisitionBytes
 			}
 		}
 		handle, err := TurnRelayHandleWithTrust(h.config.RelayURL, relay.token, stdioTrust)
@@ -777,12 +776,18 @@ func (h *PermissionHost) relayTrustMap() map[string]any {
 	if h.relayTrust.CAFile != "" {
 		m["ca_file"] = h.relayTrust.CAFile
 	}
+	if h.relayTrust.CASHA256 != "" {
+		m["ca_sha256"] = h.relayTrust.CASHA256
+	}
 	certSHA := h.relayTrust.CertSHA256
 	if certSHA == "" {
 		certSHA = h.relayTrust.PeerSHA256
 	}
 	if certSHA != "" {
 		m["cert_sha256"] = certSHA
+	}
+	if h.relayTrust.PeerSHA256 != "" {
+		m["peer_sha256"] = h.relayTrust.PeerSHA256
 	}
 	if h.relayTrust.ServerName != "" {
 		m["server_name"] = h.relayTrust.ServerName
@@ -939,6 +944,9 @@ func (h *PermissionHost) ServeHTTP(w http.ResponseWriter, r *http.Request) { //n
 		http.Error(w, "relay unavailable", http.StatusUnauthorized)
 		return
 	}
+	if budgets, ok := h.coordinator.ResponseBudgets(); ok {
+		w.Header().Set("X-Octo-Acquisition-Budget-Bytes", strconv.FormatInt(budgets.MaxAcquisitionBytes, 10))
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxHTTPBodyBytes+1))
 	if err != nil || len(body) > maxHTTPBodyBytes {
 		http.Error(w, "invalid request", 400)
@@ -960,9 +968,6 @@ func (h *PermissionHost) ServeHTTP(w http.ResponseWriter, r *http.Request) { //n
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
-	if budgets, ok := h.coordinator.ResponseBudgets(); ok {
-		w.Header().Set("X-Octo-Acquisition-Budget-Bytes", strconv.FormatInt(budgets.MaxAcquisitionBytes, 10))
-	}
 	server := h.server(relay.turn)
 	resp, has, call := server.dispatchManaged(ctx, req)
 	w.Header().Set("Content-Type", "application/json")

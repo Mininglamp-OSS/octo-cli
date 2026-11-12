@@ -1,7 +1,7 @@
 {
   "format": "permission-cli-endpoint-abi-v2",
   "supersedes": "endpoint-abi-v1.json",
-  "endpoint_head": "d007962a7762ec42ae2279c673392121ad630e64",
+  "endpoint_head": "131dc9c38bfe6813a0a0e9f207398fa06112cb9e",
   "endpoint_task_id": "2f4a34e9-2be3-48ac-99f0-38a30f077acd",
   "control": "TLS 1.3 mutual authentication and exact peer certificate pin; uint32 BE canonical JSON <=65536 bytes; methods: hello, register_ingress, admit, resolve_contributors, bind_context, open_relay, renew, close, checkpoint",
   "readiness": {
@@ -143,13 +143,16 @@
     "stdio_pinned_ticket_fields": [
       "ca_sha256",
       "endpoint",
+      "max_response_bytes",
       "peer_sha256",
+      "server_name",
       "token"
     ],
     "stdio_tls_trust_ticket_fields": [
-      "ca_file",
-      "cert_sha256",
+      "ca_sha256",
       "endpoint",
+      "max_response_bytes",
+      "peer_sha256",
       "server_name",
       "token"
     ],
@@ -159,13 +162,15 @@
     "tls_metadata": {
       "fields": [
         "ca_file",
+        "ca_sha256",
         "cert_sha256",
+        "peer_sha256",
         "server_name"
       ],
-      "semantics": "populated when include_tls_trust=true and host relay TLS trust material is configured, matching checkTurnRelayTrust in endpoint d007962a7762ec42ae2279c673392121ad630e64; never disables TLS 1.3 verification"
+      "semantics": "populated when include_tls_trust=true and host relay TLS trust material is configured, matching checkTurnRelayTrust / validateTurnRelayTrust in endpoint 131dc9c38bfe6813a0a0e9f207398fa06112cb9e; never disables TLS 1.3 verification"
     },
-    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; when relay TLS pins are present, reply includes ca_sha256 (SHA-256 of relay CA PEM bytes) and peer_sha256 (SHA-256 of relay leaf certificate DER), plus optional tls={ca_file, cert_sha256, server_name} when include_tls_trust=true, matching checkedTurnRelay in endpoint d007962a7762ec42ae2279c673392121ad630e64 and a3164ded106e06de88f98a6820da4f0d80876dc9",
-    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing {ca_file, cert_sha256, endpoint, server_name, token} when include_tls_trust=true (matching endpoint d007962a7762ec42ae2279c673392121ad630e64 checkedTurnRelay and preparePrivateWorker), or {ca_sha256, endpoint, peer_sha256, token} on 4-field requests (matching endpoint a3164ded106e06de88f98a6820da4f0d80876dc9); ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from ca_file/SSL_CERT_FILE/NODE_EXTRA_CA_CERTS, VerifyConnection leaf peer_sha256/cert_sha256 pinning, and fail-closed MaxAcquisitionBytes response budget via ReadBoundedHTTPResponseBody (Content-Length precheck + io.LimitReader(limit+1))",
+    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; when relay TLS pins are present, reply includes ca_sha256 (SHA-256 of relay CA PEM bytes) and peer_sha256 (SHA-256 of relay leaf certificate DER), plus optional tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true; every HTTP response (including hijacked writeManagedHTTP responses) emits X-Octo-Acquisition-Budget-Bytes=<MaxAcquisitionBytes> when ResponseBudgets are configured",
+    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing {ca_sha256, endpoint, peer_sha256, token} plus optional server_name (when RelayServerName is configured and differs from the endpoint hostname) and optional max_response_bytes (when ResponseBudgets.MaxAcquisitionBytes > 0) for both 4-field and include_tls_trust=true requests, avoiding host-private ca_file paths inside contained sandboxes; ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from SSL_CERT_FILE/NODE_EXTRA_CA_CERTS (or ca_file) verified against ca_sha256, VerifyConnection leaf peer_sha256/cert_sha256 pinning, and fail-closed MaxAcquisitionBytes response budget from X-Octo-Acquisition-Budget-Bytes, ticket max_response_bytes, or in-process LookupRelayEndpointBudgets",
     "relay_executable": "private config may name the pinned CLI; empty selects this executable; absolute regular non-writable executable required",
     "bearer_domain": "64 lowercase hex characters; ordinary bf_/app_/uk_ credentials are rejected by the relay ticket parser"
   },
@@ -209,6 +214,11 @@
     "saturation_behavior": "fail closed with permission: bundle unavailable (PERMISSION_BUNDLE_UNAVAILABLE); never evicts read_id/read_nonce uniqueness fences or HeaderV1 immutability observations via TTL or sliding window"
   },
   "source_control_client": {
+    "v52_head": {
+      "commit": "131dc9c38bfe6813a0a0e9f207398fa06112cb9e",
+      "path": "src/permissions/control-client.ts",
+      "handoff_path": "docs/permission-endpoint-handoff-v7.json"
+    },
     "v49_head": {
       "commit": "d007962a7762ec42ae2279c673392121ad630e64",
       "path": "src/permissions/control-client.ts",

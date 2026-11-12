@@ -3,18 +3,23 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -709,11 +714,11 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 		t.Fatal("invalid JSON ticket:", string(ticketBytes))
 	}
 	ticketKeys := sortedKeys(ticketMap)
-	if !reflect.DeepEqual(ticketKeys, []string{"ca_sha256", "endpoint", "peer_sha256", "token"}) {
-		t.Fatalf("expected 4-field pinned stdio ticket [ca_sha256 endpoint peer_sha256 token], got %v (%s)", ticketKeys, string(ticketBytes))
+	if !reflect.DeepEqual(ticketKeys, []string{"ca_sha256", "endpoint", "max_response_bytes", "peer_sha256", "server_name", "token"}) {
+		t.Fatalf("expected pinned stdio ticket [ca_sha256 endpoint max_response_bytes peer_sha256 server_name token], got %v (%s)", ticketKeys, string(ticketBytes))
 	}
-	if ticketMap["ca_sha256"] != caSHA || ticketMap["peer_sha256"] != leafSHA || ticketMap["endpoint"] != loadedCfg.RelayURL {
-		t.Fatalf("stdio ticket pin mismatch: got=%v want ca=%s peer=%s url=%s", ticketMap, caSHA, leafSHA, loadedCfg.RelayURL)
+	if ticketMap["ca_sha256"] != caSHA || ticketMap["peer_sha256"] != leafSHA || ticketMap["endpoint"] != loadedCfg.RelayURL || ticketMap["server_name"] != "localhost" || ticketMap["max_response_bytes"] != float64(2097152) {
+		t.Fatalf("stdio ticket pin/budget mismatch: got=%v want ca=%s peer=%s url=%s sni=localhost max_response_bytes=2097152", ticketMap, caSHA, leafSHA, loadedCfg.RelayURL)
 	}
 
 	// Verify ServeTurnRelayHandle succeeds with matching SSL_CERT_FILE and fails closed on mismatched ca_sha256 or peer_sha256.
@@ -829,10 +834,10 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 		t.Fatalf("unexpected stdio include_tls_trust keys: %v", sortedKeys(stdioTLSRelay))
 	}
 	tlsSub, ok := stdioTLSRelay["tls"].(map[string]any)
-	if !ok || !reflect.DeepEqual(sortedKeys(tlsSub), []string{"ca_file", "cert_sha256", "server_name"}) {
-		t.Fatalf("expected d007962a checkTurnRelayTrust keys [ca_file cert_sha256 server_name], got %v", stdioTLSRelay["tls"])
+	if !ok || !reflect.DeepEqual(sortedKeys(tlsSub), []string{"ca_file", "ca_sha256", "cert_sha256", "peer_sha256", "server_name"}) {
+		t.Fatalf("expected checkTurnRelayTrust keys [ca_file ca_sha256 cert_sha256 peer_sha256 server_name], got %v", stdioTLSRelay["tls"])
 	}
-	if tlsSub["ca_file"] != loadedCfg.RelayCA || tlsSub["cert_sha256"] != leafSHA || tlsSub["server_name"] != "localhost" {
+	if tlsSub["ca_file"] != loadedCfg.RelayCA || tlsSub["ca_sha256"] != caSHA || tlsSub["cert_sha256"] != leafSHA || tlsSub["peer_sha256"] != leafSHA || tlsSub["server_name"] != "localhost" {
 		t.Fatalf("stdio tls sub-object mismatch: %v", tlsSub)
 	}
 	stdioTLSHandle := stdioTLSRelay["handle"].(string)
@@ -844,16 +849,32 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 	if json.Unmarshal(stdioTLSTicketRaw, &stdioTLSTicket) != nil {
 		t.Fatal("invalid JSON ticket:", string(stdioTLSTicketRaw))
 	}
-	if !reflect.DeepEqual(sortedKeys(stdioTLSTicket), []string{"ca_file", "cert_sha256", "endpoint", "server_name", "token"}) {
-		t.Fatalf("expected d007962a allowedTicketKeys [ca_file cert_sha256 endpoint server_name token], got %v", sortedKeys(stdioTLSTicket))
+	if !reflect.DeepEqual(sortedKeys(stdioTLSTicket), []string{"ca_sha256", "endpoint", "max_response_bytes", "peer_sha256", "server_name", "token"}) {
+		t.Fatalf("expected sandbox-usable stdio ticket [ca_sha256 endpoint max_response_bytes peer_sha256 server_name token], got %v", sortedKeys(stdioTLSTicket))
+	}
+	if stdioTLSTicket["ca_sha256"] != caSHA || stdioTLSTicket["peer_sha256"] != leafSHA || stdioTLSTicket["server_name"] != "localhost" || stdioTLSTicket["max_response_bytes"] != float64(2097152) {
+		t.Fatalf("stdio include_tls_trust ticket mismatch: %v", stdioTLSTicket)
 	}
 	var initOut3 bytes.Buffer
 	if err := ServeTurnRelayHandle(ctx, stdioTLSHandle, bytes.NewReader(append(rawInit, '\n')), &initOut3); err != nil {
-		t.Fatal("ServeTurnRelayHandle failed with d007962a stdio ticket:", err)
+		t.Fatal("ServeTurnRelayHandle failed with stdio include_tls_trust ticket:", err)
+	}
+	// Verify legacy ca_file + cert_sha256 ticket format remains accepted when constructed explicitly.
+	legacyHandle, err := TurnRelayHandleWithTrust(loadedCfg.RelayURL, stdioTLSTicket["token"].(string), TurnRelayTrust{
+		CAFile:     loadedCfg.RelayCA,
+		CertSHA256: leafSHA,
+		ServerName: "localhost",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var initOutLegacy bytes.Buffer
+	if err := ServeTurnRelayHandle(ctx, legacyHandle, bytes.NewReader(append(rawInit, '\n')), &initOutLegacy); err != nil {
+		t.Fatal("ServeTurnRelayHandle failed with legacy ca_file+cert_sha256 ticket:", err)
 	}
 	request("close", map[string]any{"capsule_id": adm3["capsule_id"], "reason": "completed"})
 
-	// Turn 4: http open_relay with include_tls_trust=true -> exact d007962a checkedTurnRelay parity.
+	// Turn 4: http open_relay with include_tls_trust=true -> exact checkedTurnRelay parity.
 	f.mu.Lock()
 	f.header.MessageID = "45"
 	f.header.Reference = "header_45"
@@ -893,8 +914,8 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 		t.Fatalf("unexpected http include_tls_trust keys: %v", sortedKeys(httpTLSRelay))
 	}
 	httpTLSSub, ok := httpTLSRelay["tls"].(map[string]any)
-	if !ok || !reflect.DeepEqual(sortedKeys(httpTLSSub), []string{"ca_file", "cert_sha256", "server_name"}) {
-		t.Fatalf("expected d007962a checkTurnRelayTrust keys on http open_relay, got %v", httpTLSRelay["tls"])
+	if !ok || !reflect.DeepEqual(sortedKeys(httpTLSSub), []string{"ca_file", "ca_sha256", "cert_sha256", "peer_sha256", "server_name"}) {
+		t.Fatalf("expected checkTurnRelayTrust keys on http open_relay, got %v", httpTLSRelay["tls"])
 	}
 	request("close", map[string]any{"capsule_id": adm4["capsule_id"], "reason": "completed"})
 }
@@ -1257,3 +1278,627 @@ func TestXIN2794V45ContractManifestAndResponseBudgetLedger(t *testing.T) {
 	}
 }
 
+func makeCustomDNSCertificates(t *testing.T, dnsName string) (server, client tls.Certificate, roots *x509.CertPool, caPEM []byte, caSHA, leafSHA, clientSHA string) {
+	t.Helper()
+	_, caKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(101),
+		Subject:               pkix.Name{CommonName: "v52-ca-" + dnsName},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, caKey.Public(), caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots = x509.NewCertPool()
+	roots.AddCert(ca)
+	caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+	caSHA = sha256Sum(caPEM)
+
+	makeLeaf := func(serial int64, usage x509.ExtKeyUsage) tls.Certificate {
+		pub, key, gerr := ed25519.GenerateKey(rand.Reader)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		// Intentionally omit IPAddresses so connecting to https://127.0.0.1:<port>
+		// REQUIRES server_name (SNI/SAN override) to be preserved in the relay ticket.
+		tmpl := &x509.Certificate{
+			SerialNumber: big.NewInt(serial),
+			Subject:      pkix.Name{CommonName: dnsName},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().Add(time.Hour),
+			DNSNames:     []string{dnsName},
+			KeyUsage:     x509.KeyUsageDigitalSignature,
+			ExtKeyUsage:  []x509.ExtKeyUsage{usage},
+		}
+		der, cerr := x509.CreateCertificate(rand.Reader, tmpl, ca, pub, caKey)
+		if cerr != nil {
+			t.Fatal(cerr)
+		}
+		return tls.Certificate{Certificate: [][]byte{der, caDER}, PrivateKey: key}
+	}
+	server = makeLeaf(102, x509.ExtKeyUsageServerAuth)
+	client = makeLeaf(103, x509.ExtKeyUsageClientAuth)
+	leafSHA = sha256Sum(server.Certificate[0])
+	clientSHA = sha256Sum(client.Certificate[0])
+	return server, client, roots, caPEM, caSHA, leafSHA, clientSHA
+}
+
+// TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning verifies the v52 [C-B1] and [C-B2]
+// repairs end-to-end across a real child octo-cli process (`octo-cli --turn-relay <handle>`):
+//   - [C-B1]: writeManagedHTTP emits X-Octo-Acquisition-Budget-Bytes on hijacked responses and
+//     open_relay embeds max_response_bytes in the stdio ticket so cross-process octo --turn-relay
+//     enforces configured MaxAcquisitionBytes (rather than falling back to 64 MiB).
+//   - [C-B2]: open_relay preserves server_name alongside ca_sha256 and peer_sha256 (for both
+//     include_tls_trust=false and include_tls_trust=true) without replacing CA/leaf pins with a
+//     host-private ca_file path, while positive/negative CA, SNI/SAN, and leaf pins and the
+//     denied-write gate behave fail-closed across the actual child CLI binary.
+func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	dir := secureTestDir(t)
+	cliBin := filepath.Join(dir, "octo-cli")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", cliBin, "github.com/Mininglamp-OSS/octo-cli/cmd/octo-cli")
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build octo-cli failed: %v\n%s", err, out)
+	}
+	if err := os.Chmod(cliBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	const relayDNSName = "relay.octo.internal"
+	serverCert, clientCert, roots, caPEM, caSHA, leafSHA, peerHash := makeCustomDNSCertificates(t, relayDNSName)
+	_, _, _, wrongCAPEM, _, _, _ := makeCustomDNSCertificates(t, relayDNSName)
+
+	// Host-private CA path exists only during NewPermissionHost initialization, then is deleted
+	// to prove child stdio relay workers inside a sandbox do not depend on host-private ca_file paths.
+	hostPrivateCADir := filepath.Join(dir, "host-only-ca")
+	if err := os.MkdirAll(hostPrivateCADir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostPrivateCAPath := filepath.Join(hostPrivateCADir, "ca.pem")
+	if err := os.WriteFile(hostPrivateCAPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sandboxCAPath := filepath.Join(dir, "sandbox-ca.pem")
+	if err := os.WriteFile(sandboxCAPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wrongCAPath := filepath.Join(dir, "wrong-ca.pem")
+	if err := os.WriteFile(wrongCAPath, wrongCAPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f := newManagedFixture(t)
+	// Grant only docs.search (read) so docs.create / message.send are denied at the write gate.
+	caps := []string{"octo-cli/docs/op/docs.search"}
+	f.bundle.Capability.Rules[0]["capabilities"] = caps
+	f.save()
+	var err error
+	f.coordinator, err = permission.NewCoordinator(
+		permission.Catalog{
+			Version:      f.bundle.CatalogVersion,
+			Digest:       f.bundle.CatalogDigest,
+			Capabilities: caps,
+		},
+		f.policies,
+		f.reader,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var docsMode atomic.Int32
+	var docsCalls atomic.Int32
+	var writeDispatches atomic.Int32
+	baseServe := f.serve
+	f.backend.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/bot/docs/search":
+			docsCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			switch docsMode.Load() {
+			case 0:
+				// Within budget.
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"total": 1,
+					"items": []map[string]any{{"docId": "doc-ok", "title": "v52"}},
+				})
+			case 1:
+				// Over MaxAcquisitionBytes (2048) with Content-Length.
+				body := `{"total":1,"items":[{"docId":"` + strings.Repeat("a", 4096) + `"}]}`
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(body)))
+				_, _ = w.Write([]byte(body))
+			case 2:
+				// Over MaxAcquisitionBytes (2048) via chunked streaming.
+				flusher, _ := w.(http.Flusher)
+				_, _ = w.Write([]byte(`{"total":1,"items":[{"docId":"`))
+				if flusher != nil {
+					flusher.Flush()
+				}
+				_, _ = w.Write([]byte(strings.Repeat("b", 4096) + `"}]}`))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			case 3:
+				// Within MaxAcquisitionBytes (<= 2048) but wrapped MCP JSON-RPC envelope > MaxSerializedRPCBytes (2048).
+				body := `{"total":1,"items":[{"docId":"` + strings.Repeat("c", 1900) + `"}]}`
+				_, _ = w.Write([]byte(body))
+			}
+		case "/v1/bot/docs/create":
+			writeDispatches.Add(1)
+			http.Error(w, "unexpected write dispatch", http.StatusInternalServerError)
+		default:
+			baseServe(w, r)
+		}
+	})
+
+	relayRaw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relayRaw.Close()
+	relayTLS := permission.PublicationTLSListener(relayRaw, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+	})
+	relayURL := "https://" + relayRaw.Addr().String() + "/mcp"
+
+	const configuredAcqBudget = int64(2048)
+	const configuredSerBudget = int64(2048)
+	budgets := &permission.ResponseBudgets{
+		MaxAcquisitionBytes:   configuredAcqBudget,
+		MaxPageItems:          10,
+		MaxPages:              3,
+		MaxCumulativeBytes:    4096,
+		MaxSerializedRPCBytes: configuredSerBudget,
+	}
+	cfg := PermissionHostConfig{
+		Version:             1,
+		Origin:              f.backend.URL,
+		BotUID:              "bot",
+		RecipientID:         "endpoint-1",
+		EndpointIncarnation: strings.Repeat("5", 32),
+		PeerSHA256:          peerHash,
+		RelayURL:            relayURL,
+		RelayExecutable:     cliBin,
+		RelayCA:             hostPrivateCAPath,
+		RelayCASHA256:       caSHA,
+		RelayPeerSHA256:     leafSHA,
+		RelayCertSHA256:     leafSHA,
+		RelayServerName:     relayDNSName,
+		ResponseBudgets:     budgets,
+	}
+	host, err := NewPermissionHost(cfg, f.coordinator, f.policies, f.reader, f.server)
+	if err != nil {
+		t.Fatal("NewPermissionHost failed:", err)
+	}
+	// Remove the host-private CA file now that the host has started.
+	if err := os.RemoveAll(hostPrivateCADir); err != nil {
+		t.Fatal(err)
+	}
+
+	relayServer := &http.Server{Handler: host, ReadHeaderTimeout: 5 * time.Second}
+	defer relayServer.Close()
+	go func() { _ = relayServer.Serve(relayTLS) }()
+
+	controlListener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    roots,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controlListener.Close()
+	controlDone := make(chan error, 1)
+	go func() {
+		c, aerr := controlListener.Accept()
+		if aerr != nil {
+			controlDone <- aerr
+			return
+		}
+		controlDone <- host.ServeControl(ctx, c.(*tls.Conn))
+	}()
+	controlConn, err := tls.Dial("tcp", controlListener.Addr().String(), &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      roots,
+		ServerName:   relayDNSName,
+		Certificates: []tls.Certificate{clientCert},
+	})
+	if err != nil {
+		t.Fatal("control dial failed:", err)
+	}
+	defer func() {
+		_ = controlConn.Close()
+		<-controlDone
+	}()
+
+	session := permission.NewID()
+	request := func(method string, payload any) map[string]any {
+		t.Helper()
+		frame, ferr := permission.PrivateJSON(map[string]any{
+			"control_version": 1,
+			"request_id":      permission.NewID(),
+			"session_id":      session,
+			"method":          method,
+			"payload":         payload,
+		})
+		if ferr != nil {
+			t.Fatal(ferr)
+		}
+		var prefix [4]byte
+		binary.BigEndian.PutUint32(prefix[:], uint32(len(frame)))
+		_ = controlConn.SetDeadline(time.Now().Add(10 * time.Second))
+		if _, werr := controlConn.Write(append(prefix[:], frame...)); werr != nil {
+			t.Fatal(werr)
+		}
+		if _, rerr := io.ReadFull(controlConn, prefix[:]); rerr != nil {
+			t.Fatal(rerr)
+		}
+		body := make([]byte, binary.BigEndian.Uint32(prefix[:]))
+		if _, rerr := io.ReadFull(controlConn, body); rerr != nil {
+			t.Fatal(rerr)
+		}
+		var resp map[string]any
+		if json.Unmarshal(body, &resp) != nil || resp["status"] != "ok" {
+			t.Fatalf("control %s failed: %s", method, string(body))
+		}
+		return resp["payload"].(map[string]any)
+	}
+
+	request("hello", map[string]any{
+		"versions":             []int{2},
+		"metadata_versions":    []int{2},
+		"identity_versions":    []int{2},
+		"endpoint_incarnation": cfg.EndpointIncarnation,
+		"configured_origin":    cfg.Origin,
+		"recipient_id":         cfg.RecipientID,
+	})
+
+	openTurn := func(seq string, includeTLS bool) (capsuleID string, reply map[string]any, ticket map[string]any) {
+		t.Helper()
+		f.mu.Lock()
+		f.header.MessageID = "52" + seq
+		f.header.Reference = "header_v52_" + seq
+		f.header.Delivery.Sequence = seq
+		f.mu.Unlock()
+		ing := request("register_ingress", map[string]any{
+			"key":                f.bundle.Key,
+			"delivery_reference": "delivery_v52_" + seq,
+			"stream":             f.header.Delivery,
+			"payload_sha256":     f.header.PayloadSHA256,
+		})
+		ctxID := permission.NewID()
+		adm := request("admit", map[string]any{
+			"ingress_id":          ing["ingress_id"],
+			"proposed_context_id": ctxID,
+		})
+		man := map[string]any{
+			"context_id":         ctxID,
+			"context_generation": adm["generation"],
+			"originals":          []permission.NativeHeader{f.header},
+		}
+		mBytes, _ := permission.PrivateJSON(man)
+		man["bytes"] = len(mBytes)
+		man["sha256"] = sha256Sum(mBytes)
+		request("bind_context", map[string]any{
+			"capsule_id": adm["capsule_id"],
+			"manifest":   man,
+		})
+		openPayload := map[string]any{
+			"capsule_id":   adm["capsule_id"],
+			"recipient_id": cfg.RecipientID,
+			"transport":    "stdio",
+			"relay_nonce":  permission.NewID(),
+		}
+		if includeTLS {
+			openPayload["include_tls_trust"] = true
+		}
+		reply = request("open_relay", openPayload)
+		handleStr := reply["handle"].(string)
+		rawTicket, derr := base64.RawURLEncoding.Strict().DecodeString(handleStr)
+		if derr != nil {
+			t.Fatal(derr)
+		}
+		if json.Unmarshal(rawTicket, &ticket) != nil {
+			t.Fatalf("invalid ticket JSON: %s", string(rawTicket))
+		}
+		return adm["capsule_id"].(string), reply, ticket
+	}
+
+	runChildTurnRelay := func(handle, sslCertFile string, lines ...[]byte) (stdout, stderr string, err error) {
+		t.Helper()
+		var input bytes.Buffer
+		for _, l := range lines {
+			input.Write(l)
+			input.WriteByte('\n')
+		}
+		cmd := exec.CommandContext(ctx, cliBin, "--turn-relay", handle)
+		env := []string{
+			"PATH=" + os.Getenv("PATH"),
+			"HOME=" + dir,
+			"TMPDIR=" + dir,
+		}
+		if sslCertFile != "" {
+			env = append(env, "SSL_CERT_FILE="+sslCertFile)
+		}
+		cmd.Env = env
+		cmd.Stdin = &input
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &errBuf
+		err = cmd.Run()
+		return outBuf.String(), errBuf.String(), err
+	}
+
+	makeCallLine := func(seq, id string, opID string, args map[string]any) []byte {
+		t.Helper()
+		params, _ := json.Marshal(map[string]any{
+			"name": "call_op",
+			"arguments": map[string]any{
+				"operation_id": opID,
+				"arguments":    args,
+			},
+		})
+		req := rpcRequest{
+			Jsonrpc: "2.0",
+			ID:      json.RawMessage(fmt.Sprintf("%q", id)),
+			Method:  "tools/call",
+			Params:  params,
+		}
+		if err := relayDeclaration(&req, permission.DeclarationV2{
+			Sender:      "alice",
+			Channel:     "group",
+			ChannelType: 2,
+			SpaceID:     "space",
+			MessageID:   "52" + seq,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(req)
+		return b
+	}
+	initLine, _ := json.Marshal(initializedRequest())
+
+	// 1. Verify [C-B1] & [C-B2] on open_relay (both include_tls_trust=false and include_tls_trust=true).
+	for idx, includeTLS := range []bool{false, true} {
+		seq := fmt.Sprintf("%d", idx+1)
+		capID, reply, ticket := openTurn(seq, includeTLS)
+		handle := reply["handle"].(string)
+
+		wantKeys := []string{"ca_sha256", "endpoint", "max_response_bytes", "peer_sha256", "server_name", "token"}
+		if !reflect.DeepEqual(sortedKeys(ticket), wantKeys) {
+			t.Fatalf("includeTLS=%v unexpected ticket keys: got %v want %v", includeTLS, sortedKeys(ticket), wantKeys)
+		}
+		if ticket["ca_sha256"] != caSHA || ticket["peer_sha256"] != leafSHA || ticket["server_name"] != relayDNSName || ticket["max_response_bytes"] != float64(configuredAcqBudget) {
+			t.Fatalf("includeTLS=%v ticket mismatch: %v", includeTLS, ticket)
+		}
+		if includeTLS {
+			tlsSub, ok := reply["tls"].(map[string]any)
+			if !ok || !reflect.DeepEqual(sortedKeys(tlsSub), []string{"ca_file", "ca_sha256", "cert_sha256", "peer_sha256", "server_name"}) {
+				t.Fatalf("includeTLS=true unexpected tls keys: %v", reply["tls"])
+			}
+		}
+
+		// Verify raw hijacked HTTP response from writeManagedHTTP carries X-Octo-Acquisition-Budget-Bytes.
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MinVersion: tls.VersionTLS13,
+					RootCAs:    roots,
+					ServerName: relayDNSName,
+				},
+			},
+		}
+		docsMode.Store(0)
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL, bytes.NewReader(makeCallLine(seq, "http_hdr", "docs.search", map[string]any{"q": "hdr"})))
+		if err != nil {
+			t.Fatal(err)
+		}
+		httpReq.Header.Set("Authorization", "Bearer "+ticket["token"].(string))
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpResp, err := httpClient.Do(httpReq)
+		if err != nil {
+			t.Fatalf("direct hijacked HTTP call failed: %v", err)
+		}
+		respBody, _ := io.ReadAll(httpResp.Body)
+		_ = httpResp.Body.Close()
+		if gotHdr := httpResp.Header.Get("X-Octo-Acquisition-Budget-Bytes"); gotHdr != "2048" {
+			t.Fatalf("writeManagedHTTP hijacked response missing X-Octo-Acquisition-Budget-Bytes=2048: got=%q headers=%v body=%s", gotHdr, httpResp.Header, string(respBody))
+		}
+
+		// Positive child-process execution (with hostPrivateCAPath deleted, using sandbox SSL_CERT_FILE).
+		docsMode.Store(0)
+		stdout, stderr, err := runChildTurnRelay(
+			handle,
+			sandboxCAPath,
+			initLine,
+			makeCallLine(seq, "pos_ok", "docs.search", map[string]any{"q": "v52"}),
+		)
+		if err != nil {
+			t.Fatalf("includeTLS=%v child octo-cli --turn-relay failed: err=%v stderr=%s stdout=%s", includeTLS, err, stderr, stdout)
+		}
+		if !strings.Contains(stdout, "doc-ok") {
+			t.Fatalf("includeTLS=%v expected doc-ok in child stdout, got: %s", includeTLS, stdout)
+		}
+
+		// Over-budget upstream acquisition (Content-Length & streaming) -> replacement envelope relayed cleanly.
+		for _, mode := range []int32{1, 2} {
+			docsMode.Store(mode)
+			outAcq, errAcqOut, errAcq := runChildTurnRelay(
+				handle,
+				sandboxCAPath,
+				initLine,
+				makeCallLine(seq, fmt.Sprintf("acq_%d", mode), "docs.search", map[string]any{"q": "over"}),
+			)
+			if errAcq != nil {
+				t.Fatalf("mode=%d child octo-cli --turn-relay failed on replacement envelope: err=%v stderr=%s", mode, errAcq, errAcqOut)
+			}
+			if !strings.Contains(outAcq, "RESPONSE_BUDGET_EXCEEDED") || !strings.Contains(outAcq, "acquisition_bytes") {
+				t.Fatalf("mode=%d expected RESPONSE_BUDGET_EXCEEDED (acquisition_bytes) in child stdout, got: %s", mode, outAcq)
+			}
+		}
+
+		// Over-budget serialized RPC envelope -> replacement envelope relayed cleanly.
+		docsMode.Store(3)
+		outSer, errSerOut, errSer := runChildTurnRelay(
+			handle,
+			sandboxCAPath,
+			initLine,
+			makeCallLine(seq, "ser_over", "docs.search", map[string]any{"q": "ser"}),
+		)
+		if errSer != nil {
+			t.Fatalf("child octo-cli --turn-relay failed on serialized_rpc_bytes replacement: err=%v stderr=%s", errSer, errSerOut)
+		}
+		if !strings.Contains(outSer, "RESPONSE_BUDGET_EXCEEDED") || !strings.Contains(outSer, "serialized_rpc_bytes") {
+			t.Fatalf("expected RESPONSE_BUDGET_EXCEEDED (serialized_rpc_bytes) in child stdout, got: %s", outSer)
+		}
+
+		// Denied-write gate across child octo-cli --turn-relay -> -32007 capability_denied, zero backend write dispatches.
+		writeDispatches.Store(0)
+		outDenied, errDeniedOut, errDenied := runChildTurnRelay(
+			handle,
+			sandboxCAPath,
+			initLine,
+			makeCallLine(seq, "deny_write", "docs.create", map[string]any{"title": "forbidden"}),
+		)
+		if errDenied != nil {
+			t.Fatalf("child octo-cli --turn-relay failed on denied write: err=%v stderr=%s", errDenied, errDeniedOut)
+		}
+		if !strings.Contains(outDenied, "-32007") || !strings.Contains(outDenied, "capability_denied") {
+			t.Fatalf("expected -32007 capability_denied on denied write, got: %s", outDenied)
+		}
+		if writeDispatches.Load() != 0 {
+			t.Fatalf("expected 0 backend dispatches on denied write, got %d", writeDispatches.Load())
+		}
+
+		// Negative TLS refusals across child octo-cli --turn-relay process.
+		// (a) Wrong CA in SSL_CERT_FILE -> RELAY_TLS_PIN_MISMATCH.
+		if out, errOut, cerr := runChildTurnRelay(handle, wrongCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RELAY_TLS_PIN_MISMATCH") {
+			t.Fatalf("expected RELAY_TLS_PIN_MISMATCH with wrong SSL_CERT_FILE: err=%v stdout=%q stderr=%q", cerr, out, errOut)
+		}
+		// (b) Wrong ca_sha256 in ticket -> RELAY_TLS_PIN_MISMATCH.
+		badCAHandle, err := TurnRelayHandleWithTrust(relayURL, ticket["token"].(string), TurnRelayTrust{
+			CASHA256:         strings.Repeat("a", 64),
+			PeerSHA256:       leafSHA,
+			ServerName:       relayDNSName,
+			MaxResponseBytes: configuredAcqBudget,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, errOut, cerr := runChildTurnRelay(badCAHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RELAY_TLS_PIN_MISMATCH") {
+			t.Fatalf("expected RELAY_TLS_PIN_MISMATCH with wrong ca_sha256: err=%v stdout=%q stderr=%q", cerr, out, errOut)
+		}
+		// (c) Wrong server_name in ticket -> RELAY_UNAVAILABLE.
+		badSNIHandle, err := TurnRelayHandleWithTrust(relayURL, ticket["token"].(string), TurnRelayTrust{
+			CASHA256:         caSHA,
+			PeerSHA256:       leafSHA,
+			ServerName:       "wrong.octo.internal",
+			MaxResponseBytes: configuredAcqBudget,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, errOut, cerr := runChildTurnRelay(badSNIHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RELAY_UNAVAILABLE") {
+			t.Fatalf("expected RELAY_UNAVAILABLE with wrong server_name: err=%v stdout=%q stderr=%q", cerr, out, errOut)
+		}
+		// (d) Missing server_name against 127.0.0.1 endpoint whose cert has only DNS SAN -> RELAY_UNAVAILABLE.
+		missingSNIHandle, err := TurnRelayHandleWithTrust(relayURL, ticket["token"].(string), TurnRelayTrust{
+			CASHA256:         caSHA,
+			PeerSHA256:       leafSHA,
+			MaxResponseBytes: configuredAcqBudget,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, errOut, cerr := runChildTurnRelay(missingSNIHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RELAY_UNAVAILABLE") {
+			t.Fatalf("expected RELAY_UNAVAILABLE when server_name omitted against DNS-only cert: err=%v stdout=%q stderr=%q", cerr, out, errOut)
+		}
+		// (e) Wrong peer_sha256 in ticket -> RELAY_TLS_PIN_MISMATCH.
+		badPeerHandle, err := TurnRelayHandleWithTrust(relayURL, ticket["token"].(string), TurnRelayTrust{
+			CASHA256:         caSHA,
+			PeerSHA256:       strings.Repeat("b", 64),
+			ServerName:       relayDNSName,
+			MaxResponseBytes: configuredAcqBudget,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out, errOut, cerr := runChildTurnRelay(badPeerHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RELAY_TLS_PIN_MISMATCH") {
+			t.Fatalf("expected RELAY_TLS_PIN_MISMATCH with wrong peer_sha256: err=%v stdout=%q stderr=%q", cerr, out, errOut)
+		}
+
+		request("close", map[string]any{"capsule_id": capID, "reason": "completed"})
+	}
+
+	// 2. Verify cross-process octo-cli --turn-relay directly enforces configured MaxAcquisitionBytes (1024 < 64 MiB)
+	// when the relay HTTP response itself exceeds the budget (both via ticket max_response_bytes alone and via header),
+	// proving the child process does not fall back to 64 MiB when in-process relayEndpointBudgets is empty.
+	oversizeListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oversizeListener.Close()
+	oversizeTLS := permission.PublicationTLSListener(oversizeListener, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+	})
+	var includeBudgetHeader atomic.Bool
+	oversizeSrv := &http.Server{
+		ReadHeaderTimeout: 5 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if includeBudgetHeader.Load() {
+				w.Header().Set("X-Octo-Acquisition-Budget-Bytes", "1024")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			// Write 2048 bytes (> 1024 budget, far below 64 MiB).
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"` + strings.Repeat("x", 2048) + `"}` + "\n"))
+		}),
+	}
+	defer oversizeSrv.Close()
+	go func() { _ = oversizeSrv.Serve(oversizeTLS) }()
+
+	oversizeURL := "https://" + oversizeListener.Addr().String() + "/mcp"
+	// Case 2A: ticket carries max_response_bytes=1024, server omits header -> child still enforces 1024 bytes!
+	includeBudgetHeader.Store(false)
+	ticketBudgetHandle, err := TurnRelayHandleWithTrust(oversizeURL, strings.Repeat("d", 64), TurnRelayTrust{
+		CASHA256:         caSHA,
+		PeerSHA256:       leafSHA,
+		ServerName:       relayDNSName,
+		MaxResponseBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, errOut, cerr := runChildTurnRelay(ticketBudgetHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RESPONSE_BUDGET_EXCEEDED") {
+		t.Fatalf("expected child octo-cli --turn-relay to enforce ticket max_response_bytes=1024 (<64MiB): err=%v stdout=%q stderr=%q", cerr, out, errOut)
+	}
+	// Case 2B: server emits X-Octo-Acquisition-Budget-Bytes=1024 -> child enforces 1024 bytes even if ticket has no max_response_bytes!
+	includeBudgetHeader.Store(true)
+	headerBudgetHandle, err := TurnRelayHandleWithTrust(oversizeURL, strings.Repeat("d", 64), TurnRelayTrust{
+		CASHA256:   caSHA,
+		PeerSHA256: leafSHA,
+		ServerName: relayDNSName,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, errOut, cerr := runChildTurnRelay(headerBudgetHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RESPONSE_BUDGET_EXCEEDED") {
+		t.Fatalf("expected child octo-cli --turn-relay to enforce X-Octo-Acquisition-Budget-Bytes=1024 (<64MiB): err=%v stdout=%q stderr=%q", cerr, out, errOut)
+	}
+}
