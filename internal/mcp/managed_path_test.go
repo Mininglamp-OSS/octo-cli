@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"math/big"
@@ -356,15 +357,29 @@ func TestManagedPrivateControlToHTTPRelay(t *testing.T) {
 func runManagedPrivateControlToHTTPRelay(t *testing.T, f *managedFixture) {
 	t.Helper()
 	serverCert, clientCert, roots, peerHash := controlCertificates(t)
-	cfg := PermissionHostConfig{Version: 1, Origin: f.backend.URL, BotUID: "bot", RecipientID: "endpoint-1", EndpointIncarnation: strings.Repeat("5", 32), PeerSHA256: peerHash}
+	dir := secureTestDir(t)
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCert.Certificate[1]})
+	caPath := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	relayRaw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relayRaw.Close()
+	relayTLS := permission.PublicationTLSListener(relayRaw, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}})
+	relayURL := "https://" + relayRaw.Addr().String()
+	leafPin := sha256Sum(serverCert.Certificate[0])
+	cfg := PermissionHostConfig{Version: 1, Origin: f.backend.URL, BotUID: "bot", RecipientID: "endpoint-1", EndpointIncarnation: strings.Repeat("5", 32), PeerSHA256: peerHash, RelayURL: relayURL, RelayCA: caPath, RelayCertSHA256: leafPin, RelayServerName: "localhost"}
 	host, err := NewPermissionHost(cfg, f.coordinator, f.policies, f.reader, f.server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay := httptest.NewServer(host)
-	defer relay.Close()
-	host.config.RelayURL = relay.URL
-	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{serverCert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
+	relayServer := &http.Server{Handler: host, ReadHeaderTimeout: 5 * time.Second}
+	defer relayServer.Close()
+	go func() { _ = relayServer.Serve(relayTLS) }()
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,17 +424,25 @@ func runManagedPrivateControlToHTTPRelay(t *testing.T, f *managedFixture) {
 	ingress := request("register_ingress", map[string]any{"key": f.bundle.Key, "delivery_reference": "delivery", "stream": f.header.Delivery, "payload_sha256": f.header.PayloadSHA256})
 	contextID := permission.NewID()
 	admitted := request("admit", map[string]any{"ingress_id": ingress["ingress_id"], "proposed_context_id": contextID})
+	if admitted["scope_incarnation"] != f.bundle.Incarnation || admitted["context_epoch"] != f.bundle.ContextEpoch {
+		t.Fatal("admit scope/epoch mismatch", admitted)
+	}
 	manifest := map[string]any{"context_id": contextID, "context_generation": admitted["generation"], "originals": []permission.NativeHeader{f.header}}
 	b, _ := permission.PrivateJSON(manifest)
 	manifest["bytes"] = len(b)
 	manifest["sha256"] = sha256Sum(b)
 	request("bind_context", map[string]any{"capsule_id": admitted["capsule_id"], "manifest": manifest})
-	opened := request("open_relay", map[string]any{"capsule_id": admitted["capsule_id"], "recipient_id": cfg.RecipientID, "transport": "http", "relay_nonce": permission.NewID()})
+	opened := request("open_relay", map[string]any{"capsule_id": admitted["capsule_id"], "recipient_id": cfg.RecipientID, "transport": "http", "relay_nonce": permission.NewID(), "include_tls_trust": true})
+	tlsMap, ok := opened["tls"].(map[string]any)
+	if !ok || tlsMap["ca_file"] != caPath || tlsMap["cert_sha256"] != leafPin || tlsMap["server_name"] != "localhost" {
+		t.Fatal("open_relay tls trust mismatch", opened)
+	}
+	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, ServerName: "localhost"}}}
 	post := func(req rpcRequest) rpcResponse {
 		raw, _ := json.Marshal(req)
-		request, _ := http.NewRequest("POST", relay.URL, bytes.NewReader(raw))
+		request, _ := http.NewRequest("POST", relayURL, bytes.NewReader(raw))
 		request.Header.Set("Authorization", "Bearer "+opened["handle"].(string))
-		response, err := http.DefaultClient.Do(request)
+		response, err := tlsClient.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -437,7 +460,7 @@ func runManagedPrivateControlToHTTPRelay(t *testing.T, f *managedFixture) {
 		t.Fatal(r, f.business.Load())
 	}
 	// The worker receives only the relay ticket, never the host/Bot secret.
-	ticket, _ := json.Marshal(map[string]any{"endpoint": relay.URL, "token": opened["handle"]})
+	ticket, _ := json.Marshal(map[string]any{"ca_file": caPath, "cert_sha256": leafPin, "endpoint": relayURL, "server_name": "localhost", "token": opened["handle"]})
 	workerRequest := sendRequest(t, 3, "call_op", permission.DeclarationV2{Sender: "alice", Channel: "group", ChannelType: 2, SpaceID: "space", MessageID: "42"})
 	workerBytes, _ := json.Marshal(workerRequest)
 	var workerOutput bytes.Buffer

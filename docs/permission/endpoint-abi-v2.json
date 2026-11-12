@@ -1,0 +1,153 @@
+{
+  "format": "permission-cli-endpoint-abi-v2",
+  "supersedes": "endpoint-abi-v1.json",
+  "endpoint_head": "afb732b20e63baf8acf06c4726a66e290b98e1b6",
+  "control": "TLS 1.3 mutual authentication and exact peer certificate pin; uint32 BE canonical JSON <=65536 bytes; nine methods (hello, register_ingress, admit, resolve_contributors, bind_context, open_relay, close_turn, release_session, evict_scope)",
+  "readiness": {
+    "config_key": "ready_path",
+    "record": {
+      "control_version": 1,
+      "coordinator_incarnation": "32-hex fresh process ID"
+    },
+    "lifetime": "private 0600 exclusive-create, fsync before serving, refuse existing record; endpoint launcher supplies this exact boot ID to its pinned consumer"
+  },
+  "admit": {
+    "request": [
+      "ingress_id",
+      "proposed_context_id"
+    ],
+    "optional_request": [
+      "prior_generation",
+      "context_generation"
+    ],
+    "reply": [
+      "capsule_id",
+      "turn_id",
+      "generation",
+      "scope_incarnation",
+      "context_epoch"
+    ],
+    "context_reuse_semantics": "when an active completed bound context for (owner, proposed_context_id, key, scope_incarnation, context_epoch) exists on this host and optional prior_generation/context_generation (if supplied) matches that bound generation, admit reuses that generation ID for same-generation complete-contributor context reuse; if scope_incarnation or context_epoch rotated, or the prior turn did not complete, admit mints a fresh generation ID"
+  },
+  "resolve_contributors": {
+    "request": [
+      "capsule_id",
+      "delivery_references"
+    ],
+    "limits": {
+      "min_references": 1,
+      "max_references_per_capsule": 256,
+      "native_batch_size": 32
+    },
+    "reply": [
+      "headers"
+    ],
+    "semantics": "resolves unseen prior-turn/history contributor delivery references on an admitted unbound capsule via NativeReader.Resolve with purpose='contributor' without inserting into seenDeliveries ingress replay tombstones, enabling complete-contributor bind_context while allowing those references to be resolved or admitted independently across turns"
+  },
+  "bind_context": {
+    "request": [
+      "capsule_id",
+      "manifest"
+    ],
+    "optional_request": [
+      "contributor_references",
+      "delivery_references"
+    ],
+    "inline_manifest": [
+      "context_id",
+      "context_generation",
+      "originals",
+      "bytes",
+      "sha256"
+    ],
+    "core_hash": "bytes/sha256 cover canonical JSON of exactly context_id, context_generation, originals; originals are complete native Headers, including the invoking original and all resolved contributor Headers",
+    "limits": {
+      "originals": 256,
+      "core_bytes": 1048576,
+      "control_frame_bytes": 65536
+    },
+    "chunk_manifest": [
+      "carrier",
+      "bytes",
+      "sha256",
+      "offset",
+      "data_base64"
+    ],
+    "carrier": "canonical-json-chunks-v1",
+    "chunk_semantics": "each bind_context frame uses manifest containing the chunk descriptor; bytes/hash fixed on first chunk, offset exactly accepted length, standard base64 <=32768 decoded bytes recommended; no truncation/replacement/path/URL; canonical full core verified before binding",
+    "intermediate_reply": [
+      "accepted_bytes"
+    ],
+    "final_reply": [
+      "context_generation"
+    ],
+    "contributor_resolution": "if optional contributor_references/delivery_references are supplied on bind_context before final chunk assembly completes, the host resolves any not-yet-resolved contributor references on the capsule via purpose='contributor' before verifying ObservedHeader and Stage1 contributor intersection"
+  },
+  "open_relay": {
+    "request": [
+      "capsule_id",
+      "recipient_id",
+      "transport",
+      "relay_nonce"
+    ],
+    "optional_request": [
+      "include_tls_trust"
+    ],
+    "http_reply": [
+      "transport",
+      "url",
+      "handle"
+    ],
+    "stdio_reply": [
+      "transport",
+      "executable",
+      "executableSha256",
+      "handle"
+    ],
+    "optional_reply_when_include_tls_trust": [
+      "tls"
+    ],
+    "tls_metadata": {
+      "fields": [
+        "ca_file",
+        "cert_sha256",
+        "server_name"
+      ],
+      "semantics": "populated when include_tls_trust=true and host relay TLS trust material is configured; never disables TLS 1.3 verification"
+    },
+    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; worker verifies private CA and/or leaf cert_sha256 with InsecureSkipVerify=false",
+    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing endpoint, token, and optional ca_file, cert_sha256, server_name; ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from ca_file/SSL_CERT_FILE, and VerifyConnection leaf cert_sha256 pinning",
+    "relay_executable": "private config may name the pinned CLI; empty selects this executable; absolute regular non-writable executable required",
+    "bearer_domain": "64 lowercase hex characters; ordinary bf_/app_/uk_ credentials are rejected by the relay ticket parser"
+  },
+  "host_config_optional_relay_tls": {
+    "fields": [
+      "relay_ca",
+      "relay_cert_sha256",
+      "relay_server_name"
+    ],
+    "defaults": "ServePermissionHost defaults relay_ca to peer_ca and relay_cert_sha256 to the SHA-256 of the loaded server leaf certificate when not explicitly overridden"
+  },
+  "native_reader_bounds": {
+    "max_reads": 100000,
+    "max_observations": 100000,
+    "max_generations": 1024,
+    "saturation_behavior": "fail closed with permission: bundle unavailable (PERMISSION_BUNDLE_UNAVAILABLE); never evicts read_id/read_nonce uniqueness fences or HeaderV1 immutability observations via TTL or sliding window"
+  },
+  "source_control_client": {
+    "v43_head": {
+      "commit": "afb732b20e63baf8acf06c4726a66e290b98e1b6",
+      "path": "src/permissions/control-client.ts",
+      "bytes": 11710,
+      "sha256": "4e40ee144b5eec7ef645be92948dd6b1f36a838d1fb82e6b471a59e820c99bef"
+    },
+    "e460_head": {
+      "commit": "e4601041bd9bab186e4122fb8c76a3444bd1da62",
+      "path": "src/permissions/control-client.ts",
+      "bytes": 11683,
+      "sha256": "e390188ce11fc5c22041feff24119f81b7fa3a3a8efb6555b9fb7328dd676fbe"
+    }
+  },
+  "verification": "exact pinned endpoint control sources (e4601041 and afb732b2) and v44 convergence harness exercised over mTLS 1.3, private-CA TLS 1.3 PublicationTLSListener relay, actual CLI --turn-relay process, and ServePermissionHost v2 package bootstrap with page-bounds-v2.json enforcement",
+  "rpc_identity": "JSON-RPC IDs only correlate replies; equal parameters and reused IDs may be legitimate new logical calls. Each BeginCall mints a private call ID and each prepared physical attempt is one-use. Native delivery replay is separately fenced; no argument-based idempotency is invented."
+}

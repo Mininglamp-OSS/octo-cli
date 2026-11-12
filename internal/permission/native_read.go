@@ -76,20 +76,54 @@ type nativeGeneration struct {
 	bound        bool
 }
 
+const (
+	// MaxNativeReads caps retained read_id and authority read_nonce replay fences.
+	// Without a proven native horizon, saturation fails closed rather than evicting fences.
+	MaxNativeReads = 100000
+	// MaxNativeObservations caps retained cross-read HeaderV1 immutability records.
+	MaxNativeObservations = 100000
+	// MaxNativeGenerations caps concurrently active generation bindings.
+	MaxNativeGenerations = 1024
+)
+
 // NativeReader consumes the existing exact-Bot native-facts contract. It does
 // not provide the server's native authority, disclosure or checkpoint methods.
 type NativeReader struct {
-	self         *SelfPolicyReader
-	pins         map[string]AuthorityPin
-	profiles     map[string][]string
-	mu           sync.Mutex
-	reads        map[string]bool
-	generations  map[string]nativeGeneration
-	observations map[headerKey]Observation
+	self            *SelfPolicyReader
+	pins            map[string]AuthorityPin
+	profiles        map[string][]string
+	mu              sync.Mutex
+	reads           map[string]bool
+	generations     map[string]nativeGeneration
+	observations    map[headerKey]Observation
+	maxReads        int
+	maxObservations int
+	maxGenerations  int
 }
 type headerKey struct {
 	Key
 	reference string
+}
+
+func (r *NativeReader) readLimit() int {
+	if r.maxReads > 0 {
+		return r.maxReads
+	}
+	return MaxNativeReads
+}
+
+func (r *NativeReader) observationLimit() int {
+	if r.maxObservations > 0 {
+		return r.maxObservations
+	}
+	return MaxNativeObservations
+}
+
+func (r *NativeReader) generationLimit() int {
+	if r.maxGenerations > 0 {
+		return r.maxGenerations
+	}
+	return MaxNativeGenerations
 }
 
 // NewNativeReader fixes authority pins and the exact unchanged predicate table.
@@ -313,6 +347,21 @@ func (r *NativeReader) Resolve(ctx context.Context, key Key, purpose string, ref
 			return nil, ErrUnavailable
 		}
 	}
+	newObservations := map[headerKey]bool{}
+	for j := range observations {
+		o := &observations[j]
+		k := headerKey{o.key, o.header.Reference}
+		if prior, ok := r.observations[k]; ok {
+			if !bytes.Equal(prior.raw, o.raw) {
+				return nil, ErrUnavailable
+			}
+		} else {
+			newObservations[k] = true
+		}
+	}
+	if len(r.reads)+1+len(nonces) > r.readLimit() || len(r.observations)+len(newObservations) > r.observationLimit() {
+		return nil, ErrUnavailable
+	}
 	for n := range nonces {
 		r.reads[n] = true
 	}
@@ -320,16 +369,26 @@ func (r *NativeReader) Resolve(ctx context.Context, key Key, purpose string, ref
 	for j := range observations {
 		o := &observations[j]
 		k := headerKey{o.key, o.header.Reference}
-		if prior, ok := r.observations[k]; ok && !bytes.Equal(prior.raw, o.raw) {
-			return nil, ErrUnavailable
-		}
-	}
-	for j := range observations {
-		o := &observations[j]
-		k := headerKey{o.key, o.header.Reference}
 		r.observations[k] = *o
 	}
 	return observations, nil
+}
+
+// ConfigureBounds overrides the fail-closed retention ceilings before any reads
+// or generations are recorded. It never enables sliding-window or TTL eviction.
+func (r *NativeReader) ConfigureBounds(maxReads, maxObservations, maxGenerations int) error {
+	if maxReads < 1 || maxReads > MaxNativeReads || maxObservations < 1 || maxObservations > MaxNativeObservations || maxGenerations < 1 || maxGenerations > MaxNativeGenerations {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.reads) != 0 || len(r.observations) != 0 || len(r.generations) != 0 {
+		return ErrConflict
+	}
+	r.maxReads = maxReads
+	r.maxObservations = maxObservations
+	r.maxGenerations = maxGenerations
+	return nil
 }
 
 // ObservedHeader joins an endpoint's exact Header to a native-issued delivery
@@ -367,6 +426,9 @@ func (r *NativeReader) BindGeneration(generation string, original Observation, c
 	defer r.mu.Unlock()
 	if _, exists := r.generations[generation]; exists {
 		return ErrConflict
+	}
+	if len(r.generations) >= r.generationLimit() {
+		return ErrUnavailable
 	}
 	r.generations[generation] = nativeGeneration{key: original.key, original: original, contributors: copyContributors}
 	return nil

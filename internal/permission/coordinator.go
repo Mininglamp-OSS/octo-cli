@@ -89,8 +89,10 @@ type watermark struct {
 }
 type scope struct {
 	gate      chan struct{}
+	mu        sync.Mutex
 	seen      bool
 	watermark watermark
+	needs     Needs
 }
 
 // TryLock enters the exact-scope acceptance/first-write critical section.
@@ -246,7 +248,16 @@ func (s *scope) accept(p *Bundle) error {
 	}
 	s.seen = true
 	s.watermark = watermark{r, e, p.Digest}
+	s.mu.Lock()
+	s.needs = Needs{p.Invocation.State == "E", p.Capability.State == "E"}
+	s.mu.Unlock()
 	return nil
+}
+
+func (s *scope) initialNeeds() Needs {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.needs
 }
 
 // atBoundary performs F -> newly initiated complete B -> serialized acceptance,
@@ -263,7 +274,7 @@ func (c *Coordinator) atBoundary(ctx context.Context, i *Invocation, capability 
 		return refuse("context_untrusted")
 	}
 	b := i.binding
-	need := Needs{}
+	need := c.scope(&b).initialNeeds()
 	for round := 0; round < 3; round++ {
 		if i.context.Err() != nil {
 			return refuse("context_untrusted")

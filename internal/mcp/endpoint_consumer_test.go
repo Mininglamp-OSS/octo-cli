@@ -7,13 +7,15 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"net"
-	"net/http/httptest"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 // Opt-in, offline exact-source consumer test. The environment selects only an
@@ -48,14 +50,26 @@ func runPinnedEndpointControlAndActualTurnRelayExecutable(t *testing.T, f *manag
 		t.Fatal(err, string(output))
 	}
 	serverCert, clientCert, roots, peerHash := controlCertificates(t)
-	cfg := PermissionHostConfig{Version: 1, Origin: f.backend.URL, BotUID: "bot", RecipientID: "endpoint-1", EndpointIncarnation: strings.Repeat("5", 32), PeerSHA256: peerHash, RelayURL: "http://127.0.0.1", RelayExecutable: binary}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCert.Certificate[1]})
+	caPath := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caPath, caPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	relayRaw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relayRaw.Close()
+	relayTLS := permission.PublicationTLSListener(relayRaw, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}})
+	relayURL := "https://" + relayRaw.Addr().String()
+	cfg := PermissionHostConfig{Version: 1, Origin: f.backend.URL, BotUID: "bot", RecipientID: "endpoint-1", EndpointIncarnation: strings.Repeat("5", 32), PeerSHA256: peerHash, RelayURL: relayURL, RelayExecutable: binary, RelayCA: caPath, RelayCertSHA256: sha256Sum(serverCert.Certificate[0]), RelayServerName: "localhost"}
 	host, err := NewPermissionHost(cfg, f.coordinator, f.policies, f.reader, f.server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relay := httptest.NewServer(host)
-	defer relay.Close()
-	host.config.RelayURL = relay.URL
+	relayServer := &http.Server{Handler: host, ReadHeaderTimeout: 5 * time.Second}
+	defer relayServer.Close()
+	go func() { _ = relayServer.Serve(relayTLS) }()
 	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{serverCert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
 	if err != nil {
 		t.Fatal(err)

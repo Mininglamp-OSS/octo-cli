@@ -4,19 +4,72 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
+
+// TurnRelayTrust carries verified private-CA, leaf-certificate digest, and SAN
+// server-name constraints for private turn-relay and HTTP-worker TLS handoff.
+// It never disables TLS certificate or hostname/IP SAN verification.
+type TurnRelayTrust struct {
+	CAFile     string `json:"ca_file,omitempty"`
+	CertSHA256 string `json:"cert_sha256,omitempty"`
+	ServerName string `json:"server_name,omitempty"`
+}
+
+func validRelayServerName(s string) bool {
+	if s == "" || len(s) > 253 || strings.ContainsAny(s, "/:\\\r\n\t ") {
+		return false
+	}
+	for _, ch := range s {
+		if ch < 33 || ch > 126 {
+			return false
+		}
+	}
+	return true
+}
 
 // TurnRelayHandle is the endpoint e4601041 worker ABI. It contains only a
 // relay address and one-turn bearer, never Bot/control credentials or paths.
 func TurnRelayHandle(endpoint, token string) (string, error) {
-	b, err := json.Marshal(map[string]string{"endpoint": endpoint, "token": token})
+	return TurnRelayHandleWithTrust(endpoint, token, TurnRelayTrust{})
+}
+
+// TurnRelayHandleWithTrust binds optional verified private-CA/SAN/cert-digest
+// pins into the one-turn stdio relay handle within the 512-char handle budget.
+func TurnRelayHandleWithTrust(endpoint, token string, trust TurnRelayTrust) (string, error) {
+	ticket := map[string]string{"endpoint": endpoint, "token": token}
+	if trust.CAFile != "" {
+		if !filepath.IsAbs(trust.CAFile) || strings.ContainsAny(trust.CAFile, "\r\n\x00") {
+			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+		}
+		ticket["ca_file"] = trust.CAFile
+	}
+	if trust.CertSHA256 != "" {
+		if !controlHash(trust.CertSHA256) {
+			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+		}
+		ticket["cert_sha256"] = trust.CertSHA256
+	}
+	if trust.ServerName != "" {
+		if !validRelayServerName(trust.ServerName) {
+			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+		}
+		ticket["server_name"] = trust.ServerName
+	}
+	b, err := json.Marshal(ticket)
 	if err != nil {
 		return "", err
 	}
@@ -40,6 +93,50 @@ func ServeTurnRelayHandle(ctx context.Context, handle string, in io.Reader, out 
 	return ServeTurnRelay(ctx, bytes.NewReader(b), in, out)
 }
 
+func relayTLSClientConfig(caFile, certSHA256, serverName string) (*tls.Config, error) {
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
+	if serverName != "" {
+		if !validRelayServerName(serverName) {
+			return nil, errors.New("RELAY_TICKET_INVALID")
+		}
+		tlsConfig.ServerName = serverName
+	}
+	caPath := caFile
+	if caPath == "" {
+		caPath = os.Getenv("SSL_CERT_FILE")
+	}
+	if caPath != "" {
+		if !filepath.IsAbs(caPath) || strings.ContainsAny(caPath, "\r\n\x00") {
+			return nil, errors.New("RELAY_TICKET_INVALID")
+		}
+		pemBytes, err := os.ReadFile(caPath)
+		if err != nil || len(pemBytes) == 0 || len(pemBytes) > 256*1024 {
+			return nil, errors.New("RELAY_UNAVAILABLE")
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, errors.New("RELAY_UNAVAILABLE")
+		}
+		tlsConfig.RootCAs = pool
+	}
+	if certSHA256 != "" {
+		if !controlHash(certSHA256) {
+			return nil, errors.New("RELAY_TICKET_INVALID")
+		}
+		tlsConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+			if cs.Version < tls.VersionTLS13 || len(cs.VerifiedChains) == 0 || len(cs.PeerCertificates) == 0 {
+				return errors.New("RELAY_TLS_PEER_UNVERIFIED")
+			}
+			sum := sha256.Sum256(cs.PeerCertificates[0].Raw)
+			if hex.EncodeToString(sum[:]) != certSHA256 {
+				return errors.New("RELAY_TLS_PIN_MISMATCH")
+			}
+			return nil
+		}
+	}
+	return tlsConfig, nil
+}
+
 // ServeTurnRelay bridges worker stdio to one private host-issued HTTP turn
 // channel. The inherited ticket contains no Bot/owner/control credential. The
 // endpoint launcher owns FD, process, filesystem and network containment.
@@ -48,19 +145,32 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 	if err != nil || len(raw) > 4096 {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	fields, err := strictObject(raw, "endpoint", "token")
+	fields, err := strictObjectWithOptional(raw, []string{"endpoint", "token"}, "ca_file", "cert_sha256", "server_name")
 	if err != nil {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	var endpoint, token string
+	var endpoint, token, caFile, certSHA256, serverName string
 	if json.Unmarshal(fields["endpoint"], &endpoint) != nil || json.Unmarshal(fields["token"], &token) != nil || !validRelayToken(token) {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawCA, ok := fields["ca_file"]; ok && (json.Unmarshal(rawCA, &caFile) != nil || caFile == "") {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawPin, ok := fields["cert_sha256"]; ok && (json.Unmarshal(rawPin, &certSHA256) != nil || certSHA256 == "") {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawSNI, ok := fields["server_name"]; ok && (json.Unmarshal(rawSNI, &serverName) != nil || serverName == "") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Host == "" || u.Scheme != "https" && (u.Scheme != "http" || u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	client := &http.Client{Timeout: 120 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	tlsConfig, err := relayTLSClientConfig(caFile, certSHA256, serverName)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 120 * time.Second, Transport: &http.Transport{DisableKeepAlives: true, TLSClientConfig: tlsConfig}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	reader := bufio.NewReaderSize(in, 64*1024)
 	for {
 		line, oversized, readErr := readStdioMessage(reader)

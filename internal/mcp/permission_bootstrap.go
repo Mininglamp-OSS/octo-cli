@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,7 +43,7 @@ func LoadPermissionHostConfig(path string) (PermissionHostConfig, error) {
 	if err != nil || len(b) > 16384 {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
-	if _, err = strictObject(b, "version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins", "ready_path", "relay_executable"); err != nil {
+	if _, err = strictObjectWithOptional(b, []string{"version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins", "ready_path", "relay_executable"}, "relay_ca", "relay_cert_sha256", "relay_server_name"); err != nil {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if json.Unmarshal(b, &cfg) != nil || cfg.Version != 1 {
@@ -114,16 +115,63 @@ func readSupportedLegacyRelease(path, expected string) (permission.Catalog, erro
 	return result, nil
 }
 
+func permissionReleasePageBounds(catalog permission.Catalog, snapshot *permission.VerifiedCatalog) (map[string]permission.PageBound, error) {
+	if snapshot != nil {
+		return PermissionCatalogPageBounds()
+	}
+	return supportedPermissionReleases[catalog.Digest].pageBounds, nil
+}
+
 // ServePermissionHost runs the private authenticated control and turn relay
 // inside the existing MCP host process. No second unmanaged endpoint is opened.
-func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token string, build RootBuilder, admission *Admission, facade facadeMode, base cmdutil.GlobalOptions, uploadRoot string, downloads *SecretDownloads) error { //nolint:gocritic,gocyclo // immutable startup inputs and complete verification/readiness ordering stay together
+func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token string, build RootBuilder, admission *Admission, facade facadeMode, base cmdutil.GlobalOptions, uploadRoot string, downloads *SecretDownloads) error { //nolint:gocritic // immutable startup inputs stay together
+	return servePermissionHostWithPackages(ctx, cfg, token, build, admission, facade, base, uploadRoot, downloads, supportedPermissionPackages)
+}
+
+func servePermissionHostWithPackages(ctx context.Context, cfg PermissionHostConfig, token string, build RootBuilder, admission *Admission, facade facadeMode, base cmdutil.GlobalOptions, uploadRoot string, downloads *SecretDownloads, packages map[string]permission.CatalogPin) error { //nolint:gocritic,gocyclo // immutable startup inputs and complete verification/readiness ordering stay together
 	startup, cancelStartup := context.WithTimeout(ctx, 120*time.Second)
-	catalog, snapshot, err := readPermissionRelease(startup, cfg.ReleasePath, cfg.ReleaseSHA256, supportedPermissionPackages)
+	catalog, snapshot, err := readPermissionRelease(startup, cfg.ReleasePath, cfg.ReleaseSHA256, packages)
 	cancelStartup()
 	if err != nil {
 		return err
 	}
-	policies, err := permission.NewSelfPolicyReader(cfg.Origin, cfg.BotUID, token, nil, cfg.Origin)
+	cert, err := tls.LoadX509KeyPair(cfg.Certificate, cfg.PrivateKey)
+	if err != nil || len(cert.Certificate) == 0 {
+		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
+	}
+	ca, err := os.ReadFile(cfg.PeerCA)
+	if err != nil {
+		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(ca) {
+		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
+	}
+	leafSum := sha256.Sum256(cert.Certificate[0])
+	leafHex := hex.EncodeToString(leafSum[:])
+	if cfg.RelayCertSHA256 != "" && cfg.RelayCertSHA256 != leafHex {
+		return errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	if cfg.RelayCA == "" {
+		cfg.RelayCA = cfg.PeerCA
+	}
+	if cfg.RelayCertSHA256 == "" {
+		if _, err := TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: cfg.RelayCA, CertSHA256: leafHex, ServerName: cfg.RelayServerName}); err == nil {
+			cfg.RelayCertSHA256 = leafHex
+		}
+	}
+	originRoots, err := x509.SystemCertPool()
+	if err != nil || originRoots == nil {
+		originRoots = x509.NewCertPool()
+	}
+	originRoots.AppendCertsFromPEM(ca)
+	if cfg.RelayCA != "" && cfg.RelayCA != cfg.PeerCA {
+		relayCA, readErr := os.ReadFile(cfg.RelayCA)
+		if readErr != nil || !originRoots.AppendCertsFromPEM(relayCA) {
+			return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
+		}
+	}
+	policies, err := permission.NewSelfPolicyReader(cfg.Origin, cfg.BotUID, token, &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: originRoots}, cfg.Origin)
 	if err != nil {
 		return err
 	}
@@ -140,7 +188,11 @@ func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token st
 			return err
 		}
 	}
-	if err := coordinator.ConfigurePageBounds(supportedPermissionReleases[catalog.Digest].pageBounds); err != nil {
+	pageBounds, err := permissionReleasePageBounds(catalog, snapshot)
+	if err != nil {
+		return err
+	}
+	if err := coordinator.ConfigurePageBounds(pageBounds); err != nil {
 		return err
 	}
 	prototype, err := NewServer(build)
@@ -167,18 +219,6 @@ func ServePermissionHost(ctx context.Context, cfg PermissionHostConfig, token st
 	host, err := NewPermissionHost(cfg, coordinator, policies, native, server)
 	if err != nil {
 		return err
-	}
-	cert, err := tls.LoadX509KeyPair(cfg.Certificate, cfg.PrivateKey)
-	if err != nil {
-		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
-	}
-	ca, err := os.ReadFile(cfg.PeerCA)
-	if err != nil {
-		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
-	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(ca) {
-		return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
 	}
 	control, err := tls.Listen("tcp", cfg.ControlAddress, &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots})
 	if err != nil {

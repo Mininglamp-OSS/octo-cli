@@ -4,8 +4,11 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 //go:embed catalog_sources/release-inputs-v6.json
@@ -187,6 +190,29 @@ func AssemblePermissionRelease() ([]byte, error) { //nolint:gocyclo // closed fi
 	release := map[string]any{"format": "permission-release-manifest-v1", "catalog_version": index.CatalogVersion, "semantics_version": "1", "identity_index_sha256": "70cb8771d93bb38788418156029f59f35eb0031f1a8ee3b8d900eb18b673f798", "source_heads": index.SourceHeads, "normalization": map[string]string{"operation": "exact-id-v1", "resource": "first-fragment-only-v1", "origin": "exact-configured-v1", "discovery": "domain-and-validated-query-v1"}, "entries": entries, "profiles": inputs.Profiles, "content": ordered, "source_files": inputs.SourceFiles, "exceptions": []string{"fixed tools/list definitions", "initialize", "nonexecuting initialized/cancelled notifications", "nonexecuting transport acknowledgements", "ping"}, "limits": map[string]int{"artifact_bytes": 8388608, "entries": 827, "profile_nodes": 64, "conditional_children": 8, "redirect_hops": 9, "page_limit": 1000, "local_input_bytes": 16777216}, "contract_revision": 2}
 	assembled := catalogCanonicalJSON(release)
 	return catalogCanonicalJSON(map[string]any{"format": "permission-release-assembly-report-v4", "catalog_digest": nil, "status": "NOT_ALLOWLISTED_PENDING_COMPATIBLE_SOURCE_BOUNDS", "assembled_bytes": len(assembled), "artifact_limit": 8388608, "assembled_sha256_not_catalog_digest": sha256Sum(assembled), "content_records": len(content), "entries": len(entries), "source_count_witness": json.RawMessage(sourcePageWitness), "unproved_pagination": unprovedPages, "unproved_response_acquisition": unboundedResponses, "release_shape": release, "size_analysis": catalogSizeAnalysis(release, assembled), "unproved_selector_correlations": []string{"schema_variant has no resource-negotiation/managed-field selector; the report retains all distinct templates under the same facade", "discovery_index has no server-facade/resource-negotiation selector; all distinct actual navigation rows are retained", "profile exemplars do not supply selected per-entry pagination declarations or response-acquisition bounds"}}), nil
+}
+
+// PermissionCatalogPageBounds returns the source-proven per-capability page
+// count and item bounds from the embedded page-bounds-v2 witness. Unproven
+// pagination endpoints remain absent so --page-all fails closed.
+func PermissionCatalogPageBounds() (map[string]permission.PageBound, error) {
+	var witness struct {
+		Format       string   `json:"format"`
+		Capabilities []string `json:"capabilities"`
+		ItemsPerPage int      `json:"items_per_page"`
+		MCPPageLimit int      `json:"mcp_page_limit"`
+	}
+	if err := json.Unmarshal(sourcePageWitness, &witness); err != nil || witness.Format != "permission-source-page-witness-v2" || len(witness.Capabilities) == 0 || witness.ItemsPerPage < 1 || witness.MCPPageLimit < 1 {
+		return nil, errors.New("PERMISSION_RELEASE_SOURCE_BOUNDS_UNPROVEN")
+	}
+	bounds := make(map[string]permission.PageBound, len(witness.Capabilities))
+	for _, capID := range witness.Capabilities {
+		if _, dup := bounds[capID]; dup {
+			return nil, errors.New("PERMISSION_RELEASE_SOURCE_BOUNDS_UNPROVEN")
+		}
+		bounds[capID] = permission.PageBound{Items: witness.ItemsPerPage, Pages: witness.MCPPageLimit}
+	}
+	return bounds, nil
 }
 
 // catalogJSON encodes only registry-owned data during offline generation.

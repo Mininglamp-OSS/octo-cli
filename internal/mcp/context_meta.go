@@ -61,6 +61,29 @@ func strictObject(raw []byte, fields ...string) (map[string]json.RawMessage, err
 	return m, nil
 }
 
+func strictObjectWithOptional(raw []byte, required []string, optional ...string) (map[string]json.RawMessage, error) {
+	m, err := strictObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]bool, len(required)+len(optional))
+	for _, k := range required {
+		allowed[k] = true
+		if _, ok := m[k]; !ok {
+			return nil, errors.New("missing")
+		}
+	}
+	for _, k := range optional {
+		allowed[k] = true
+	}
+	for k := range m {
+		if !allowed[k] {
+			return nil, errors.New("unknown")
+		}
+	}
+	return m, nil
+}
+
 // encoding/json replaces invalid UTF-8 and unpaired surrogates. Security
 // metadata must reject those spellings rather than accept a lossy identity.
 func validJSONText(raw []byte) bool { //nolint:gocyclo // explicit JSON escape and surrogate-pair state machine

@@ -1,0 +1,58 @@
+{
+  "format": "permission-cli-contract-manifest-v6",
+  "status": "V44_TOP_SECTION_CONVERGENCE_DELIVERED_SOURCE_SUPPORT_NOT_APPROVED",
+  "catalog_digest": null,
+  "candidate_manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+  "retained_artifacts_and_unchanged_contracts": "contract-manifest-v5.json -> v4 -> v3 -> v2 -> v1; original template/wire schemas and engineering artifacts unchanged",
+  "files": {
+    "docs/permission/endpoint-abi-v2.json": {
+      "bytes": 6955,
+      "sha256": "7f9556d0526cff30ef1c36d53d2457dbc4266b8912722717badebac796ad8909"
+    },
+    "docs/permission/cli-component-contract-v6.json": {
+      "bytes": 8998,
+      "sha256": "8da203c9e6b650f5bc94d81080f4ed7281bd2cc36755ff0027f8e2e6b0b9fe9d"
+    },
+    "internal/mcp/catalog_sources/page-bounds-v2.json": {
+      "bytes": 3574,
+      "sha256": "b8d494cd392a5797213b58a612ea8a4653b90ed5aa37f2c79dc625bbdbff1cb6"
+    },
+    "docs/permission/catalog-package-report-v5.json": {
+      "bytes": 1914,
+      "sha256": "7257dfef2ed8d48844f9a97335926109f4b49e85b4eb233ba593202375e85caf"
+    },
+    "docs/permission/cli-component-contract-v5.json": {
+      "bytes": 7352,
+      "sha256": "1d37f1f3533ef9b5dd3ff053f0dd97588e2eb752f0c3de9c6a849267acce7f0e"
+    },
+    "docs/permission/catalog-package-v2.md": {
+      "bytes": 15233,
+      "sha256": "eecaf98135d2a7c88b5592e9afda8f10de4a26cf277236ed3c9317a54d967cf8"
+    },
+    "docs/permission/catalog-package-v2/manifest.json": {
+      "bytes": 4934,
+      "sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc"
+    },
+    "docs/permission/source-slot-witness-v5.json.gz": {
+      "bytes": 12562,
+      "sha256": "0c5da173bd0f53c64562a70a5c5feebc955ad111bbe84ed11f5588c08b4b9c0b"
+    },
+    "internal/permission/contracts/permission-catalog-package-v2.schema.json": {
+      "bytes": 58587,
+      "sha256": "c27a2ab4ad8419e3166e41d143c4897a30be53a1216da858c64eef8d6dd9a7f1"
+    },
+    "internal/permission/contracts/permission-wire-v1-package-v2.schema.json": {
+      "bytes": 14163,
+      "sha256": "17abec79cc96a75e8ba9d1843dbde109dbcab1b8bbc93a18ecbcad6a5996b8d3"
+    },
+    "internal/mcp/catalog_sources/source-files-v6.tar": {
+      "bytes": 2037760,
+      "sha256": "0fa35acb36a3d785b812a2b1d68afca30e1f19cd599c18667abd75a504e8634f"
+    },
+    "docs/permission/contract-manifest-v5.json": {
+      "bytes": 2097,
+      "sha256": "d54a11eac89263c9a5ddd3279af03c750ccc1775d2832cbe647eab9d089b411a"
+    }
+  },
+  "package_files": "catalog-package-v2/manifest.json commits the complete remaining inventory; no unlisted package files"
+}

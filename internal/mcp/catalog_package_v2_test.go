@@ -98,5 +98,12 @@ func managedPackageFixture(t *testing.T, v *permission.VerifiedCatalog) *managed
 	if err = f.coordinator.ConfigureCatalogPackage(v); err != nil {
 		t.Fatal(err)
 	}
+	bounds, err := PermissionCatalogPageBounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.coordinator.ConfigurePageBounds(bounds); err != nil {
+		t.Fatal(err)
+	}
 	return f
 }

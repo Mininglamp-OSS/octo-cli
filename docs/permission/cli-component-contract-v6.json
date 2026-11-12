@@ -1,0 +1,159 @@
+{
+  "format": "permission-cli-component-handoff-v6",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "supersedes": "cli-component-contract-v5.json",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "status": "V44_TOP_SECTION_CONVERGENCE_DELIVERED_A1_SOURCE_SUPPORT_BLOCKED",
+  "normative_addendum": {
+    "attachment_id": "01a1bfb4-aeef-7497-8f7f-268335e0b0fa",
+    "bytes": 70457,
+    "sha256": "f8bcf1af183fcb69b5c40575d26e21b8a37e7e8fb6720b53e4013924ad078725"
+  },
+  "xin2830_convergence_inputs": {
+    "report_attachment_id": "edd9ad84-f10b-4e1e-9161-19a598bbb153",
+    "report_sha256": "458bc7eb003497d56a250edbc6f58667aa6e071398c3e1cf7ac38b9baaeac3da",
+    "corrective_addendum_attachment_id": "28585cc5-4cc3-47e0-b3a5-17f81ac55b75",
+    "corrective_addendum_sha256": "be8257b931a13457249658176298df80340f26b48c1de2c060c58875cf49c367"
+  },
+  "catalog_digest": null,
+  "candidate": {
+    "format": "permission-catalog-package-v2",
+    "contract_revision": 3,
+    "semantics_version": "1",
+    "version": "octo-capabilities-v1-xin2748-v4",
+    "manifest": "catalog-package-v2/manifest.json",
+    "manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+    "semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
+    "status": "VERIFIED_CANDIDATE_NOT_ALLOWLISTED",
+    "ledger": {
+      "stored_bytes": 7823327,
+      "pre_bytes": 10202896,
+      "post_bytes": 11603961,
+      "metadata_nodes": 158934,
+      "pre_nodes": 399778,
+      "post_nodes": 398617,
+      "max_depth": 15,
+      "files": 30,
+      "roots": 4128,
+      "shared_rows": 1179,
+      "content_records": 5481,
+      "parts_total": 15649,
+      "max_parts_per_root": 25,
+      "schema_cells": 56592,
+      "discovery_cells": 156,
+      "static_cells": 1248
+    },
+    "source_conformance": {
+      "discovery_cells": 156,
+      "discovery_source_observations": 1248,
+      "schema_cells": 56592,
+      "static_cells": 1248
+    }
+  },
+  "v44_cli_deliverables": {
+    "v2_page_bounds_bootstrap": {
+      "function": "permissionReleasePageBounds / PermissionCatalogPageBounds",
+      "source_witness": "internal/mcp/catalog_sources/page-bounds-v2.json",
+      "proven_capabilities": [
+        "octo-cli/message/op/message.search",
+        "octo-cli/message/cmd/message.search",
+        "octo-im/message/op/message.search",
+        "octo-im/message/cmd/message.search"
+      ],
+      "proven_bound": {
+        "items": 100,
+        "pages": 10
+      },
+      "unproven_capabilities_behavior": "fail closed with PERMISSION_BUNDLE_UNAVAILABLE on --page-all; unapproved A1 client-budget proposal is not adopted"
+    },
+    "contributor_resolution_and_epoch_admit": {
+      "admit_reply_fields": [
+        "capsule_id",
+        "turn_id",
+        "generation",
+        "scope_incarnation",
+        "context_epoch"
+      ],
+      "same_generation_context_reuse": "admit reuses a completed bound generation for identical (owner, proposed_context_id, key, scope_incarnation, context_epoch) and mints a fresh generation if scope_incarnation or context_epoch rotated or the prior turn did not complete",
+      "resolve_contributors_method": "resolves unseen prior-turn/history delivery_references in batches <=32 with purpose='contributor' without adding to seenDeliveries ingress replay tombstones",
+      "bind_context_optional_contributor_references": "bind_context accepts optional contributor_references/delivery_references and resolves unseen contributor headers with purpose='contributor' before verifying ObservedHeader and Stage1 contributor intersection"
+    },
+    "private_ca_san_tls_relay": {
+      "turn_relay_trust": [
+        "ca_file",
+        "cert_sha256",
+        "server_name"
+      ],
+      "tls_verification": "TLS 1.3 minimum, InsecureSkipVerify=false, custom RootCAs from ca_file/SSL_CERT_FILE, VerifyConnection leaf cert_sha256 pinning, and ServerName SAN matching across ServePermissionHost PublicationTLSListener, ServeTurnRelay, and HTTP worker handoff"
+    },
+    "native_reader_fail_closed_bounds": {
+      "max_reads": 100000,
+      "max_observations": 100000,
+      "max_generations": 1024,
+      "saturation_behavior": "returns permission: bundle unavailable without evicting read_id/read_nonce uniqueness fences or HeaderV1 immutability observations"
+    },
+    "coordinator_watermark_needs_seeding": {
+      "behavior": "Coordinator.atBoundary seeds initial Needs from the scope's last accepted watermark stage states (p.Invocation.State == 'E', p.Capability.State == 'E') so steady-state active scopes complete boundary checks in one fresh FB round while preserving 'FBFB' on first activation or U->E transition and preserving per-attempt/per-page physical IO/publication and fresh F->B revocation checks"
+    }
+  },
+  "private_bootstrap": {
+    "host_config_version": 1,
+    "hello": "UNCHANGED",
+    "format_selection": "private compiled digest-to-approved-pin map; never MCP/model input",
+    "release_path_v2": "absolute path to manifest.json in an isolated immutable directory",
+    "release_sha256_v2": "raw canonical manifest bytes, not decoded JSON or concatenated package hash",
+    "ordering": "verify every listed byte, typed edge, ownership, slot and selector budget; install detached snapshot and PermissionCatalogPageBounds before existing listeners/readiness",
+    "v1": "existing legacy startup remains; no historical engineering report becomes a supported v1 release"
+  },
+  "supported_pins": [],
+  "approved_directed_compatible_pairs": [],
+  "schema": "internal/permission/contracts/permission-catalog-package-v2.schema.json",
+  "wire_discriminator": "internal/permission/contracts/permission-wire-v1-package-v2.schema.json",
+  "endpoint_abi": "docs/permission/endpoint-abi-v2.json",
+  "server_dependency": {
+    "head": "ff4d43c403083fd059ec2e6ef6e0d6d505228d48",
+    "handoff": "pkg/permissionbundle/contracts/handoff-v4.json",
+    "bytes": 8285,
+    "sha256": "c226b46007904c37ef5b46f78b587cd734f4ac4ccf8c739f786e87cfe4573791",
+    "manifest_bytes": 5067,
+    "manifest_sha256": "39b138a4f689f3695c087ceab0598b4da74a632ec6276ee159b6c5c586c0f230",
+    "status": "server v2 package verifier/registry/private-read components verified; C1-C9 source/production wiring remains blocked"
+  },
+  "endpoint_dependency": {
+    "head": "afb732b20e63baf8acf06c4726a66e290b98e1b6",
+    "path": "docs/permission-endpoint-handoff-v4.json",
+    "bytes": 6435,
+    "sha256": "cc193256548ecb3b5c09b0a739f1cd5a7ca5503b1fb66e2a7bd5684ddcbd4671",
+    "control_client_bytes": 11710,
+    "control_client_sha256": "4e40ee144b5eec7ef645be92948dd6b1f36a838d1fb82e6b471a59e820c99bef",
+    "tested": "exact endpoint control clients (e4601041 and afb732b2) and v44 convergence harness drive actual built Go executable with complete v2 package over real mTLS 1.3 and private-CA TLS 1.3 PublicationTLSListener relay",
+    "remaining": "endpoint worker consumption of admit scope_incarnation/context_epoch and resolve_contributors/open_relay tls metadata; dependent physical import/publication and actual OS containment (E1-E12)"
+  },
+  "remaining_dependencies": [
+    {
+      "id": "A1",
+      "owner": "PjM and upstream octo-server / octo-loop / octo-docs-backend source owners, then CLI integration",
+      "required": "authoritative source-proven server/upstream page bounds (max items per page, max pages, and cursor/page-number semantics) for the remaining 132 paginated capabilities, or an explicitly approved contract amendment; until then, unproven --page-all calls fail closed with PERMISSION_BUNDLE_UNAVAILABLE while single-page calls and the 4 source-proven message.search capabilities operate normally"
+    },
+    {
+      "id": "C1-C9",
+      "owner": "XIN-2793 server and upstream native/SQL/recovery/docs owners",
+      "required": "server production router wiring, SQLite WAL / PostgreSQL durable stores, live IM/SQL/Docs producer bridges, trusted external source witness binding, and approved support pins/directed compatibility pairs before populating supportedPermissionPackages"
+    },
+    {
+      "id": "E1-E12",
+      "owner": "XIN-2795 endpoint",
+      "required": "endpoint worker consumption of admit scope_incarnation/context_epoch and resolve_contributors/open_relay tls metadata, real provider/MCP wiring, physical import/publication revocation gates, and supported OS containment"
+    }
+  ],
+  "acceptance": {
+    "source_native": "NOT_RUN",
+    "browser": "NOT_RUN",
+    "supported_os_containment": "NOT_RUN",
+    "real_cross_repository": "SYNTHETIC_TLS13_EXECUTABLE_HARNESS_RUN_LIVE_PRODUCERS_BLOCKED"
+  },
+  "next_step": "keep supportedPermissionPackages empty until C1-C9 and A1 close; endpoint XIN-2795 consumes endpoint-abi-v2.json (admit scope_incarnation/context_epoch, resolve_contributors, and open_relay TLS trust)",
+  "rollback": "revert Draft changes and keep managed mode disabled; preserve journals, epochs and fences"
+}
