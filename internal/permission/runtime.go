@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -202,33 +203,32 @@ func AdmitPageBytes(ctx context.Context, count int, pageBytes int) error {
 		c.record(err)
 		return err
 	}
-	if count < 0 || (hasStatic && count > bound.Items) {
+	if count < 0 || pageBytes < 0 || (hasStatic && count > bound.Items) {
 		err := PolicyUnavailable()
 		c.record(err)
 		return err
 	}
-	if budgets != nil {
-		if count > budgets.MaxPageItems {
-			return &ResponseBudgetError{Kind: "page_items", Limit: int64(budgets.MaxPageItems), Observed: int64(count)}
-		}
-		c.state.Lock()
-		nextBytes := c.state.pageBytes[c.capability] + int64(pageBytes)
-		c.state.Unlock()
-		if pageBytes > 0 && nextBytes > budgets.MaxCumulativeBytes {
-			return &ResponseBudgetError{Kind: "cumulative_bytes", Limit: budgets.MaxCumulativeBytes, Observed: nextBytes}
-		}
+	if budgets != nil && count > budgets.MaxPageItems {
+		return &ResponseBudgetError{Kind: "page_items", Limit: int64(budgets.MaxPageItems), Observed: int64(count)}
 	}
 	return c.check(ctx, func() error {
 		c.state.Lock()
 		defer c.state.Unlock()
-		c.state.pages[c.capability]++
-		c.state.pageBytes[c.capability] += int64(pageBytes)
-		if hasStatic && c.state.pages[c.capability] > bound.Pages {
+		nextPages := c.state.pages[c.capability] + 1
+		nextBytes := c.state.pageBytes[c.capability] + int64(pageBytes)
+		if hasStatic && nextPages > bound.Pages {
 			return PolicyUnavailable()
 		}
-		if budgets != nil && c.state.pages[c.capability] > budgets.MaxPages {
-			return &ResponseBudgetError{Kind: "page_count", Limit: int64(budgets.MaxPages), Observed: int64(c.state.pages[c.capability])}
+		if budgets != nil {
+			if nextPages > budgets.MaxPages {
+				return &ResponseBudgetError{Kind: "page_count", Limit: int64(budgets.MaxPages), Observed: int64(nextPages)}
+			}
+			if pageBytes > 0 && nextBytes > budgets.MaxCumulativeBytes {
+				return &ResponseBudgetError{Kind: "cumulative_bytes", Limit: budgets.MaxCumulativeBytes, Observed: nextBytes}
+			}
 		}
+		c.state.pages[c.capability] = nextPages
+		c.state.pageBytes[c.capability] = nextBytes
 		return nil
 	})
 }
@@ -257,14 +257,48 @@ func RequestContext(ctx context.Context, service, id, method, path string) (cont
 	}
 	return ctx, DenyCapability(ctx)
 }
+
+func validRequestPathSegment(seg string) bool {
+	if seg == "" || seg == "." || seg == ".." {
+		return false
+	}
+	lower := strings.ToLower(seg)
+	if strings.Contains(lower, "%2e") || strings.Contains(lower, "%2f") || strings.Contains(lower, "%5c") || strings.Contains(lower, "%00") || strings.ContainsAny(seg, "/\\\x00") {
+		return false
+	}
+	unescaped, err := url.PathUnescape(seg)
+	if err != nil || unescaped == "" || unescaped == "." || unescaped == ".." || strings.ContainsAny(unescaped, "/\\\x00") {
+		return false
+	}
+	return true
+}
+
+func validRequestPath(path string) bool {
+	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return false
+	}
+	if path == "/" {
+		return true
+	}
+	for _, seg := range strings.Split(path[1:], "/") {
+		if !validRequestPathSegment(seg) {
+			return false
+		}
+	}
+	return true
+}
+
 func targetPath(template, path string) bool {
+	if !validRequestPath(path) {
+		return false
+	}
 	a, b := strings.Split(template, "/"), strings.Split(path, "/")
 	if len(a) != len(b) {
 		return false
 	}
 	for j := range a {
 		if strings.HasPrefix(a[j], "{") && strings.HasSuffix(a[j], "}") {
-			if b[j] == "" {
+			if !validRequestPathSegment(b[j]) {
 				return false
 			}
 		} else if a[j] != b[j] {
@@ -462,26 +496,27 @@ func AuthorityContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, callContextKey{}, (*Call)(nil))
 }
 
-// RelayResponseBudgetBytes resolves the effective response byte budget for a
-// turn-relay HTTP call from the bound Call, context ResponseBudgets, registered
-// PermissionHost endpoint, ticket max_response_bytes, or response header, with
-// MaxResponseBudgetBytes (64 MiB) as the hard fail-closed upper bound.
+// RelayResponseBudgetBytes resolves the effective serialized MCP JSON-RPC
+// response byte budget for a turn-relay HTTP call from the bound Call, context
+// ResponseBudgets, registered PermissionHost endpoint, ticket
+// max_response_bytes, or response header, with MaxResponseBudgetBytes (64 MiB)
+// as the hard fail-closed upper bound.
 func RelayResponseBudgetBytes(ctx context.Context, endpoint string, ticketMaxBytes int64, headerBudget string) (int64, error) {
 	limit := MaxResponseBudgetBytes
 	if call := BoundCall(ctx); call != nil {
-		if b := call.MaxAcquisitionBytes(); b > 0 && b < limit {
+		if b := call.MaxSerializedRPCBytes(); b > 0 && b < limit {
 			limit = b
 		}
 	}
-	if b, ok := ResponseBudgetsFromContext(ctx); ok && b.MaxAcquisitionBytes > 0 && b.MaxAcquisitionBytes < limit {
-		limit = b.MaxAcquisitionBytes
+	if b, ok := ResponseBudgetsFromContext(ctx); ok && b.MaxSerializedRPCBytes > 0 && b.MaxSerializedRPCBytes < limit {
+		limit = b.MaxSerializedRPCBytes
 	}
 	if endpoint != "" {
 		relayEndpointBudgetsMu.RLock()
 		b, ok := relayEndpointBudgets[endpoint]
 		relayEndpointBudgetsMu.RUnlock()
-		if ok && b.MaxAcquisitionBytes > 0 && b.MaxAcquisitionBytes < limit {
-			limit = b.MaxAcquisitionBytes
+		if ok && b.MaxSerializedRPCBytes > 0 && b.MaxSerializedRPCBytes < limit {
+			limit = b.MaxSerializedRPCBytes
 		}
 	}
 	if ticketMaxBytes != 0 {

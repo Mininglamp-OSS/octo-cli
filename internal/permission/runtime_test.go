@@ -342,3 +342,118 @@ func TestOwnedHTTPProxyRetainsProxyAuthWithoutBotCredentials(t *testing.T) {
 		t.Fatal(string(data))
 	}
 }
+
+func TestXIN2794Round2PathTraversalAndAdmitPageBytesLock(t *testing.T) {
+	f := newRuntimeFixture(t, testCap)
+	budgets := ResponseBudgets{
+		MaxAcquisitionBytes:   512,
+		MaxPageItems:          10,
+		MaxPages:              4,
+		MaxCumulativeBytes:    1000,
+		MaxSerializedRPCBytes: 2048,
+	}
+	if err := f.c.ConfigureResponseBudgets(budgets); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ctx, err := f.c.BeginCall(ctx, f.i, testCap, []byte(`{}`), nil, RequestTarget{testCap, "GET", "/v1/spaces/{id}/items"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := BoundCall(ctx)
+	defer call.Close()
+
+	// 1. [C-B3] targetPath / RequestContext & PrepareHTTP reject dot-segments and encoded slashes/backslashes.
+	if _, err := RequestContext(ctx, "message", "message.send", "GET", "/v1/spaces/space_42/items"); err != nil {
+		t.Fatalf("expected valid path segment to succeed, got %v", err)
+	}
+	badSegments := []string{
+		".",
+		"..",
+		"%2e",
+		"%2E",
+		"%2e%2e",
+		"%2E%2E",
+		".%2e",
+		"%2e.",
+		"foo%2fbar",
+		"foo%2Fbar",
+		"foo%5cbar",
+		"foo%5Cbar",
+		"foo\\bar",
+	}
+	for _, seg := range badSegments {
+		rawPath := "/v1/spaces/" + seg + "/items"
+		if targetPath("/v1/spaces/{id}/items", rawPath) {
+			t.Fatalf("expected targetPath to reject %q", rawPath)
+		}
+		_, reqErr := RequestContext(ctx, "message", "message.send", "GET", rawPath)
+		category(t, reqErr, "capability_denied")
+		if _, prepErr := PrepareHTTP(ctx, f.p.Key, "GET", rawPath, nil, nil, nil, time.Now().Add(3*time.Second)); prepErr != ErrInvalid {
+			t.Fatalf("expected PrepareHTTP to reject %q with ErrInvalid, got %v", rawPath, prepErr)
+		}
+	}
+
+	// 2. [C-B3] AdmitPageBytes rejects negative pageBytes, does not account rejected pages, and enforces MaxCumulativeBytes under state lock.
+	negCtx, err := f.c.BeginCall(ctx, f.i, testCap, []byte(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer BoundCall(negCtx).Close()
+	category(t, AdmitPageBytes(negCtx, 1, -1), "policy_unavailable")
+
+	pageCtx, err := f.c.BeginCall(ctx, f.i, testCap, []byte(`{}`), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageCall := BoundCall(pageCtx)
+	defer pageCall.Close()
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for idx := 0; idx < 2; idx++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs[i] = AdmitPageBytes(pageCtx, 2, 600)
+		}(idx)
+	}
+	wg.Wait()
+	successes, budgetFailures := 0, 0
+	for _, e := range errs {
+		if e == nil {
+			successes++
+		} else if rb, ok := e.(*ResponseBudgetError); ok && rb.Kind == "cumulative_bytes" && rb.Limit == 1000 && rb.Observed == 1200 {
+			budgetFailures++
+		} else {
+			t.Fatalf("unexpected AdmitPageBytes error: %v", e)
+		}
+	}
+	if successes != 1 || budgetFailures != 1 {
+		t.Fatalf("expected 1 success and 1 cumulative_bytes failure, got successes=%d failures=%d errs=%v", successes, budgetFailures, errs)
+	}
+	pageCall.state.Lock()
+	gotPages := pageCall.state.pages[testCap]
+	gotBytes := pageCall.state.pageBytes[testCap]
+	pageCall.state.Unlock()
+	if gotPages != 1 || gotBytes != 600 {
+		t.Fatalf("expected accounted pages=1 bytes=600 after rejected page, got pages=%d bytes=%d", gotPages, gotBytes)
+	}
+
+	// 3. [C-B1r2] RelayResponseBudgetBytes uses MaxSerializedRPCBytes (2048), not MaxAcquisitionBytes (512).
+	limitFromCall, err := RelayResponseBudgetBytes(pageCtx, "", 0, "")
+	if err != nil || limitFromCall != 2048 {
+		t.Fatalf("expected RelayResponseBudgetBytes from Call to return MaxSerializedRPCBytes=2048, got %d (%v)", limitFromCall, err)
+	}
+	ctxWithBudgets := WithResponseBudgets(context.Background(), budgets)
+	limitFromCtx, err := RelayResponseBudgetBytes(ctxWithBudgets, "", 0, "")
+	if err != nil || limitFromCtx != 2048 {
+		t.Fatalf("expected RelayResponseBudgetBytes from context to return MaxSerializedRPCBytes=2048, got %d (%v)", limitFromCtx, err)
+	}
+	endpoint := "https://127.0.0.1:65432/mcp-r2-test"
+	RegisterRelayEndpointBudgets(endpoint, budgets)
+	limitFromEndpoint, err := RelayResponseBudgetBytes(context.Background(), endpoint, 0, "")
+	if err != nil || limitFromEndpoint != 2048 {
+		t.Fatalf("expected RelayResponseBudgetBytes from endpoint registry to return MaxSerializedRPCBytes=2048, got %d (%v)", limitFromEndpoint, err)
+	}
+}

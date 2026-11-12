@@ -36,8 +36,9 @@ func PrepareHTTP(ctx context.Context, key Key, method, target string, headers ht
 	if !key.Valid() || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || deadline.IsZero() || !deadline.After(time.Now()) {
 		return nil, ErrInvalid
 	}
+	rawPath, _, _ := strings.Cut(target, "?")
 	u, err := url.Parse(key.Origin + target)
-	if err != nil || u.Scheme+"://"+u.Host != key.Origin || u.Fragment != "" || u.User != nil {
+	if err != nil || u.Scheme+"://"+u.Host != key.Origin || u.Fragment != "" || u.User != nil || !validRequestPath(rawPath) || !validRequestPath(u.EscapedPath()) {
 		return nil, ErrInvalid
 	}
 	req, err := http.NewRequest(method, u.String(), bytes.NewReader(body))

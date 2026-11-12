@@ -386,7 +386,7 @@ func writeManagedHTTP(ctx context.Context, w http.ResponseWriter, id json.RawMes
 	}
 	frame := func(payload []byte) []byte {
 		var budgetHeader string
-		if maxBytes := call.MaxAcquisitionBytes(); maxBytes > 0 {
+		if maxBytes := call.MaxSerializedRPCBytes(); maxBytes > 0 {
 			budgetHeader = fmt.Sprintf("X-Octo-Acquisition-Budget-Bytes: %d\r\n", maxBytes)
 		} else if hb := strings.TrimSpace(w.Header().Get("X-Octo-Acquisition-Budget-Bytes")); hb != "" {
 			budgetHeader = "X-Octo-Acquisition-Budget-Bytes: " + hb + "\r\n"

@@ -1,7 +1,7 @@
 {
   "format": "permission-cli-endpoint-abi-v2",
   "supersedes": "endpoint-abi-v1.json",
-  "endpoint_head": "131dc9c38bfe6813a0a0e9f207398fa06112cb9e",
+  "endpoint_head": "6830c4050ccb7a299114933b7eb6afbea990abb2",
   "endpoint_task_id": "2f4a34e9-2be3-48ac-99f0-38a30f077acd",
   "control": "TLS 1.3 mutual authentication and exact peer certificate pin; uint32 BE canonical JSON <=65536 bytes; methods: hello, register_ingress, admit, resolve_contributors, bind_context, open_relay, renew, close, checkpoint",
   "readiness": {
@@ -169,8 +169,8 @@
       ],
       "semantics": "populated when include_tls_trust=true and host relay TLS trust material is configured, matching checkTurnRelayTrust / validateTurnRelayTrust in endpoint 131dc9c38bfe6813a0a0e9f207398fa06112cb9e; never disables TLS 1.3 verification"
     },
-    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; when relay TLS pins are present, reply includes ca_sha256 (SHA-256 of relay CA PEM bytes) and peer_sha256 (SHA-256 of relay leaf certificate DER), plus optional tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true; every HTTP response (including hijacked writeManagedHTTP responses) emits X-Octo-Acquisition-Budget-Bytes=<MaxAcquisitionBytes> when ResponseBudgets are configured",
-    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing {ca_sha256, endpoint, peer_sha256, token} plus optional server_name (when RelayServerName is configured and differs from the endpoint hostname) and optional max_response_bytes (when ResponseBudgets.MaxAcquisitionBytes > 0) for both 4-field and include_tls_trust=true requests, avoiding host-private ca_file paths inside contained sandboxes; ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from SSL_CERT_FILE/NODE_EXTRA_CA_CERTS (or ca_file) verified against ca_sha256, VerifyConnection leaf peer_sha256/cert_sha256 pinning, and fail-closed MaxAcquisitionBytes response budget from X-Octo-Acquisition-Budget-Bytes, ticket max_response_bytes, or in-process LookupRelayEndpointBudgets",
+    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; when relay TLS pins are present, reply includes ca_sha256 (SHA-256 of relay CA PEM bytes) and peer_sha256 (SHA-256 of relay leaf certificate DER), plus optional tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true; every HTTP response (including hijacked writeManagedHTTP responses) emits X-Octo-Acquisition-Budget-Bytes=<MaxSerializedRPCBytes> when ResponseBudgets are configured",
+    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing {ca_sha256, endpoint, peer_sha256, token} plus optional server_name (when RelayServerName is configured and differs from the endpoint hostname) and optional max_response_bytes (positive decimal string \"<MaxSerializedRPCBytes>\" when ResponseBudgets.MaxSerializedRPCBytes > 0) for both 4-field and include_tls_trust=true requests, avoiding host-private ca_file paths inside contained sandboxes; ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from SSL_CERT_FILE/NODE_EXTRA_CA_CERTS (or ca_file) verified against ca_sha256, VerifyConnection leaf peer_sha256/cert_sha256 pinning, and fail-closed MaxSerializedRPCBytes response budget from X-Octo-Acquisition-Budget-Bytes, ticket max_response_bytes (accepting positive decimal string or JSON integer), or in-process LookupRelayEndpointBudgets",
     "relay_executable": "private config may name the pinned CLI; empty selects this executable; absolute regular non-writable executable required",
     "bearer_domain": "64 lowercase hex characters; ordinary bf_/app_/uk_ credentials are rejected by the relay ticket parser"
   },
@@ -215,9 +215,11 @@
   },
   "source_control_client": {
     "v52_head": {
-      "commit": "131dc9c38bfe6813a0a0e9f207398fa06112cb9e",
+      "commit": "6830c4050ccb7a299114933b7eb6afbea990abb2",
       "path": "src/permissions/control-client.ts",
-      "handoff_path": "docs/permission-endpoint-handoff-v7.json"
+      "handoff_path": "docs/permission-endpoint-handoff-v7.json",
+      "handoff_bytes": 13799,
+      "handoff_sha256": "8f67e01671080c41639d750ddec0e89e03bcab42af8ab9b86e51cae79c65ad7c"
     },
     "v49_head": {
       "commit": "d007962a7762ec42ae2279c673392121ad630e64",

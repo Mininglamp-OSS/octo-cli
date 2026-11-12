@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,7 +91,7 @@ func TurnRelayHandleWithTrust(endpoint, token string, trust TurnRelayTrust) (str
 	if trust.MaxResponseBytes != 0 && (trust.MaxResponseBytes < 1 || trust.MaxResponseBytes > permission.MaxResponseBudgetBytes) {
 		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
 	}
-	ticket := map[string]any{"endpoint": endpoint, "token": token}
+	ticket := map[string]string{"endpoint": endpoint, "token": token}
 	if trust.CASHA256 != "" && peerSHA256 != "" {
 		ticket["ca_sha256"] = trust.CASHA256
 		ticket["peer_sha256"] = peerSHA256
@@ -109,7 +110,7 @@ func TurnRelayHandleWithTrust(endpoint, token string, trust TurnRelayTrust) (str
 		}
 	}
 	if trust.MaxResponseBytes > 0 {
-		ticket["max_response_bytes"] = trust.MaxResponseBytes
+		ticket["max_response_bytes"] = strconv.FormatInt(trust.MaxResponseBytes, 10)
 	}
 	b, err := json.Marshal(ticket)
 	if err != nil {
@@ -245,8 +246,12 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 	if rawSNI, ok := fields["server_name"]; ok && (json.Unmarshal(rawSNI, &serverName) != nil || serverName == "") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	if rawMax, ok := fields["max_response_bytes"]; ok && (json.Unmarshal(rawMax, &ticketMaxBytes) != nil || ticketMaxBytes < 1 || ticketMaxBytes > permission.MaxResponseBudgetBytes) {
-		return errors.New("RELAY_TICKET_INVALID")
+	if rawMax, ok := fields["max_response_bytes"]; ok {
+		var validMax bool
+		ticketMaxBytes, validMax = parseRelayTicketMaxBytes(rawMax)
+		if !validMax {
+			return errors.New("RELAY_TICKET_INVALID")
+		}
 	}
 	if peerSHA256 != "" && certSHA256 != "" && peerSHA256 != certSHA256 {
 		return errors.New("RELAY_TICKET_INVALID")
@@ -319,6 +324,26 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 			return readErr
 		}
 	}
+}
+
+func parseRelayTicketMaxBytes(raw json.RawMessage) (int64, bool) {
+	trimmed := strings.TrimSpace(string(raw))
+	if len(trimmed) >= 2 && trimmed[0] == '"' && trimmed[len(trimmed)-1] == '"' {
+		trimmed = trimmed[1 : len(trimmed)-1]
+	}
+	if len(trimmed) == 0 || trimmed[0] < '1' || trimmed[0] > '9' {
+		return 0, false
+	}
+	for i := 1; i < len(trimmed); i++ {
+		if trimmed[i] < '0' || trimmed[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || n < 1 || n > permission.MaxResponseBudgetBytes {
+		return 0, false
+	}
+	return n, true
 }
 
 func relayNegotiation(req *rpcRequest) error {

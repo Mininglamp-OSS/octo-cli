@@ -168,11 +168,10 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 		if err := c.ConfigureResponseBudgets(*cfg.ResponseBudgets); err != nil {
 			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 		}
-		permission.RegisterRelayEndpointBudgets(cfg.RelayURL, *cfg.ResponseBudgets)
 	}
 	var maxResponseBytes int64
 	if budgets, ok := c.ResponseBudgets(); ok {
-		maxResponseBytes = budgets.MaxAcquisitionBytes
+		maxResponseBytes = budgets.MaxSerializedRPCBytes
 	}
 	trust := TurnRelayTrust{CAFile: cfg.RelayCA, CAPEM: caPEM, CASHA256: effectiveCASHA256, PeerSHA256: peerSHA256, CertSHA256: certSHA256, ServerName: cfg.RelayServerName, MaxResponseBytes: maxResponseBytes}
 	h := &PermissionHost{config: cfg, coordinator: c, policies: p, native: n, incarnation: permission.NewID(), sessions: map[string]bool{}, ingress: map[string]*hostIngress{}, capsules: map[string]*hostCapsule{}, contextGenerations: map[string]hostContextGeneration{}, relays: map[string]*hostRelay{}, seenDeliveries: map[[32]byte]bool{}, server: server, relayTrust: trust}
@@ -207,6 +206,9 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 	h.executableSHA = hex.EncodeToString(hash.Sum(nil))
 	if _, err = TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), h.relayTrust); err != nil {
 		return nil, err
+	}
+	if budgets, ok := c.ResponseBudgets(); ok {
+		permission.RegisterRelayEndpointBudgets(cfg.RelayURL, budgets)
 	}
 	return h, nil
 }
@@ -655,7 +657,7 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		stdioTrust := h.relayTrust
 		if stdioTrust.MaxResponseBytes == 0 {
 			if budgets, ok := h.coordinator.ResponseBudgets(); ok {
-				stdioTrust.MaxResponseBytes = budgets.MaxAcquisitionBytes
+				stdioTrust.MaxResponseBytes = budgets.MaxSerializedRPCBytes
 			}
 		}
 		handle, err := TurnRelayHandleWithTrust(h.config.RelayURL, relay.token, stdioTrust)
@@ -945,7 +947,7 @@ func (h *PermissionHost) ServeHTTP(w http.ResponseWriter, r *http.Request) { //n
 		return
 	}
 	if budgets, ok := h.coordinator.ResponseBudgets(); ok {
-		w.Header().Set("X-Octo-Acquisition-Budget-Bytes", strconv.FormatInt(budgets.MaxAcquisitionBytes, 10))
+		w.Header().Set("X-Octo-Acquisition-Budget-Bytes", strconv.FormatInt(budgets.MaxSerializedRPCBytes, 10))
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxHTTPBodyBytes+1))
 	if err != nil || len(body) > maxHTTPBodyBytes {

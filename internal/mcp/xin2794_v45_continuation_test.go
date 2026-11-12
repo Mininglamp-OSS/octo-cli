@@ -717,8 +717,8 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 	if !reflect.DeepEqual(ticketKeys, []string{"ca_sha256", "endpoint", "max_response_bytes", "peer_sha256", "server_name", "token"}) {
 		t.Fatalf("expected pinned stdio ticket [ca_sha256 endpoint max_response_bytes peer_sha256 server_name token], got %v (%s)", ticketKeys, string(ticketBytes))
 	}
-	if ticketMap["ca_sha256"] != caSHA || ticketMap["peer_sha256"] != leafSHA || ticketMap["endpoint"] != loadedCfg.RelayURL || ticketMap["server_name"] != "localhost" || ticketMap["max_response_bytes"] != float64(2097152) {
-		t.Fatalf("stdio ticket pin/budget mismatch: got=%v want ca=%s peer=%s url=%s sni=localhost max_response_bytes=2097152", ticketMap, caSHA, leafSHA, loadedCfg.RelayURL)
+	if ticketMap["ca_sha256"] != caSHA || ticketMap["peer_sha256"] != leafSHA || ticketMap["endpoint"] != loadedCfg.RelayURL || ticketMap["server_name"] != "localhost" || ticketMap["max_response_bytes"] != "4194304" {
+		t.Fatalf("stdio ticket pin/budget mismatch: got=%v want ca=%s peer=%s url=%s sni=localhost max_response_bytes=\"4194304\"", ticketMap, caSHA, leafSHA, loadedCfg.RelayURL)
 	}
 
 	// Verify ServeTurnRelayHandle succeeds with matching SSL_CERT_FILE and fails closed on mismatched ca_sha256 or peer_sha256.
@@ -852,7 +852,7 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 	if !reflect.DeepEqual(sortedKeys(stdioTLSTicket), []string{"ca_sha256", "endpoint", "max_response_bytes", "peer_sha256", "server_name", "token"}) {
 		t.Fatalf("expected sandbox-usable stdio ticket [ca_sha256 endpoint max_response_bytes peer_sha256 server_name token], got %v", sortedKeys(stdioTLSTicket))
 	}
-	if stdioTLSTicket["ca_sha256"] != caSHA || stdioTLSTicket["peer_sha256"] != leafSHA || stdioTLSTicket["server_name"] != "localhost" || stdioTLSTicket["max_response_bytes"] != float64(2097152) {
+	if stdioTLSTicket["ca_sha256"] != caSHA || stdioTLSTicket["peer_sha256"] != leafSHA || stdioTLSTicket["server_name"] != "localhost" || stdioTLSTicket["max_response_bytes"] != "4194304" {
 		t.Fatalf("stdio include_tls_trust ticket mismatch: %v", stdioTLSTicket)
 	}
 	var initOut3 bytes.Buffer
@@ -1433,8 +1433,12 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 					flusher.Flush()
 				}
 			case 3:
-				// Within MaxAcquisitionBytes (<= 2048) but wrapped MCP JSON-RPC envelope > MaxSerializedRPCBytes (2048).
-				body := `{"total":1,"items":[{"docId":"` + strings.Repeat("c", 1900) + `"}]}`
+				// Within MaxAcquisitionBytes (<= 1000) but wrapped MCP JSON-RPC envelope > MaxSerializedRPCBytes (1200).
+				body := `{"total":1,"items":[{"docId":"` + strings.Repeat("c", 920) + `"}]}`
+				_, _ = w.Write([]byte(body))
+			case 4:
+				// Within MaxAcquisitionBytes (<= 1000) whose wrapped MCP JSON-RPC envelope (~1108B) exceeds MaxAcquisitionBytes (1000) and fits <= MaxSerializedRPCBytes (1200).
+				body := `{"total":1,"items":[{"docId":"doc-borderline-` + strings.Repeat("d", 750) + `"}]}`
 				_, _ = w.Write([]byte(body))
 			}
 		case "/v1/bot/docs/create":
@@ -1456,8 +1460,8 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 	})
 	relayURL := "https://" + relayRaw.Addr().String() + "/mcp"
 
-	const configuredAcqBudget = int64(2048)
-	const configuredSerBudget = int64(2048)
+	const configuredAcqBudget = int64(1000)
+	const configuredSerBudget = int64(1200)
 	budgets := &permission.ResponseBudgets{
 		MaxAcquisitionBytes:   configuredAcqBudget,
 		MaxPageItems:          10,
@@ -1684,7 +1688,7 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 		if !reflect.DeepEqual(sortedKeys(ticket), wantKeys) {
 			t.Fatalf("includeTLS=%v unexpected ticket keys: got %v want %v", includeTLS, sortedKeys(ticket), wantKeys)
 		}
-		if ticket["ca_sha256"] != caSHA || ticket["peer_sha256"] != leafSHA || ticket["server_name"] != relayDNSName || ticket["max_response_bytes"] != float64(configuredAcqBudget) {
+		if ticket["ca_sha256"] != caSHA || ticket["peer_sha256"] != leafSHA || ticket["server_name"] != relayDNSName || ticket["max_response_bytes"] != fmt.Sprintf("%d", configuredSerBudget) {
 			t.Fatalf("includeTLS=%v ticket mismatch: %v", includeTLS, ticket)
 		}
 		if includeTLS {
@@ -1717,8 +1721,8 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 		}
 		respBody, _ := io.ReadAll(httpResp.Body)
 		_ = httpResp.Body.Close()
-		if gotHdr := httpResp.Header.Get("X-Octo-Acquisition-Budget-Bytes"); gotHdr != "2048" {
-			t.Fatalf("writeManagedHTTP hijacked response missing X-Octo-Acquisition-Budget-Bytes=2048: got=%q headers=%v body=%s", gotHdr, httpResp.Header, string(respBody))
+		if gotHdr := httpResp.Header.Get("X-Octo-Acquisition-Budget-Bytes"); gotHdr != "1200" {
+			t.Fatalf("writeManagedHTTP hijacked response missing X-Octo-Acquisition-Budget-Bytes=1200: got=%q headers=%v body=%s", gotHdr, httpResp.Header, string(respBody))
 		}
 
 		// Positive child-process execution (with hostPrivateCAPath deleted, using sandbox SSL_CERT_FILE).
@@ -1736,7 +1740,22 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 			t.Fatalf("includeTLS=%v expected doc-ok in child stdout, got: %s", includeTLS, stdout)
 		}
 
-		// Over-budget upstream acquisition (Content-Length & streaming) -> replacement envelope relayed cleanly.
+		// [C-B1r2] Borderline response: raw upstream <= MaxAcquisitionBytes (512), wrapped MCP JSON-RPC envelope > 512 and <= MaxSerializedRPCBytes (2048) -> relayed cleanly.
+		docsMode.Store(4)
+		outBorder, errBorderOut, errBorder := runChildTurnRelay(
+			handle,
+			sandboxCAPath,
+			initLine,
+			makeCallLine(seq, "pos_borderline", "docs.search", map[string]any{"q": "borderline"}),
+		)
+		if errBorder != nil {
+			t.Fatalf("includeTLS=%v child octo-cli --turn-relay failed on borderline envelope (>MaxAcquisitionBytes, <=MaxSerializedRPCBytes): err=%v stderr=%s stdout=%s", includeTLS, errBorder, errBorderOut, outBorder)
+		}
+		if !strings.Contains(outBorder, "doc-borderline-") || len(outBorder) <= int(configuredAcqBudget) {
+			t.Fatalf("includeTLS=%v expected doc-borderline (>%d bytes) in child stdout, got (%d bytes): %s", includeTLS, configuredAcqBudget, len(outBorder), outBorder)
+		}
+
+		// Over-budget upstream acquisition (Content-Length & streaming) -> replacement envelope (>512 bytes, <=2048 bytes) relayed cleanly.
 		for _, mode := range []int32{1, 2} {
 			docsMode.Store(mode)
 			outAcq, errAcqOut, errAcq := runChildTurnRelay(
@@ -1900,5 +1919,22 @@ func TestXIN2794V52CrossProcessTurnRelayBudgetsAndTLSPinning(t *testing.T) {
 	}
 	if out, errOut, cerr := runChildTurnRelay(headerBudgetHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RESPONSE_BUDGET_EXCEEDED") {
 		t.Fatalf("expected child octo-cli --turn-relay to enforce X-Octo-Acquisition-Budget-Bytes=1024 (<64MiB): err=%v stdout=%q stderr=%q", cerr, out, errOut)
+	}
+	// Case 2C: ticket carries max_response_bytes encoded as a canonical decimal string ("1024", matching encodeGoRelayTicket) -> accepted and enforces 1024 bytes!
+	includeBudgetHeader.Store(false)
+	stringBudgetTicketJSON, err := json.Marshal(map[string]string{
+		"ca_sha256":          caSHA,
+		"endpoint":           oversizeURL,
+		"max_response_bytes": "1024",
+		"peer_sha256":        leafSHA,
+		"server_name":        relayDNSName,
+		"token":              strings.Repeat("d", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stringBudgetHandle := base64.RawURLEncoding.EncodeToString(stringBudgetTicketJSON)
+	if out, errOut, cerr := runChildTurnRelay(stringBudgetHandle, sandboxCAPath, initLine); cerr == nil || out != "" || !strings.Contains(errOut, "RESPONSE_BUDGET_EXCEEDED") {
+		t.Fatalf("expected child octo-cli --turn-relay to accept decimal-string max_response_bytes=\"1024\" and enforce 1024B budget: err=%v stdout=%q stderr=%q", cerr, out, errOut)
 	}
 }
