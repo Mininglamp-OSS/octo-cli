@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
@@ -154,7 +155,57 @@ func (s *Server) dispatchManaged(ctx context.Context, req rpcRequest) (rpcRespon
 	if r := call.Refused(); r != nil {
 		return permissionResponse(req.ID, r), true, call
 	}
+	if has {
+		resp = enforceSerializedRPCBudget(req, resp, call)
+	}
 	return resp, has, call
+}
+
+func enforceSerializedRPCBudget(req rpcRequest, resp rpcResponse, call *permission.Call) rpcResponse {
+	if call == nil || (resp.Error != nil && resp.Error.Code == -32007) {
+		return resp
+	}
+	limit := call.MaxSerializedRPCBytes()
+	if limit <= 0 {
+		return resp
+	}
+	var b bytes.Buffer
+	if err := json.NewEncoder(&b).Encode(resp); err != nil {
+		return resp
+	}
+	observed := int64(b.Len())
+	if observed <= limit {
+		return resp
+	}
+	var p toolCallParams
+	_ = decodeToolCallParams(req.Params, &p)
+	var a struct {
+		OperationID string `json:"operation_id"`
+	}
+	_ = json.Unmarshal(p.Arguments, &a)
+	ee := output.ErrWithHint(
+		"api",
+		"RESPONSE_BUDGET_EXCEEDED",
+		fmt.Sprintf("serialized MCP RPC response (%d bytes) exceeds managed serialized_rpc_bytes budget of %d bytes", observed, limit),
+		"narrow the request scope or page size",
+	)
+	if detail, err := json.Marshal(map[string]any{
+		"budget_kind":    "serialized_rpc_bytes",
+		"limit_bytes":    limit,
+		"observed_bytes": observed,
+	}); err == nil {
+		ee.Detail = detail
+	}
+	env := synthErrorEnvelope(ee)
+	if p.Name == "execute" {
+		return newResultResponse(req.ID, jsonToolResult(map[string]any{
+			"status":       "execution_error",
+			"operation_id": a.OperationID,
+			"envelope":     decodeEnvelope(env),
+			"error":        ee,
+		}, true))
+	}
+	return newResultResponse(req.ID, rawToolResult(env, true))
 }
 
 func managedSelection(raw json.RawMessage) bool {

@@ -1,17 +1,22 @@
 {
   "format": "permission-cli-contract-manifest-v6",
-  "status": "V44_TOP_SECTION_CONVERGENCE_DELIVERED_SOURCE_SUPPORT_NOT_APPROVED",
+  "status": "V45_CONTINUATION_DELIVERED_AWAITING_OWNER_NUMERIC_SIGN_OFF",
   "catalog_digest": null,
   "candidate_manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+  "candidate_semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
   "retained_artifacts_and_unchanged_contracts": "contract-manifest-v5.json -> v4 -> v3 -> v2 -> v1; original template/wire schemas and engineering artifacts unchanged",
   "files": {
     "docs/permission/endpoint-abi-v2.json": {
-      "bytes": 6955,
-      "sha256": "7f9556d0526cff30ef1c36d53d2457dbc4266b8912722717badebac796ad8909"
+      "bytes": 9647,
+      "sha256": "219f927f2522ac5090ef257d50ca5bf5768055607df028ca6c7ad04de1223cdf"
     },
     "docs/permission/cli-component-contract-v6.json": {
-      "bytes": 8998,
-      "sha256": "8da203c9e6b650f5bc94d81080f4ed7281bd2cc36755ff0027f8e2e6b0b9fe9d"
+      "bytes": 10671,
+      "sha256": "16e924573297469c56c0346b8b6b023f06a68d5ed2f2e389de2ea1664326b4d5"
+    },
+    "docs/permission/response-budget-ledger-v6.json": {
+      "bytes": 7728,
+      "sha256": "b7c646f4c73fe62d00450a5fec10d4a0f852f227b1040c8b3c31cf94475c9263"
     },
     "internal/mcp/catalog_sources/page-bounds-v2.json": {
       "bytes": 3574,

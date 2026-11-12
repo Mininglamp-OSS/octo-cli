@@ -25,6 +25,9 @@ import (
 // It never disables TLS certificate or hostname/IP SAN verification.
 type TurnRelayTrust struct {
 	CAFile     string `json:"ca_file,omitempty"`
+	CAPEM      string `json:"ca_pem,omitempty"`
+	CASHA256   string `json:"ca_sha256,omitempty"`
+	PeerSHA256 string `json:"peer_sha256,omitempty"`
 	CertSHA256 string `json:"cert_sha256,omitempty"`
 	ServerName string `json:"server_name,omitempty"`
 }
@@ -50,24 +53,41 @@ func TurnRelayHandle(endpoint, token string) (string, error) {
 // TurnRelayHandleWithTrust binds optional verified private-CA/SAN/cert-digest
 // pins into the one-turn stdio relay handle within the 512-char handle budget.
 func TurnRelayHandleWithTrust(endpoint, token string, trust TurnRelayTrust) (string, error) {
+	if trust.CAFile != "" && (!filepath.IsAbs(trust.CAFile) || strings.ContainsAny(trust.CAFile, "\r\n\x00")) {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if trust.CASHA256 != "" && !controlHash(trust.CASHA256) {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if trust.PeerSHA256 != "" && !controlHash(trust.PeerSHA256) {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if trust.CertSHA256 != "" && !controlHash(trust.CertSHA256) {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if (trust.CASHA256 != "") != (trust.PeerSHA256 != "") {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if trust.PeerSHA256 != "" && trust.CertSHA256 != "" && trust.PeerSHA256 != trust.CertSHA256 {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
+	if trust.ServerName != "" && !validRelayServerName(trust.ServerName) {
+		return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	}
 	ticket := map[string]string{"endpoint": endpoint, "token": token}
-	if trust.CAFile != "" {
-		if !filepath.IsAbs(trust.CAFile) || strings.ContainsAny(trust.CAFile, "\r\n\x00") {
-			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+	if trust.CASHA256 != "" && trust.PeerSHA256 != "" {
+		ticket["ca_sha256"] = trust.CASHA256
+		ticket["peer_sha256"] = trust.PeerSHA256
+	} else {
+		if trust.CAFile != "" {
+			ticket["ca_file"] = trust.CAFile
 		}
-		ticket["ca_file"] = trust.CAFile
-	}
-	if trust.CertSHA256 != "" {
-		if !controlHash(trust.CertSHA256) {
-			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+		if trust.CertSHA256 != "" {
+			ticket["cert_sha256"] = trust.CertSHA256
 		}
-		ticket["cert_sha256"] = trust.CertSHA256
-	}
-	if trust.ServerName != "" {
-		if !validRelayServerName(trust.ServerName) {
-			return "", errors.New("RELAY_HANDLE_UNAVAILABLE")
+		if trust.ServerName != "" {
+			ticket["server_name"] = trust.ServerName
 		}
-		ticket["server_name"] = trust.ServerName
 	}
 	b, err := json.Marshal(ticket)
 	if err != nil {
@@ -93,7 +113,7 @@ func ServeTurnRelayHandle(ctx context.Context, handle string, in io.Reader, out 
 	return ServeTurnRelay(ctx, bytes.NewReader(b), in, out)
 }
 
-func relayTLSClientConfig(caFile, certSHA256, serverName string) (*tls.Config, error) {
+func relayTLSClientConfig(caFile, caSHA256, certSHA256, serverName string) (*tls.Config, error) {
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS13}
 	if serverName != "" {
 		if !validRelayServerName(serverName) {
@@ -101,9 +121,18 @@ func relayTLSClientConfig(caFile, certSHA256, serverName string) (*tls.Config, e
 		}
 		tlsConfig.ServerName = serverName
 	}
+	if caSHA256 != "" && !controlHash(caSHA256) {
+		return nil, errors.New("RELAY_TICKET_INVALID")
+	}
 	caPath := caFile
 	if caPath == "" {
 		caPath = os.Getenv("SSL_CERT_FILE")
+	}
+	if caPath == "" {
+		caPath = os.Getenv("NODE_EXTRA_CA_CERTS")
+	}
+	if caSHA256 != "" && caPath == "" {
+		return nil, errors.New("RELAY_UNAVAILABLE")
 	}
 	if caPath != "" {
 		if !filepath.IsAbs(caPath) || strings.ContainsAny(caPath, "\r\n\x00") {
@@ -112,6 +141,12 @@ func relayTLSClientConfig(caFile, certSHA256, serverName string) (*tls.Config, e
 		pemBytes, err := os.ReadFile(caPath)
 		if err != nil || len(pemBytes) == 0 || len(pemBytes) > 256*1024 {
 			return nil, errors.New("RELAY_UNAVAILABLE")
+		}
+		if caSHA256 != "" {
+			pemSum := sha256.Sum256(pemBytes)
+			if hex.EncodeToString(pemSum[:]) != caSHA256 {
+				return nil, errors.New("RELAY_TLS_PIN_MISMATCH")
+			}
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pemBytes) {
@@ -145,15 +180,21 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 	if err != nil || len(raw) > 4096 {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	fields, err := strictObjectWithOptional(raw, []string{"endpoint", "token"}, "ca_file", "cert_sha256", "server_name")
+	fields, err := strictObjectWithOptional(raw, []string{"endpoint", "token"}, "ca_file", "ca_sha256", "peer_sha256", "cert_sha256", "server_name")
 	if err != nil {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	var endpoint, token, caFile, certSHA256, serverName string
+	var endpoint, token, caFile, caSHA256, peerSHA256, certSHA256, serverName string
 	if json.Unmarshal(fields["endpoint"], &endpoint) != nil || json.Unmarshal(fields["token"], &token) != nil || !validRelayToken(token) {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	if rawCA, ok := fields["ca_file"]; ok && (json.Unmarshal(rawCA, &caFile) != nil || caFile == "") {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawCASHA, ok := fields["ca_sha256"]; ok && (json.Unmarshal(rawCASHA, &caSHA256) != nil || caSHA256 == "") {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawPeerSHA, ok := fields["peer_sha256"]; ok && (json.Unmarshal(rawPeerSHA, &peerSHA256) != nil || peerSHA256 == "") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	if rawPin, ok := fields["cert_sha256"]; ok && (json.Unmarshal(rawPin, &certSHA256) != nil || certSHA256 == "") {
@@ -162,11 +203,17 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 	if rawSNI, ok := fields["server_name"]; ok && (json.Unmarshal(rawSNI, &serverName) != nil || serverName == "") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
+	if (caSHA256 != "") != (peerSHA256 != "") || (peerSHA256 != "" && certSHA256 != "" && peerSHA256 != certSHA256) {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if certSHA256 == "" {
+		certSHA256 = peerSHA256
+	}
 	u, err := url.Parse(endpoint)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Host == "" || u.Scheme != "https" && (u.Scheme != "http" || u.Hostname() != "127.0.0.1" && u.Hostname() != "localhost" && u.Hostname() != "::1") {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	tlsConfig, err := relayTLSClientConfig(caFile, certSHA256, serverName)
+	tlsConfig, err := relayTLSClientConfig(caFile, caSHA256, certSHA256, serverName)
 	if err != nil {
 		return err
 	}
@@ -187,6 +234,12 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 			req.Header.Set("Content-Type", "application/json")
 			resp, err := client.Do(req) //nolint:bodyclose // source response is fully acquired and closed under the existing request deadline
 			if err != nil {
+				if strings.Contains(err.Error(), "RELAY_TLS_PIN_MISMATCH") {
+					return errors.New("RELAY_TLS_PIN_MISMATCH")
+				}
+				if strings.Contains(err.Error(), "RELAY_TLS_PEER_UNVERIFIED") {
+					return errors.New("RELAY_TLS_PEER_UNVERIFIED")
+				}
 				return errors.New("RELAY_UNAVAILABLE")
 			}
 			// maxHTTPBodyBytes is the existing incoming-request bound. Ordinary

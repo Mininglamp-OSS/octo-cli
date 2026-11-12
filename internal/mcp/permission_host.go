@@ -45,8 +45,11 @@ type PermissionHostConfig struct {
 	ReadyPath           string                             `json:"ready_path"`
 	RelayExecutable     string                             `json:"relay_executable"`
 	RelayCA             string                             `json:"relay_ca,omitempty"`
+	RelayCASHA256       string                             `json:"relay_ca_sha256,omitempty"`
+	RelayPeerSHA256     string                             `json:"relay_peer_sha256,omitempty"`
 	RelayCertSHA256     string                             `json:"relay_cert_sha256,omitempty"`
 	RelayServerName     string                             `json:"relay_server_name,omitempty"`
+	ResponseBudgets     *permission.ResponseBudgets        `json:"response_budgets,omitempty"`
 	AuthorityPins       map[string]permission.AuthorityPin `json:"authority_pins"`
 }
 
@@ -114,6 +117,7 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 		}
 	}
+	var caPEM, caSHA256 string
 	if cfg.RelayCA != "" {
 		if !filepath.IsAbs(cfg.RelayCA) || strings.ContainsAny(cfg.RelayCA, "\r\n\x00") {
 			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
@@ -122,14 +126,49 @@ func NewPermissionHost(cfg PermissionHostConfig, c *permission.Coordinator, p pe
 		if err != nil || len(pemBytes) == 0 || len(pemBytes) > 256*1024 || !x509.NewCertPool().AppendCertsFromPEM(pemBytes) {
 			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 		}
+		caPEM = string(pemBytes)
+		caSum := sha256.Sum256(pemBytes)
+		caSHA256 = hex.EncodeToString(caSum[:])
+	}
+	if cfg.RelayCASHA256 != "" && (!controlHash(cfg.RelayCASHA256) || (caSHA256 != "" && cfg.RelayCASHA256 != caSHA256)) {
+		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	if cfg.RelayPeerSHA256 != "" && !controlHash(cfg.RelayPeerSHA256) {
+		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if cfg.RelayCertSHA256 != "" && !controlHash(cfg.RelayCertSHA256) {
+		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	if cfg.RelayPeerSHA256 != "" && cfg.RelayCertSHA256 != "" && cfg.RelayPeerSHA256 != cfg.RelayCertSHA256 {
+		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	peerSHA256 := cfg.RelayPeerSHA256
+	if peerSHA256 == "" {
+		peerSHA256 = cfg.RelayCertSHA256
+	}
+	certSHA256 := cfg.RelayCertSHA256
+	if certSHA256 == "" {
+		certSHA256 = cfg.RelayPeerSHA256
+	}
+	effectiveCASHA256 := cfg.RelayCASHA256
+	if effectiveCASHA256 == "" && peerSHA256 != "" && caSHA256 != "" {
+		effectiveCASHA256 = caSHA256
+	}
+	if (effectiveCASHA256 != "") != (peerSHA256 != "") && (cfg.RelayCASHA256 != "" || cfg.RelayPeerSHA256 != "") {
 		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if cfg.RelayServerName != "" && !validRelayServerName(cfg.RelayServerName) {
 		return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
-	trust := TurnRelayTrust{CAFile: cfg.RelayCA, CertSHA256: cfg.RelayCertSHA256, ServerName: cfg.RelayServerName}
+	if cfg.ResponseBudgets != nil {
+		if !cfg.ResponseBudgets.Valid() {
+			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+		}
+		if err := c.ConfigureResponseBudgets(*cfg.ResponseBudgets); err != nil {
+			return nil, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+		}
+	}
+	trust := TurnRelayTrust{CAFile: cfg.RelayCA, CAPEM: caPEM, CASHA256: effectiveCASHA256, PeerSHA256: peerSHA256, CertSHA256: certSHA256, ServerName: cfg.RelayServerName}
 	h := &PermissionHost{config: cfg, coordinator: c, policies: p, native: n, incarnation: permission.NewID(), sessions: map[string]bool{}, ingress: map[string]*hostIngress{}, capsules: map[string]*hostCapsule{}, contextGenerations: map[string]hostContextGeneration{}, relays: map[string]*hostRelay{}, seenDeliveries: map[[32]byte]bool{}, server: server, relayTrust: trust}
 	if _, err := rand.Read(h.macKey[:]); err != nil {
 		return nil, err
@@ -596,6 +635,10 @@ func (h *PermissionHost) handleControl(ctx context.Context, owner string, f perm
 		h.relays[relay.token] = relay
 		if transport == "http" {
 			reply := map[string]any{"transport": "http", "url": h.config.RelayURL, "handle": relay.token}
+			if h.relayTrust.CASHA256 != "" && h.relayTrust.PeerSHA256 != "" {
+				reply["ca_sha256"] = h.relayTrust.CASHA256
+				reply["peer_sha256"] = h.relayTrust.PeerSHA256
+			}
 			if includeTLS && h.relayTrust != (TurnRelayTrust{}) {
 				reply["tls"] = h.relayTrustMap()
 			}
@@ -716,6 +759,15 @@ func (h *PermissionHost) relayTrustMap() map[string]any {
 	m := map[string]any{}
 	if h.relayTrust.CAFile != "" {
 		m["ca_file"] = h.relayTrust.CAFile
+	}
+	if h.relayTrust.CAPEM != "" {
+		m["ca_pem"] = h.relayTrust.CAPEM
+	}
+	if h.relayTrust.CASHA256 != "" {
+		m["ca_sha256"] = h.relayTrust.CASHA256
+	}
+	if h.relayTrust.PeerSHA256 != "" {
+		m["peer_sha256"] = h.relayTrust.PeerSHA256
 	}
 	if h.relayTrust.CertSHA256 != "" {
 		m["cert_sha256"] = h.relayTrust.CertSHA256

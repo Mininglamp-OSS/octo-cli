@@ -131,21 +131,63 @@ type scopeKey struct {
 // facade and sink must share this instance; a new per-request instance is not
 // a permission enforcement composition.
 type Coordinator struct {
-	mu             sync.Mutex
-	scopes         map[scopeKey]*scope
-	policies       PolicyReader
-	facts          FactReader
-	catalog        Catalog
-	caps           map[string]bool
-	tlsConfig      *tls.Config
-	attempts       chan struct{}
-	pageBounds     map[string]PageBound
-	packageCatalog *VerifiedCatalog
+	mu              sync.Mutex
+	scopes          map[scopeKey]*scope
+	policies        PolicyReader
+	facts           FactReader
+	catalog         Catalog
+	caps            map[string]bool
+	tlsConfig       *tls.Config
+	attempts        chan struct{}
+	pageBounds      map[string]PageBound
+	responseBudgets *ResponseBudgets
+	packageCatalog  *VerifiedCatalog
 }
 
 // PageBound is a source-proven count contract from the supported release.
 // A schema page-size input maximum alone is not this response guarantee.
 type PageBound struct{ Items, Pages int }
+
+// ResponseBudgets configures explicit managed-mode byte and pagination ceilings
+// for HTTP acquisition, multi-page aggregation, and final serialized MCP RPC
+// responses (A1 direction). Production defaults are intentionally unselected
+// (zero values remain unconfigured); capabilities requiring static source
+// provenance remain isolated from generic response budgets.
+type ResponseBudgets struct {
+	MaxAcquisitionBytes   int64 `json:"max_acquisition_bytes"`
+	MaxPageItems          int   `json:"max_page_items"`
+	MaxPages              int   `json:"max_pages"`
+	MaxCumulativeBytes    int64 `json:"max_cumulative_bytes"`
+	MaxSerializedRPCBytes int64 `json:"max_serialized_rpc_bytes"`
+}
+
+// Valid reports whether every budget dimension is explicitly configured within
+// bounded positive limits. Missing or zero fields are invalid.
+func (b ResponseBudgets) Valid() bool {
+	return b.MaxAcquisitionBytes >= 1 && b.MaxAcquisitionBytes <= 64<<20 &&
+		b.MaxPageItems >= 1 && b.MaxPageItems <= 10000 &&
+		b.MaxPages >= 1 && b.MaxPages <= 1000 &&
+		b.MaxCumulativeBytes >= b.MaxAcquisitionBytes && b.MaxCumulativeBytes <= 64<<20 &&
+		b.MaxSerializedRPCBytes >= 1 && b.MaxSerializedRPCBytes <= 64<<20
+}
+
+// ResponseBudgetError reports an explicit managed-mode acquisition, pagination,
+// or serialized RPC response budget overflow without silent truncation.
+type ResponseBudgetError struct {
+	Kind     string `json:"budget_kind"`
+	Limit    int64  `json:"limit"`
+	Observed int64  `json:"observed"`
+}
+
+func (e *ResponseBudgetError) Error() string {
+	return "RESPONSE_BUDGET_EXCEEDED"
+}
+
+// StaticProvenanceRequired isolates capabilities that genuinely require static
+// source provenance/bounds proof rather than generic managed response budgets.
+func StaticProvenanceRequired(capability string) bool {
+	return capability == "octo-cli/docs/derived/portable-attachment-bytes"
+}
 
 // ConfigurePageBounds installs immutable release contracts before admission.
 func (c *Coordinator) ConfigurePageBounds(bounds map[string]PageBound) error {
@@ -163,6 +205,37 @@ func (c *Coordinator) ConfigurePageBounds(bounds map[string]PageBound) error {
 	}
 	c.pageBounds = validated
 	return nil
+}
+
+// ConfigureResponseBudgets installs explicit managed-mode acquisition,
+// cumulative pagination, and serialized RPC response budgets before admission.
+func (c *Coordinator) ConfigureResponseBudgets(budgets ResponseBudgets) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !budgets.Valid() {
+		return ErrInvalid
+	}
+	if c.responseBudgets != nil {
+		if *c.responseBudgets == budgets {
+			return nil
+		}
+		return ErrConflict
+	}
+	if len(c.scopes) != 0 {
+		return ErrConflict
+	}
+	copied := budgets
+	c.responseBudgets = &copied
+	return nil
+}
+
+// ResponseBudgets returns a copy of the configured managed response budgets, or
+// false when no response budgets are configured.
+func (c *Coordinator) ResponseBudgets() (ResponseBudgets, bool) {
+	if c == nil || c.responseBudgets == nil {
+		return ResponseBudgets{}, false
+	}
+	return *c.responseBudgets, true
 }
 
 // Invocation is an opaque, revocable host handle. Handles from an earlier

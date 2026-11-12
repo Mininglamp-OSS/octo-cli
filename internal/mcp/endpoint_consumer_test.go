@@ -101,7 +101,7 @@ func runPinnedEndpointControlAndActualTurnRelayExecutable(t *testing.T, f *manag
 		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: raw})...)
 	}
 	config := map[string]any{"port": listener.Addr().(*net.TCPAddr).Port, "host": "127.0.0.1", "servername": "localhost", "ca": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCert.Certificate[1]})), "cert": string(chain), "key": string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key})), "endpointIncarnation": cfg.EndpointIncarnation, "coordinatorIncarnation": host.Incarnation(), "recipientId": cfg.RecipientID, "configuredOrigin": cfg.Origin, "peerCertificateSha256": sha256Sum(serverCert.Certificate[0]), "timeoutMs": 10000}
-	fixture := map[string]any{"control": config, "key": f.bundle.Key, "header": f.header}
+	fixture := map[string]any{"control": config, "key": f.bundle.Key, "header": f.header, "caPath": caPath}
 	data, _ := json.Marshal(fixture)
 	configPath := filepath.Join(dir, "fixture.json")
 	os.WriteFile(configPath, data, 0o600)
@@ -140,7 +140,7 @@ await control.call('bind_context',{capsule_id:admitted.capsule_id,manifest:{...m
 const relay=await control.call('open_relay',{capsule_id:admitted.capsule_id,recipient_id:'endpoint-1',transport:'stdio',relay_nonce:randomBytes(16).toString('hex')});
 if(createHash('sha256').update(readFileSync(relay.executable)).digest('hex')!==relay.executableSha256)throw Error('Executable pin mismatch');
 const input=JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{capabilities:{}}})+'\n'+JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'call_op',arguments:{operation_id:'message.send',arguments:{channel_id:'target',channel_type:2,payload:{text:'synthetic'}}}}})+'\n';
-const worker=spawnSync(relay.executable,['--turn-relay',relay.handle],{input,encoding:'utf8',env:{},timeout:20000});
+const worker=spawnSync(relay.executable,['--turn-relay',relay.handle],{input,encoding:'utf8',env:{SSL_CERT_FILE:fixture.caPath,NODE_EXTRA_CA_CERTS:fixture.caPath},timeout:20000});
 if(worker.status!==0||!worker.stdout.includes('synthetic-result'))throw Error('Worker failed: '+worker.stderr+' '+worker.stdout);
 await control.call('close',{capsule_id:admitted.capsule_id,reason:'completed'});
 let duplicateBlocked=false;try{await control.call('register_ingress',{key:fixture.key,delivery_reference:'delivery',stream:fixture.header.delivery,payload_sha256:fixture.header.payload_sha256});}catch{duplicateBlocked=true;}

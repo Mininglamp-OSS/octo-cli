@@ -945,7 +945,15 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 		if e != nil {
 			return nil, e
 		}
-		return permission.BoundCall(scoped).ConsumeBytes(scoped, result)
+		consumed, consumeErr := permission.BoundCall(scoped).ConsumeBytes(scoped, result)
+		if consumeErr != nil {
+			var bErr *permission.ResponseBudgetError
+			if errors.As(consumeErr, &bErr) {
+				return nil, responseBudgetExceededError(req.Method, bErr.Kind, bErr.Limit, bErr.Observed)
+			}
+			return nil, consumeErr
+		}
+		return consumed, nil
 	}
 	return result, nil
 }
@@ -1155,14 +1163,25 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	// still buffers a large export (docs.ppt.export allows up to 160 MiB);
 	// streaming it to the temp file is a separate change.
 	var responseReader io.Reader = resp.Body
-	if req.MaxResponseBytes > 0 {
-		responseReader = io.LimitReader(resp.Body, req.MaxResponseBytes+1)
+	maxResponseBytes := req.MaxResponseBytes
+	managedBudget := int64(0)
+	if bound := permission.BoundCall(ctx); bound != nil && !req.BinaryResponse {
+		if b := bound.MaxAcquisitionBytes(); b > 0 && (maxResponseBytes <= 0 || b < maxResponseBytes) {
+			maxResponseBytes = b
+			managedBudget = b
+		}
+	}
+	if maxResponseBytes > 0 {
+		responseReader = io.LimitReader(resp.Body, maxResponseBytes+1)
 	}
 	respBody, err := io.ReadAll(responseReader)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
 	}
-	if req.MaxResponseBytes > 0 && int64(len(respBody)) > req.MaxResponseBytes {
+	if maxResponseBytes > 0 && int64(len(respBody)) > maxResponseBytes {
+		if managedBudget > 0 && int64(len(respBody)) > managedBudget {
+			return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, int64(len(respBody)))
+		}
 		return nil, output.ErrAPI("RESPONSE_TOO_LARGE", "response exceeds the configured limit", "")
 	}
 
@@ -1601,6 +1620,27 @@ func withRetryAfterHint(err error) error {
 // not taken as proof: most come from pre-handler rate limiters, but a handler
 // can also answer 429 after it committed (octo-server OIDC bind does for an
 // already-created token), and the client cannot tell the two apart.
+func responseBudgetExceededError(method, kind string, limit, observed int64) *output.ExitError {
+	hint := "narrow the request scope or page size"
+	if !isSafeMethod(method) {
+		hint = "the request was sent before the response exceeded the managed budget; do not retry mutating requests without checking server state"
+	}
+	ee := output.ErrWithHint(
+		"api",
+		"RESPONSE_BUDGET_EXCEEDED",
+		fmt.Sprintf("response exceeds managed %s budget of %d bytes (observed >= %d bytes)", kind, limit, observed),
+		hint,
+	)
+	if detail, err := json.Marshal(map[string]any{
+		"budget_kind":             kind,
+		"limit_bytes":             limit,
+		"observed_bytes_at_least": observed,
+	}); err == nil {
+		ee.Detail = detail
+	}
+	return ee
+}
+
 func attemptMayHaveApplied(err error) bool {
 	ee := output.AsExitError(err)
 	if ee == nil {
@@ -1609,7 +1649,7 @@ func attemptMayHaveApplied(err error) bool {
 	if ee.NotProcessed {
 		return false
 	}
-	if ee.Type == "network" {
+	if ee.Type == "network" || ee.Code == "RESPONSE_BUDGET_EXCEEDED" || ee.Code == "RESPONSE_TOO_LARGE" {
 		return true
 	}
 	status := ee.HTTPStatus

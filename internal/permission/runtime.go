@@ -32,11 +32,12 @@ type Call struct {
 type RequestTarget struct{ Capability, Method, Path string }
 type callState struct {
 	sync.Mutex
-	refusal *Refusal
-	end     sync.Once
-	cancel  context.CancelFunc
-	stop    func() bool
-	pages   map[string]int
+	refusal   *Refusal
+	end       sync.Once
+	cancel    context.CancelFunc
+	stop      func() bool
+	pages     map[string]int
+	pageBytes map[string]int64
 }
 
 // BeginCall establishes the root check before any protected metadata/input.
@@ -53,7 +54,7 @@ func (c *Coordinator) BeginCall(ctx context.Context, i *Invocation, capability s
 	ctx, cancel := context.WithCancel(ctx)
 	stop := context.AfterFunc(i.context, cancel)
 	sum := sha256.Sum256(arguments)
-	call := &Call{coordinator: c, invocation: i, capability: capability, callID: randomID(), argumentsDigest: hex.EncodeToString(sum[:]), children: map[string]bool{}, state: &callState{cancel: cancel, stop: stop, pages: map[string]int{}}}
+	call := &Call{coordinator: c, invocation: i, capability: capability, callID: randomID(), argumentsDigest: hex.EncodeToString(sum[:]), children: map[string]bool{}, state: &callState{cancel: cancel, stop: stop, pages: map[string]int{}, pageBytes: map[string]int64{}}}
 	call.targets = map[string][]RequestTarget{}
 	for _, child := range children {
 		call.children[child] = true
@@ -71,8 +72,60 @@ func (c *Coordinator) BeginCall(ctx context.Context, i *Invocation, capability s
 	return ctx, nil
 }
 
+// MaxAcquisitionBytes returns the configured per-response acquisition byte
+// budget for this managed call, or 0 when unconfigured.
+func (c *Call) MaxAcquisitionBytes() int64 {
+	if c == nil || c.coordinator == nil || c.coordinator.responseBudgets == nil {
+		return 0
+	}
+	return c.coordinator.responseBudgets.MaxAcquisitionBytes
+}
+
+// MaxSerializedRPCBytes returns the configured serialized MCP RPC response byte
+// budget for this managed call, or 0 when unconfigured.
+func (c *Call) MaxSerializedRPCBytes() int64 {
+	if c == nil || c.coordinator == nil || c.coordinator.responseBudgets == nil {
+		return 0
+	}
+	return c.coordinator.responseBudgets.MaxSerializedRPCBytes
+}
+
+// PageStopLimit returns the configured page-count stop bound for clean
+// page-budget-prefix pagination when ResponseBudgets is active, or 0 otherwise.
+func (c *Call) PageStopLimit() int {
+	if c == nil || c.coordinator == nil || StaticProvenanceRequired(c.capability) {
+		return 0
+	}
+	if bound, ok := c.coordinator.pageBounds[c.capability]; ok {
+		if c.coordinator.responseBudgets != nil && c.coordinator.responseBudgets.MaxPages < bound.Pages {
+			return c.coordinator.responseBudgets.MaxPages
+		}
+		return bound.Pages
+	}
+	if c.coordinator.responseBudgets != nil {
+		return c.coordinator.responseBudgets.MaxPages
+	}
+	return 0
+}
+
+// AdmitCumulativeBytes checks the merged pagination payload against the
+// configured cumulative pagination byte budget without silent truncation.
+func (c *Call) AdmitCumulativeBytes(totalBytes int64) error {
+	if c == nil || c.coordinator == nil || c.coordinator.responseBudgets == nil {
+		return nil
+	}
+	limit := c.coordinator.responseBudgets.MaxCumulativeBytes
+	if limit > 0 && totalBytes > limit {
+		return &ResponseBudgetError{Kind: "cumulative_bytes", Limit: limit, Observed: totalBytes}
+	}
+	return nil
+}
+
 // ConsumeBytes owns insertion of one completed read into helper/derived state.
 func (c *Call) ConsumeBytes(ctx context.Context, source []byte) ([]byte, error) {
+	if limit := c.MaxAcquisitionBytes(); limit > 0 && int64(len(source)) > limit {
+		return nil, &ResponseBudgetError{Kind: "acquisition_bytes", Limit: limit, Observed: int64(len(source))}
+	}
 	var sealed []byte
 	err := c.check(ctx, func() error { sealed = append([]byte(nil), source...); return nil })
 	return sealed, err
@@ -81,22 +134,54 @@ func (c *Call) ConsumeBytes(ctx context.Context, source []byte) ([]byte, error) 
 // AdmitPage counts every returned item before aggregation. Missing compatible
 // source bounds are unavailable, never zero/unlimited or silent truncation.
 func AdmitPage(ctx context.Context, count int) error {
+	return AdmitPageBytes(ctx, count, 0)
+}
+
+// AdmitPageBytes enforces per-page item count, page count, and cumulative page
+// byte budgets across each pagination page boundary with a fresh F -> B check.
+func AdmitPageBytes(ctx context.Context, count int, pageBytes int) error {
 	c := BoundCall(ctx)
 	if c == nil {
 		return nil
 	}
-	bound, ok := c.coordinator.pageBounds[c.capability]
-	if !ok || count < 0 || count > bound.Items {
+	if StaticProvenanceRequired(c.capability) {
 		err := PolicyUnavailable()
 		c.record(err)
 		return err
+	}
+	bound, hasStatic := c.coordinator.pageBounds[c.capability]
+	budgets := c.coordinator.responseBudgets
+	if !hasStatic && budgets == nil {
+		err := PolicyUnavailable()
+		c.record(err)
+		return err
+	}
+	if count < 0 || (hasStatic && count > bound.Items) {
+		err := PolicyUnavailable()
+		c.record(err)
+		return err
+	}
+	if budgets != nil {
+		if count > budgets.MaxPageItems {
+			return &ResponseBudgetError{Kind: "page_items", Limit: int64(budgets.MaxPageItems), Observed: int64(count)}
+		}
+		c.state.Lock()
+		nextBytes := c.state.pageBytes[c.capability] + int64(pageBytes)
+		c.state.Unlock()
+		if pageBytes > 0 && nextBytes > budgets.MaxCumulativeBytes {
+			return &ResponseBudgetError{Kind: "cumulative_bytes", Limit: budgets.MaxCumulativeBytes, Observed: nextBytes}
+		}
 	}
 	return c.check(ctx, func() error {
 		c.state.Lock()
 		defer c.state.Unlock()
 		c.state.pages[c.capability]++
-		if c.state.pages[c.capability] > bound.Pages {
+		c.state.pageBytes[c.capability] += int64(pageBytes)
+		if hasStatic && c.state.pages[c.capability] > bound.Pages {
 			return PolicyUnavailable()
+		}
+		if budgets != nil && c.state.pages[c.capability] > budgets.MaxPages {
+			return &ResponseBudgetError{Kind: "page_count", Limit: int64(budgets.MaxPages), Observed: int64(c.state.pages[c.capability])}
 		}
 		return nil
 	})

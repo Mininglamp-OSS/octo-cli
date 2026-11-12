@@ -43,11 +43,17 @@ func LoadPermissionHostConfig(path string) (PermissionHostConfig, error) {
 	if err != nil || len(b) > 16384 {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
-	if _, err = strictObjectWithOptional(b, []string{"version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins", "ready_path", "relay_executable"}, "relay_ca", "relay_cert_sha256", "relay_server_name"); err != nil {
+	fields, err := strictObjectWithOptional(b, []string{"version", "origin", "bot_uid", "recipient_id", "endpoint_incarnation", "peer_sha256", "control_address", "relay_address", "relay_url", "certificate", "private_key", "peer_ca", "release_path", "release_sha256", "authority_pins", "ready_path", "relay_executable"}, "relay_ca", "relay_ca_sha256", "relay_peer_sha256", "relay_cert_sha256", "relay_server_name", "response_budgets")
+	if err != nil {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if json.Unmarshal(b, &cfg) != nil || cfg.Version != 1 {
 		return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	if rawBudgets, ok := fields["response_budgets"]; ok {
+		if _, err := strictObject(rawBudgets, "max_acquisition_bytes", "max_page_items", "max_pages", "max_cumulative_bytes", "max_serialized_rpc_bytes"); err != nil || cfg.ResponseBudgets == nil || !cfg.ResponseBudgets.Valid() {
+			return cfg, errors.New("PERMISSION_HOST_CONFIG_INVALID")
+		}
 	}
 	u, err := url.Parse(cfg.RelayURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !filepath.IsAbs(cfg.ReadyPath) {
@@ -149,26 +155,35 @@ func servePermissionHostWithPackages(ctx context.Context, cfg PermissionHostConf
 	}
 	leafSum := sha256.Sum256(cert.Certificate[0])
 	leafHex := hex.EncodeToString(leafSum[:])
-	if cfg.RelayCertSHA256 != "" && cfg.RelayCertSHA256 != leafHex {
+	if (cfg.RelayCertSHA256 != "" && cfg.RelayCertSHA256 != leafHex) || (cfg.RelayPeerSHA256 != "" && cfg.RelayPeerSHA256 != leafHex) {
 		return errors.New("PERMISSION_HOST_CONFIG_INVALID")
 	}
 	if cfg.RelayCA == "" {
 		cfg.RelayCA = cfg.PeerCA
-	}
-	if cfg.RelayCertSHA256 == "" {
-		if _, err := TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: cfg.RelayCA, CertSHA256: leafHex, ServerName: cfg.RelayServerName}); err == nil {
-			cfg.RelayCertSHA256 = leafHex
-		}
 	}
 	originRoots, err := x509.SystemCertPool()
 	if err != nil || originRoots == nil {
 		originRoots = x509.NewCertPool()
 	}
 	originRoots.AppendCertsFromPEM(ca)
+	relayCABytes := ca
 	if cfg.RelayCA != "" && cfg.RelayCA != cfg.PeerCA {
-		relayCA, readErr := os.ReadFile(cfg.RelayCA)
-		if readErr != nil || !originRoots.AppendCertsFromPEM(relayCA) {
+		var readErr error
+		relayCABytes, readErr = os.ReadFile(cfg.RelayCA)
+		if readErr != nil || !originRoots.AppendCertsFromPEM(relayCABytes) {
 			return errors.New("PERMISSION_CONTROL_CERTIFICATE_UNAVAILABLE")
+		}
+	}
+	caSum := sha256.Sum256(relayCABytes)
+	caHex := hex.EncodeToString(caSum[:])
+	if cfg.RelayCASHA256 != "" && cfg.RelayCASHA256 != caHex {
+		return errors.New("PERMISSION_HOST_CONFIG_INVALID")
+	}
+	if cfg.RelayCertSHA256 == "" || cfg.RelayPeerSHA256 == "" || cfg.RelayCASHA256 == "" {
+		if _, err := TurnRelayHandleWithTrust(cfg.RelayURL, strings.Repeat("a", 64), TurnRelayTrust{CAFile: cfg.RelayCA, CASHA256: caHex, PeerSHA256: leafHex, CertSHA256: leafHex, ServerName: cfg.RelayServerName}); err == nil {
+			cfg.RelayCASHA256 = caHex
+			cfg.RelayPeerSHA256 = leafHex
+			cfg.RelayCertSHA256 = leafHex
 		}
 	}
 	policies, err := permission.NewSelfPolicyReader(cfg.Origin, cfg.BotUID, token, &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: originRoots}, cfg.Origin)
