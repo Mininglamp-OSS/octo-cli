@@ -21,6 +21,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -205,7 +206,20 @@ func (s *Server) secretDownloadTool(ctx context.Context, raw json.RawMessage) to
 	token := base64.RawURLEncoding.EncodeToString(nonce[:])
 	hash := sha256.Sum256([]byte(token))
 	key := d.prefix + hex.EncodeToString(hash[:])
-	expires, err := d.redis.Eval(ctx, secretIssueScript, []string{key}, base64.StdEncoding.EncodeToString(payload), d.ttl.Milliseconds()).Int64()
+	var expires int64
+	var err error
+	if bound := permission.BoundCall(ctx); bound != nil {
+		options := d.redis.Options()
+		expires, err = bound.IssueSecret(ctx, permission.RedisEndpoint{Address: options.Addr, Username: options.Username, Password: options.Password, Database: options.DB, TLS: options.TLSConfig}, secretIssueScript, key, base64.StdEncoding.EncodeToString(payload), d.ttl.Milliseconds())
+	} else {
+		expires, err = d.redis.Eval(ctx, secretIssueScript, []string{key}, base64.StdEncoding.EncodeToString(payload), d.ttl.Milliseconds()).Int64()
+	}
+	if permission.IsRefusal(err) {
+		return secretFailure("refused")
+	}
+	if errors.Is(err, permission.ErrAttemptUnknown) {
+		return secretFailure("result_unknown")
+	}
 	if err != nil || expires <= 0 {
 		return secretFailure("unavailable")
 	}
@@ -243,7 +257,12 @@ func (s *Server) resolveSecret(ctx context.Context, d *SecretDownloads, query st
 	}
 	req.Header.Set("Authorization", "Bearer "+cred.Token)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := d.client.Do(req)
+	var resp *http.Response
+	if bound := permission.BoundCall(ctx); bound != nil {
+		resp, err = bound.RoundTrip(ctx, req)
+	} else {
+		resp, err = d.client.Do(req)
+	}
 	if err != nil {
 		return nil, secretFailure("unavailable")
 	}

@@ -9,12 +9,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
+	"github.com/Mininglamp-OSS/octo-cli/internal/config"
+	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/mcp"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
 )
@@ -31,7 +34,7 @@ func newMCPCmd(f *cmdutil.Factory) *cobra.Command {
 		Annotations: map[string]string{"skipValidation": "true"},
 		RunE:        rejectMCPBareParent,
 	}
-	cmd.AddCommand(newMCPServeCmd(f))
+	cmd.AddCommand(newMCPServeCmd(f), newMCPRelayCmd(f))
 	return cmd
 }
 
@@ -47,6 +50,7 @@ func newMCPServeCmd(f *cmdutil.Factory) *cobra.Command { //nolint:gocyclo // ope
 		facade           string
 		policyDebug      bool
 		policyDebugFile  string
+		permissionConfig string
 	)
 	serve := &cobra.Command{
 		Use:   "serve",
@@ -118,7 +122,14 @@ the policy source; authentication and durable logging remain mandatory. The
 
 Serve-time --dry-run is rejected locally. execute.dry_run=true previews the
 business request after real authentication, policy checks and request logging.
-See docs/mcp-context-admission.md for wire and compatibility details.`,
+See docs/mcp-context-admission.md for wire and compatibility details.
+
+--permission-config selects the private managed coordinator host. It requires
+an operator-owned 0600 config, authenticated endpoint control, and a compiled
+supported release. The current pinned source has unresolved catalog bounds;
+no supported release is enabled. See docs/permission/cli-components.md.
+Worker stdio connects through mcp relay --ticket-fd using an inherited,
+turn-limited ticket supplied by the endpoint launcher.`,
 		Args:        cobra.NoArgs,
 		Annotations: map[string]string{"skipValidation": "true"},
 		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
@@ -174,6 +185,22 @@ See docs/mcp-context-admission.md for wire and compatibility details.`,
 				return output.ErrValidation(err.Error(), "")
 			}
 			defer func() { runErr = errors.Join(runErr, admission.Close()) }()
+			if permissionConfig != "" {
+				if httpAddr != "" || policyDebug || allowLocalUpload || tc.ChannelID != "" || tc.ChannelType != "" {
+					return output.ErrValidation("PERMISSION_MANAGED_FLAGS_CONFLICT", "")
+				}
+				cfg, err := mcp.LoadPermissionHostConfig(permissionConfig)
+				if err != nil {
+					return output.ErrValidation(err.Error(), "")
+				}
+				cred, err := f.Credential()
+				if err != nil || cred == nil {
+					return output.ErrAuth("BOT_AUTH_REQUIRED", "")
+				}
+				downloads := mcp.SecretDownloadsFromEnv()
+				defer downloads.Close()
+				return mcp.ServePermissionHost(cmd.Context(), cfg, cred.Token, build, admission, fac, base, os.Getenv("OCTO_MCP_UPLOAD_ROOT"), downloads)
+			}
 
 			if httpAddr != "" {
 				return serveHTTP(cmd.Context(), httpAddr, build, tc, base, f.IOStreams.ErrOut, facade, admission)
@@ -200,6 +227,7 @@ See docs/mcp-context-admission.md for wire and compatibility details.`,
 	serve.Flags().StringVar(&facade, "facade", "three", "tool surface: three (default), two (get_skill + execute), or both")
 	serve.Flags().BoolVar(&policyDebug, "policy-debug", false, "operator only: use an immutable local policy file; real Bot authentication remains required")
 	serve.Flags().StringVar(&policyDebugFile, "policy-debug-file", "", "absolute path to the private policy file; requires --policy-debug")
+	serve.Flags().StringVar(&permissionConfig, "permission-config", "", "private managed host configuration; opens only authenticated host control and turn relays")
 	return serve
 }
 
@@ -282,4 +310,52 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func newMCPRelayCmd(f *cmdutil.Factory) *cobra.Command {
+	var ticketFD int
+	cmd := &cobra.Command{Use: "relay", Short: "Serve a host-issued turn relay over worker stdio", Args: cobra.NoArgs, Annotations: map[string]string{"skipValidation": "true"}, RunE: func(cmd *cobra.Command, _ []string) error {
+		if ticketFD < 3 {
+			return output.ErrValidation("RELAY_TICKET_REQUIRED", "")
+		}
+		ticket := os.NewFile(uintptr(ticketFD), "turn-relay-ticket")
+		if ticket == nil {
+			return output.ErrValidation("RELAY_TICKET_REQUIRED", "")
+		}
+		defer func() { _ = ticket.Close() }() //nolint:errcheck // closing an inherited ticket cannot require protocol replay
+		return mcp.ServeTurnRelay(cmd.Context(), ticket, f.IOStreams.In, f.IOStreams.Out)
+	}}
+	cmd.Flags().IntVar(&ticketFD, "ticket-fd", -1, "inherited anonymous host ticket descriptor; contains only one turn relay endpoint/token")
+	return cmd
+}
+
+func bindTurnRelayRoot(root *cobra.Command, f *cmdutil.Factory) {
+	var handle string
+	root.Flags().StringVar(&handle, "turn-relay", "", "serve one endpoint-issued private turn handle over stdio")
+	ordinary := root.PersistentPreRunE
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if handle != "" {
+			f.ConfigFunc = func() (*config.Config, error) { return &config.Config{}, nil }
+			f.CredentialFunc = func() (*credential.BotCredential, error) {
+				return nil, output.ErrAuth("RELAY_CREDENTIALS_UNAVAILABLE", "")
+			}
+			if strings.EqualFold(strings.TrimSpace(os.Getenv(config.EnvCredentialMode)), config.CredentialModeTask) {
+				return fmt.Errorf("%s=task only allows Loop commands", config.EnvCredentialMode)
+			}
+			if cmd != root || len(args) != 0 || cmd.Flags().NFlag() != 1 {
+				return fmt.Errorf("RELAY_FLAGS_INVALID")
+			}
+			return nil
+		}
+		if cmd == root && len(args) == 0 {
+			return nil
+		}
+		return ordinary(cmd, args)
+	}
+	root.RunE = func(cmd *cobra.Command, _ []string) error {
+		if handle == "" {
+			return cmd.Help()
+		}
+		return mcp.ServeTurnRelayHandle(cmd.Context(), handle, f.IOStreams.In, f.IOStreams.Out)
+	}
 }

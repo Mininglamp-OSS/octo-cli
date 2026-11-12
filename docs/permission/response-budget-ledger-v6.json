@@ -1,0 +1,189 @@
+{
+  "format": "permission-cli-response-budget-ledger-v6",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "charter_task_id": "17e81670-5b49-461d-9509-7c22ca127939",
+  "charter_receipt_comment_id": "d040527d-641a-4df8-9b0c-bc9070f45688",
+  "purpose": "Source/fixture measurement ledger and candidate production numeric recommendations for managed-mode JSON acquisition, cumulative pagination, and serialized RPC response budgets (A1 accepted direction). No production numbers are enabled by default without owner sign-off.",
+  "source_constants_and_bounds": {
+    "octo_server": {
+      "commit": "e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d",
+      "task_id": "6a92a547-cb82-4c3d-ac6c-8f5529028ba4",
+      "im_max_content_bytes": {
+        "source": "internal/bot/handler.go:40",
+        "constant": "maxContentBytes",
+        "bytes": 102400
+      },
+      "im_max_batch_recipients": {
+        "source": "internal/bot/handler.go:41",
+        "constant": "maxBatchRecipients",
+        "items": 100
+      },
+      "message_search_pagination": {
+        "source": "internal/bot/handler.go:338-347",
+        "default_limit": 20,
+        "max_page_items": 100,
+        "internal_fetch_limit": 300
+      },
+      "permission_bundle_limits": {
+        "source": "pkg/permissionbundle/contracts/handoff-v7.json",
+        "handoff_bytes": 15815,
+        "handoff_sha256": "0bb6754dbd6de0f66c25bfa02ff5973ff477c64443a84aad7f5bde1b454fc454",
+        "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v7.json",
+        "manifest_bytes": 2127,
+        "manifest_sha256": "8ae92962d775c09cac86bf617399a950ef6416e80de23f18de33e29df27948f2",
+        "max_package_bytes": 8388608,
+        "max_entry_bytes": 65536,
+        "max_manifest_bytes": 1048576,
+        "max_contributors_per_turn": 256,
+        "max_resolve_references": 32
+      }
+    },
+    "octo_docs_backend": {
+      "commit": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "docs_search_page_size_max": {
+        "source": "src/config/env.ts:385",
+        "env": "SEARCH_PAGE_SIZE_MAX",
+        "default_items": 50
+      },
+      "doc_versions_list_pagination": {
+        "source": "src/db/repos/docVersionRepo.ts (test/paginationBind.test.ts:41-59)",
+        "default_limit": 20,
+        "max_page_items": 100
+      },
+      "doc_comments_list_pagination": {
+        "source": "src/db/repos/docCommentRepo.ts (test/paginationBind.test.ts:61-78)",
+        "default_limit": 20,
+        "max_page_items": 100
+      },
+      "doc_meta_list_pagination": {
+        "source": "src/db/repos/docMetaRepo.ts (test/paginationBind.test.ts:80-93)",
+        "default_page_size": 20,
+        "max_page_items": 100
+      },
+      "sheet_read_pagination": {
+        "source": "src/config/env.ts:803-813",
+        "max_cell_bytes": 20971520,
+        "default_page_limit": 1000,
+        "max_page_limit": 10000
+      },
+      "max_doc_bytes": {
+        "source": "src/config/env.ts:755",
+        "env": "MAX_DOC_BYTES",
+        "bytes": 20971520
+      },
+      "attachments_limits": {
+        "source": "src/config/env.ts:688-694",
+        "max_resolve_batch": 200,
+        "max_image_size_bytes": 10485760,
+        "max_file_size_bytes": 52428800
+      }
+    },
+    "octo_cli": {
+      "max_http_request_body_bytes": {
+        "source": "internal/mcp/server.go:65",
+        "constant": "maxHTTPBodyBytes",
+        "bytes": 1048576
+      },
+      "max_stdio_message_bytes": {
+        "source": "internal/mcp/server.go:66",
+        "constant": "maxStdioMessageBytes",
+        "bytes": 10485760
+      },
+      "max_policy_native_source_response_bytes": {
+        "source": "internal/permission/coordinator.go:47",
+        "constant": "MaxSourceResponseBytes",
+        "bytes": 2097152
+      },
+      "default_pagination_page_limit": {
+        "source": "cmd/service/run.go:1745",
+        "pages": 10
+      },
+      "response_budgets_hard_ceilings": {
+        "source": "internal/permission/coordinator.go:154-184",
+        "min_serialized_rpc_bytes_floor": 1024,
+        "max_acquisition_bytes_ceiling": 67108864,
+        "max_page_items_ceiling": 10000,
+        "max_pages_ceiling": 1000,
+        "max_cumulative_bytes_ceiling": 67108864,
+        "max_serialized_rpc_bytes_ceiling": 67108864,
+        "shared_acquisition_enforcement": "CheckHTTPResponseContentLength + ReadBoundedHTTPResponseBody / StreamBoundedHTTPResponseBody across JSON, inline binary, buffered binary, and ServeTurnRelay HTTP responses"
+      }
+    }
+  },
+  "fixture_and_payload_measurements": [
+    {
+      "operation": "message.search",
+      "capability": "octo-cli/message/op/message.search",
+      "typical_item_bytes": 512,
+      "max_item_bytes_with_content": 102912,
+      "single_page_100_typical_bytes": 51456,
+      "ten_page_1000_typical_bytes": 514560,
+      "mcp_execute_serialized_overhead_ratio": 1.18
+    },
+    {
+      "operation": "docs.search",
+      "capability": "octo-cli/docs/op/docs.search",
+      "typical_item_bytes": 640,
+      "single_page_50_typical_bytes": 32256,
+      "ten_page_500_typical_bytes": 322560,
+      "mcp_execute_serialized_overhead_ratio": 1.18
+    },
+    {
+      "operation": "docs.comments.list / docs.snapshots.list",
+      "capability": "octo-cli/docs/op/docs.comments.list",
+      "typical_item_bytes": 768,
+      "single_page_100_typical_bytes": 77056,
+      "ten_page_1000_typical_bytes": 770560,
+      "mcp_execute_serialized_overhead_ratio": 1.18
+    },
+    {
+      "operation": "docs.content.get / docs.scene.get",
+      "capability": "octo-cli/docs/op/docs.content.get",
+      "typical_payload_bytes": 131072,
+      "p99_interactive_payload_bytes": 1572864,
+      "mcp_execute_serialized_overhead_ratio": 1.25
+    }
+  ],
+  "isolated_static_provenance_capabilities": [
+    {
+      "capability": "octo-cli/docs/derived/portable-attachment-bytes",
+      "reason": "Transfers binary attachment blobs (up to 10 MiB image / 50 MiB file) outside JSON pagination/RPC envelopes and requires static source provenance rather than generic JSON response budgets."
+    }
+  ],
+  "overflow_and_prefix_semantics": {
+    "page_budget_prefix": {
+      "condition": "pagination loop reaches configured max_pages while has_more is true and every fetched page satisfied max_page_items, max_acquisition_bytes, and max_cumulative_bytes",
+      "behavior": "emits valid JSON prefix array with envelope _notice.code='PAGE_BUDGET_PREFIX' including pages_fetched, page_budget, items_returned, has_more=true, and next_cursor",
+      "truncates_bytes": false
+    },
+    "response_budget_exceeded": {
+      "condition": "single HTTP response body > max_acquisition_bytes, page item count > max_page_items, cumulative pagination bytes > max_cumulative_bytes, or serialized MCP JSON-RPC response > max_serialized_rpc_bytes",
+      "behavior": "returns explicit deterministic error code='RESPONSE_BUDGET_EXCEEDED' with detail={budget_kind, limit, observed} across HTTP and stdio for both execute and call_op; never emits partial/truncated JSON bytes and never retries or replays mutating requests",
+      "truncates_bytes": false,
+      "retries_on_overflow": false
+    }
+  },
+  "candidate_recommendations_for_owner_approval": {
+    "recommended_default_interactive": {
+      "response_budgets": {
+        "max_acquisition_bytes": 2097152,
+        "max_page_items": 100,
+        "max_pages": 10,
+        "max_cumulative_bytes": 4194304,
+        "max_serialized_rpc_bytes": 4194304
+      },
+      "rationale": "2 MiB single-acquisition matches MaxSourceResponseBytes; 100 items/page matches octo-server message.search and octo-docs-backend docVersionRepo/docCommentRepo/docMetaRepo clamps and exceeds SEARCH_PAGE_SIZE_MAX=50; 10 pages matches CLI default --page-limit; 4 MiB cumulative/serialized RPC fits well inside the 10 MiB stdio message limit while covering 10 pages of 100 items and JSON-RPC string-escaping overhead."
+    },
+    "optional_large_document_override": {
+      "response_budgets": {
+        "max_acquisition_bytes": 8388608,
+        "max_page_items": 1000,
+        "max_pages": 20,
+        "max_cumulative_bytes": 16777216,
+        "max_serialized_rpc_bytes": 16777216
+      },
+      "rationale": "For operator deployments that explicitly enable large sheet/whiteboard reads (SHEET_READ_DEFAULT_PAGE_LIMIT=1000) over HTTP relay."
+    }
+  }
+}

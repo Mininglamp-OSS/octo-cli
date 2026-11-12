@@ -100,7 +100,11 @@ func (s *Server) verify(ctx context.Context, policy bool) (call *Server, uid, or
 		fn = s.makeFactory
 	}
 	f, out, errout := fn(s.trusted)
-	uid, origin, mode, err = verifyMCPBot(ctx, f, policy)
+	if s.managed == nil {
+		uid, origin, mode, err = verifyMCPBot(ctx, f, policy)
+	} else {
+		uid, origin, mode, err = verifyMCPBot(ctx, f, policy, s.managed.coordinator.TLSConfiguration())
+	}
 	if err != nil {
 		return nil, "", "", "", err
 	}
@@ -113,7 +117,7 @@ func (s *Server) verify(ctx context.Context, policy bool) (call *Server, uid, or
 	s.mu.Lock()
 	clientResources := s.clientResources
 	s.mu.Unlock()
-	call = &Server{reg: s.reg, mapping: s.mapping, build: s.build, trusted: s.trusted, credentialToken: bot.Token, httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, uploadOpener: s.uploadOpener, baseGlobals: s.baseGlobals, facade: s.facade, secretDownloads: s.secretDownloads, admission: a, protocolVersion: defaultProtocolVersion, clientResources: clientResources}
+	call = &Server{managed: s.managed, reg: s.reg, mapping: s.mapping, build: s.build, trusted: s.trusted, credentialToken: bot.Token, httpMode: s.httpMode, uploadRoot: s.uploadRoot, allowLocalUpload: s.allowLocalUpload, uploadOpener: s.uploadOpener, baseGlobals: s.baseGlobals, facade: s.facade, secretDownloads: s.secretDownloads, admission: a, protocolVersion: defaultProtocolVersion, clientResources: clientResources}
 	call.factoryFn = func(TrustedContext) (*cmdutil.Factory, *bytes.Buffer, *bytes.Buffer) { return f, out, errout }
 	return call, uid, origin, mode, nil
 }
@@ -141,7 +145,7 @@ func (s *Server) admitToolCall(ctx context.Context, req rpcRequest, p toolCallPa
 			return nil, nil, err
 		}
 	}
-	source, err := parseDeclaredSource(p.Meta)
+	source, err := s.declaredSource(p.Meta)
 	if err != nil {
 		release()
 		return nil, nil, err

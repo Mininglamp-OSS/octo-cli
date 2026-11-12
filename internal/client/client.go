@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -29,6 +30,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 // Retry defaults per architecture-design.md §6.2.
@@ -42,6 +44,9 @@ const (
 
 // Options controls client runtime behaviour. Zero values are sensible defaults.
 type Options struct {
+	// TLSConfig is supplied only by a private, pinned host composition.
+	TLSConfig *tls.Config
+
 	Verbose bool
 	DryRun  bool
 	NoRetry bool
@@ -57,6 +62,8 @@ type Options struct {
 // For non-JSON payloads (e.g. multipart uploads) set RawBody + ContentType.
 // When RawBody is non-nil, Body is ignored and no JSON marshaling is performed.
 type Request struct {
+	// OperationID is trusted engine metadata, never an HTTP header or argument.
+	OperationID string
 	// MaxResponseBytes bounds buffered responses for callers with a small wire contract.
 	// Zero preserves the existing business-response limit.
 	MaxResponseBytes int64
@@ -772,11 +779,16 @@ func New(cfg *config.Config, cred *credential.BotCredential, opts Options) *Clie
 			fmt.Fprintf(opts.ErrOut, "warning: invalid --timeout %q; using %s\n", opts.Timeout, defaultTimeout) //nolint:errcheck // stderr warning
 		}
 	}
+	var transport http.RoundTripper
+	if opts.TLSConfig != nil {
+		transport = &http.Transport{TLSClientConfig: opts.TLSConfig.Clone(), DisableKeepAlives: true}
+	}
 	return &Client{
 		cfg:  cfg,
 		cred: cred,
 		httpClient: &http.Client{
-			Timeout: timeout,
+			Timeout:   timeout,
+			Transport: transport,
 			// Don't auto-follow — file.download returns 302 to a presigned URL
 			// and we want to surface that URL in the envelope, not fetch it.
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -924,6 +936,25 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 	if err != nil {
 		return nil, settleFailure(req, err, mayHaveApplied)
 	}
+	if permission.BoundCall(ctx) != nil {
+		target, parseErr := url.Parse(u)
+		if parseErr != nil {
+			return nil, permission.PolicyUnavailable()
+		}
+		scoped, e := permission.RequestContext(ctx, req.Service, req.OperationID, req.Method, target.EscapedPath())
+		if e != nil {
+			return nil, e
+		}
+		consumed, consumeErr := permission.BoundCall(scoped).ConsumeBytes(scoped, result)
+		if consumeErr != nil {
+			var bErr *permission.ResponseBudgetError
+			if errors.As(consumeErr, &bErr) {
+				return nil, responseBudgetExceededError(req.Method, bErr.Kind, bErr.Limit, bErr.Observed)
+			}
+			return nil, consumeErr
+		}
+		return consumed, nil
+	}
 	return result, nil
 }
 
@@ -939,6 +970,9 @@ func (c *Client) do(ctx context.Context, req *Request) ([]byte, error) {
 // stands: a definite refusal, a backend error, or a failure that never reached
 // the backend (NotProcessed).
 func settleFailure(req *Request, err error, mayHaveApplied bool) error {
+	if permission.IsRefusal(err) {
+		return err
+	}
 	err = withRetryAfterHint(err)
 	if !mayHaveApplied {
 		return err
@@ -1065,8 +1099,20 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		cancelled.NotProcessed = true
 		return nil, cancelled
 	}
-	resp, err := c.httpClient.Do(httpReq)
+	var resp *http.Response
+	if bound := permission.BoundCall(ctx); bound != nil {
+		var scoped context.Context
+		scoped, err = permission.RequestContext(ctx, req.Service, req.OperationID, httpReq.Method, httpReq.URL.EscapedPath())
+		if err == nil {
+			resp, err = permission.BoundCall(scoped).RoundTrip(scoped, httpReq)
+		}
+	} else {
+		resp, err = c.httpClient.Do(httpReq)
+	}
 	if err != nil {
+		if permission.IsRefusal(err) {
+			return nil, err
+		}
 		// *url.Error.Error() embeds the whole request URL, so an x-octo-secret
 		// path parameter (invite / share token) would otherwise reach the default
 		// stderr error envelope — no --verbose needed to leak it.
@@ -1091,14 +1137,30 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
+	maxResponseBytes := req.MaxResponseBytes
+	managedBudget := int64(0)
+	if bound := permission.BoundCall(ctx); bound != nil {
+		if b := bound.MaxAcquisitionBytes(); b > 0 && (maxResponseBytes <= 0 || b < maxResponseBytes) {
+			maxResponseBytes = b
+			managedBudget = b
+		}
+	}
+
 	// A 2xx binary body returned inline (the MCP server, which has no output
 	// path) is streamed: only up to InlineBinaryLimit+1 bytes are kept, while
-	// the size and sha256 cover the whole body. A large export therefore never
-	// sits in memory just to be reported as inline:false.
+	// the size and sha256 cover the whole body. When a managed or per-request
+	// acquisition limit is active, both Content-Length and the stream reader are
+	// bounded by maxResponseBytes before buffering or hashing.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 && req.BinaryResponse && req.OutputPath == "" && req.InlineBinaryLimit > 0 {
-		head, size, sum, err := readBoundedBody(resp.Body, req.InlineBinaryLimit)
+		head, size, sum, overflow, err := permission.StreamBoundedHTTPResponseBody(resp, req.InlineBinaryLimit, maxResponseBytes)
 		if err != nil {
 			return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
+		}
+		if overflow {
+			if managedBudget > 0 && size > managedBudget {
+				return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, size)
+			}
+			return nil, output.ErrAPI("RESPONSE_TOO_LARGE", "response exceeds the configured limit", "")
 		}
 		c.verbosef("← %d (%d bytes)", resp.StatusCode, size)
 		env := map[string]any{
@@ -1110,21 +1172,16 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		return json.Marshal(env)
 	}
 
-	// Every other response body is buffered whole. Every downstream branch needs
-	// it fully in memory anyway — JSON parsing, backend-error parsing, the
-	// binary describe envelope (which reports size = len(body)) and the atomic
-	// --output write all consume the complete payload. The CLI --output path
-	// still buffers a large export (docs.ppt.export allows up to 160 MiB);
-	// streaming it to the temp file is a separate change.
-	var responseReader io.Reader = resp.Body
-	if req.MaxResponseBytes > 0 {
-		responseReader = io.LimitReader(resp.Body, req.MaxResponseBytes+1)
-	}
-	respBody, err := io.ReadAll(responseReader)
+	// Every other response body is buffered whole, bounded by maxResponseBytes
+	// (including fail-closed Content-Length pre-check and LimitReader(limit+1)).
+	respBody, observed, overflow, err := permission.ReadBoundedHTTPResponseBody(resp, maxResponseBytes)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
 	}
-	if req.MaxResponseBytes > 0 && int64(len(respBody)) > req.MaxResponseBytes {
+	if overflow {
+		if managedBudget > 0 && observed > managedBudget {
+			return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, observed)
+		}
 		return nil, output.ErrAPI("RESPONSE_TOO_LARGE", "response exceeds the configured limit", "")
 	}
 
@@ -1563,6 +1620,27 @@ func withRetryAfterHint(err error) error {
 // not taken as proof: most come from pre-handler rate limiters, but a handler
 // can also answer 429 after it committed (octo-server OIDC bind does for an
 // already-created token), and the client cannot tell the two apart.
+func responseBudgetExceededError(method, kind string, limit, observed int64) *output.ExitError {
+	hint := "narrow the request scope or page size"
+	if !isSafeMethod(method) {
+		hint = "the request was sent before the response exceeded the managed budget; do not retry mutating requests without checking server state"
+	}
+	ee := output.ErrWithHint(
+		"api",
+		"RESPONSE_BUDGET_EXCEEDED",
+		fmt.Sprintf("response exceeds managed %s budget of %d bytes (observed >= %d bytes)", kind, limit, observed),
+		hint,
+	)
+	if detail, err := json.Marshal(map[string]any{
+		"budget_kind":             kind,
+		"limit_bytes":             limit,
+		"observed_bytes_at_least": observed,
+	}); err == nil {
+		ee.Detail = detail
+	}
+	return ee
+}
+
 func attemptMayHaveApplied(err error) bool {
 	ee := output.AsExitError(err)
 	if ee == nil {
@@ -1571,7 +1649,7 @@ func attemptMayHaveApplied(err error) bool {
 	if ee.NotProcessed {
 		return false
 	}
-	if ee.Type == "network" {
+	if ee.Type == "network" || ee.Code == "RESPONSE_BUDGET_EXCEEDED" || ee.Code == "RESPONSE_TOO_LARGE" {
 		return true
 	}
 	status := ee.HTTPStatus

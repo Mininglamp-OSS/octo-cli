@@ -1,0 +1,63 @@
+{
+  "format": "permission-cli-contract-manifest-v6",
+  "status": "ROUND2_BLOCKER_REPAIRS_DELIVERED_AWAITING_OWNER_NUMERIC_SIGN_OFF",
+  "catalog_digest": null,
+  "candidate_manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+  "candidate_semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
+  "retained_artifacts_and_unchanged_contracts": "contract-manifest-v5.json -> v4 -> v3 -> v2 -> v1; original template/wire schemas and engineering artifacts unchanged",
+  "files": {
+    "docs/permission/endpoint-abi-v2.json": {
+      "bytes": 11539,
+      "sha256": "49b2ed31a4c78a7a7cee3957ea60aa7c6370ac8103d2896d297025c24b17fcb2"
+    },
+    "docs/permission/cli-component-contract-v6.json": {
+      "bytes": 12209,
+      "sha256": "49dc2d92928cf673998c433931610ff685523929cd90b97864693fc4cbef5fc4"
+    },
+    "docs/permission/response-budget-ledger-v6.json": {
+      "bytes": 8331,
+      "sha256": "7c46334eacc9796c003c6929373033359e0428ed57d74a07244db84a7837e463"
+    },
+    "internal/mcp/catalog_sources/page-bounds-v2.json": {
+      "bytes": 3574,
+      "sha256": "b8d494cd392a5797213b58a612ea8a4653b90ed5aa37f2c79dc625bbdbff1cb6"
+    },
+    "docs/permission/catalog-package-report-v5.json": {
+      "bytes": 1914,
+      "sha256": "7257dfef2ed8d48844f9a97335926109f4b49e85b4eb233ba593202375e85caf"
+    },
+    "docs/permission/cli-component-contract-v5.json": {
+      "bytes": 7352,
+      "sha256": "1d37f1f3533ef9b5dd3ff053f0dd97588e2eb752f0c3de9c6a849267acce7f0e"
+    },
+    "docs/permission/catalog-package-v2.md": {
+      "bytes": 15233,
+      "sha256": "eecaf98135d2a7c88b5592e9afda8f10de4a26cf277236ed3c9317a54d967cf8"
+    },
+    "docs/permission/catalog-package-v2/manifest.json": {
+      "bytes": 4934,
+      "sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc"
+    },
+    "docs/permission/source-slot-witness-v5.json.gz": {
+      "bytes": 12562,
+      "sha256": "0c5da173bd0f53c64562a70a5c5feebc955ad111bbe84ed11f5588c08b4b9c0b"
+    },
+    "internal/permission/contracts/permission-catalog-package-v2.schema.json": {
+      "bytes": 58587,
+      "sha256": "c27a2ab4ad8419e3166e41d143c4897a30be53a1216da858c64eef8d6dd9a7f1"
+    },
+    "internal/permission/contracts/permission-wire-v1-package-v2.schema.json": {
+      "bytes": 14163,
+      "sha256": "17abec79cc96a75e8ba9d1843dbde109dbcab1b8bbc93a18ecbcad6a5996b8d3"
+    },
+    "internal/mcp/catalog_sources/source-files-v6.tar": {
+      "bytes": 2037760,
+      "sha256": "0fa35acb36a3d785b812a2b1d68afca30e1f19cd599c18667abd75a504e8634f"
+    },
+    "docs/permission/contract-manifest-v5.json": {
+      "bytes": 2097,
+      "sha256": "d54a11eac89263c9a5ddd3279af03c750ccc1775d2832cbe647eab9d089b411a"
+    }
+  },
+  "package_files": "catalog-package-v2/manifest.json commits the complete remaining inventory; no unlisted package files"
+}

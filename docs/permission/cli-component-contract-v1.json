@@ -1,0 +1,32 @@
+{
+  "format": "permission-cli-component-handoff-v1",
+  "task": "XIN-2794",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "status": "PARTIAL_NOT_NATIVE_OR_INTEGRATED_ACCEPTANCE",
+  "catalog_digest": null,
+  "private_component_symbols": [
+    "permission.ParseBundle",
+    "permission.NewCoordinator",
+    "permission.Coordinator.Register",
+    "permission.NewSelfPolicyReader",
+    "permission.ParseIdentityV2",
+    "permission.ParseDeclarationV2",
+    "permission.PrepareHTTP",
+    "permission.Coordinator.Execute"
+  ],
+  "wire_contract": "unchanged permission-wire-v1 / permission-managed-v2 / permission-native-facts-v1; Binding and Facts are private composition seams, not alternate wire frames",
+  "production_mcp_enforcement": "NOT_WIRED",
+  "native_provider": "NOT_IMPLEMENTED",
+  "authenticated_control_and_one_use_relay": "NOT_IMPLEMENTED",
+  "supported_catalog": "NOT_AVAILABLE",
+  "next_owner": "PjM/Dennis-mini: coordinate native/host/catalog prerequisites and independent exact-head backend/security review",
+  "server_dependency": {
+    "head": "36ab3dedf9354a7a0cad1a712831c132edd2e08f",
+    "handoff_sha256": "31cf10807ef0fac36c3d214354fbb69bcea0c79ee8a217d38644ad289893cfae"
+  },
+  "endpoint_dependency": {
+    "head": "c152cb54df8e3fb822288933e39cf6dcad4b9335",
+    "handoff_sha256": "3235d448421f4bfd34977d474a9a0568d720dfe8d12c825085eef463b6d13e83"
+  }
+}

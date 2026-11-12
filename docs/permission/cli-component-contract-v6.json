@@ -1,0 +1,192 @@
+{
+  "format": "permission-cli-component-handoff-v6",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "charter_task_id": "17e81670-5b49-461d-9509-7c22ca127939",
+  "charter_receipt_comment_id": "d040527d-641a-4df8-9b0c-bc9070f45688",
+  "supersedes": "cli-component-contract-v5.json",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "status": "ROUND2_BLOCKER_REPAIRS_DELIVERED_AWAITING_OWNER_NUMERIC_SIGN_OFF",
+  "normative_addendum": {
+    "attachment_id": "01a1bfb4-aeef-7497-8f7f-268335e0b0fa",
+    "bytes": 70457,
+    "sha256": "f8bcf1af183fcb69b5c40575d26e21b8a37e7e8fb6720b53e4013924ad078725"
+  },
+  "xin2830_convergence_inputs": {
+    "report_attachment_id": "edd9ad84-f10b-4e1e-9161-19a598bbb153",
+    "report_sha256": "458bc7eb003497d56a250edbc6f58667aa6e071398c3e1cf7ac38b9baaeac3da",
+    "corrective_addendum_attachment_id": "28585cc5-4cc3-47e0-b3a5-17f81ac55b75",
+    "corrective_addendum_sha256": "be8257b931a13457249658176298df80340f26b48c1de2c060c58875cf49c367"
+  },
+  "catalog_digest": null,
+  "candidate": {
+    "format": "permission-catalog-package-v2",
+    "contract_revision": 3,
+    "semantics_version": "1",
+    "version": "octo-capabilities-v1-xin2748-v4",
+    "manifest": "catalog-package-v2/manifest.json",
+    "manifest_sha256": "ecc56c2ab0a2c520ab7e5203d2abab06671daf90c28d69f88fe1de8d154109fc",
+    "semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
+    "semantic_digest_reconciliation": {
+      "authoritative_semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
+      "cli_server_e708d023_and_endpoint_d007962a_match": true,
+      "historical_pre_alignment_server_ff4d43c4_sha256": "415acc86598208cbf051c9c08cc47e33e0ec9cd8fe7f9444b48b80f11d95ba21",
+      "explanation": "octo-cli internal/permission/package.go, octo-server e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d pkg/permissionbundle/package_graph.go, and codex-channel-octo d007962a7762ec42ae2279c673392121ad630e64 docs/permission-endpoint-handoff-v6.json all converge on the identical canonical semantic projection (15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799)"
+    },
+    "status": "VERIFIED_CANDIDATE_NOT_ALLOWLISTED",
+    "ledger": {
+      "stored_bytes": 7823327,
+      "pre_bytes": 10202896,
+      "post_bytes": 11603961,
+      "metadata_nodes": 158934,
+      "pre_nodes": 399778,
+      "post_nodes": 398617,
+      "max_depth": 15,
+      "files": 30,
+      "roots": 4128,
+      "shared_rows": 1179,
+      "content_records": 5481,
+      "parts_total": 15649,
+      "max_parts_per_root": 25,
+      "schema_cells": 56592,
+      "discovery_cells": 156,
+      "static_cells": 1248
+    },
+    "source_conformance": {
+      "discovery_cells": 156,
+      "discovery_source_observations": 1248,
+      "schema_cells": 56592,
+      "static_cells": 1248
+    }
+  },
+  "v45_cli_deliverables": {
+    "configurable_response_budgets": {
+      "types_and_methods": [
+        "permission.ResponseBudgets",
+        "permission.ResponseBudgetError",
+        "permission.MinSerializedRPCBudgetBytes",
+        "permission.MaxResponseBudgetBytes",
+        "permission.CheckHTTPResponseContentLength",
+        "permission.ReadBoundedHTTPResponseBody",
+        "permission.StreamBoundedHTTPResponseBody",
+        "permission.RelayResponseBudgetBytes",
+        "permission.StaticProvenanceRequired",
+        "Coordinator.ConfigureResponseBudgets",
+        "Coordinator.ResponseBudgets",
+        "Call.MaxAcquisitionBytes",
+        "Call.MaxSerializedRPCBytes",
+        "Call.PageStopLimit",
+        "Call.AdmitCumulativeBytes",
+        "permission.AdmitPageBytes"
+      ],
+      "dimensions": [
+        "max_acquisition_bytes",
+        "max_page_items",
+        "max_pages",
+        "max_cumulative_bytes",
+        "max_serialized_rpc_bytes"
+      ],
+      "page_budget_prefix_vs_overflow": "clean stop at max_pages when has_more=true emits valid JSON prefix with _notice.code='PAGE_BUDGET_PREFIX'; any single-acquisition byte (across JSON, inline binary, buffered binary, and ServeTurnRelay HTTP responses via CheckHTTPResponseContentLength + io.LimitReader(limit+1)), page-item, cumulative-byte, or serialized-RPC-byte (>= MinSerializedRPCBudgetBytes=1024 with verified replacement envelope fit) overflow returns deterministic RESPONSE_BUDGET_EXCEEDED without silent truncation and without retrying/replaying mutating requests",
+      "boundary_enforcement": "fresh F -> B runs at initial dispatch, every pagination page boundary (AdmitPageBytes), and final publication (Publish / PublishConnection)",
+      "static_provenance_isolation": "octo-cli/docs/derived/portable-attachment-bytes remains isolated via StaticProvenanceRequired and is not unlocked by JSON response budgets",
+      "measurement_ledger": "docs/permission/response-budget-ledger-v6.json"
+    },
+    "v2_page_bounds_bootstrap": {
+      "function": "permissionReleasePageBounds / PermissionCatalogPageBounds",
+      "source_witness": "internal/mcp/catalog_sources/page-bounds-v2.json",
+      "proven_capabilities": [
+        "octo-cli/message/op/message.search",
+        "octo-cli/message/cmd/message.search",
+        "octo-im/message/op/message.search",
+        "octo-im/message/cmd/message.search"
+      ],
+      "proven_bound": {
+        "items": 100,
+        "pages": 10
+      },
+      "unconfigured_default_behavior": "when response_budgets is omitted in PermissionHostConfig, unproven --page-all calls remain fail-closed with PERMISSION_BUNDLE_UNAVAILABLE (policy_unavailable)"
+    },
+    "endpoint_a3164ded_relay_and_control_parity": {
+      "admit_reply_fields": [
+        "capsule_id",
+        "turn_id",
+        "generation",
+        "scope_incarnation",
+        "context_epoch"
+      ],
+      "resolve_contributors_method": "accepts capsule_id/key and delivery_references/references, resolving unseen contributor delivery references in batches <=32 with purpose='contributor' without adding to seenDeliveries ingress replay tombstones",
+      "open_relay_stdio": "returns {transport, executable, executableSha256, handle} (plus tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true), where handle base64url-decodes to canonical {ca_sha256, endpoint, peer_sha256, token} plus optional server_name and optional positive-decimal string max_response_bytes=\"<MaxSerializedRPCBytes>\" (<=512 chars, without host-private ca_file paths inside contained sandboxes)",
+      "open_relay_http": "returns {transport, url, handle, ca_sha256, peer_sha256} when relay TLS pins are present (plus tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true), and emits X-Octo-Acquisition-Budget-Bytes=<MaxSerializedRPCBytes> on all responses including hijacked writeManagedHTTP responses",
+      "turn_relay_tls": "ServeTurnRelay verifies TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from SSL_CERT_FILE/NODE_EXTRA_CA_CERTS (or ca_file) checked against ca_sha256, VerifyConnection peer leaf certificate checked against peer_sha256/cert_sha256, server_name SNI/SAN override, and fail-closed MaxSerializedRPCBytes response budget from X-Octo-Acquisition-Budget-Bytes, ticket max_response_bytes (accepting positive decimal string or JSON integer), or in-process LookupRelayEndpointBudgets"
+    },
+    "native_reader_fail_closed_bounds": {
+      "max_reads": 100000,
+      "max_observations": 100000,
+      "max_generations": 1024,
+      "saturation_behavior": "returns permission: bundle unavailable without evicting read_id/read_nonce uniqueness fences or HeaderV1 immutability observations"
+    },
+    "coordinator_watermark_needs_seeding": {
+      "behavior": "Coordinator.atBoundary seeds initial Needs from the scope's last accepted watermark stage states (p.Invocation.State == 'E', p.Capability.State == 'E') so steady-state active scopes complete boundary checks in one fresh FB round while preserving 'FBFB' on first activation or U->E transition"
+    }
+  },
+  "private_bootstrap": {
+    "host_config_version": 1,
+    "hello": "UNCHANGED",
+    "format_selection": "private compiled digest-to-approved-pin map; never MCP/model input",
+    "release_path_v2": "absolute path to manifest.json in an isolated immutable directory",
+    "release_sha256_v2": "raw canonical manifest bytes, not decoded JSON or concatenated package hash",
+    "ordering": "verify every listed byte, typed edge, ownership, slot and selector budget; install detached snapshot, PermissionCatalogPageBounds, and optional ResponseBudgets before existing listeners/readiness",
+    "v1": "existing legacy startup remains; no historical engineering report becomes a supported v1 release"
+  },
+  "supported_pins": [],
+  "approved_directed_compatible_pairs": [],
+  "schema": "internal/permission/contracts/permission-catalog-package-v2.schema.json",
+  "wire_discriminator": "internal/permission/contracts/permission-wire-v1-package-v2.schema.json",
+  "endpoint_abi": "docs/permission/endpoint-abi-v2.json",
+  "response_budget_ledger": "docs/permission/response-budget-ledger-v6.json",
+  "server_dependency": {
+    "task": "XIN-2793",
+    "task_id": "6a92a547-cb82-4c3d-ac6c-8f5529028ba4",
+    "head": "f3cf3a13a29c3f85be14e4b794d1a0836b54a9dc",
+    "handoff": "pkg/permissionbundle/contracts/handoff-v9.json",
+    "bytes": 15865,
+    "sha256": "4aeec7c60356e98dddafb320652c8c680aa919a306856e9b5215e67751a107d9",
+    "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v9.json",
+    "manifest_bytes": 3497,
+    "manifest_sha256": "73a27422b116a0d8ac54a10fb90510d49c86e7bd66eb3422fc95a975b8cef0a3",
+    "remaining_producers_path": "pkg/permissionbundle/contracts/remaining-producers-v7.json",
+    "remaining_producers_bytes": 4673,
+    "remaining_producers_sha256": "15db201703b72e9e8f1afcbc6524d02d6edca019410f99cd2aaa20e8831d0bd3",
+    "status": "server Draft #951 (f3cf3a13a29c3f85be14e4b794d1a0836b54a9dc) Round 2 repairs [S-B2] and [S-B3], production /v1 routes, MySQL/SQLite stores, native facts/fence producer, and semantic digest 15c7ca2b... aligned; owner approval of concrete support pins/directed compatibility pairs remains before enabling supportedPermissionPackages"
+  },
+  "endpoint_dependency": {
+    "task": "XIN-2795",
+    "task_id": "2f4a34e9-2be3-48ac-99f0-38a30f077acd",
+    "head": "6830c4050ccb7a299114933b7eb6afbea990abb2",
+    "path": "docs/permission-endpoint-handoff-v7.json",
+    "bytes": 13799,
+    "sha256": "8f67e01671080c41639d750ddec0e89e03bcab42af8ab9b86e51cae79c65ad7c",
+    "control_client_bytes": 11759,
+    "control_client_sha256": "67d7a8d86d52f7db7f327deeec892625a3733ae3c50536059906f6f62cb32f67",
+    "status": "endpoint Draft #102 starting pin (6830c4050ccb7a299114933b7eb6afbea990abb2) consumed; positive-decimal string max_response_bytes=\"<MaxSerializedRPCBytes>\" stdio ticket ABI and X-Octo-Acquisition-Budget-Bytes=<MaxSerializedRPCBytes> HTTP header published in endpoint-abi-v2.json for XIN-2795 Round 2 [A-B4]/[A-B5] convergence"
+  },
+  "architecture_constraints": {
+    "octo_im_wukongim_changes_required": false,
+    "external_ha_fence_consensus_platform_required": false
+  },
+  "remaining_dependencies": [
+    {
+      "id": "A1-OWNER-NUMBERS",
+      "owner": "Charter owner (XIN-2323 / 17e81670-5b49-461d-9509-7c22ca127939)",
+      "required": "owner sign-off on concrete production numbers from docs/permission/response-budget-ledger-v6.json (recommended default: max_acquisition_bytes=2097152, max_page_items=100, max_pages=10, max_cumulative_bytes=4194304, max_serialized_rpc_bytes=4194304) and approved catalog package pin before populating supportedPermissionPackages"
+    }
+  ],
+  "acceptance": {
+    "unit_and_race_tests": "PASS",
+    "real_tls13_relay_and_control_abi": "PASS",
+    "response_budget_http_and_stdio_parity": "PASS"
+  },
+  "next_step": "keep supportedPermissionPackages empty and default ResponseBudgets unconfigured until owner signs off on the concrete production budget numbers in docs/permission/response-budget-ledger-v6.json and the catalog package pin",
+  "rollback": "revert Draft changes and keep managed mode disabled; preserve journals, epochs and fences"
+}

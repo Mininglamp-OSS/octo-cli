@@ -34,6 +34,8 @@ const maxHTTPBodyBytes = 8 << 20
 // per request. reg and mapping are shared read-only across requests; the mutable
 // per-connection state lives on the short-lived per-request Server.
 type HTTPHandler struct {
+	managed *ManagedTurn
+
 	admission       *Admission
 	ownsAdmission   bool
 	apiOrigin       string
@@ -209,14 +211,22 @@ func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) { //noli
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	resp, has := srv.Dispatch(ctx, req)
+	resp, has, call := srv.dispatchManaged(ctx, req)
 	w.Header().Set("Content-Type", "application/json")
 	if !has {
 		// A notification: acknowledge with 202 and no body.
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	_ = json.NewEncoder(w).Encode(resp) //nolint:errcheck // response write failure means the client disconnected; no response can replace it
+	if srv.managed != nil {
+		if err := writeManaged(ctx, w, resp, call); err != nil {
+			return
+		}
+	} else {
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			return
+		}
+	}
 }
 
 // parseAllowedOrigins splits the comma-separated env allowlist, trimming blanks.
@@ -255,6 +265,7 @@ func originAllowed(origin string, allowed []string) bool {
 // fields, even if an embedding handler calls this helper without ServeHTTP.
 func (h *HTTPHandler) connectionServer(r *http.Request) *Server {
 	return &Server{
+		managed:         h.managed,
 		admission:       h.admission,
 		apiOrigin:       h.apiOrigin,
 		secretDownloads: h.secretDownloads,

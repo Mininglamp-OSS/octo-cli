@@ -1,0 +1,92 @@
+{
+  "format": "permission-cli-remaining-producers-v3",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "cli_owned": {
+    "producer": "XIN-2794",
+    "required_output": "one supported immutable release/non-null shared digest and old/target semantic equivalence",
+    "source_count_witness": "internal/mcp/catalog_sources/page-bounds-v1.json",
+    "known_message_item_bound": 100,
+    "known_mcp_page_limit": 10,
+    "unproved_page_contracts": [
+      {
+        "capability": "octo-cli/docs/op/docs.comments.markers",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/{docId}/comments/markers",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.comments.replies",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/{docId}/comments/{id}/replies",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.recent.list",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "GET",
+        "path": "/v1/bot/docs/recent",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/docs/op/docs.search",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "POST",
+        "path": "/v1/bot/docs/search",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      },
+      {
+        "capability": "octo-cli/message/op/message.search.media",
+        "cli_source": "cmd/service/run.go:runPaginated",
+        "method": "POST",
+        "path": "/v1/bot/messages/_search_media",
+        "required": "source-proven maximum returned items before aggregation; page-size input maxima do not prove it"
+      }
+    ],
+    "byte_contract": "ordinary client.Request.MaxResponseBytes remains unset; managed request spool/relay output limits need source-equivalence disposition",
+    "shape_bytes": 14128923,
+    "shape_sha256_not_catalog_digest": "bfbe803223910066d393f2005da9b077c5dd0a7da6eda667c3fb6a5e4098e647",
+    "approved_artifact_limit": 8388608,
+    "selector_correlations": [
+      "schema_variant has no resource-negotiation/managed-field selector; the report retains all distinct templates under the same facade",
+      "discovery_index has no server-facade/resource-negotiation selector; all distinct actual navigation rows are retained",
+      "profile exemplars do not supply selected per-entry pagination declarations or response-acquisition bounds"
+    ],
+    "unblocking_input": "compatible approved source/count/byte/selector/encoding contracts; PjM handles any evidenced unavoidable departure, without silently widening the format or selecting a new pin"
+  },
+  "external": {
+    "server": {
+      "head": "d5ef4b38269b379bac4aa471a6cad06073c563c8",
+      "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v3.json",
+      "manifest_bytes": 2888,
+      "manifest_sha256": "bde21d2f820d35a43110e2463c1326f02f411a6de692cc567f9098f0bca2f47c",
+      "handoff_path": "pkg/permissionbundle/contracts/handoff-v3.json",
+      "handoff_bytes": 2129,
+      "handoff_sha256": "a2723a2c74665a77e443bf0ddedb479bb5bcc0ff0e3ed5144622deb0427b4091",
+      "producer_path": "pkg/permissionbundle/contracts/remaining-producers-v2.json",
+      "producer_bytes": 29231,
+      "producer_sha256": "ee1ecf62dc3902113674fb10f02403feb367677950487d1042ce59acbed76f9d",
+      "required": "actual native/SQL authority adapters and startup; ArtifactReleases Load/Compatible/SameIntent now implemented and awaits trusted supported pins plus explicit directed approved migration pairs"
+    },
+    "endpoint": {
+      "head": "e4601041bd9bab186e4122fb8c76a3444bd1da62",
+      "path": "docs/permission-endpoint-handoff-v2.json",
+      "bytes": 5414,
+      "sha256": "3499115d71c48cfd9680d3e465ce7325aae342c67820b44528285fe34a709b02",
+      "delivered": "managed startBot, mTLS consumer, private launch components and synthetic tests",
+      "required": "main concrete factory; full legacy/import/publication/reuse/renewal; chunk carrier consumption; native providers and actual OS containment"
+    }
+  },
+  "not_run": [
+    "native business/provider acceptance",
+    "current writer/read/recovery-fence acceptance",
+    "durable pre-ACK/no-redelivery horizon acceptance",
+    "real worker OS/process/fs/network containment",
+    "browser and cross-repository end-to-end acceptance"
+  ],
+  "rollback": "revert Draft commits; leave managed mode disabled; do not erase policy epochs/incarnations/fences or replay journals",
+  "native_header_reference_bridge": "Header references and delivery references are distinct opaque domains. Unseen history Headers need a recognized native reference bridge/current-access port; no token alias is guessed. Actual native producer remains missing.",
+  "native_source_binding": "PjM binds the actual serving IM source/maintainer and DB HA/recovery operator. octo-im 613fc2b2 is only a candidate; no fourth repository edit or deployment change is authorized."
+}

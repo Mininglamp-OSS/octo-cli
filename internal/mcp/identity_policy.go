@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/config"
 	"github.com/Mininglamp-OSS/octo-cli/internal/credential"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 type admissionError struct {
@@ -66,7 +68,7 @@ func parsePolicy(raw json.RawMessage) (string, error) { //nolint:gocyclo // vali
 
 // verifyMCPBot uses one bounded, read-only verification. No registration,
 // identity cache, policy cache, retry, verbose output, or fallback is involved.
-func verifyMCPBot(ctx context.Context, f *cmdutil.Factory, requestPolicy bool) (uid, origin, mode string, err error) { //nolint:gocyclo // one bounded verification maps distinct auth, transport and policy failures
+func verifyMCPBot(ctx context.Context, f *cmdutil.Factory, requestPolicy bool, managed ...*tls.Config) (uid, origin, mode string, err error) { //nolint:gocyclo // one bounded verification maps distinct auth, transport and policy failures
 	bot, e := f.Credential()
 	if e != nil || bot == nil || bot.Token == "" {
 		err = admissionFailure(-32001, "BOT_AUTH_REQUIRED")
@@ -90,14 +92,22 @@ func verifyMCPBot(ctx context.Context, f *cmdutil.Factory, requestPolicy bool) (
 	cc.APIBaseURL = origin
 	f.ConfigFunc = func() (*config.Config, error) { c := cc; return &c, nil }
 	f.CredentialFunc = func() (*credential.BotCredential, error) { c := bc; return &c, nil }
+	isManaged := len(managed) > 0
 	body := map[string]any{"bot_token": bc.Token}
+	if isManaged {
+		body["identity_version"] = 2
+	}
 	if requestPolicy {
 		body["include_mcp_policy"] = true
 	}
 	vctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	c := client.New(&cc, &bc, client.Options{Timeout: "3s", NoRetry: true, ErrOut: io.Discard})
-	raw, e := c.Do(vctx, &client.Request{Method: http.MethodPost, Path: "/v1/auth/verify-bot", Body: body, DisableRetry: true, SuppressSpaceHeader: true, SecretValues: []string{bc.Token}, SensitiveJSONFields: []string{"bot_token"}, MaxResponseBytes: 16 << 10})
+	var tlsConfig *tls.Config
+	if isManaged {
+		tlsConfig = managed[0]
+	}
+	c := client.New(&cc, &bc, client.Options{Timeout: "3s", NoRetry: true, ErrOut: io.Discard, TLSConfig: tlsConfig})
+	raw, e := c.Do(permission.AuthorityContext(vctx), &client.Request{Method: http.MethodPost, Path: "/v1/auth/verify-bot", Body: body, DisableRetry: true, SuppressSpaceHeader: true, SecretValues: []string{bc.Token}, SensitiveJSONFields: []string{"bot_token"}, MaxResponseBytes: 16 << 10})
 	if e != nil {
 		err = admissionFailure(-32002, "BOT_VERIFICATION_UNAVAILABLE")
 		if ee := output.AsExitError(e); ee != nil {
@@ -115,7 +125,15 @@ func verifyMCPBot(ctx context.Context, f *cmdutil.Factory, requestPolicy bool) (
 		err = admissionFailure(-32002, "BOT_VERIFICATION_UNAVAILABLE")
 		return
 	}
-	if json.Unmarshal(p["bot_uid"], &uid) != nil || !validID(uid, 40) || strings.Contains(uid, bc.Token) {
+	if isManaged {
+		identity, e := permission.ParseIdentityV2(raw, requestPolicy)
+		if e != nil {
+			err = admissionFailure(-32002, "BOT_VERIFICATION_UNAVAILABLE")
+			return
+		}
+		uid = identity.BotUID
+	}
+	if (!isManaged && json.Unmarshal(p["bot_uid"], &uid) != nil) || (!isManaged && !validID(uid, 40)) || strings.Contains(uid, bc.Token) {
 		err = admissionFailure(-32002, "BOT_VERIFICATION_UNAVAILABLE")
 		return
 	}

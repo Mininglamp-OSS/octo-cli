@@ -1,0 +1,165 @@
+{
+  "format": "permission-catalog-page-disposition-v4",
+  "catalog_digest": null,
+  "approved_server_source": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+  "docs_observation_only_not_selected": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+  "correction": "Earlier v3 claim that approved server lacks _search_media was incorrect. Exact mounted source proves100 returned items. page-bounds-v2 supersedes v1 for current production analysis.",
+  "endpoints": [
+    {
+      "operation": "message.search.media",
+      "route": "POST /v1/bot/messages/_search_media",
+      "returned_items_max": 100,
+      "status": "APPROVED_PIN_COUNT_WITNESS",
+      "required_change": "No server count change. Retained in current witness; runtime acceptance remains separate."
+    },
+    {
+      "operation": "docs.comments.markers",
+      "route": "GET /v1/bot/docs/{docId}/comments/markers",
+      "observed_returned_items_max": 100,
+      "status": "UNSELECTED_DOCS_SOURCE",
+      "required_change": "Explicitly approve exact docs source pin and representation in source_heads/source_files plus existing gateway mapping. No new count clamp needed at observed source."
+    },
+    {
+      "operation": "docs.comments.replies",
+      "route": "GET /v1/bot/docs/{docId}/comments/{id}/replies",
+      "observed_returned_items_max": 25,
+      "status": "UNSELECTED_DOCS_SOURCE",
+      "required_change": "Same source selection. Returned count25 is not an acquisition-byte bound: non-PPT listReplies reads the complete thread."
+    },
+    {
+      "operation": "docs.recent.list",
+      "route": "GET /v1/bot/docs/recent",
+      "observed_returned_items_max": 100,
+      "status": "UNSELECTED_DOCS_SOURCE",
+      "required_change": "Same source selection. No new count clamp needed at observed source."
+    },
+    {
+      "operation": "docs.search",
+      "route": "POST /v1/bot/docs/search",
+      "observed_returned_items_max": null,
+      "default_page_size_max_not_contract": 50,
+      "status": "MISSING_FIXED_SOURCE_COUNT_CONTRACT",
+      "required_change": "Selected docs producer must supply an approved source/config-compatible maximum <=1000 and validate returned hit count. A universal clamp changes currently accepted larger configs; alternatively explicitly pin verified config/OS contract and amend source/config selector representation. Neither choice is selected here."
+    }
+  ],
+  "count_is_not_byte_proof": "Variable-size item payloads and whole-thread acquisition remain distinct from item-count maxima. Ordinary CLI Request.MaxResponseBytes remains unset for business calls; request spool16MiB and relay response8MiB require compatible source/encoding disposition, not arbitrary new caps.",
+  "sources": [
+    {
+      "repository": "octo-server",
+      "head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+      "path": "modules/bot_api/search_route.go",
+      "lines": "38-48",
+      "bytes": 8080,
+      "sha256": "83d4db8ff193e22ce0e3dbe82d6241a81f338510e9ac93b851edcba4a7f42579",
+      "finding": "Mounts shared message-search tree at /v1/bot/messages."
+    },
+    {
+      "repository": "octo-server",
+      "head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+      "path": "modules/messages_search/route_subtree.go",
+      "lines": "all",
+      "bytes": 5464,
+      "sha256": "d5f99523b0f9c1e526a53fe282d98ce8f048a3c3d3b59a7f37c2f06e79724778",
+      "finding": "Invokes every registered route mounter."
+    },
+    {
+      "repository": "octo-server",
+      "head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+      "path": "modules/messages_search/search_media.go",
+      "lines": "all",
+      "bytes": 6361,
+      "sha256": "3be372e94a28ba64c39b1b5dc26970116da2fbd485b0445daf3fd8355ff74065",
+      "finding": "Registers /_search_media, validates page size, calls bounded visibility pagination, projects at most one media item per hit."
+    },
+    {
+      "repository": "octo-server",
+      "head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+      "path": "modules/messages_search/validate.go",
+      "lines": "all",
+      "bytes": 8562,
+      "sha256": "42c58c098a8574de19de9f2264599dcb99662d9dcaddae5af7456263a500737d",
+      "finding": "maxPageSize=100."
+    },
+    {
+      "repository": "octo-server",
+      "head": "79701d4912eba79a8bcb02c58ed86609c38335e2",
+      "path": "modules/messages_search/visibility.go",
+      "lines": "all",
+      "bytes": 27607,
+      "sha256": "4451f22911b671edcc74cc005e32e1eec48b60785a3fc237bf05f7ad1d857cc5",
+      "finding": "Stops collecting at pageSize; handler projection cannot increase item count."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/api/app.ts",
+      "lines": "343-390",
+      "bytes": 26314,
+      "sha256": "bbe530e475d3d359d3106a2d63a1bd325745703ce52a0a4ee754c931ea8f23f2",
+      "finding": "Bot routes mount same docs/comments routers behind verifyBot at /v1/bot/docs; gateway split is documented, not a Go server docs implementation."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/api/routes/comments.ts",
+      "lines": "50;215-243;515-529",
+      "bytes": 23619,
+      "sha256": "4c0b58e990a21f1d14f99c3980dffe1d0a79d0740660f157fb9f22f500463b85",
+      "finding": "Marker limit <=100; non-PPT replies sliced to25; PPT call uses default25."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/db/repos/docCommentRepo.ts",
+      "lines": "listReplies;198-216",
+      "bytes": 10914,
+      "sha256": "e8d479ffcbd492da745fe427d2412275516f45fdb75babebb0b34be1cfdcb2e3",
+      "finding": "Markers SQL LIMIT <=100 and one projection per row. listReplies loads whole thread before route slices."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/ppt/comments.ts",
+      "lines": "71-100",
+      "bytes": 14365,
+      "sha256": "012c1fbc4e193334af65d7b96f2fa9df530f087fd0d0c568a2f96d1ffd2fd8d8",
+      "finding": "Replies default25, size clamp100, SQL limit size+1, returned items sliced to size."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/api/routes/docs.ts",
+      "lines": "522-612;646-709",
+      "bytes": 57485,
+      "sha256": "3ed4b348f5c4b02ca9e7fdf7738d41d5f2f7f58c1e6ca5a0b36536b9116d0f13",
+      "finding": "Recent input clamp100; search input only clamps to configured pageSizeMax."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/db/repos/docViewHistoryRepo.ts",
+      "lines": "231-319",
+      "bytes": 16270,
+      "sha256": "e2c2dd11bc6e40d40e5b2dac0f78b82272c68ce656a6f1dd5ef34eb7b73fefa2",
+      "finding": "Recent clamp100, SQL LIMIT size+1, truncates returned items to size."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/config/env.ts",
+      "lines": "28-40;383-385",
+      "bytes": 70408,
+      "sha256": "849855194a56c849e8d0ccf13a350c8a8ff1bba4d4322f984b961dce2de2901f",
+      "finding": "SEARCH_PAGE_SIZE_MAX default50; implementation numMin uses Math.max(min,n), with no upper bound or finite/integer validation despite its later comment."
+    },
+    {
+      "repository": "octo-docs-backend",
+      "head": "64be99c86e5a9924a5998dbc71343101a9a3672d",
+      "path": "src/search/osClient.ts",
+      "lines": "198-289",
+      "bytes": 13335,
+      "sha256": "e7a85b45e48ebf46670a19c50807620f5779c67214792e26df9f0feba5503af1",
+      "finding": "Passes size to OpenSearch; maps returned hits with no independent maximum-count validation."
+    }
+  ]
+}

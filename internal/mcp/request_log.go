@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 // RecordedRPCID preserves the JSON-RPC ID type and original number spelling.
@@ -494,7 +496,7 @@ func validStoredRecord(raw []byte) bool {
 	var r RequestRecord
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&r) != nil || r.RequestedArguments == nil || !validID(r.BotUID, 40) {
+	if decoder.Decode(&r) != nil || r.RequestedArguments == nil || !validLogBotUID(r.BotUID, r.DeclaredSource) {
 		return false
 	}
 	if _, err = time.Parse(time.RFC3339Nano, r.ReceivedAt); err != nil || !strings.HasSuffix(r.ReceivedAt, "Z") {
@@ -534,6 +536,15 @@ func validRecordedSource(root map[string]json.RawMessage, source *DeclaredSource
 	}
 	if _, err := strictObject(raw, "version", "sender", "channel", "channel_type", "space_id", "message_id"); err != nil {
 		return false
+	}
+	if source.Version == 2 {
+		m := map[string]any{"version": 2, "im": map[string]any{"sender": source.Sender, "channel": source.Channel, "channel_type": source.ChannelType, "space_id": source.SpaceID, "message_id": source.MessageID}}
+		b, marshalErr := json.Marshal(m)
+		if marshalErr != nil {
+			return false
+		}
+		_, err := permission.ParseDeclarationV2(b)
+		return err == nil
 	}
 	return source.Version == 1 && validID(source.Sender, 128) && validID(source.Channel, 256) && validID(source.SpaceID, 40) && positiveDecimal(source.MessageID, 63) && (source.ChannelType == 1 || source.ChannelType == 2 || source.ChannelType == 5)
 }
@@ -620,4 +631,11 @@ func validStoredArgument(key string, value json.RawMessage, operation string) bo
 		}
 		return validLoggedArgument(key, value, typ)
 	}
+}
+
+func validLogBotUID(uid string, source *DeclaredSource) bool {
+	if source != nil && source.Version == 2 {
+		return permission.ValidNativeID(uid)
+	}
+	return validID(uid, 40)
 }

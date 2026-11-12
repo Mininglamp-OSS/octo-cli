@@ -1,0 +1,51 @@
+{
+  "format": "permission-cli-component-handoff-v2",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "supersedes": "cli-component-contract-v1.json",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "implemented": {
+    "control": "pinned mTLS, v2 Hello, ingress, admission, private sealed capsule, canonical context descriptor/chunks, one-use turn relay, renewal, close",
+    "dispatch": "execute/call_op, HTTP/stdio, discovery/schema, resource inventory/read, typed refusal",
+    "sinks": "source-bound root/helper HTTP, each retry/hop, local confined read, helper bytes, page aggregation hook, Redis EVAL, owned host-local HTTP publication",
+    "native_client": "fixed exact-Bot authenticated native-facts route with exact profiles and pinned authority descriptors",
+    "enforcement": "fresh F then complete B; Stage1/contributors and Stage2 share P; process/key/incarnation watermark; lease/hard deadline; no OBO/ACL substitution"
+  },
+  "host_config": "operator-owned 0600 descriptor-opened file; source paths and TLS identities are private, never MCP arguments",
+  "worker_ticket": "inherited anonymous descriptor containing only endpoint/token for one turn; endpoint owns OS/process/fs/network isolation",
+  "supported_release": "NONE; compiled allowlist empty; operator digest alone cannot enable a candidate",
+  "native_provider": "EXTERNAL_INCOMPLETE; client and synthetic fixtures are not a native provider",
+  "checkpoint": "receipt_unavailable until real native FenceThroughV1/GetReplayCheckpointV1 is bound",
+  "artifacts": {
+    "dynamic": "content-v2.json.gz",
+    "assembly_report": "release-assembly-report.json.gz",
+    "source_count_witness": "../../internal/mcp/catalog_sources/page-bounds-v1.json",
+    "historical_v1": "source-materialization-v1.json.gz"
+  },
+  "remaining_cli_producer": [
+    "Select source-compatible count/byte contracts, selectors and encoding within approved grammar/limits; no arbitrary caps or source-head changes",
+    "Complete immutable release validation/emission/allowlisting and explicit old/target migration equivalence after compatibility inputs are resolved",
+    "Native/OS and full per-entry sink acceptance remain NOT_RUN; do not claim full feature completion"
+  ],
+  "server_dependency": {
+    "head": "1fae0db209d656a4b60562e14b71aeb23ad8e87b",
+    "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v2.json",
+    "manifest_bytes": 1816,
+    "manifest_sha256": "276cd8cb80c9b7f2d04ab2a835927454d75663f96ce611ccd47b2a8a05993780",
+    "producer_path": "pkg/permissionbundle/contracts/remaining-producers-v1.json",
+    "producer_bytes": 5153,
+    "producer_sha256": "53f29a0e572cf240584511627236489658089bfcf70598a56216d545730f6a52",
+    "required": "actual NativeFactSource, FencedAuthority and startup; server retains adapters and Releases.Load/Compatible/SameIntent"
+  },
+  "endpoint_dependency": {
+    "head": "c152cb54df8e3fb822288933e39cf6dcad4b9335",
+    "path": "docs/permission-component-contract.json",
+    "bytes": 2422,
+    "sha256": "3235d448421f4bfd34977d474a9a0568d720dfe8d12c825085eef463b6d13e83",
+    "required": "native Header/current access/disclosure/body/checkpoint/fence; durable pre-ACK journal binding; private host worker containment; admission/context import/native publication"
+  },
+  "next_owner": "PjM coordinates compatibility and actual native producer contracts; CLI retains this Draft branch for completion. Formal review/deployment remains deferred."
+}

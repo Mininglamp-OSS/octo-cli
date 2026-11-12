@@ -78,9 +78,15 @@ func (s *Server) handleStdioLine(ctx context.Context, line []byte, out io.Writer
 		writeMessage(out, newErrorResponse(nil, codeParseError, "parse error: "+err.Error()))
 		return
 	}
-	resp, has := s.Dispatch(ctx, req)
+	resp, has, call := s.dispatchManaged(ctx, req)
 	if has {
-		writeMessage(out, resp)
+		if s.managed != nil {
+			if err := writeManaged(ctx, out, resp, call); err != nil {
+				return
+			}
+		} else {
+			writeMessage(out, resp)
+		}
 	}
 }
 

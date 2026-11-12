@@ -1,0 +1,251 @@
+{
+  "format": "permission-cli-endpoint-abi-v2",
+  "supersedes": "endpoint-abi-v1.json",
+  "endpoint_head": "6830c4050ccb7a299114933b7eb6afbea990abb2",
+  "endpoint_task_id": "2f4a34e9-2be3-48ac-99f0-38a30f077acd",
+  "control": "TLS 1.3 mutual authentication and exact peer certificate pin; uint32 BE canonical JSON <=65536 bytes; methods: hello, register_ingress, admit, resolve_contributors, bind_context, open_relay, renew, close, checkpoint",
+  "readiness": {
+    "config_key": "ready_path",
+    "record": {
+      "control_version": 1,
+      "coordinator_incarnation": "32-hex fresh process ID"
+    },
+    "lifetime": "private 0600 exclusive-create, fsync before serving, refuse existing record; endpoint launcher supplies this exact boot ID to its pinned consumer"
+  },
+  "admit": {
+    "request": [
+      "ingress_id",
+      "proposed_context_id"
+    ],
+    "optional_request": [
+      "prior_generation",
+      "context_generation"
+    ],
+    "reply": [
+      "capsule_id",
+      "turn_id",
+      "generation",
+      "scope_incarnation",
+      "context_epoch"
+    ],
+    "context_reuse_semantics": "when a completed bound context for (owner, proposed_context_id, key, scope_incarnation, context_epoch) exists on this host and optional prior_generation/context_generation (if supplied) matches that bound generation, admit reuses that generation ID for same-generation complete-contributor context reuse; if scope_incarnation or context_epoch rotated, or the prior turn did not complete, admit mints a fresh generation ID"
+  },
+  "resolve_contributors": {
+    "request_variants": [
+      [
+        "capsule_id",
+        "delivery_references"
+      ],
+      [
+        "key",
+        "delivery_references"
+      ],
+      [
+        "capsule_id",
+        "key",
+        "delivery_references"
+      ],
+      [
+        "capsule_id",
+        "references"
+      ],
+      [
+        "key",
+        "references"
+      ],
+      [
+        "capsule_id",
+        "key",
+        "references"
+      ]
+    ],
+    "limits": {
+      "min_references": 1,
+      "max_references_per_capsule": 256,
+      "native_batch_size": 32
+    },
+    "reply": [
+      "headers"
+    ],
+    "semantics": "resolves unseen prior-turn/history contributor delivery references on an admitted capsule or verified key via NativeReader.Resolve with purpose='contributor' in batches <=32 without inserting into seenDeliveries ingress replay tombstones, matching endpoint a3164ded106e06de88f98a6820da4f0d80876dc9"
+  },
+  "bind_context": {
+    "request": [
+      "capsule_id",
+      "manifest"
+    ],
+    "optional_request": [
+      "contributor_references",
+      "delivery_references"
+    ],
+    "inline_manifest": [
+      "context_id",
+      "context_generation",
+      "originals",
+      "bytes",
+      "sha256"
+    ],
+    "core_hash": "bytes/sha256 cover canonical JSON of exactly context_id, context_generation, originals; originals are complete native Headers, including the invoking original and all resolved contributor Headers",
+    "limits": {
+      "originals": 256,
+      "core_bytes": 1048576,
+      "control_frame_bytes": 65536
+    },
+    "chunk_manifest": [
+      "carrier",
+      "bytes",
+      "sha256",
+      "offset",
+      "data_base64"
+    ],
+    "carrier": "canonical-json-chunks-v1",
+    "chunk_semantics": "each bind_context frame uses manifest containing the chunk descriptor; bytes/hash fixed on first chunk, offset exactly accepted length, standard base64 <=32768 decoded bytes recommended; no truncation/replacement/path/URL; canonical full core verified before binding",
+    "intermediate_reply": [
+      "accepted_bytes"
+    ],
+    "final_reply": [
+      "context_generation"
+    ],
+    "contributor_resolution": "if optional contributor_references/delivery_references are supplied on bind_context before final chunk assembly completes, the host resolves any not-yet-resolved contributor references on the capsule via purpose='contributor' before verifying ObservedHeader and Stage1 contributor intersection"
+  },
+  "open_relay": {
+    "request": [
+      "capsule_id",
+      "recipient_id",
+      "transport",
+      "relay_nonce"
+    ],
+    "optional_request": [
+      "include_tls_trust"
+    ],
+    "http_reply": [
+      "transport",
+      "url",
+      "handle"
+    ],
+    "http_pinned_reply": [
+      "transport",
+      "url",
+      "handle",
+      "ca_sha256",
+      "peer_sha256"
+    ],
+    "stdio_reply": [
+      "transport",
+      "executable",
+      "executableSha256",
+      "handle"
+    ],
+    "stdio_ticket_fields": [
+      "endpoint",
+      "token"
+    ],
+    "stdio_pinned_ticket_fields": [
+      "ca_sha256",
+      "endpoint",
+      "max_response_bytes",
+      "peer_sha256",
+      "server_name",
+      "token"
+    ],
+    "stdio_tls_trust_ticket_fields": [
+      "ca_sha256",
+      "endpoint",
+      "max_response_bytes",
+      "peer_sha256",
+      "server_name",
+      "token"
+    ],
+    "optional_reply_when_include_tls_trust": [
+      "tls"
+    ],
+    "tls_metadata": {
+      "fields": [
+        "ca_file",
+        "ca_sha256",
+        "cert_sha256",
+        "peer_sha256",
+        "server_name"
+      ],
+      "semantics": "populated when include_tls_trust=true and host relay TLS trust material is configured, matching checkTurnRelayTrust / validateTurnRelayTrust in endpoint 131dc9c38bfe6813a0a0e9f207398fa06112cb9e; never disables TLS 1.3 verification"
+    },
+    "http": "production URL is HTTPS over PublicationTLSListener (TLS 1.3); handle is a 64-hex one-turn bearer; when relay TLS pins are present, reply includes ca_sha256 (SHA-256 of relay CA PEM bytes) and peer_sha256 (SHA-256 of relay leaf certificate DER), plus optional tls={ca_file, ca_sha256, cert_sha256, peer_sha256, server_name} when include_tls_trust=true; every HTTP response (including hijacked writeManagedHTTP responses) emits X-Octo-Acquisition-Budget-Bytes=<MaxSerializedRPCBytes> when ResponseBudgets are configured",
+    "stdio": "actual pinned CLI executes --turn-relay <handle>; handle is unpadded base64url of a closed JSON ticket <=512 characters containing {ca_sha256, endpoint, peer_sha256, token} plus optional server_name (when RelayServerName is configured and differs from the endpoint hostname) and optional max_response_bytes (positive decimal string \"<MaxSerializedRPCBytes>\" when ResponseBudgets.MaxSerializedRPCBytes > 0) for both 4-field and include_tls_trust=true requests, avoiding host-private ca_file paths inside contained sandboxes; ServeTurnRelay enforces TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from SSL_CERT_FILE/NODE_EXTRA_CA_CERTS (or ca_file) verified against ca_sha256, VerifyConnection leaf peer_sha256/cert_sha256 pinning, and fail-closed MaxSerializedRPCBytes response budget from X-Octo-Acquisition-Budget-Bytes, ticket max_response_bytes (accepting positive decimal string or JSON integer), or in-process LookupRelayEndpointBudgets",
+    "relay_executable": "private config may name the pinned CLI; empty selects this executable; absolute regular non-writable executable required",
+    "bearer_domain": "64 lowercase hex characters; ordinary bf_/app_/uk_ credentials are rejected by the relay ticket parser"
+  },
+  "host_config_optional_fields": {
+    "relay_tls": [
+      "relay_ca",
+      "relay_ca_sha256",
+      "relay_peer_sha256",
+      "relay_cert_sha256",
+      "relay_server_name"
+    ],
+    "response_budgets": {
+      "config_key": "response_budgets",
+      "required_subfields_when_present": [
+        "max_acquisition_bytes",
+        "max_page_items",
+        "max_pages",
+        "max_cumulative_bytes",
+        "max_serialized_rpc_bytes"
+      ],
+      "semantics": "optional operator-configured managed-mode JSON response budgets; missing or invalid subfields fail closed with PERMISSION_HOST_CONFIG_INVALID; when omitted, unproven --page-all operations remain fail-closed with policy_unavailable"
+    },
+    "defaults": "ServePermissionHost defaults relay_ca to peer_ca, relay_ca_sha256 to SHA-256(relay_ca PEM bytes), and relay_peer_sha256/relay_cert_sha256 to SHA-256(server leaf cert DER) when not explicitly overridden"
+  },
+  "response_budget_runtime_parity": {
+    "transports": [
+      "http",
+      "stdio"
+    ],
+    "tools": [
+      "execute",
+      "call_op"
+    ],
+    "page_budget_prefix_notice": "when pagination stops cleanly at max_pages while has_more is true, runPaginated returns the valid JSON array prefix with envelope _notice={code:'PAGE_BUDGET_PREFIX', pages_fetched, page_budget, items_returned, has_more:true, next_cursor}",
+    "overflow_error": "when max_acquisition_bytes (across JSON, inline binary, buffered binary, and ServeTurnRelay HTTP responses via CheckHTTPResponseContentLength + LimitReader(limit+1)), max_page_items, max_cumulative_bytes, or max_serialized_rpc_bytes (>= MinSerializedRPCBudgetBytes=1024 with verified replacement envelope fit) is exceeded, returns deterministic RESPONSE_BUDGET_EXCEEDED error with detail={budget_kind, limit, observed}; never truncates JSON/binary bytes and never retries/replays mutating requests; fresh F->B runs at dispatch, every page boundary, and publication"
+  },
+  "native_reader_bounds": {
+    "max_reads": 100000,
+    "max_observations": 100000,
+    "max_generations": 1024,
+    "saturation_behavior": "fail closed with permission: bundle unavailable (PERMISSION_BUNDLE_UNAVAILABLE); never evicts read_id/read_nonce uniqueness fences or HeaderV1 immutability observations via TTL or sliding window"
+  },
+  "source_control_client": {
+    "v52_head": {
+      "commit": "6830c4050ccb7a299114933b7eb6afbea990abb2",
+      "path": "src/permissions/control-client.ts",
+      "handoff_path": "docs/permission-endpoint-handoff-v7.json",
+      "handoff_bytes": 13799,
+      "handoff_sha256": "8f67e01671080c41639d750ddec0e89e03bcab42af8ab9b86e51cae79c65ad7c"
+    },
+    "v49_head": {
+      "commit": "d007962a7762ec42ae2279c673392121ad630e64",
+      "path": "src/permissions/control-client.ts",
+      "bytes": 11759,
+      "sha256": "67d7a8d86d52f7db7f327deeec892625a3733ae3c50536059906f6f62cb32f67",
+      "handoff_path": "docs/permission-endpoint-handoff-v6.json",
+      "handoff_bytes": 12897,
+      "handoff_sha256": "e7fe1cf23bf914eab7ba4429f51c477c63c7762eaff973326bfe5de4b2ba258c"
+    },
+    "v45_head": {
+      "commit": "a3164ded106e06de88f98a6820da4f0d80876dc9",
+      "path": "src/permissions/control-client.ts",
+      "bytes": 11710,
+      "sha256": "4e40ee144b5eec7ef645be92948dd6b1f36a838d1fb82e6b471a59e820c99bef",
+      "handoff_path": "docs/permission-endpoint-handoff-v5.json",
+      "handoff_bytes": 7294,
+      "handoff_sha256": "8b96b29e212e5bf068b66f7eb2dc68a7eb83e4cafc1611e57435501598b6bcdc"
+    },
+    "e460_head": {
+      "commit": "e4601041bd9bab186e4122fb8c76a3444bd1da62",
+      "path": "src/permissions/control-client.ts",
+      "bytes": 11683,
+      "sha256": "e390188ce11fc5c22041feff24119f81b7fa3a3a8efb6555b9fb7328dd676fbe"
+    }
+  },
+  "verification": "exact pinned endpoint control sources (e4601041 and a3164ded) and v44/v45 convergence harnesses exercised over mTLS 1.3, private-CA TLS 1.3 PublicationTLSListener relay, actual CLI --turn-relay process, checkedTurnRelay ca_sha256/peer_sha256 parity, and configurable response budgets across HTTP and stdio execute/call_op",
+  "rpc_identity": "JSON-RPC IDs only correlate replies; equal parameters and reused IDs may be legitimate new logical calls. Each BeginCall mints a private call ID and each prepared physical attempt is one-use. Native delivery replay is separately fenced; no argument-based idempotency is invented."
+}

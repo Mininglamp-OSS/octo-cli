@@ -1,0 +1,60 @@
+{
+  "format": "permission-cli-component-handoff-v3",
+  "task": "XIN-2794",
+  "task_id": "229ad215-8526-4a04-8f5b-36f073f81a16",
+  "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
+  "target": "chore/main-snapshot-20261029-mcp",
+  "supersedes": "cli-component-contract-v2.json",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "implemented": {
+    "control": "pinned mTLS, v2 Hello, ingress, admission, private sealed capsule, canonical context descriptor/chunks, one-use turn relay, renewal, close",
+    "dispatch": "execute/call_op, HTTP/stdio, discovery/schema, resource inventory/read, typed refusal",
+    "sinks": "source-bound root/helper HTTP, each retry/hop, local confined read, helper bytes, page aggregation hook, Redis EVAL, owned host-local HTTP publication",
+    "native_client": "fixed exact-Bot authenticated native-facts route with exact profiles and pinned authority descriptors",
+    "enforcement": "fresh F then complete B; Stage1/contributors and Stage2 share P; process/key/incarnation watermark; lease/hard deadline; no OBO/ACL substitution"
+  },
+  "host_config": "operator-owned 0600 descriptor-opened file; source paths and TLS identities are private, never MCP arguments",
+  "worker_ticket": "Endpoint e4601041 pinned executable --turn-relay handle ABI; HTTP reply transport/url/handle and stdio transport/executable/executableSha256/handle; only turn credentials",
+  "supported_release": "NONE; compiled allowlist empty; operator digest alone cannot enable a candidate",
+  "native_provider": "EXTERNAL_INCOMPLETE; client and synthetic fixtures are not a native provider",
+  "checkpoint": "receipt_unavailable until real native FenceThroughV1/GetReplayCheckpointV1 is bound",
+  "artifacts": {
+    "dynamic": "content-v2.json.gz",
+    "assembly_report": "release-assembly-report.json.gz",
+    "source_count_witness": "../../internal/mcp/catalog_sources/page-bounds-v1.json",
+    "historical_v1": "source-materialization-v1.json.gz"
+  },
+  "remaining_cli_producer": [
+    "Select source-compatible count/byte contracts, selectors and encoding within approved grammar/limits; no arbitrary caps or source-head changes",
+    "Complete immutable release validation/emission/allowlisting and explicit old/target migration equivalence after compatibility inputs are resolved",
+    "Native/OS and full per-entry sink acceptance remain NOT_RUN; do not claim full feature completion"
+  ],
+  "server_dependency": {
+    "head": "d5ef4b38269b379bac4aa471a6cad06073c563c8",
+    "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v3.json",
+    "manifest_bytes": 2888,
+    "manifest_sha256": "bde21d2f820d35a43110e2463c1326f02f411a6de692cc567f9098f0bca2f47c",
+    "handoff_path": "pkg/permissionbundle/contracts/handoff-v3.json",
+    "handoff_bytes": 2129,
+    "handoff_sha256": "a2723a2c74665a77e443bf0ddedb479bb5bcc0ff0e3ed5144622deb0427b4091",
+    "producer_path": "pkg/permissionbundle/contracts/remaining-producers-v2.json",
+    "producer_bytes": 29231,
+    "producer_sha256": "ee1ecf62dc3902113674fb10f02403feb367677950487d1042ce59acbed76f9d",
+    "required": "actual native/SQL authority adapters and startup; ArtifactReleases Load/Compatible/SameIntent now implemented and awaits trusted supported pins plus explicit directed approved migration pairs"
+  },
+  "endpoint_dependency": {
+    "head": "e4601041bd9bab186e4122fb8c76a3444bd1da62",
+    "path": "docs/permission-endpoint-handoff-v2.json",
+    "bytes": 5414,
+    "sha256": "3499115d71c48cfd9680d3e465ce7325aae342c67820b44528285fe34a709b02",
+    "delivered": "managed startBot, mTLS consumer, private launch components and synthetic tests",
+    "required": "main concrete factory; full legacy/import/publication/reuse/renewal; chunk carrier consumption; native providers and actual OS containment"
+  },
+  "next_owner": "PjM coordinates compatibility and actual native producer contracts; CLI retains this Draft branch for completion. Formal review/deployment remains deferred.",
+  "endpoint_abi": "endpoint-abi-v1.json",
+  "supported_pins": [],
+  "approved_directed_compatible_pairs": [],
+  "rpc_identity": "RPC correlation is separate from host-minted call/attempt IDs and native delivery fences; legitimate repeated calls and recovery from transient authority failure remain callable",
+  "ingress_lifecycle": "consume ingress handle when admission is attempted and purge owner handles on session close; preserve native delivery tombstones, stop at the finite bound without an authoritative checkpoint"
+}

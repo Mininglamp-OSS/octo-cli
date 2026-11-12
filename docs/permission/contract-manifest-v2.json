@@ -1,0 +1,36 @@
+{
+  "format": "permission-cli-contract-manifest-v2",
+  "status": "BLOCKED_COMPATIBLE_RELEASE_AND_NATIVE_HOST_ACCEPTANCE",
+  "catalog_digest": null,
+  "unchanged_contracts": "contract-manifest-v1.json",
+  "files": {
+    "docs/permission/cli-component-contract-v2.json": {
+      "bytes": 3645,
+      "sha256": "f329d8c4315448212e5801e5373ba5491d75e315d2b0c2aedf398931d0f1e36d"
+    },
+    "docs/permission/remaining-producers-v2.json": {
+      "bytes": 4608,
+      "sha256": "93e4aa59f0d9ccc880ae03362194d9006a49b7aef90b2f8d77d5491aabc0ac4e"
+    },
+    "docs/permission/content-v2.json.gz": {
+      "bytes": 2417296,
+      "sha256": "ce0eb982d43540595b0b833b049c863cda8894cd05e58e196f799e4bcfa37f85",
+      "decoded_bytes": 12795574,
+      "decoded_sha256": "0e611da9da15e35068edec1af614dbd6411353f8a95dd0a29beed61a6c923617"
+    },
+    "docs/permission/release-assembly-report.json.gz": {
+      "bytes": 3181452,
+      "sha256": "63e34de6a7448287812cd74531f1c6798000925877b9d5a6b89457b295c80c57",
+      "decoded_bytes": 14249049,
+      "decoded_sha256": "f12f3d583d62ed855e065668f1a2dd34939e4de93c65d3903d90f2b3b4956c4f"
+    },
+    "internal/mcp/catalog_sources/page-bounds-v1.json": {
+      "bytes": 3216,
+      "sha256": "f3110b993c2b17f1fdc0e96a5a7d84d35314bd751e6d938fb0e7261dcb08af3e"
+    },
+    "internal/mcp/catalog_sources/release-inputs-v6.json": {
+      "bytes": 21556,
+      "sha256": "2cf62c66c208bc145791386cb936561b7ec4f95d0144f23655e0d5136d8c900d"
+    }
+  }
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/Mininglamp-OSS/octo-cli/internal/client"
 	"github.com/Mininglamp-OSS/octo-cli/internal/cmdutil"
 	"github.com/Mininglamp-OSS/octo-cli/internal/output"
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 	"github.com/Mininglamp-OSS/octo-cli/internal/registry"
 )
 
@@ -82,6 +83,7 @@ func runOperation(cobraCmd *cobra.Command, f *cmdutil.Factory, rt *operationRunt
 	// Body: start from --data (if any), then merge explicit flags on top.
 	// Multipart ops take a separate path — they build a form body, not JSON.
 	req := client.Request{
+		OperationID:    d.ID,
 		Service:        d.Service,
 		Credential:     d.Credential,
 		Method:         d.Method,
@@ -1631,9 +1633,18 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 	}
 	pag := rt.detail.Pagination
 	cursorParam, limit := paginationControls(rt, pag)
+	bound := permission.BoundCall(ctx)
+	if bound != nil {
+		if stopLimit := bound.PageStopLimit(); stopLimit > 0 && stopLimit < limit {
+			limit = stopLimit
+		}
+	}
 	merged := make([]json.RawMessage, 0, 64)
 	req := *firstReq
 	seenCursors := paginationSeenCursors(&req, rt, pag, cursorParam)
+	stoppedAtPageBudget := false
+	stoppedNextCursor := ""
+	pagesFetched := 0
 	for page := 0; page < limit; page++ {
 		body, err := cli.Do(ctx, &req)
 		if err != nil {
@@ -1648,8 +1659,23 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 			_ = f.EmitError(perr) //nolint:errcheck // best-effort emit before returning err
 			return perr
 		}
+		if err := permission.AdmitPageBytes(ctx, len(data), len(body)); err != nil {
+			var bErr *permission.ResponseBudgetError
+			if errors.As(err, &bErr) {
+				ee := paginationBudgetExceededError(bErr)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
+				return ee
+			}
+			return err
+		}
+		pagesFetched = page + 1
 		merged = append(merged, data...)
-		if !hasMore || nextCursor == "" || page+1 >= limit {
+		if !hasMore || nextCursor == "" {
+			break
+		}
+		if page+1 >= limit {
+			stoppedAtPageBudget = true
+			stoppedNextCursor = nextCursor
 			break
 		}
 		if cursorWasSeen(seenCursors, nextCursor) {
@@ -1667,7 +1693,48 @@ func runPaginated(ctx context.Context, f *cmdutil.Factory, rt *operationRuntime,
 	if err != nil {
 		return err
 	}
+	if bound != nil {
+		if err := bound.AdmitCumulativeBytes(int64(len(out))); err != nil {
+			var bErr *permission.ResponseBudgetError
+			if errors.As(err, &bErr) {
+				ee := paginationBudgetExceededError(bErr)
+				_ = f.EmitError(ee) //nolint:errcheck // best-effort emit before returning err
+				return ee
+			}
+			return err
+		}
+		if stoppedAtPageBudget {
+			notice, mErr := json.Marshal(map[string]any{
+				"code":           "PAGE_BUDGET_PREFIX",
+				"pages_fetched":  pagesFetched,
+				"page_budget":    limit,
+				"items_returned": len(merged),
+				"has_more":       true,
+				"next_cursor":    stoppedNextCursor,
+			})
+			if mErr == nil {
+				return f.EmitSuccessWithMeta(out, output.EnvelopeMeta{Notice: notice})
+			}
+		}
+	}
 	return f.EmitSuccess(out)
+}
+
+func paginationBudgetExceededError(bErr *permission.ResponseBudgetError) *output.ExitError {
+	ee := output.ErrWithHint(
+		"api",
+		"RESPONSE_BUDGET_EXCEEDED",
+		fmt.Sprintf("pagination response exceeds managed %s budget of %d (observed %d)", bErr.Kind, bErr.Limit, bErr.Observed),
+		"narrow the query or reduce page size",
+	)
+	if detail, err := json.Marshal(map[string]any{
+		"budget_kind": bErr.Kind,
+		"limit":       bErr.Limit,
+		"observed":    bErr.Observed,
+	}); err == nil {
+		ee.Detail = detail
+	}
+	return ee
 }
 
 func paginationControls(rt *operationRuntime, pag *registry.PaginationInfo) (cursorParam string, limit int) {
