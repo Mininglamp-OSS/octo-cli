@@ -148,6 +148,15 @@ type Coordinator struct {
 // A schema page-size input maximum alone is not this response guarantee.
 type PageBound struct{ Items, Pages int }
 
+// MinSerializedRPCBudgetBytes is the lower bound for MaxSerializedRPCBytes so
+// a replacement RESPONSE_BUDGET_EXCEEDED JSON-RPC error envelope is always
+// representable within the configured serialized RPC ceiling.
+const MinSerializedRPCBudgetBytes int64 = 1024
+
+// MaxResponseBudgetBytes is the upper bound for explicit managed response
+// acquisition, cumulative pagination, and serialized RPC byte ceilings.
+const MaxResponseBudgetBytes int64 = 64 << 20
+
 // ResponseBudgets configures explicit managed-mode byte and pagination ceilings
 // for HTTP acquisition, multi-page aggregation, and final serialized MCP RPC
 // responses (A1 direction). Production defaults are intentionally unselected
@@ -162,13 +171,16 @@ type ResponseBudgets struct {
 }
 
 // Valid reports whether every budget dimension is explicitly configured within
-// bounded positive limits. Missing or zero fields are invalid.
+// bounded positive limits, including the lower bound required to represent a
+// replacement RESPONSE_BUDGET_EXCEEDED JSON-RPC envelope.
 func (b ResponseBudgets) Valid() bool {
-	return b.MaxAcquisitionBytes >= 1 && b.MaxAcquisitionBytes <= 64<<20 &&
+	return b.MaxAcquisitionBytes >= 1 && b.MaxAcquisitionBytes <= MaxResponseBudgetBytes &&
 		b.MaxPageItems >= 1 && b.MaxPageItems <= 10000 &&
 		b.MaxPages >= 1 && b.MaxPages <= 1000 &&
-		b.MaxCumulativeBytes >= b.MaxAcquisitionBytes && b.MaxCumulativeBytes <= 64<<20 &&
-		b.MaxSerializedRPCBytes >= 1 && b.MaxSerializedRPCBytes <= 64<<20
+		b.MaxCumulativeBytes >= b.MaxAcquisitionBytes && b.MaxCumulativeBytes <= MaxResponseBudgetBytes &&
+		b.MaxSerializedRPCBytes >= MinSerializedRPCBudgetBytes &&
+		b.MaxSerializedRPCBytes >= b.MaxAcquisitionBytes &&
+		b.MaxSerializedRPCBytes <= MaxResponseBudgetBytes
 }
 
 // ResponseBudgetError reports an explicit managed-mode acquisition, pagination,

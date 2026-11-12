@@ -7,7 +7,7 @@
   "supersedes": "cli-component-contract-v5.json",
   "target": "chore/main-snapshot-20261029-mcp",
   "base_sha": "f8d434b6318215948ebbf67feb11f6265dee11e5",
-  "status": "V45_CONTINUATION_DELIVERED_AWAITING_OWNER_NUMERIC_SIGN_OFF",
+  "status": "V49_REVIEW_FINDINGS_AND_SIBLING_RECONCILIATION_DELIVERED_AWAITING_OWNER_NUMERIC_SIGN_OFF",
   "normative_addendum": {
     "attachment_id": "01a1bfb4-aeef-7497-8f7f-268335e0b0fa",
     "bytes": 70457,
@@ -30,9 +30,9 @@
     "semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
     "semantic_digest_reconciliation": {
       "authoritative_semantic_sha256": "15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799",
-      "cli_and_server_a4021ad8_match": true,
+      "cli_server_e708d023_and_endpoint_d007962a_match": true,
       "historical_pre_alignment_server_ff4d43c4_sha256": "415acc86598208cbf051c9c08cc47e33e0ec9cd8fe7f9444b48b80f11d95ba21",
-      "explanation": "octo-cli internal/permission/package.go and octo-server a4021ad87ebc95cf995e8ca1dabbb2d331b0cee8 pkg/permissionbundle/package_graph.go compute the identical canonical semantic projection (15c7ca2b...); endpoint a3164ded observed 415acc86... only when running against earlier server commit ff4d43c403083fd059ec2e6ef6e0d6d505228d48 prior to server semanticView alignment"
+      "explanation": "octo-cli internal/permission/package.go, octo-server e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d pkg/permissionbundle/package_graph.go, and codex-channel-octo d007962a7762ec42ae2279c673392121ad630e64 docs/permission-endpoint-handoff-v6.json all converge on the identical canonical semantic projection (15c7ca2bf6df703979df529afbca6828f116b2463b1a818456edfad80bcad799)"
     },
     "status": "VERIFIED_CANDIDATE_NOT_ALLOWLISTED",
     "ledger": {
@@ -65,6 +65,12 @@
       "types_and_methods": [
         "permission.ResponseBudgets",
         "permission.ResponseBudgetError",
+        "permission.MinSerializedRPCBudgetBytes",
+        "permission.MaxResponseBudgetBytes",
+        "permission.CheckHTTPResponseContentLength",
+        "permission.ReadBoundedHTTPResponseBody",
+        "permission.StreamBoundedHTTPResponseBody",
+        "permission.RelayResponseBudgetBytes",
         "permission.StaticProvenanceRequired",
         "Coordinator.ConfigureResponseBudgets",
         "Coordinator.ResponseBudgets",
@@ -81,7 +87,7 @@
         "max_cumulative_bytes",
         "max_serialized_rpc_bytes"
       ],
-      "page_budget_prefix_vs_overflow": "clean stop at max_pages when has_more=true emits valid JSON prefix with _notice.code='PAGE_BUDGET_PREFIX'; any single-acquisition byte, page-item, cumulative-byte, or serialized-RPC-byte overflow returns deterministic RESPONSE_BUDGET_EXCEEDED without silent truncation and without retrying/replaying mutating requests",
+      "page_budget_prefix_vs_overflow": "clean stop at max_pages when has_more=true emits valid JSON prefix with _notice.code='PAGE_BUDGET_PREFIX'; any single-acquisition byte (across JSON, inline binary, buffered binary, and ServeTurnRelay HTTP responses via CheckHTTPResponseContentLength + io.LimitReader(limit+1)), page-item, cumulative-byte, or serialized-RPC-byte (>= MinSerializedRPCBudgetBytes=1024 with verified replacement envelope fit) overflow returns deterministic RESPONSE_BUDGET_EXCEEDED without silent truncation and without retrying/replaying mutating requests",
       "boundary_enforcement": "fresh F -> B runs at initial dispatch, every pagination page boundary (AdmitPageBytes), and final publication (Publish / PublishConnection)",
       "static_provenance_isolation": "octo-cli/docs/derived/portable-attachment-bytes remains isolated via StaticProvenanceRequired and is not unlocked by JSON response budgets",
       "measurement_ledger": "docs/permission/response-budget-ledger-v6.json"
@@ -110,9 +116,9 @@
         "context_epoch"
       ],
       "resolve_contributors_method": "accepts capsule_id/key and delivery_references/references, resolving unseen contributor delivery references in batches <=32 with purpose='contributor' without adding to seenDeliveries ingress replay tombstones",
-      "open_relay_stdio": "returns {transport, executable, executableSha256, handle} where handle base64url-decodes to canonical {ca_sha256, endpoint, peer_sha256, token} when relay TLS pins are present, matching checkedTurnRelay in endpoint a3164ded106e06de88f98a6820da4f0d80876dc9",
-      "open_relay_http": "returns {transport, url, handle, ca_sha256, peer_sha256} when relay TLS pins are present (plus optional tls metadata when include_tls_trust=true), matching checkedTurnRelay in endpoint a3164ded106e06de88f98a6820da4f0d80876dc9",
-      "turn_relay_tls": "ServeTurnRelay verifies TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from ca_file/SSL_CERT_FILE/NODE_EXTRA_CA_CERTS checked against ca_sha256, and VerifyConnection peer leaf certificate checked against peer_sha256/cert_sha256"
+      "open_relay_stdio": "returns {transport, executable, executableSha256, handle} (plus tls={ca_file, cert_sha256, server_name} when include_tls_trust=true, where handle base64url-decodes to canonical {ca_file, cert_sha256, endpoint, server_name, token} matching endpoint d007962a7762ec42ae2279c673392121ad630e64 checkedTurnRelay and preparePrivateWorker, or {ca_sha256, endpoint, peer_sha256, token} on 4-field requests matching endpoint a3164ded106e06de88f98a6820da4f0d80876dc9)",
+      "open_relay_http": "returns {transport, url, handle, ca_sha256, peer_sha256} when relay TLS pins are present (plus tls={ca_file, cert_sha256, server_name} when include_tls_trust=true), matching checkedTurnRelay in endpoint d007962a7762ec42ae2279c673392121ad630e64 and a3164ded106e06de88f98a6820da4f0d80876dc9",
+      "turn_relay_tls": "ServeTurnRelay verifies TLS 1.3 with InsecureSkipVerify=false, custom RootCAs from ca_file/SSL_CERT_FILE/NODE_EXTRA_CA_CERTS checked against ca_sha256, VerifyConnection peer leaf certificate checked against peer_sha256/cert_sha256, and fail-closed MaxAcquisitionBytes response budget via ReadBoundedHTTPResponseBody"
     },
     "native_reader_fail_closed_bounds": {
       "max_reads": 100000,
@@ -142,25 +148,28 @@
   "server_dependency": {
     "task": "XIN-2793",
     "task_id": "6a92a547-cb82-4c3d-ac6c-8f5529028ba4",
-    "head": "a4021ad87ebc95cf995e8ca1dabbb2d331b0cee8",
-    "handoff": "pkg/permissionbundle/contracts/handoff-v5.json",
-    "bytes": 3626,
-    "sha256": "e72902dc68c60acc4f36344749a971b4fc94e43253da4407365259d64d873384",
-    "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v5.json",
-    "manifest_bytes": 6628,
-    "manifest_sha256": "d51823e404a4c9e3e2b252f6f33453b9fa5047f1bca0e1ca787397bccf6ec9ab",
-    "status": "server v44/v45 production /v1 routes, MySQL/SQLite stores, native facts/fence producer, and semantic digest 15c7ca2b... aligned; owner approval of concrete support pins/directed compatibility pairs remains before enabling supportedPermissionPackages"
+    "head": "e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d",
+    "handoff": "pkg/permissionbundle/contracts/handoff-v7.json",
+    "bytes": 15815,
+    "sha256": "0bb6754dbd6de0f66c25bfa02ff5973ff477c64443a84aad7f5bde1b454fc454",
+    "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v7.json",
+    "manifest_bytes": 2127,
+    "manifest_sha256": "8ae92962d775c09cac86bf617399a950ef6416e80de23f18de33e29df27948f2",
+    "remaining_producers_path": "pkg/permissionbundle/contracts/remaining-producers-v5.json",
+    "remaining_producers_bytes": 4044,
+    "remaining_producers_sha256": "31f28c62f96451dc4f8eeed0c61e6c1b952cbaff073e2fd982a26c3047d19bbb",
+    "status": "server Draft #951 (e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d) production /v1 routes, MySQL/SQLite stores, native facts/fence producer, and semantic digest 15c7ca2b... aligned; owner approval of concrete support pins/directed compatibility pairs remains before enabling supportedPermissionPackages"
   },
   "endpoint_dependency": {
     "task": "XIN-2795",
     "task_id": "2f4a34e9-2be3-48ac-99f0-38a30f077acd",
-    "head": "a3164ded106e06de88f98a6820da4f0d80876dc9",
-    "path": "docs/permission-endpoint-handoff-v5.json",
-    "bytes": 7294,
-    "sha256": "8b96b29e212e5bf068b66f7eb2dc68a7eb83e4cafc1611e57435501598b6bcdc",
-    "control_client_bytes": 11710,
-    "control_client_sha256": "4e40ee144b5eec7ef645be92948dd6b1f36a838d1fb82e6b471a59e820c99bef",
-    "status": "endpoint v44/v45 5-field admit, resolve_contributors, checkedTurnRelay ca_sha256/peer_sha256, and ContainedWorkerDriver aligned with endpoint-abi-v2.json"
+    "head": "d007962a7762ec42ae2279c673392121ad630e64",
+    "path": "docs/permission-endpoint-handoff-v6.json",
+    "bytes": 12897,
+    "sha256": "e7fe1cf23bf914eab7ba4429f51c477c63c7762eaff973326bfe5de4b2ba258c",
+    "control_client_bytes": 11759,
+    "control_client_sha256": "67d7a8d86d52f7db7f327deeec892625a3733ae3c50536059906f6f62cb32f67",
+    "status": "endpoint Draft #102 (d007962a7762ec42ae2279c673392121ad630e64) 5-field admit, resolve_contributors, checkedTurnRelay / checkTurnRelayTrust / preparePrivateWorker private-CA staging and forwarding, ContainedWorkerDriver, and semantic digest 15c7ca2b... aligned with endpoint-abi-v2.json"
   },
   "architecture_constraints": {
     "octo_im_wukongim_changes_required": false,

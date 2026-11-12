@@ -161,6 +161,14 @@ func (s *Server) dispatchManaged(ctx context.Context, req rpcRequest) (rpcRespon
 	return resp, has, call
 }
 
+func serializedRPCResponseLen(resp rpcResponse) (int64, bool) {
+	var b bytes.Buffer
+	if err := json.NewEncoder(&b).Encode(resp); err != nil {
+		return 0, false
+	}
+	return int64(b.Len()), true
+}
+
 func enforceSerializedRPCBudget(req rpcRequest, resp rpcResponse, call *permission.Call) rpcResponse {
 	if call == nil || (resp.Error != nil && resp.Error.Code == -32007) {
 		return resp
@@ -169,12 +177,8 @@ func enforceSerializedRPCBudget(req rpcRequest, resp rpcResponse, call *permissi
 	if limit <= 0 {
 		return resp
 	}
-	var b bytes.Buffer
-	if err := json.NewEncoder(&b).Encode(resp); err != nil {
-		return resp
-	}
-	observed := int64(b.Len())
-	if observed <= limit {
+	observed, ok := serializedRPCResponseLen(resp)
+	if !ok || observed <= limit {
 		return resp
 	}
 	var p toolCallParams
@@ -183,29 +187,80 @@ func enforceSerializedRPCBudget(req rpcRequest, resp rpcResponse, call *permissi
 		OperationID string `json:"operation_id"`
 	}
 	_ = json.Unmarshal(p.Arguments, &a)
+	detail, _ := json.Marshal(map[string]any{
+		"budget_kind":    "serialized_rpc_bytes",
+		"limit_bytes":    limit,
+		"observed_bytes": observed,
+	})
 	ee := output.ErrWithHint(
 		"api",
 		"RESPONSE_BUDGET_EXCEEDED",
 		fmt.Sprintf("serialized MCP RPC response (%d bytes) exceeds managed serialized_rpc_bytes budget of %d bytes", observed, limit),
 		"narrow the request scope or page size",
 	)
-	if detail, err := json.Marshal(map[string]any{
-		"budget_kind":    "serialized_rpc_bytes",
-		"limit_bytes":    limit,
-		"observed_bytes": observed,
-	}); err == nil {
+	if len(detail) > 0 {
 		ee.Detail = detail
 	}
 	env := synthErrorEnvelope(ee)
+	var candidate rpcResponse
 	if p.Name == "execute" {
-		return newResultResponse(req.ID, jsonToolResult(map[string]any{
+		candidate = newResultResponse(req.ID, jsonToolResult(map[string]any{
 			"status":       "execution_error",
 			"operation_id": a.OperationID,
 			"envelope":     decodeEnvelope(env),
 			"error":        ee,
 		}, true))
+	} else {
+		candidate = newResultResponse(req.ID, rawToolResult(env, true))
 	}
-	return newResultResponse(req.ID, rawToolResult(env, true))
+	if n, fitOK := serializedRPCResponseLen(candidate); fitOK && n <= limit {
+		return candidate
+	}
+	compactEE := output.ErrWithHint(
+		"api",
+		"RESPONSE_BUDGET_EXCEEDED",
+		"exceeds serialized_rpc_bytes budget",
+		"",
+	)
+	if len(detail) > 0 {
+		compactEE.Detail = detail
+	}
+	compactEnv := synthErrorEnvelope(compactEE)
+	compactID := req.ID
+	if len(compactID) > 64 {
+		compactID = json.RawMessage("null")
+	}
+	if p.Name == "execute" {
+		opID := a.OperationID
+		if len(opID) > 64 {
+			opID = ""
+		}
+		candidate = newResultResponse(compactID, jsonToolResult(map[string]any{
+			"status":       "execution_error",
+			"operation_id": opID,
+			"envelope":     decodeEnvelope(compactEnv),
+			"error":        compactEE,
+		}, true))
+	} else {
+		candidate = newResultResponse(compactID, rawToolResult(compactEnv, true))
+	}
+	if n, fitOK := serializedRPCResponseLen(candidate); fitOK && n <= limit {
+		return candidate
+	}
+	return rpcResponse{
+		Jsonrpc: jsonrpcVersion,
+		ID:      compactID,
+		Error: &rpcError{
+			Code:    -32000,
+			Message: "RESPONSE_BUDGET_EXCEEDED",
+			Data: map[string]any{
+				"code":           "RESPONSE_BUDGET_EXCEEDED",
+				"budget_kind":    "serialized_rpc_bytes",
+				"limit_bytes":    limit,
+				"observed_bytes": observed,
+			},
+		},
+	}
 }
 
 func managedSelection(raw json.RawMessage) bool {

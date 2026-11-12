@@ -1,19 +1,65 @@
 package permission
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
 type callContextKey struct{}
+type responseBudgetsContextKey struct{}
+
+var (
+	relayEndpointBudgetsMu sync.RWMutex
+	relayEndpointBudgets   = map[string]ResponseBudgets{}
+)
+
+// WithResponseBudgets binds explicit ResponseBudgets to ctx so in-process
+// callers and turn-relay bridges without a direct Call handle can enforce the
+// same fail-closed acquisition and serialized RPC ceilings.
+func WithResponseBudgets(ctx context.Context, budgets ResponseBudgets) context.Context {
+	return context.WithValue(ctx, responseBudgetsContextKey{}, budgets)
+}
+
+// ResponseBudgetsFromContext returns any explicit ResponseBudgets bound to ctx.
+func ResponseBudgetsFromContext(ctx context.Context) (ResponseBudgets, bool) {
+	if ctx == nil {
+		return ResponseBudgets{}, false
+	}
+	b, ok := ctx.Value(responseBudgetsContextKey{}).(ResponseBudgets)
+	return b, ok
+}
+
+// RegisterRelayEndpointBudgets associates a private turn-relay endpoint URL
+// with the Coordinator's configured ResponseBudgets for its lifetime.
+func RegisterRelayEndpointBudgets(endpoint string, budgets ResponseBudgets) {
+	if endpoint == "" || !budgets.Valid() {
+		return
+	}
+	relayEndpointBudgetsMu.Lock()
+	relayEndpointBudgets[endpoint] = budgets
+	relayEndpointBudgetsMu.Unlock()
+}
+
+// UnregisterRelayEndpointBudgets removes any ResponseBudgets association for endpoint.
+func UnregisterRelayEndpointBudgets(endpoint string) {
+	if endpoint == "" {
+		return
+	}
+	relayEndpointBudgetsMu.Lock()
+	delete(relayEndpointBudgets, endpoint)
+	relayEndpointBudgetsMu.Unlock()
+}
 
 // Call is an immutable logical MCP call. Child contexts retain the same root
 // refusal/uncertainty state, but never borrow the root's capability grant.
@@ -414,4 +460,159 @@ func (b *releasedBody) Close() error { err := b.ReadCloser.Close(); b.once.Do(b.
 // The caller must not use it for business or content requests.
 func AuthorityContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, callContextKey{}, (*Call)(nil))
+}
+
+// RelayResponseBudgetBytes resolves the effective response byte budget for a
+// turn-relay HTTP call from the bound Call, context ResponseBudgets, registered
+// PermissionHost endpoint, ticket max_response_bytes, or response header, with
+// MaxResponseBudgetBytes (64 MiB) as the hard fail-closed upper bound.
+func RelayResponseBudgetBytes(ctx context.Context, endpoint string, ticketMaxBytes int64, headerBudget string) (int64, error) {
+	limit := MaxResponseBudgetBytes
+	if call := BoundCall(ctx); call != nil {
+		if b := call.MaxAcquisitionBytes(); b > 0 && b < limit {
+			limit = b
+		}
+	}
+	if b, ok := ResponseBudgetsFromContext(ctx); ok && b.MaxAcquisitionBytes > 0 && b.MaxAcquisitionBytes < limit {
+		limit = b.MaxAcquisitionBytes
+	}
+	if endpoint != "" {
+		relayEndpointBudgetsMu.RLock()
+		b, ok := relayEndpointBudgets[endpoint]
+		relayEndpointBudgetsMu.RUnlock()
+		if ok && b.MaxAcquisitionBytes > 0 && b.MaxAcquisitionBytes < limit {
+			limit = b.MaxAcquisitionBytes
+		}
+	}
+	if ticketMaxBytes != 0 {
+		if ticketMaxBytes < 1 || ticketMaxBytes > MaxResponseBudgetBytes {
+			return 0, errors.New("RELAY_TICKET_INVALID")
+		}
+		if ticketMaxBytes < limit {
+			limit = ticketMaxBytes
+		}
+	}
+	if trimmed := strings.TrimSpace(headerBudget); trimmed != "" {
+		hb, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil || hb < 1 || hb > MaxResponseBudgetBytes {
+			return 0, errors.New("RELAY_RESPONSE_INVALID")
+		}
+		if hb < limit {
+			limit = hb
+		}
+	}
+	return limit, nil
+}
+
+// CheckHTTPResponseContentLength inspects Content-Length headers and
+// resp.ContentLength before reading resp.Body. When limit > 0 and the declared
+// length exceeds limit, it returns overflow=true without reading any body bytes.
+func CheckHTTPResponseContentLength(resp *http.Response, limit int64) (observed int64, overflow bool, err error) {
+	if resp == nil {
+		return 0, false, errors.New("nil HTTP response")
+	}
+	if limit <= 0 {
+		return 0, false, nil
+	}
+	var seen bool
+	var declared int64
+	for _, rawHeader := range resp.Header.Values("Content-Length") {
+		for _, part := range strings.Split(rawHeader, ",") {
+			trimmed := strings.TrimSpace(part)
+			if trimmed == "" {
+				continue
+			}
+			parsed, parseErr := strconv.ParseInt(trimmed, 10, 64)
+			if parseErr != nil || parsed < 0 {
+				return 0, false, errors.New("invalid Content-Length header")
+			}
+			if seen && parsed != declared {
+				return 0, false, errors.New("conflicting Content-Length headers")
+			}
+			seen = true
+			declared = parsed
+		}
+	}
+	if seen && declared > limit {
+		return declared, true, nil
+	}
+	if resp.ContentLength > limit {
+		return resp.ContentLength, true, nil
+	}
+	return 0, false, nil
+}
+
+// ReadBoundedHTTPResponseBody enforces CheckHTTPResponseContentLength and
+// io.LimitReader(resp.Body, limit+1) so neither oversized Content-Length nor
+// chunked/streaming bodies can allocate or buffer beyond limit+1 bytes.
+func ReadBoundedHTTPResponseBody(resp *http.Response, limit int64) (data []byte, observed int64, overflow bool, err error) {
+	observed, overflow, err = CheckHTTPResponseContentLength(resp, limit)
+	if err != nil || overflow {
+		return nil, observed, overflow, err
+	}
+	if resp.Body == nil {
+		return nil, 0, false, nil
+	}
+	var reader io.Reader = resp.Body
+	if limit > 0 {
+		reader = io.LimitReader(resp.Body, limit+1)
+	}
+	data, err = io.ReadAll(reader)
+	observed = int64(len(data))
+	if err != nil {
+		return nil, observed, false, err
+	}
+	if limit > 0 && observed > limit {
+		return nil, observed, true, nil
+	}
+	return data, observed, false, nil
+}
+
+type boundedPrefixWriter struct {
+	buf *bytes.Buffer
+	max int64
+}
+
+func (w *boundedPrefixWriter) Write(p []byte) (int, error) {
+	if room := w.max - int64(w.buf.Len()); room > 0 {
+		if int64(len(p)) > room {
+			w.buf.Write(p[:room])
+		} else {
+			w.buf.Write(p)
+		}
+	}
+	return len(p), nil
+}
+
+// StreamBoundedHTTPResponseBody enforces CheckHTTPResponseContentLength and
+// io.LimitReader(resp.Body, acquisitionLimit+1) on inline binary responses so
+// streaming binary downloads cannot bypass MaxAcquisitionBytes while keeping at
+// most inlineLimit+1 bytes in memory when within the acquisition budget.
+func StreamBoundedHTTPResponseBody(resp *http.Response, inlineLimit, acquisitionLimit int64) (head []byte, size int64, sum []byte, overflow bool, err error) {
+	observed, overflow, err := CheckHTTPResponseContentLength(resp, acquisitionLimit)
+	if err != nil || overflow {
+		return nil, observed, nil, overflow, err
+	}
+	if resp.Body == nil {
+		empty := sha256.Sum256(nil)
+		return nil, 0, empty[:], false, nil
+	}
+	var reader io.Reader = resp.Body
+	if acquisitionLimit > 0 {
+		reader = io.LimitReader(resp.Body, acquisitionLimit+1)
+	}
+	h := sha256.New()
+	var buf bytes.Buffer
+	keep := inlineLimit + 1
+	if keep < 1 {
+		keep = 1
+	}
+	n, err := io.Copy(io.MultiWriter(h, &boundedPrefixWriter{buf: &buf, max: keep}), reader)
+	if err != nil {
+		return nil, n, nil, false, err
+	}
+	if acquisitionLimit > 0 && n > acquisitionLimit {
+		return nil, n, nil, true, nil
+	}
+	return buf.Bytes(), n, h.Sum(nil), false, nil
 }

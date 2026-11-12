@@ -788,6 +788,421 @@ func TestXIN2794V45EndpointA3164dedRelayAndControlParity(t *testing.T) {
 		t.Fatalf("http open_relay pin mismatch: %v", httpRelay)
 	}
 	request("close", map[string]any{"capsule_id": adm2["capsule_id"], "reason": "completed"})
+
+	// Turn 3: stdio open_relay with include_tls_trust=true -> exact d007962a checkedTurnRelay & checkTurnRelayTrust parity.
+	f.mu.Lock()
+	f.header.MessageID = "44"
+	f.header.Reference = "header_44"
+	f.header.Delivery.Sequence = "3"
+	f.mu.Unlock()
+	ing3 := request("register_ingress", map[string]any{
+		"key":                f.bundle.Key,
+		"delivery_reference": "delivery_v49_stdio_tls",
+		"stream":             f.header.Delivery,
+		"payload_sha256":     f.header.PayloadSHA256,
+	})
+	ctxID3 := permission.NewID()
+	adm3 := request("admit", map[string]any{
+		"ingress_id":          ing3["ingress_id"],
+		"proposed_context_id": ctxID3,
+	})
+	man3 := map[string]any{
+		"context_id":         ctxID3,
+		"context_generation": adm3["generation"],
+		"originals":          []permission.NativeHeader{f.header},
+	}
+	m3Bytes, _ := permission.PrivateJSON(man3)
+	man3["bytes"] = len(m3Bytes)
+	man3["sha256"] = sha256Sum(m3Bytes)
+	request("bind_context", map[string]any{
+		"capsule_id": adm3["capsule_id"],
+		"manifest":   man3,
+	})
+	stdioTLSRelay := request("open_relay", map[string]any{
+		"capsule_id":        adm3["capsule_id"],
+		"recipient_id":      loadedCfg.RecipientID,
+		"transport":         "stdio",
+		"relay_nonce":       permission.NewID(),
+		"include_tls_trust": true,
+	})
+	if !reflect.DeepEqual(sortedKeys(stdioTLSRelay), []string{"executable", "executableSha256", "handle", "tls", "transport"}) {
+		t.Fatalf("unexpected stdio include_tls_trust keys: %v", sortedKeys(stdioTLSRelay))
+	}
+	tlsSub, ok := stdioTLSRelay["tls"].(map[string]any)
+	if !ok || !reflect.DeepEqual(sortedKeys(tlsSub), []string{"ca_file", "cert_sha256", "server_name"}) {
+		t.Fatalf("expected d007962a checkTurnRelayTrust keys [ca_file cert_sha256 server_name], got %v", stdioTLSRelay["tls"])
+	}
+	if tlsSub["ca_file"] != loadedCfg.RelayCA || tlsSub["cert_sha256"] != leafSHA || tlsSub["server_name"] != "localhost" {
+		t.Fatalf("stdio tls sub-object mismatch: %v", tlsSub)
+	}
+	stdioTLSHandle := stdioTLSRelay["handle"].(string)
+	stdioTLSTicketRaw, err := base64.RawURLEncoding.Strict().DecodeString(stdioTLSHandle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdioTLSTicket map[string]any
+	if json.Unmarshal(stdioTLSTicketRaw, &stdioTLSTicket) != nil {
+		t.Fatal("invalid JSON ticket:", string(stdioTLSTicketRaw))
+	}
+	if !reflect.DeepEqual(sortedKeys(stdioTLSTicket), []string{"ca_file", "cert_sha256", "endpoint", "server_name", "token"}) {
+		t.Fatalf("expected d007962a allowedTicketKeys [ca_file cert_sha256 endpoint server_name token], got %v", sortedKeys(stdioTLSTicket))
+	}
+	var initOut3 bytes.Buffer
+	if err := ServeTurnRelayHandle(ctx, stdioTLSHandle, bytes.NewReader(append(rawInit, '\n')), &initOut3); err != nil {
+		t.Fatal("ServeTurnRelayHandle failed with d007962a stdio ticket:", err)
+	}
+	request("close", map[string]any{"capsule_id": adm3["capsule_id"], "reason": "completed"})
+
+	// Turn 4: http open_relay with include_tls_trust=true -> exact d007962a checkedTurnRelay parity.
+	f.mu.Lock()
+	f.header.MessageID = "45"
+	f.header.Reference = "header_45"
+	f.header.Delivery.Sequence = "4"
+	f.mu.Unlock()
+	ing4 := request("register_ingress", map[string]any{
+		"key":                f.bundle.Key,
+		"delivery_reference": "delivery_v49_http_tls",
+		"stream":             f.header.Delivery,
+		"payload_sha256":     f.header.PayloadSHA256,
+	})
+	ctxID4 := permission.NewID()
+	adm4 := request("admit", map[string]any{
+		"ingress_id":          ing4["ingress_id"],
+		"proposed_context_id": ctxID4,
+	})
+	man4 := map[string]any{
+		"context_id":         ctxID4,
+		"context_generation": adm4["generation"],
+		"originals":          []permission.NativeHeader{f.header},
+	}
+	m4Bytes, _ := permission.PrivateJSON(man4)
+	man4["bytes"] = len(m4Bytes)
+	man4["sha256"] = sha256Sum(m4Bytes)
+	request("bind_context", map[string]any{
+		"capsule_id": adm4["capsule_id"],
+		"manifest":   man4,
+	})
+	httpTLSRelay := request("open_relay", map[string]any{
+		"capsule_id":        adm4["capsule_id"],
+		"recipient_id":      loadedCfg.RecipientID,
+		"transport":         "http",
+		"relay_nonce":       permission.NewID(),
+		"include_tls_trust": true,
+	})
+	if !reflect.DeepEqual(sortedKeys(httpTLSRelay), []string{"ca_sha256", "handle", "peer_sha256", "tls", "transport", "url"}) {
+		t.Fatalf("unexpected http include_tls_trust keys: %v", sortedKeys(httpTLSRelay))
+	}
+	httpTLSSub, ok := httpTLSRelay["tls"].(map[string]any)
+	if !ok || !reflect.DeepEqual(sortedKeys(httpTLSSub), []string{"ca_file", "cert_sha256", "server_name"}) {
+		t.Fatalf("expected d007962a checkTurnRelayTrust keys on http open_relay, got %v", httpTLSRelay["tls"])
+	}
+	request("close", map[string]any{"capsule_id": adm4["capsule_id"], "reason": "completed"})
+}
+
+type countingReadCloser struct {
+	r     io.Reader
+	bytes *atomic.Int64
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	if n > 0 {
+		c.bytes.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error { return nil }
+
+func TestXIN2794V49ReviewFindingsTurnRelayBinaryAndRPCEnvelopeBudgets(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Finding 3 (part A): ResponseBudgets.Valid() rejects MaxSerializedRPCBytes < MinSerializedRPCBudgetBytes (1024)
+	// and rejects MaxSerializedRPCBytes < MaxAcquisitionBytes.
+	for _, invalid := range []permission.ResponseBudgets{
+		{MaxAcquisitionBytes: 512, MaxPageItems: 10, MaxPages: 2, MaxCumulativeBytes: 1024, MaxSerializedRPCBytes: 1},
+		{MaxAcquisitionBytes: 512, MaxPageItems: 10, MaxPages: 2, MaxCumulativeBytes: 1024, MaxSerializedRPCBytes: 1023},
+		{MaxAcquisitionBytes: 2048, MaxPageItems: 10, MaxPages: 2, MaxCumulativeBytes: 4096, MaxSerializedRPCBytes: 1024},
+	} {
+		if invalid.Valid() {
+			t.Fatalf("expected invalid ResponseBudgets to fail Valid(): %+v", invalid)
+		}
+	}
+	minValid := permission.ResponseBudgets{
+		MaxAcquisitionBytes:   512,
+		MaxPageItems:          10,
+		MaxPages:              2,
+		MaxCumulativeBytes:    1024,
+		MaxSerializedRPCBytes: permission.MinSerializedRPCBudgetBytes,
+	}
+	if !minValid.Valid() {
+		t.Fatalf("expected boundary ResponseBudgets at MinSerializedRPCBudgetBytes (%d) to be valid", permission.MinSerializedRPCBudgetBytes)
+	}
+
+	// Finding 1: ServeTurnRelay enforces MaxAcquisitionBytes via Content-Length pre-check (0 body bytes read)
+	// and via io.LimitReader(limit+1) on chunked/streaming bodies (at most limit+1 bytes read), failing closed
+	// with RESPONSE_BUDGET_EXCEEDED and writing no truncated output.
+	var relayMode atomic.Int32
+	var serverWrites atomic.Int64
+	relaySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		switch relayMode.Load() {
+		case 0:
+			// Oversized declared Content-Length (4096 > 512).
+			payload := `{"jsonrpc":"2.0","id":1,"result":{"pad":"` + strings.Repeat("a", 4096) + `"}}`
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+			n, _ := w.Write([]byte(payload))
+			serverWrites.Store(int64(n))
+		case 1:
+			// Chunked/streaming response without Content-Length exceeding 512 bytes.
+			flusher, _ := w.(http.Flusher)
+			chunk := []byte(`{"jsonrpc":"2.0","id":1,"result":{"pad":"` + strings.Repeat("b", 1024) + `"}}`)
+			n, _ := w.Write(chunk)
+			serverWrites.Store(int64(n))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		case 2:
+			// Within 512-byte acquisition budget.
+			okResp := `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`
+			_, _ = w.Write([]byte(okResp))
+		}
+	}))
+	defer relaySrv.Close()
+
+	budgetCtx := permission.WithResponseBudgets(ctx, minValid)
+	ticket, _ := json.Marshal(map[string]any{
+		"endpoint": relaySrv.URL,
+		"token":    strings.Repeat("c", 64),
+	})
+	reqLine := []byte("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n")
+
+	// Mode 0: Content-Length > 512 fails closed with ResponseBudgetError and empty output.
+	relayMode.Store(0)
+	var relayOut bytes.Buffer
+	err := ServeTurnRelay(budgetCtx, bytes.NewReader(ticket), bytes.NewReader(reqLine), &relayOut)
+	if err == nil || err.Error() != "RESPONSE_BUDGET_EXCEEDED" || relayOut.Len() != 0 {
+		t.Fatalf("ServeTurnRelay Content-Length overflow: err=%v outLen=%d", err, relayOut.Len())
+	}
+
+	// Also verify ReadBoundedHTTPResponseBody directly against a counting reader:
+	// when Content-Length > limit, 0 bytes are read from Body; when streaming without Content-Length,
+	// exactly limit+1 bytes are read from a 1 MiB stream.
+	var countedCL atomic.Int64
+	clResp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Length": []string{"8192"}},
+		ContentLength: 8192,
+		Body:          &countingReadCloser{r: bytes.NewReader(bytes.Repeat([]byte("x"), 8192)), bytes: &countedCL},
+	}
+	_, obsCL, overCL, errCL := permission.ReadBoundedHTTPResponseBody(clResp, 512)
+	if errCL != nil || !overCL || obsCL != 8192 || countedCL.Load() != 0 {
+		t.Fatalf("ReadBoundedHTTPResponseBody Content-Length precheck failed: err=%v over=%v obs=%d read=%d", errCL, overCL, obsCL, countedCL.Load())
+	}
+	var countedStream atomic.Int64
+	streamResp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{},
+		ContentLength: -1,
+		Body:          &countingReadCloser{r: bytes.NewReader(bytes.Repeat([]byte("y"), 1<<20)), bytes: &countedStream},
+	}
+	_, obsStream, overStream, errStream := permission.ReadBoundedHTTPResponseBody(streamResp, 512)
+	if errStream != nil || !overStream || obsStream != 513 || countedStream.Load() != 513 {
+		t.Fatalf("ReadBoundedHTTPResponseBody stream cap failed: err=%v over=%v obs=%d read=%d", errStream, overStream, obsStream, countedStream.Load())
+	}
+
+	// Mode 1: Chunked/streaming overflow in ServeTurnRelay fails closed with RESPONSE_BUDGET_EXCEEDED and empty output.
+	relayMode.Store(1)
+	relayOut.Reset()
+	err = ServeTurnRelay(budgetCtx, bytes.NewReader(ticket), bytes.NewReader(reqLine), &relayOut)
+	if err == nil || err.Error() != "RESPONSE_BUDGET_EXCEEDED" || relayOut.Len() != 0 {
+		t.Fatalf("ServeTurnRelay chunked overflow: err=%v outLen=%d", err, relayOut.Len())
+	}
+
+	// Mode 2: Within budget succeeds and writes exact JSON line.
+	relayMode.Store(2)
+	relayOut.Reset()
+	if err := ServeTurnRelay(budgetCtx, bytes.NewReader(ticket), bytes.NewReader(reqLine), &relayOut); err != nil {
+		t.Fatalf("ServeTurnRelay within-budget failed: %v", err)
+	}
+	if strings.TrimSpace(relayOut.String()) != `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}` {
+		t.Fatalf("ServeTurnRelay within-budget output mismatch: %q", relayOut.String())
+	}
+
+	// Finding 2 & Finding 3 (part B): Managed binary response (BinaryResponse=true, InlineBinaryLimit=1<<20,
+	// docs.scene.export) and lower-boundary MaxSerializedRPCBytes (1024 bytes) across HTTP and stdio.
+	f := newManagedFixture(t)
+	caps := []string{
+		"octo-cli/docs/op/docs.scene.export",
+		"octo-cli/docs/op/docs.search",
+	}
+	f.bundle.Capability.Rules[0]["capabilities"] = caps
+	f.save()
+	f.coordinator, err = permission.NewCoordinator(
+		permission.Catalog{
+			Version:      f.bundle.CatalogVersion,
+			Digest:       f.bundle.CatalogDigest,
+			Capabilities: caps,
+		},
+		f.policies,
+		f.reader,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.coordinator.ConfigureResponseBudgets(minValid); err != nil {
+		t.Fatalf("ConfigureResponseBudgets(minValid) failed: %v", err)
+	}
+
+	var exportMode atomic.Int32
+	var exportCalls atomic.Int32
+	baseServe := f.serve
+	f.backend.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/bot/permission-facts/v1":
+			baseServe(w, r)
+		case "/v1/bot/docs/doc_1/export":
+			exportCalls.Add(1)
+			w.Header().Set("Content-Type", "image/png")
+			switch exportMode.Load() {
+			case 0:
+				// Binary response within 512-byte MaxAcquisitionBytes (128 bytes).
+				_, _ = w.Write(bytes.Repeat([]byte{0x89, 'P', 'N', 'G'}, 32))
+			case 1:
+				// Binary response exceeding 512-byte MaxAcquisitionBytes via Content-Length (2048 bytes).
+				payload := bytes.Repeat([]byte{0x89, 'P', 'N', 'G'}, 512)
+				w.Header().Set("Content-Length", fmt.Sprintf("%d", len(payload)))
+				_, _ = w.Write(payload)
+			case 2:
+				// Binary response exceeding 512-byte MaxAcquisitionBytes via chunked stream (no Content-Length).
+				flusher, _ := w.(http.Flusher)
+				_, _ = w.Write(bytes.Repeat([]byte{0x89, 'P', 'N', 'G'}, 512))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+		case "/v1/bot/docs/search":
+			w.Header().Set("Content-Type", "application/json")
+			// Within 512-byte MaxAcquisitionBytes (~430 bytes), but with quote escaping exceeds 1024-byte MaxSerializedRPCBytes.
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"total":      1,
+				"items":      []map[string]any{{"docId": "d_bound", "snippet": strings.Repeat(`"`, 180)}},
+				"nextCursor": "",
+			})
+		default:
+			baseServe(w, r)
+		}
+	})
+
+	turn := f.turn()
+	defer turn.Close()
+	srv := f.server(turn)
+	if initResp, _, _ := srv.dispatchManaged(ctx, initializedRequest()); initResp.Error != nil {
+		t.Fatalf("initialize failed: %+v", initResp.Error)
+	}
+	makeDeclaredCall := func(toolName string, args map[string]any) rpcRequest {
+		t.Helper()
+		params, _ := json.Marshal(map[string]any{
+			"name":      toolName,
+			"arguments": args,
+		})
+		req := rpcRequest{Jsonrpc: "2.0", ID: json.RawMessage(`1`), Method: "tools/call", Params: params}
+		if err := relayDeclaration(&req, turn.source); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+
+	// Binary export within MaxAcquisitionBytes succeeds.
+	exportMode.Store(0)
+	exportCalls.Store(0)
+	okExportReq := makeDeclaredCall("call_op", map[string]any{
+		"operation_id": "docs.scene.export",
+		"arguments":    map[string]any{"docId": "doc_1", "format": "png"},
+	})
+	okExportResp, has, _ := srv.dispatchManaged(ctx, okExportReq)
+	if !has || okExportResp.Error != nil {
+		t.Fatalf("expected within-budget binary export to succeed, got %+v", okExportResp)
+	}
+	okExportText := string(okExportResp.Result)
+	if !strings.Contains(okExportText, `\"inline\": true`) || !strings.Contains(okExportText, `content_base64`) || exportCalls.Load() != 1 {
+		t.Fatalf("unexpected within-budget binary export payload: %s (calls=%d)", okExportText, exportCalls.Load())
+	}
+
+	// Binary export exceeding MaxAcquisitionBytes fails closed with RESPONSE_BUDGET_EXCEEDED (single attempt, no retry)
+	// for both Content-Length (mode 1) and chunked stream (mode 2), across call_op and execute.
+	for _, mode := range []int32{1, 2} {
+		for _, toolName := range []string{"call_op", "execute"} {
+			exportMode.Store(mode)
+			before := exportCalls.Load()
+			req := makeDeclaredCall(toolName, map[string]any{
+				"operation_id": "docs.scene.export",
+				"arguments":    map[string]any{"docId": "doc_1", "format": "png"},
+			})
+			resp, hasResp, _ := srv.dispatchManaged(ctx, req)
+			if !hasResp || resp.Error != nil {
+				t.Fatalf("mode=%d tool=%s unexpected RPC error: %+v", mode, toolName, resp)
+			}
+			if gotCalls := exportCalls.Load() - before; gotCalls != 1 {
+				t.Fatalf("mode=%d tool=%s expected single attempt without retry, got %d calls", mode, toolName, gotCalls)
+			}
+			text := string(resp.Result)
+			if !strings.Contains(text, `RESPONSE_BUDGET_EXCEEDED`) || !strings.Contains(text, `acquisition_bytes`) {
+				t.Fatalf("mode=%d tool=%s expected RESPONSE_BUDGET_EXCEEDED acquisition_bytes, got: %s", mode, toolName, text)
+			}
+		}
+	}
+
+	// Also verify StreamBoundedHTTPResponseBody directly against a counting reader:
+	// Content-Length > acquisitionLimit reads 0 bytes; streaming > acquisitionLimit reads acquisitionLimit+1 bytes.
+	var binCLCount atomic.Int64
+	binCLResp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Length": []string{"4096"}},
+		ContentLength: 4096,
+		Body:          &countingReadCloser{r: bytes.NewReader(bytes.Repeat([]byte("z"), 4096)), bytes: &binCLCount},
+	}
+	_, binCLSize, _, binCLOver, binCLErr := permission.StreamBoundedHTTPResponseBody(binCLResp, 1<<20, 512)
+	if binCLErr != nil || !binCLOver || binCLSize != 4096 || binCLCount.Load() != 0 {
+		t.Fatalf("StreamBoundedHTTPResponseBody Content-Length check failed: err=%v over=%v size=%d read=%d", binCLErr, binCLOver, binCLSize, binCLCount.Load())
+	}
+	var binStreamCount atomic.Int64
+	binStreamResp := &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{},
+		ContentLength: -1,
+		Body:          &countingReadCloser{r: bytes.NewReader(bytes.Repeat([]byte("z"), 1<<20)), bytes: &binStreamCount},
+	}
+	_, binStreamSize, _, binStreamOver, binStreamErr := permission.StreamBoundedHTTPResponseBody(binStreamResp, 1<<20, 512)
+	if binStreamErr != nil || !binStreamOver || binStreamSize != 513 || binStreamCount.Load() != 513 {
+		t.Fatalf("StreamBoundedHTTPResponseBody stream cap failed: err=%v over=%v size=%d read=%d", binStreamErr, binStreamOver, binStreamSize, binStreamCount.Load())
+	}
+
+	// Finding 3 (part B): At the minimum valid MaxSerializedRPCBytes (1024), even with a long request ID,
+	// enforceSerializedRPCBudget produces a valid RESPONSE_BUDGET_EXCEEDED envelope whose serialized length is <= 1024.
+	for _, toolName := range []string{"call_op", "execute"} {
+		req := makeDeclaredCall(toolName, map[string]any{
+			"operation_id": "docs.search",
+			"arguments":    map[string]any{"q": "bound"},
+		})
+		req.ID = json.RawMessage(`"` + strings.Repeat("id_", 60) + `"`)
+		resp, hasResp, _ := srv.dispatchManaged(ctx, req)
+		if !hasResp {
+			t.Fatalf("tool=%s expected response", toolName)
+		}
+		var enc bytes.Buffer
+		if err := json.NewEncoder(&enc).Encode(resp); err != nil {
+			t.Fatal(err)
+		}
+		if int64(enc.Len()) > permission.MinSerializedRPCBudgetBytes {
+			t.Fatalf("tool=%s replacement RESPONSE_BUDGET_EXCEEDED envelope (%d bytes) exceeded MinSerializedRPCBudgetBytes (%d): %s", toolName, enc.Len(), permission.MinSerializedRPCBudgetBytes, enc.String())
+		}
+		if !strings.Contains(enc.String(), "RESPONSE_BUDGET_EXCEEDED") || !strings.Contains(enc.String(), "serialized_rpc_bytes") {
+			t.Fatalf("tool=%s replacement envelope missing RESPONSE_BUDGET_EXCEEDED / serialized_rpc_bytes: %s", toolName, enc.String())
+		}
+	}
 }
 
 func TestXIN2794V45ContractManifestAndResponseBudgetLedger(t *testing.T) {

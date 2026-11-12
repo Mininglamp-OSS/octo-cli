@@ -7,7 +7,7 @@
   "purpose": "Source/fixture measurement ledger and candidate production numeric recommendations for managed-mode JSON acquisition, cumulative pagination, and serialized RPC response budgets (A1 accepted direction). No production numbers are enabled by default without owner sign-off.",
   "source_constants_and_bounds": {
     "octo_server": {
-      "commit": "a4021ad87ebc95cf995e8ca1dabbb2d331b0cee8",
+      "commit": "e708d0235f0d0ecb2b2fd3966db9ccf9e0a8054d",
       "task_id": "6a92a547-cb82-4c3d-ac6c-8f5529028ba4",
       "im_max_content_bytes": {
         "source": "internal/bot/handler.go:40",
@@ -26,7 +26,12 @@
         "internal_fetch_limit": 300
       },
       "permission_bundle_limits": {
-        "source": "pkg/permissionbundle/contracts/handoff-v5.json",
+        "source": "pkg/permissionbundle/contracts/handoff-v7.json",
+        "handoff_bytes": 15815,
+        "handoff_sha256": "0bb6754dbd6de0f66c25bfa02ff5973ff477c64443a84aad7f5bde1b454fc454",
+        "manifest_path": "pkg/permissionbundle/contracts/contract-manifest-v7.json",
+        "manifest_bytes": 2127,
+        "manifest_sha256": "8ae92962d775c09cac86bf617399a950ef6416e80de23f18de33e29df27948f2",
         "max_package_bytes": 8388608,
         "max_entry_bytes": 65536,
         "max_manifest_bytes": 1048576,
@@ -95,12 +100,14 @@
         "pages": 10
       },
       "response_budgets_hard_ceilings": {
-        "source": "internal/permission/coordinator.go:166-172",
+        "source": "internal/permission/coordinator.go:154-184",
+        "min_serialized_rpc_bytes_floor": 1024,
         "max_acquisition_bytes_ceiling": 67108864,
         "max_page_items_ceiling": 10000,
         "max_pages_ceiling": 1000,
         "max_cumulative_bytes_ceiling": 67108864,
-        "max_serialized_rpc_bytes_ceiling": 67108864
+        "max_serialized_rpc_bytes_ceiling": 67108864,
+        "shared_acquisition_enforcement": "CheckHTTPResponseContentLength + ReadBoundedHTTPResponseBody / StreamBoundedHTTPResponseBody across JSON, inline binary, buffered binary, and ServeTurnRelay HTTP responses"
       }
     }
   },

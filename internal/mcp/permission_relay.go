@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/Mininglamp-OSS/octo-cli/internal/permission"
 )
 
 // TurnRelayTrust carries verified private-CA, leaf-certificate digest, and SAN
@@ -180,11 +182,12 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 	if err != nil || len(raw) > 4096 {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
-	fields, err := strictObjectWithOptional(raw, []string{"endpoint", "token"}, "ca_file", "ca_sha256", "peer_sha256", "cert_sha256", "server_name")
+	fields, err := strictObjectWithOptional(raw, []string{"endpoint", "token"}, "ca_file", "ca_sha256", "peer_sha256", "cert_sha256", "server_name", "max_response_bytes")
 	if err != nil {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	var endpoint, token, caFile, caSHA256, peerSHA256, certSHA256, serverName string
+	var ticketMaxBytes int64
 	if json.Unmarshal(fields["endpoint"], &endpoint) != nil || json.Unmarshal(fields["token"], &token) != nil || !validRelayToken(token) {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
@@ -201,6 +204,9 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	if rawSNI, ok := fields["server_name"]; ok && (json.Unmarshal(rawSNI, &serverName) != nil || serverName == "") {
+		return errors.New("RELAY_TICKET_INVALID")
+	}
+	if rawMax, ok := fields["max_response_bytes"]; ok && (json.Unmarshal(rawMax, &ticketMaxBytes) != nil || ticketMaxBytes < 1 || ticketMaxBytes > permission.MaxResponseBudgetBytes) {
 		return errors.New("RELAY_TICKET_INVALID")
 	}
 	if (caSHA256 != "") != (peerSHA256 != "") || (peerSHA256 != "" && certSHA256 != "" && peerSHA256 != certSHA256) {
@@ -232,7 +238,7 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 			}
 			req.Header.Set("Authorization", "Bearer "+token)
 			req.Header.Set("Content-Type", "application/json")
-			resp, err := client.Do(req) //nolint:bodyclose // source response is fully acquired and closed under the existing request deadline
+			resp, err := client.Do(req) //nolint:bodyclose // source response is bounded and closed under the existing request deadline
 			if err != nil {
 				if strings.Contains(err.Error(), "RELAY_TLS_PIN_MISMATCH") {
 					return errors.New("RELAY_TLS_PIN_MISMATCH")
@@ -242,11 +248,17 @@ func ServeTurnRelay(ctx context.Context, ticket, in io.Reader, out io.Writer) er
 				}
 				return errors.New("RELAY_UNAVAILABLE")
 			}
-			// maxHTTPBodyBytes is the existing incoming-request bound. Ordinary
-			// MCP responses have their own source semantics and may exceed it.
-			data, readErr := io.ReadAll(resp.Body)
+			limit, budgetErr := permission.RelayResponseBudgetBytes(ctx, endpoint, ticketMaxBytes, resp.Header.Get("X-Octo-Acquisition-Budget-Bytes"))
+			if budgetErr != nil {
+				closePermissionIO(resp.Body)
+				return budgetErr
+			}
+			data, observed, overflow, bodyErr := permission.ReadBoundedHTTPResponseBody(resp, limit)
 			closePermissionIO(resp.Body)
-			if readErr != nil || resp.StatusCode != 200 && resp.StatusCode != 202 {
+			if overflow {
+				return &permission.ResponseBudgetError{Kind: "acquisition_bytes", Limit: limit, Observed: observed}
+			}
+			if bodyErr != nil || resp.StatusCode != 200 && resp.StatusCode != 202 {
 				return errors.New("RELAY_UNAVAILABLE")
 			}
 			if len(bytes.TrimSpace(data)) > 0 {

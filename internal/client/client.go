@@ -1137,14 +1137,30 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 	}
 	defer resp.Body.Close() //nolint:errcheck // best-effort close on HTTP response body
 
+	maxResponseBytes := req.MaxResponseBytes
+	managedBudget := int64(0)
+	if bound := permission.BoundCall(ctx); bound != nil {
+		if b := bound.MaxAcquisitionBytes(); b > 0 && (maxResponseBytes <= 0 || b < maxResponseBytes) {
+			maxResponseBytes = b
+			managedBudget = b
+		}
+	}
+
 	// A 2xx binary body returned inline (the MCP server, which has no output
 	// path) is streamed: only up to InlineBinaryLimit+1 bytes are kept, while
-	// the size and sha256 cover the whole body. A large export therefore never
-	// sits in memory just to be reported as inline:false.
+	// the size and sha256 cover the whole body. When a managed or per-request
+	// acquisition limit is active, both Content-Length and the stream reader are
+	// bounded by maxResponseBytes before buffering or hashing.
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 && req.BinaryResponse && req.OutputPath == "" && req.InlineBinaryLimit > 0 {
-		head, size, sum, err := readBoundedBody(resp.Body, req.InlineBinaryLimit)
+		head, size, sum, overflow, err := permission.StreamBoundedHTTPResponseBody(resp, req.InlineBinaryLimit, maxResponseBytes)
 		if err != nil {
 			return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
+		}
+		if overflow {
+			if managedBudget > 0 && size > managedBudget {
+				return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, size)
+			}
+			return nil, output.ErrAPI("RESPONSE_TOO_LARGE", "response exceeds the configured limit", "")
 		}
 		c.verbosef("← %d (%d bytes)", resp.StatusCode, size)
 		env := map[string]any{
@@ -1156,31 +1172,15 @@ func (c *Client) attempt(ctx context.Context, req *Request, urlStr string, body 
 		return json.Marshal(env)
 	}
 
-	// Every other response body is buffered whole. Every downstream branch needs
-	// it fully in memory anyway — JSON parsing, backend-error parsing, the
-	// binary describe envelope (which reports size = len(body)) and the atomic
-	// --output write all consume the complete payload. The CLI --output path
-	// still buffers a large export (docs.ppt.export allows up to 160 MiB);
-	// streaming it to the temp file is a separate change.
-	var responseReader io.Reader = resp.Body
-	maxResponseBytes := req.MaxResponseBytes
-	managedBudget := int64(0)
-	if bound := permission.BoundCall(ctx); bound != nil && !req.BinaryResponse {
-		if b := bound.MaxAcquisitionBytes(); b > 0 && (maxResponseBytes <= 0 || b < maxResponseBytes) {
-			maxResponseBytes = b
-			managedBudget = b
-		}
-	}
-	if maxResponseBytes > 0 {
-		responseReader = io.LimitReader(resp.Body, maxResponseBytes+1)
-	}
-	respBody, err := io.ReadAll(responseReader)
+	// Every other response body is buffered whole, bounded by maxResponseBytes
+	// (including fail-closed Content-Length pre-check and LimitReader(limit+1)).
+	respBody, observed, overflow, err := permission.ReadBoundedHTTPResponseBody(resp, maxResponseBytes)
 	if err != nil {
 		return nil, output.ErrNetwork(fmt.Sprintf("read response: %v", err), "")
 	}
-	if maxResponseBytes > 0 && int64(len(respBody)) > maxResponseBytes {
-		if managedBudget > 0 && int64(len(respBody)) > managedBudget {
-			return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, int64(len(respBody)))
+	if overflow {
+		if managedBudget > 0 && observed > managedBudget {
+			return nil, responseBudgetExceededError(req.Method, "acquisition_bytes", managedBudget, observed)
 		}
 		return nil, output.ErrAPI("RESPONSE_TOO_LARGE", "response exceeds the configured limit", "")
 	}
